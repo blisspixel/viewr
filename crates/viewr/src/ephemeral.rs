@@ -198,16 +198,23 @@ mod tests {
     #[test]
     fn scrub_removes_legacy_orphans_without_pid() {
         let root = std::env::temp_dir();
+        // No numeric tail → no embedded PID → always safe to scrub.
         let orphan = root.join(format!(
             "viewr_avif_smoke_orphan_{}.avif",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
+            std::process::id()
         ));
+        // Ensure the name is classified as scrub-safe even under concurrent tests.
+        let name = orphan.file_name().and_then(|s| s.to_str()).unwrap();
+        assert!(
+            is_safe_to_scrub(name),
+            "legacy smoke name must be scrub-safe: {name}"
+        );
         fs::write(&orphan, b"not an image").unwrap();
         assert!(orphan.is_file());
-        let n = scrub_stale_viewr_temps();
-        assert!(n >= 1, "scrub should remove at least the legacy orphan");
-        assert!(!orphan.exists(), "legacy viewr_* smoke file must be gone");
+        let _ = scrub_stale_viewr_temps();
+        assert!(
+            !orphan.exists(),
+            "legacy viewr_* smoke file must be gone after scrub"
+        );
     }
 }

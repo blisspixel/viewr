@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = ["crates/viewr"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+authors = ["viewr contributors"]
+repository = "https://github.com/viewr/viewr"
+
+# Quality bar, enforced by `cargo clippy -- -D warnings` in CI.
+# See docs/STANDARDS.md.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Curated allows: pedantic lints that are noise for this codebase.
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+# Cross-platform installer generation with `dist` (cargo-dist). A maintainer runs
+# `dist init` to pin the tool version and generate the tag-triggered release
+# workflow; these preferences seed that. See docs/INSTALL.md.
+[workspace.metadata.dist]
+# Native targets for the three desktop OSes, including Apple Silicon.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+# One-command installers per OS: curl|sh, irm|iex, and a Windows MSI.
+installers = ["shell", "powershell", "msi"]
+ci = ["github"]
+install-updater = false   # viewr never phones home; no background update checks
+

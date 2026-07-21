@@ -1,0 +1,1 @@
+{"rustc":1562763049001146449,"features":"[]","declared_features":"[\"default\", \"regex\", \"std\"]","target":6400872401409613105,"profile":2241668132362809309,"path":176079936462488615,"deps":[],"local":[{"CheckDepInfo":{"dep_info":"debug\\.fingerprint\\scan_fmt-b2c3390d8dc56fbf\\dep-lib-scan_fmt","checksum":false}}],"rustflags":[],"config":8247474407144887393,"compile_kind":0}

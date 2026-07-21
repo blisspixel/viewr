@@ -1,0 +1,9 @@
+# cargo-audit configuration. Kept in sync with deny.toml's advisory ignores.
+# Each entry is a reviewed, documented exception; see deny.toml for the full
+# rationale. Runtime-reachable vulnerabilities are never ignored.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0192", # ttf-parser unmaintained; winit Linux decorations, build-time only
+    "RUSTSEC-2026-0194", # quick-xml DoS; winit wayland-scanner build-time, trusted input
+    "RUSTSEC-2026-0195", # quick-xml DoS; winit wayland-scanner build-time, trusted input
+]

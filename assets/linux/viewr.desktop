@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=viewr
+GenericName=Image Viewer
+Comment=A photo viewer that just shows your photos
+Exec=viewr %F
+Icon=viewr
+Terminal=false
+Categories=Graphics;Viewer;RasterGraphics;
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/avif;image/jxl;image/bmp;image/tiff;image/x-icon;image/svg+xml;image/heif;image/heic;
+Keywords=image;photo;picture;viewer;
+StartupNotify=true

@@ -1,0 +1,58 @@
+[package]
+name = "viewr"
+description = "A photo viewer that just shows your photos."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage = "https://github.com/viewr/viewr"
+readme = "../../README.md"
+categories = ["multimedia::images", "graphics"]
+keywords = ["image", "photo", "viewer", "privacy", "gpu"]
+
+[lib]
+name = "viewr"
+path = "src/lib.rs"
+
+[[bin]]
+name = "viewr"
+path = "src/main.rs"
+
+[dependencies]
+# Trusted core only. See docs/STANDARDS.md dependency policy.
+winit = "0.30"        # stable GA line; 0.31 is still beta
+wgpu = "29"
+pollster = "1"
+log = "0.4"
+env_logger = "0.11"
+thiserror = "2"
+anyhow = "1"
+rfd = "0.17.2"
+jxl-oxide = { version = "0.12.6", features = ["image"] }
+shared_memory = "0.12.4"
+muda = "0.19.3"
+egui = "0.35"
+egui-winit = "0.35"
+egui-wgpu = "0.35"
+bytemuck = "1.25.2"
+# Pure-Rust SVG rasterizer (STACK Decision 4 / Phase 6 vector support).
+# Default features off: skip system fonts / text shaping so we do not pull
+# unmaintained rustybuzz or OFL-licensed font blobs into the trusted core.
+# Shapes, fills, and paths still render; text glyphs fall back to outlines when
+# present as paths. Feature expansion for full SVG text is a deliberate later choice.
+resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
+
+# Pure-Rust decoders for the always-on core formats. Exotic/C-backed formats
+# (HEIC, RAW, AVIF) come later behind feature flags. See docs/STANDARDS.md.
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg", "gif", "bmp", "ico", "tiff", "webp", "pnm", "tga", "qoi", "hdr", "exr", "ff", "dds"]
+
+[lints]
+workspace = true
+
+[build-dependencies]
+winres = "0.1.12"

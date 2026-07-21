@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="viewr">
+  <circle cx="50" cy="50" r="48" fill="#1a1a1e" />
+  <g fill="none" stroke="#ffffff">
+    <polygon points="50,14 81,32 81,68 50,86 19,68 19,32" stroke-width="4.5" stroke-linejoin="miter"/>
+    <polygon points="31,50 50,37 69,50 50,63" stroke-width="4.5" stroke-linejoin="miter"/>
+    <circle cx="50" cy="50" r="4.6" fill="#ffffff" stroke="none"/>
+  </g>
+</svg>

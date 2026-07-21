@@ -1,0 +1,97 @@
+# cargo-deny configuration. See docs/STANDARDS.md.
+# The headline rule is in [bans]: no networking-capable crate may enter the tree.
+# This is what turns "viewr cannot phone home" into a checked fact.
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = [
+    # Unmaintained (not a vulnerability), pulled transitively by winit's Linux
+    # Wayland client-side-decoration crate (sctk-adwaita -> ab_glyph ->
+    # ttf-parser). No safe upgrade exists yet. Tracked for removal when winit's
+    # decoration path moves off ttf-parser. Not reachable on our untrusted-input
+    # path and not a security issue.
+    "RUSTSEC-2026-0192",
+
+    # quick-xml DoS advisories (quadratic attribute check; unbounded namespace
+    # allocation). Reviewed and not reachable in viewr: quick-xml is used only by
+    # winit's `wayland-scanner`, a BUILD-TIME proc-macro that parses the fixed,
+    # trusted Wayland protocol XML bundled with the crate. It never parses user,
+    # file, or network input, does not run in the shipped app, and is Linux-only.
+    # wayland-scanner pins quick-xml 0.39, so the fix (0.41) is not yet reachable.
+    # Tracked for removal when winit/wayland-scanner update. Runtime-reachable
+    # vulnerabilities are never ignored; see docs/STANDARDS.md.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+
+    # gtk3-rs stack (unmaintained, not a vulnerability). Pulled only by `muda`
+    # for native menus on Linux. No safe upgrade yet; not on the untrusted
+    # image-decode path. Tracked for removal when muda moves off gtk3.
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    # paste / proc-macro-error: unmaintained build-time macros via gtk3-macros.
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2024-0370",
+]
+
+[licenses]
+# Permissive licenses compatible with Apache-2.0 distribution.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "BSL-1.0",
+    # Bundled default UI fonts from egui (`epaint_default_fonts`). Display-only;
+    # not used on the image-decode path.
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+# The privacy invariant. If any of these (HTTP clients/servers, websocket, QUIC,
+# or TLS stacks) appears in the dependency tree, the build fails. viewr has no
+# business opening a network connection, so nothing that can should be present.
+deny = [
+    { crate = "reqwest" },
+    { crate = "hyper" },
+    { crate = "hyper-util" },
+    { crate = "ureq" },
+    { crate = "curl" },
+    { crate = "curl-sys" },
+    { crate = "isahc" },
+    { crate = "surf" },
+    { crate = "attohttpc" },
+    { crate = "awc" },
+    { crate = "actix-web" },
+    { crate = "axum" },
+    { crate = "warp" },
+    { crate = "tonic" },
+    { crate = "quinn" },
+    { crate = "tungstenite" },
+    { crate = "tokio-tungstenite" },
+    { crate = "rustls" },
+    { crate = "native-tls" },
+    { crate = "openssl" },
+    { crate = "openssl-sys" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

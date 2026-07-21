@@ -1,0 +1,20 @@
+[workspace]
+[package]
+name = "viewr-decode"
+description = "Isolated decode worker for viewr"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+authors = ["viewr contributors"]
+repository = "https://github.com/viewr/viewr"
+
+[dependencies]
+shared_memory = "0.12.4"
+image = "0.25"
+libavif-image = "0.14"
+libheif-rs = "2.7"
+libraw-rs = "0.0.4"
+
+[lints.rust]
+unsafe_code = "deny"

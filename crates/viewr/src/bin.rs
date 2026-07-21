@@ -1,0 +1,1 @@
+use image::GenericImageView; fn main() { let bytes = include_bytes!("../../assets/icon.ico"); match image::load_from_memory(bytes) { Ok(i) => println!("Success: {}x{}", i.width(), i.height()), Err(e) => println!("Error: {}", e) } }

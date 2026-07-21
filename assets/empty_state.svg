@@ -1,0 +1,31 @@
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#121214"/>
+  
+  <!-- Dashed drop zone -->
+  <g transform="translate(400, 240)">
+    <rect x="-100" y="-100" width="200" height="200" rx="24" fill="#1a1a1e" stroke="#333338" stroke-width="4" stroke-dasharray="12 12"/>
+    
+    <!-- Image Icon -->
+    <g transform="scale(1.5)">
+      <rect x="-24" y="-20" width="48" height="40" rx="6" fill="#2d2d34"/>
+      <circle cx="-8" cy="-6" r="4" fill="#4a4a52"/>
+      <path d="M-24,8 L-12,-4 L0,8 L8,0 L24,16 L24,14 C24,17.3 21.3,20 18,20 L-18,20 C-21.3,20 -24,17.3 -24,14 Z" fill="#3a3a42"/>
+    </g>
+  </g>
+  
+  <!-- Typography -->
+  <g text-anchor="middle" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="400" y="400" fill="#e0e0e4" font-size="28" font-weight="600" letter-spacing="1">Drop an image here</text>
+    
+    <!-- Shortcuts -->
+    <g transform="translate(0, 440)" font-size="14" fill="#888890" font-weight="500">
+      <text x="400" y="0">
+        <tspan fill="#b0b0b8">O</tspan> to Open  ·  <tspan fill="#b0b0b8">← / →</tspan> to Navigate  ·  <tspan fill="#b0b0b8">Del</tspan> to Trash
+      </text>
+      <text x="400" y="30">
+        <tspan fill="#b0b0b8">Space</tspan> to Reset Zoom  ·  <tspan fill="#b0b0b8">R</tspan> to Rotate  ·  <tspan fill="#b0b0b8">F11</tspan> to Fullscreen
+      </text>
+    </g>
+  </g>
+</svg>

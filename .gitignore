@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+*.log
+/lcov.info
+
+/corpus
+
+# Agent working files (prewarm, codegraph, scratch)
+.agent/
+

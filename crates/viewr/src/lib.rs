@@ -7,6 +7,7 @@
 //! deliberately thin.
 
 pub mod app;
+pub mod cli;
 pub mod curate;
 pub mod decode;
 pub mod edit;
@@ -21,5 +22,5 @@ pub mod ui;
 pub mod view;
 pub(crate) mod worker_limit;
 
-pub use app::run;
+pub use app::{run, run_with_image};
 pub use error::Error;

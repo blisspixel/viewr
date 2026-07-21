@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- CLI: `viewr help`, `doctor`, `benchmark [dir]`, `update` (local instructions only),
+  `version`, `open <path>`; image path still opens the GUI. Windows console attach
+  for subcommands under the GUI subsystem.
 - Interaction polish: progressive left floating toolbar (auto-hide), empty-state guidance, bottom status chip (name · size · position · zoom), trash toast, amber crop handles + ratio strip, Esc cancel crop, double-click fit/1:1 toggle, grab cursors.
 - Cursor-anchored wheel/trackpad zoom; progressive bottom filmstrip (near-bottom hover); monochrome painted toolbar icons.
 - Filmstrip shows async real thumbnails (`thumbs` module); Space-hold temporary pan, tap Space resets view.

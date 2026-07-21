@@ -107,4 +107,10 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 6 residuals closed; next is Phase 7**. viewr is a fast, zero-bloat image viewer with pure-Rust core decode (including SVG via `resvg`) and a workspace `viewr-decode` worker for C-backed formats (feature-gated; RAW deferred). OS-level sandbox packaging is Phase 7. See `docs/FORMATS.md`. Try it with `cargo run --release -- path/to/image.png`.
+Status: **Phase 6 residuals closed; Phase 7 hardening in progress**. Pure-Rust core decode (incl. SVG), `viewr-decode` worker, cull UI, and local CLI (`doctor`, `benchmark`, `update`, `help`). Store publish is out of scope for now. See `docs/FORMATS.md`.
+
+```
+cargo run --release -- path/to/image.png
+cargo run --release -- doctor
+cargo run --release -- help
+```

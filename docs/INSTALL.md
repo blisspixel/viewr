@@ -59,6 +59,19 @@ cargo build --release --workspace
 # Keep them side by side so C-backed formats can spawn the worker.
 ```
 
+### CLI (local tools, no network)
+
+```
+viewr help
+viewr doctor              # layout, worker, decode self-test
+viewr benchmark [dir]     # decode timings (temp corpus if dir omitted)
+viewr update              # print local update instructions only
+viewr version
+viewr path\to\image.jpg   # open GUI
+```
+
+`viewr update` never downloads anything; viewr does not phone home.
+
 Optional C-backed formats (needs system libraries):
 
 ```

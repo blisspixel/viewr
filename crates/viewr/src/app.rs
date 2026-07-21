@@ -25,18 +25,25 @@ use crate::theme::Mode;
 use crate::thumbs::{self, ThumbRgba};
 use crate::ui::FilmstripItem;
 
-/// Start viewr: create the event loop and run the application to completion. The
-/// first command-line argument, if present, is the image to open.
+/// Start viewr: create the event loop and run the application to completion.
 ///
 /// # Errors
 /// Returns [`Error`] if the event loop cannot be created or fails while running.
 pub fn run() -> Result<(), Error> {
+    run_with_image(std::env::args_os().nth(1).map(PathBuf::from))
+}
+
+/// Start the GUI with an optional initial image path (from the CLI).
+///
+/// # Errors
+/// Returns [`Error`] if the event loop cannot be created or fails while running.
+pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
     let event_loop = EventLoop::new()?;
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
     let (thumb_result_tx, thumb_rx) = mpsc::channel();
     let mut app = App {
-        image_path: std::env::args_os().nth(1).map(PathBuf::from),
+        image_path,
         renderer: None,
         playlist: None,
         scanner_rx: None,

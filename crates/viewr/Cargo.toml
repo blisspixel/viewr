@@ -11,6 +11,7 @@ homepage = "https://github.com/viewr/viewr"
 readme = "../../README.md"
 categories = ["multimedia::images", "graphics"]
 keywords = ["image", "photo", "viewer", "privacy", "gpu"]
+default-run = "viewr"
 
 [lib]
 name = "viewr"
@@ -50,6 +51,7 @@ trash = { version = "5.2.6", default-features = false, features = ["coinit_apart
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_Console",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }

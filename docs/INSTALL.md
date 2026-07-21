@@ -51,10 +51,18 @@ is structurally unable to reach the internet.
 
 ### From source (any OS)
 
-With a Rust toolchain installed:
+With a Rust toolchain installed (see `rust-toolchain.toml`):
 
 ```
-cargo install --path crates/viewr
+cargo build --release --workspace
+# Binaries land in target/release/viewr and target/release/viewr-decode
+# Keep them side by side so C-backed formats can spawn the worker.
+```
+
+Optional C-backed formats (needs system libraries):
+
+```
+cargo build --release -p viewr-decode --features avif,heic
 ```
 
 On Linux, building needs the usual windowing dev packages

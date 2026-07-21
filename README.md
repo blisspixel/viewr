@@ -51,13 +51,11 @@ strong signal we do not want it.
 ## Formats
 
 The goal is the VLC of image viewers: if it is an image, viewr opens it, and you
-never think about which app handles which file. Target coverage includes JPEG, PNG,
-GIF (animated), WebP (animated), BMP, TIFF, ICO, PNM, TGA, QOI, DDS, HDR, OpenEXR,
-farbfeld, JPEG XL (via `jxl-oxide`), and SVG (via `resvg`/`usvg`).
-Formats that lack a safe pure-Rust decoder, or that require complex C dependencies
-like AVIF, HEIC, HEIF, and camera RAW, will be supported next, decoded inside a
-sandboxed worker rather than linked into the main process. Format support is built
-up in a defined order, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+never think about which app handles which file. The always-on pure-Rust core covers
+JPEG, PNG, GIF, WebP, BMP, TIFF, ICO, PNM, TGA, QOI, DDS, HDR, OpenEXR, farbfeld,
+JPEG XL, and SVG. AVIF/HEIC/HEIF and camera RAW go through the `viewr-decode`
+worker (feature-gated C backends; RAW deferred). Full table:
+[`docs/FORMATS.md`](docs/FORMATS.md).
 
 ## Stack, short version
 

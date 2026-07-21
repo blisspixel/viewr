@@ -85,6 +85,8 @@ Shipped:
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
   metadata by construction.
 - **`curate`**: move to the OS trash / recycle bin and restore for undo.
+- **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; Job Object /
+  process-group lifetime limits for helpers.
 - **`fs`**: recognizing image files (core and worker extensions) and natural-sort
   ordering (`img2` before `img10`).
 - **`theme`**: reads the OS light/dark setting via winit and maps it to our palette,

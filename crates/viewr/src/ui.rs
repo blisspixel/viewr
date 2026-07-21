@@ -151,23 +151,21 @@ fn glass_frame() -> Frame {
 
 fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     // Thin, low-contrast bar: discovery only, not the main control surface.
-    Panel::top("top_panel")
-        .frame(menu_frame())
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                file_menu(ui, actions, frame.flag_count);
-                edit_menu(ui, actions, frame.is_cropping);
-                view_menu(ui, actions);
-                canvas_menu(ui, actions);
-                info_menu(ui, actions);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some((i, n)) = frame.playlist_pos {
-                        ui.label(RichText::new(format!("{i} / {n}")).size(12.5).color(MUTED));
-                    }
-                });
+    Panel::top("top_panel").frame(menu_frame()).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            file_menu(ui, actions, frame.flag_count);
+            edit_menu(ui, actions, frame.is_cropping);
+            view_menu(ui, actions);
+            canvas_menu(ui, actions);
+            info_menu(ui, actions);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some((i, n)) = frame.playlist_pos {
+                    ui.label(RichText::new(format!("{i} / {n}")).size(12.5).color(MUTED));
+                }
             });
         });
+    });
 }
 
 fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, flag_count: usize) {
@@ -326,10 +324,9 @@ fn render_exif_panel(ui: &mut egui::Ui, frame: &UiFrameOwned) {
             ui.heading(RichText::new("Image Info").color(TEXT));
             ui.separator();
             if let Some(path) = &frame.file_path {
-                let name = std::path::Path::new(path).file_name().map_or_else(
-                    || path.clone(),
-                    |s| s.to_string_lossy().into_owned(),
-                );
+                let name = std::path::Path::new(path)
+                    .file_name()
+                    .map_or_else(|| path.clone(), |s| s.to_string_lossy().into_owned());
                 ui.label(RichText::new(name).color(TEXT));
             }
             if let Some((w, h)) = frame.img_size {

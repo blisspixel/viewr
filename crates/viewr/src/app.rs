@@ -49,11 +49,7 @@ struct Playlist {
     index: usize,
 }
 
-struct TrashedFile {
-    original_path: PathBuf,
-    trashed_path: PathBuf,
-    playlist_index: usize,
-}
+use crate::curate::TrashedFile;
 
 /// The aspect ratio to enforce when cropping.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -277,92 +273,80 @@ impl App {
     }
 
     fn trash_current(&mut self) {
-        if let Some(path) = &self.image_path
-            && let Some(parent) = path.parent()
-        {
-            let trash_dir = parent.join("_trash");
-            if let Err(e) = std::fs::create_dir_all(&trash_dir) {
-                log::error!("Failed to create _trash dir: {e}");
-                return;
+        let Some(path) = self.image_path.clone() else {
+            return;
+        };
+
+        if let Err(e) = crate::curate::move_to_trash(&path) {
+            log::error!("Failed to move file to trash: {e}");
+            return;
+        }
+
+        let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
+        self.last_trashed = Some(TrashedFile {
+            original_path: path,
+            playlist_index,
+        });
+
+        if let Some(playlist) = &mut self.playlist {
+            if playlist.index < playlist.files.len() {
+                playlist.files.remove(playlist.index);
             }
-
-            if let Some(file_name) = path.file_name() {
-                let trashed_path = trash_dir.join(file_name);
-
-                if let Err(e) = std::fs::rename(path, &trashed_path) {
-                    log::error!("Failed to move file to trash: {e}");
-                    return;
+            if playlist.files.is_empty() {
+                self.image_path = None;
+                self.current_image = None;
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.clear_image();
                 }
-
-                if let Some(playlist) = &mut self.playlist {
-                    self.last_trashed = Some(TrashedFile {
-                        original_path: path.clone(),
-                        trashed_path,
-                        playlist_index: playlist.index,
-                    });
-
-                    playlist.files.remove(playlist.index);
-                    if playlist.files.is_empty() {
-                        self.image_path = None;
-                        self.current_image = None;
-                        if let Some(renderer) = self.renderer.as_mut() {
-                            renderer.clear_image();
-                        }
-                    } else {
-                        playlist.index = playlist.index.min(playlist.files.len().saturating_sub(1));
-                        let next_path = playlist.files[playlist.index].clone();
-                        self.image_path = Some(next_path.clone());
-                        self.transform = Transform::default();
-
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        self.image_loader_rx = Some(rx);
-                        let window = self.renderer.as_ref().map(|r| r.window.clone());
-
-                        std::thread::spawn(move || {
-                            let res = crate::decode::DecodedImage::load(&next_path)
-                                .map_err(|e| e.to_string());
-                            let _ = tx.send((next_path, res));
-                            if let Some(w) = window {
-                                w.request_redraw();
-                            }
-                        });
-                    }
-                }
+            } else {
+                playlist.index = playlist.index.min(playlist.files.len().saturating_sub(1));
+                let next_path = playlist.files[playlist.index].clone();
+                self.image_path = Some(next_path.clone());
+                self.transform = Transform::default();
+                self.spawn_image_load(next_path);
+            }
+        } else {
+            self.image_path = None;
+            self.current_image = None;
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.clear_image();
             }
         }
     }
 
     fn undo_trash(&mut self) {
-        if let Some(trashed) = self.last_trashed.take() {
-            if let Err(e) = std::fs::rename(&trashed.trashed_path, &trashed.original_path) {
-                log::error!("Failed to restore file from trash: {e}");
-                self.last_trashed = Some(trashed);
-                return;
-            }
+        let Some(trashed) = self.last_trashed.take() else {
+            return;
+        };
 
-            if let Some(playlist) = &mut self.playlist {
-                let index = trashed.playlist_index.min(playlist.files.len());
-                playlist.files.insert(index, trashed.original_path.clone());
-                playlist.index = index;
-
-                self.image_path = Some(trashed.original_path.clone());
-                self.transform = Transform::default();
-
-                let (tx, rx) = std::sync::mpsc::channel();
-                self.image_loader_rx = Some(rx);
-                let window = self.renderer.as_ref().map(|r| r.window.clone());
-                let path_clone = trashed.original_path.clone();
-
-                std::thread::spawn(move || {
-                    let res =
-                        crate::decode::DecodedImage::load(&path_clone).map_err(|e| e.to_string());
-                    let _ = tx.send((path_clone, res));
-                    if let Some(w) = window {
-                        w.request_redraw();
-                    }
-                });
-            }
+        if let Err(e) = crate::curate::restore_from_trash(&trashed.original_path) {
+            log::error!("Failed to restore file from trash: {e}");
+            self.last_trashed = Some(trashed);
+            return;
         }
+
+        if let Some(playlist) = &mut self.playlist {
+            let index = trashed.playlist_index.min(playlist.files.len());
+            playlist.files.insert(index, trashed.original_path.clone());
+            playlist.index = index;
+        }
+
+        self.image_path = Some(trashed.original_path.clone());
+        self.transform = Transform::default();
+        self.spawn_image_load(trashed.original_path);
+    }
+
+    fn spawn_image_load(&mut self, path: PathBuf) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.image_loader_rx = Some(rx);
+        let window = self.renderer.as_ref().map(|r| r.window.clone());
+        std::thread::spawn(move || {
+            let res = DecodedImage::load(&path).map_err(|e| e.to_string());
+            let _ = tx.send((path, res));
+            if let Some(w) = window {
+                w.request_redraw();
+            }
+        });
     }
 
     fn star_current(&self) {

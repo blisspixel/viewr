@@ -43,6 +43,7 @@ bytemuck = "1.25.2"
 # Shapes, fills, and paths still render; text glyphs fall back to outlines when
 # present as paths. Feature expansion for full SVG text is a deliberate later choice.
 resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
+trash = { version = "5.2.6", default-features = false, features = ["coinit_apartmentthreaded"] }
 
 # Pure-Rust decoders for the always-on core formats. Exotic/C-backed formats
 # (HEIC, RAW, AVIF) come later behind feature flags. See docs/STANDARDS.md.

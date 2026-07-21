@@ -15,6 +15,7 @@ All notable changes to this project are documented here. The format is human-wri
 - `viewr-decode` is a workspace member with feature-gated C backends (`avif`, `heic`, `raw`); default build needs no system libraries.
 - Folder navigation recognizes worker formats (AVIF/HEIC/RAW extensions); decode routes through the worker when present.
 - `docs/FORMATS.md` capability table (core vs worker, RAW deferred).
+- System trash via the `trash` crate (`curate` module) with undo from the OS recycle bin / trash.
 
 ### Changed
 

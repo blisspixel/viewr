@@ -149,13 +149,16 @@ of them just works.
 Turn "we designed it to be private and safe" into something a third party can
 verify.
 
-- Sandbox packaging on all three platforms with the network denied: macOS App
+- [ ] Sandbox packaging on all three platforms with the network denied: macOS App
   Sandbox, Windows AppContainer, and Linux Flatpak with no network share.
+  - [x] Flatpak manifest sketch (`packaging/flatpak/…`) with no `--share=network`.
 - The isolated decode worker fully in place, with seccomp on Linux and reduced
   privileges elsewhere.
+  - [x] Workspace worker + SHM IPC (process isolation); OS privilege drop still open.
 - Continuous fuzzing of every decoder, with any crash a release blocker.
 - Reproducible and signed builds, so a user can confirm the binary matches the
   source.
+- [x] Deletes use the system trash (`trash` crate), not a local `_trash` folder.
 
 Definition of done: the app runs correctly with the network entitlement off,
 fuzzing finds no crashes at the decode boundary, and the release binary is

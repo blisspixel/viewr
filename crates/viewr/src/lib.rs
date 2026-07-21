@@ -7,6 +7,7 @@
 //! deliberately thin.
 
 pub mod app;
+pub mod curate;
 pub mod decode;
 pub mod edit;
 pub mod error;

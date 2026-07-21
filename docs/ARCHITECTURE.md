@@ -84,8 +84,9 @@ Shipped:
   zoom and pan). Unit-tested without a GPU.
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
   metadata by construction.
-- **`fs`**: recognizing image files and natural-sort ordering (`img2` before
-  `img10`). Off-thread folder scanning lands in Phase 2.
+- **`curate`**: move to the OS trash / recycle bin and restore for undo.
+- **`fs`**: recognizing image files (core and worker extensions) and natural-sort
+  ordering (`img2` before `img10`).
 - **`theme`**: reads the OS light/dark setting via winit and maps it to our palette,
   live-updating on change.
 - **`error`**: the typed error set for the app.

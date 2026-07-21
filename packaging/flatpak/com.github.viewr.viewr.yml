@@ -1,0 +1,31 @@
+# Flatpak manifest sketch for Phase 7 (network denied by default).
+# Not yet wired into CI release; build locally with flatpak-builder when ready.
+#
+# Privacy invariant: do NOT add --share=network. Files open via portals / user
+# grants. See docs/SANDBOX_PLAN.md and docs.flatpak.org sandbox-permissions.
+
+app-id: com.github.viewr.viewr
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: viewr
+finish-args:
+  # Display / GPU only. No network share.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Optional: host pictures via portal is preferred over broad filesystem.
+  # - --filesystem=xdg-pictures:ro
+modules:
+  - name: viewr
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --workspace
+      - install -Dm755 target/release/viewr /app/bin/viewr
+      - install -Dm755 target/release/viewr-decode /app/bin/viewr-decode
+    sources:
+      - type: dir
+        path: ../..

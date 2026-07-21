@@ -32,7 +32,7 @@ thiserror = "2"
 anyhow = "1"
 rfd = "0.17.2"
 jxl-oxide = { version = "0.12.6", features = ["image"] }
-shared_memory = "0.12.4"
+viewr-protocol = { path = "../viewr-protocol" }
 egui = "0.35"
 egui-winit = "0.35"
 egui-wgpu = "0.35"
@@ -56,9 +56,11 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
 ] }
 
-# Linux worker: no_new_privs + seccomp-bpf network deny.
-[target.'cfg(target_os = "linux")'.dependencies]
+# Unix worker address-space limit and Linux-specific seccomp hardening.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
 seccompiler = "0.5"
 
 # Pure-Rust decoders for the always-on core formats. Exotic/C-backed formats

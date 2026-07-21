@@ -79,14 +79,15 @@ Shipped:
 - **`gpu`**: the wgpu pipeline. Clears to the theme background and draws the current
   image as a textured quad scaled to fit. The neighbor texture cache lands in
   Phase 2.
-- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded natively via the `image` crate. Complex C-backed formats are seamlessly delegated to a persistent daemon pool (`viewr-decode`) communicating via Zero-Copy Shared Memory IPC, entirely eliminating process-creation latency.
+- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on background threads via the `image` crate. Complex C-backed formats are delegated to a persistent daemon pool (`viewr-decode`) using versioned native-path frames and a length-validated RGBA8 stream. The parent acknowledges each complete pixel stream before the worker accepts another request.
 - **`view`**: pure geometry for placing an image in the viewport (fit math, later
   zoom and pan). Unit-tested without a GPU.
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
   metadata by construction.
 - **`curate`**: move to the OS trash / recycle bin and restore for undo.
-- **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; Job Object /
-  process-group lifetime limits for helpers.
+- **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; Job Object or
+  process-group lifetime controls, one-process policies, and memory limits for
+  helpers.
 - **`fs`**: recognizing image files (core and worker extensions) and natural-sort
   ordering (`img2` before `img10`).
 - **`theme`**: reads the OS light/dark setting via winit and maps it to our palette,
@@ -156,16 +157,17 @@ polish.
 │            ▲ decoded pixels only          ▲ paths in / results out   │
 │            │                               │                         │
 │   ┌────────┴───────────────────────────────┴─────────┐              │
-│   │  decode worker  (no network, no fs beyond the fd  │  ◀ untrusted │
-│   │  it's handed; seccomp-restricted on Linux)        │     bytes    │
-│   └───────────────────────────────────────────────────┘              │
+│   │  C decode worker: bounded IPC, memory, and time  │  ◀ untrusted │
+│   │  Linux additionally denies network syscalls     │     bytes    │
+│   └─────────────────────────────────────────────────┘              │
 └──────────────────────────────────────────────────────────────────────┘
-        The whole process ships in an OS sandbox with NETWORK DENIED.
+        OS packaging profiles add a second network-denial boundary when used.
 ```
 
-- **No network path exists.** No socket/HTTP crate is linked; there is nothing in
-  the binary that can reach the network. CI enforces this (see `PRIVACY.md`).
-- **Decoding is isolated.** The decode daemon receives a file path, decodes the image, and writes directly into anonymous shared memory (mmap/shm) for the main process to consume natively. It has no ambient filesystem or network access. A malicious file that somehow subverts a C-decoder lands in a box with nothing to steal and nowhere to go.
+- **No application networking stack exists.** No socket/HTTP client crate is
+  linked, and CI enforces the dependency policy (see `PRIVACY.md`). Syscall-level
+  denial comes from Linux worker seccomp and the enclosing OS package profiles.
+- **C-backed decoding is process-isolated.** The daemon receives one versioned native path request and returns a validated, exact-length RGBA8 stream over its existing pipe. This avoids trusting worker-owned mapping metadata or mutable backing storage. Linux denies classic and io_uring network paths. Windows constrains the Job Object to one process and 1.5 GiB aggregate memory; Linux denies process-creating syscalls while allowing same-process decoder threads; supported non-Linux Unix targets create a private session and apply a one-process resource limit. All workers have containment lifetime controls, typed bounded responses, and a hard request deadline covering both send and receive. The worker currently receives a path and therefore retains the filesystem access granted by its enclosing OS package; Phase 7 packaging profiles are responsible for narrowing that ambient access. Pure-Rust formats remain in the main process but decode off the UI thread under the same dimension, allocation, and aggregate concurrency limits.
 - **Trash, not unlink**, by default — the filesystem is treated as precious.
 
 ## What is intentionally absent

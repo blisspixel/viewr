@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/viewr", "crates/viewr-decode"]
+members = ["crates/viewr", "crates/viewr-decode", "crates/viewr-protocol"]
 # Default `cargo test` / `cargo clippy` stay pure-Rust and need no system C libs.
 # C-backed worker backends: `cargo build -p viewr-decode --features avif,heic`
 
@@ -49,4 +49,3 @@ targets = [
 installers = ["shell", "powershell", "msi"]
 ci = ["github"]
 install-updater = false   # viewr never phones home; no background update checks
-

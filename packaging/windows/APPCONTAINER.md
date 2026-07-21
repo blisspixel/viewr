@@ -20,7 +20,7 @@ internet capability**, matching Microsoft’s least-privilege AppContainer model
 
 1. Parent creates a Job Object with kill-on-close and active process limit.
 2. Spawn worker with restricted token when packaging allows.
-3. Keep stdin/stdout + shared memory as the only IPC.
+3. Keep the versioned stdin/stdout protocol as the only IPC.
 
 Implementation lives in `crates/viewr/src/sandbox.rs` over time; this document
 is the packaging contract until the launcher code lands.

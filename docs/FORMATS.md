@@ -63,6 +63,7 @@ cleanly without panicking.
 ## Privacy and safety notes
 
 - No format path opens a network connection.
-- Worker isolation today is process + IPC only. OS-level sandbox restrictions
-  (seccomp, AppContainer, App Sandbox) are Phase 7 work; see `docs/SANDBOX_PLAN.md`
-  and `docs/ROADMAP.md`.
+- Optional C-backed formats use bounded, versioned worker IPC. Linux applies a
+  fail-closed network-denying seccomp filter; AppContainer, App Sandbox, and
+  Flatpak runtime-profile verification remain Phase 7 work. Pure-Rust formats
+  decode in the main process under the same shape and aggregate concurrency caps.

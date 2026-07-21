@@ -156,9 +156,11 @@ submission.
   - [x] Windows AppContainer packaging notes (`packaging/windows/APPCONTAINER.md`).
 - The isolated decode worker fully in place, with seccomp on Linux and reduced
   privileges elsewhere.
-  - [x] Workspace worker + SHM IPC (process isolation).
-  - [x] Windows Job Object kill-on-close + Unix process group (`worker_limit`).
-  - [x] Linux `no_new_privs` + `dumpable=0` + default-allow seccomp-bpf that EPERMs network syscalls (`worker_limit` + `packaging/linux/SECCOMP.md`).
+  - [x] Workspace worker + versioned native-path frames + bounded pixel-stream IPC (process isolation).
+  - [x] Windows one-process Job Object kill-on-close + Unix private session and one-process policy (`worker_limit`), with fail-closed setup and a 1.5 GiB containment memory ceiling.
+  - [x] Linux `no_new_privs` + post-exec `dumpable=0` + default-allow seccomp-bpf that EPERMs classic and io_uring network paths, with startup failure if hardening cannot apply (`worker_limit` + `packaging/linux/SECCOMP.md`).
+  - [x] Shared 512 MiB decoded-output limit, strict dimension validation, typed bounded responses, and a hard 30-second send/receive deadline with bounded cleanup.
+  - [x] Two-slot foreground-priority file-decode gate, stale load cancellation, and exact source/pixel state matching for path-sensitive actions.
   - [ ] Optional default-deny allowlist for C-decoder builds (when avif/heic features are used in production).
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).

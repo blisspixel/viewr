@@ -5,8 +5,9 @@
 #![allow(unsafe_code)]
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -43,6 +44,7 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
     let (thumb_result_tx, thumb_rx) = mpsc::channel();
+    let (prefetch_result_tx, prefetch_rx) = mpsc::channel();
     let mut app = App {
         image_path,
         renderer: None,
@@ -52,11 +54,14 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         is_fullscreen: false,
         last_trashed: None,
         current_image: None,
+        loaded_image_path: None,
         show_exif: false,
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
         bg_override: None,
         image_loader_rx: None,
+        image_load_generation: Arc::new(AtomicU64::new(0)),
+        resize_on_load: None,
         flags: FlagSet::new(),
         modifiers: ModifiersState::default(),
         toast: None,
@@ -73,7 +78,8 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         thumb_textures: HashMap::new(),
         prefetch: PrefetchCache::with_capacity(prefetch::DEFAULT_CAPACITY),
         prefetch_in_flight: HashSet::new(),
-        prefetch_rx: None,
+        prefetch_result_tx,
+        prefetch_rx,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -144,6 +150,8 @@ struct App {
     is_fullscreen: bool,
     last_trashed: Option<TrashedFile>,
     current_image: Option<DecodedImage>,
+    /// Source path corresponding exactly to `current_image` and the GPU texture.
+    loaded_image_path: Option<PathBuf>,
     show_exif: bool,
     /// When true, Save As copies EXIF from the source. Default **false** (strip).
     retain_exif: bool,
@@ -154,6 +162,10 @@ struct App {
             Result<crate::decode::DecodedImage, String>,
         )>,
     >,
+    /// Monotonic cancellation token for superseded foreground decode jobs.
+    image_load_generation: Arc<AtomicU64>,
+    /// The explicitly opened image whose first completed load should size the window.
+    resize_on_load: Option<PathBuf>,
     /// Paths flagged for batch cull (photographer workflow).
     flags: FlagSet,
     /// Latest keyboard modifiers (for Shift+Delete, etc.).
@@ -186,58 +198,19 @@ struct App {
     prefetch: PrefetchCache,
     /// Paths currently being prefetched in the background.
     prefetch_in_flight: HashSet<PathBuf>,
+    /// Sender shared by bounded speculative decode jobs.
+    prefetch_result_tx: Sender<(PathBuf, Result<DecodedImage, String>)>,
     /// Completed prefetch jobs: `(path, result)`.
-    prefetch_rx: Option<Receiver<(PathBuf, Result<DecodedImage, String>)>>,
+    prefetch_rx: Receiver<(PathBuf, Result<DecodedImage, String>)>,
 }
 
 impl App {
     fn load_and_scan(&mut self, path: PathBuf) {
-        if let Some(renderer) = self.renderer.as_mut() {
-            match DecodedImage::load(&path) {
-                Ok(image) => {
-                    renderer.set_image(&image);
-                    self.current_image = Some(image);
-
-                    // Resize window to fit aspect ratio
-                    if let Some(monitor) = renderer.window().current_monitor() {
-                        let scale = monitor.scale_factor();
-                        let max_w = f64::from(monitor.size().width) / scale;
-                        let max_h = f64::from(monitor.size().height) / scale;
-
-                        let img_w = f64::from(renderer.image_size().unwrap().0);
-                        let img_h = f64::from(renderer.image_size().unwrap().1);
-
-                        // Pick a reasonable max size (80% of monitor)
-                        let target_w = (max_w * 0.8).min(img_w);
-                        let target_h = (max_h * 0.8).min(img_h);
-
-                        let aspect = img_w / img_h;
-
-                        let (new_w, new_h) = if target_w / aspect <= target_h {
-                            (target_w, target_w / aspect)
-                        } else {
-                            (target_h * aspect, target_h)
-                        };
-
-                        if let Some(size) = winit::dpi::LogicalSize::new(new_w, new_h).into() {
-                            let _ = renderer.window().request_inner_size(size);
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Paths never go to logs (privacy). Surface failures via toast.
-                    log::error!("failed to load image");
-                    self.show_toast(format!("Could not open image: {e}"));
-                    if let Some(r) = self.renderer.as_ref() {
-                        r.window().request_redraw();
-                    }
-                    return;
-                }
-            }
-        }
         self.image_path = Some(path.clone());
         self.playlist = None;
         self.transform = Transform::default();
+        self.resize_on_load = Some(path.clone());
+        self.spawn_image_load(path.clone());
 
         let (tx, rx) = std::sync::mpsc::channel();
         self.scanner_rx = Some(rx);
@@ -261,6 +234,41 @@ impl App {
             });
             let _ = tx.send(files);
         });
+    }
+
+    fn display_loaded_image(&mut self, path: &Path, image: DecodedImage) {
+        let should_resize = self.resize_on_load.as_deref() == Some(path);
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_image(&image);
+            if should_resize {
+                resize_window_to_image(renderer);
+            }
+        }
+        if should_resize {
+            self.resize_on_load = None;
+        }
+        self.current_image = Some(image);
+        self.loaded_image_path = Some(path.to_owned());
+    }
+
+    fn invalidate_displayed_image(&mut self) {
+        self.current_image = None;
+        self.loaded_image_path = None;
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.clear_image();
+        }
+    }
+
+    fn cancel_pending_image_load(&mut self) {
+        self.image_load_generation.fetch_add(1, Ordering::AcqRel);
+        self.image_loader_rx = None;
+        self.resize_on_load = None;
+    }
+
+    fn current_loaded_path(&self) -> Option<&Path> {
+        let path = self.image_path.as_deref()?;
+        (self.current_image.is_some() && self.loaded_image_path.as_deref() == Some(path))
+            .then_some(path)
     }
 
     fn screen_to_uv(&self, x: f64, y: f64) -> Option<(f32, f32)> {
@@ -341,20 +349,7 @@ impl App {
         let next_path = playlist.files[new_index].clone();
         self.image_path = Some(next_path.clone());
         self.transform = Transform::default();
-
-        // Instant path: neighbor was already decoded into the RAM cache.
-        if let Some(image) = self.prefetch.take(&next_path) {
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.set_image(&image);
-            }
-            self.current_image = Some(image);
-            self.image_loader_rx = None;
-            self.kick_prefetch();
-            if let Some(r) = self.renderer.as_ref() {
-                r.window().request_redraw();
-            }
-            return;
-        }
+        self.resize_on_load = None;
 
         self.spawn_image_load(next_path);
         self.kick_prefetch();
@@ -375,41 +370,49 @@ impl App {
             return;
         }
 
-        let (tx, rx) = mpsc::channel();
-        // Keep the latest channel; older jobs still insert if they finish.
-        self.prefetch_rx = Some(rx);
         for path in targets {
-            self.prefetch_in_flight.insert(path.clone());
-            let tx = tx.clone();
+            let job_path = path.clone();
+            let tx = self.prefetch_result_tx.clone();
             let window = self.renderer.as_ref().map(|r| r.window.clone());
-            std::thread::spawn(move || {
-                let res = DecodedImage::load(&path).map_err(|e| e.to_string());
-                let _ = tx.send((path, res));
+            let scheduled = crate::decode::schedule_background_decode(move || {
+                let res = DecodedImage::load_background(&job_path).map_err(|e| e.to_string());
+                let _ = tx.send((job_path, res));
                 if let Some(w) = window {
                     w.request_redraw();
                 }
             });
-        }
-    }
-
-    fn poll_prefetch(&mut self) {
-        let Some(rx) = &self.prefetch_rx else {
-            return;
-        };
-        while let Ok((path, result)) = rx.try_recv() {
-            self.prefetch_in_flight.remove(&path);
-            if let Ok(image) = result {
-                // Do not cache the currently displayed path as a neighbor entry;
-                // it already lives in `current_image`.
-                if self.image_path.as_ref() != Some(&path) {
-                    self.prefetch.insert(path, image);
-                }
+            if scheduled {
+                self.prefetch_in_flight.insert(path);
             }
         }
     }
 
+    fn poll_prefetch(&mut self) {
+        let mut completed = false;
+        while let Ok((path, result)) = self.prefetch_rx.try_recv() {
+            completed = true;
+            self.prefetch_in_flight.remove(&path);
+            if let Ok(image) = result {
+                // Do not cache the currently displayed path as a neighbor entry;
+                // it already lives in `current_image`. Also discard results from
+                // a folder that was replaced while this decode was queued.
+                if self.image_path.as_ref() != Some(&path)
+                    && self
+                        .playlist
+                        .as_ref()
+                        .is_some_and(|playlist| playlist.files.contains(&path))
+                {
+                    self.prefetch.insert(path, image);
+                }
+            }
+        }
+        if completed {
+            self.kick_prefetch();
+        }
+    }
+
     fn toggle_flag_current(&mut self) {
-        let Some(path) = self.image_path.clone() else {
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
         let flagged = self.flags.toggle(&path);
@@ -425,7 +428,7 @@ impl App {
     }
 
     fn trash_current(&mut self) {
-        let Some(path) = self.image_path.clone() else {
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
 
@@ -632,15 +635,18 @@ impl App {
             if self.thumb_textures.contains_key(&path) || self.thumbs_in_flight.contains(&path) {
                 continue;
             }
-            self.thumbs_in_flight.insert(path.clone());
+            let job_path = path.clone();
             let tx = self.thumb_result_tx.clone();
-            std::thread::spawn(move || {
-                let result = match thumbs::generate_thumb(&path) {
+            let scheduled = crate::decode::schedule_background_decode(move || {
+                let result = match thumbs::generate_thumb(&job_path) {
                     Ok(thumb) => Ok(thumb),
-                    Err(err) => Err((path, err)),
+                    Err(err) => Err((job_path, err)),
                 };
                 let _ = tx.send(result);
             });
+            if scheduled {
+                self.thumbs_in_flight.insert(path);
+            }
         }
     }
 
@@ -673,6 +679,9 @@ impl App {
         }
         if got && let Some(r) = self.renderer.as_ref() {
             r.window().request_redraw();
+        }
+        if got {
+            self.kick_prefetch();
         }
     }
 
@@ -711,7 +720,7 @@ impl App {
     }
 
     fn permanent_delete_current(&mut self) {
-        let Some(path) = self.image_path.clone() else {
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
         let name = path.file_name().map_or_else(
@@ -744,11 +753,9 @@ impl App {
         if let Some(playlist) = &mut self.playlist {
             crate::curate::remove_from_playlist(&mut playlist.files, removed);
             if playlist.files.is_empty() {
+                self.cancel_pending_image_load();
                 self.image_path = None;
-                self.current_image = None;
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.clear_image();
-                }
+                self.invalidate_displayed_image();
             } else {
                 playlist.index =
                     crate::curate::index_after_removals(&playlist.files, old_index, removed);
@@ -758,11 +765,9 @@ impl App {
                 self.spawn_image_load(next_path);
             }
         } else {
+            self.cancel_pending_image_load();
             self.image_path = None;
-            self.current_image = None;
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.clear_image();
-            }
+            self.invalidate_displayed_image();
         }
     }
 
@@ -790,12 +795,15 @@ impl App {
     }
 
     fn spawn_image_load(&mut self, path: PathBuf) {
+        let generation = self
+            .image_load_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        self.invalidate_displayed_image();
+
         // Prefer RAM cache even for non-navigate loads (undo, filmstrip jump).
         if let Some(image) = self.prefetch.take(&path) {
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.set_image(&image);
-            }
-            self.current_image = Some(image);
+            self.display_loaded_image(&path, image);
             self.image_loader_rx = None;
             self.kick_prefetch();
             if let Some(r) = self.renderer.as_ref() {
@@ -806,13 +814,23 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.image_loader_rx = Some(rx);
         let window = self.renderer.as_ref().map(|r| r.window.clone());
-        std::thread::spawn(move || {
-            let res = DecodedImage::load(&path).map_err(|e| e.to_string());
+        let current_generation = Arc::clone(&self.image_load_generation);
+        let scheduled = crate::decode::schedule_foreground_decode(move || {
+            let res = match DecodedImage::load_if_current(&path, &current_generation, generation) {
+                Ok(Some(image)) => Ok(image),
+                Ok(None) => return,
+                Err(error) => Err(error.to_string()),
+            };
             let _ = tx.send((path, res));
             if let Some(w) = window {
                 w.request_redraw();
             }
         });
+        if let Err(error) = scheduled {
+            self.image_loader_rx = None;
+            log::error!("failed to queue foreground decode");
+            self.show_toast(format!("Could not start image decode: {error}"));
+        }
     }
 
     /// Mark the current image as a pick for this session only.
@@ -827,6 +845,7 @@ impl App {
     fn save_as(&mut self) {
         if let Some(path) = &self.image_path
             && let Some(image) = &self.current_image
+            && self.loaded_image_path.as_ref() == Some(path)
         {
             let default_name = path.with_extension("jpg");
             if let Some(file_name) = default_name.file_name()
@@ -899,6 +918,26 @@ impl App {
             r.window().request_redraw();
         }
     }
+}
+
+/// Resize the window to fit the loaded image within the current monitor.
+fn resize_window_to_image(renderer: &Renderer) {
+    let Some(monitor) = renderer.window().current_monitor() else {
+        return;
+    };
+    let Some((width, height)) = renderer.image_size() else {
+        return;
+    };
+    let monitor_scale = monitor.scale_factor();
+    let available_width = f64::from(monitor.size().width) / monitor_scale;
+    let available_height = f64::from(monitor.size().height) / monitor_scale;
+    let image_width = f64::from(width);
+    let image_height = f64::from(height);
+    let fit_scale = ((available_width * 0.8) / image_width)
+        .min((available_height * 0.8) / image_height)
+        .min(1.0);
+    let size = LogicalSize::new(image_width * fit_scale, image_height * fit_scale);
+    let _ = renderer.window().request_inner_size(size);
 }
 
 /// Round a non-negative f32 to u32 without triggering sign-loss noise.
@@ -1559,10 +1598,7 @@ impl ApplicationHandler for App {
             let is_current = self.image_path.as_ref() == Some(&path);
             match result {
                 Ok(image) if is_current => {
-                    if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.set_image(&image);
-                    }
-                    self.current_image = Some(image);
+                    self.display_loaded_image(&path, image);
                     self.kick_prefetch();
                     if let Some(r) = self.renderer.as_mut() {
                         r.window().request_redraw();
@@ -1573,6 +1609,9 @@ impl ApplicationHandler for App {
                     self.prefetch.insert(path, image);
                 }
                 Err(e) if is_current => {
+                    if self.resize_on_load.as_ref() == Some(&path) {
+                        self.resize_on_load = None;
+                    }
                     log::error!("decode failed");
                     self.show_toast(format!("Could not decode: {e}"));
                     if let Some(r) = self.renderer.as_mut() {

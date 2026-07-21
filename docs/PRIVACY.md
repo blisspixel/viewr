@@ -51,18 +51,25 @@ A promise you can verify beats a promise you have to trust.
    job audits the full dependency tree (e.g. `cargo-deny` / a dependency check) and
    **fails the build** if a networking-capable crate appears. The absence of
    networking is a tested invariant, not a habit.
-2. **Sandboxed with the network denied.** Release builds ship inside the OS sandbox
-   with no network entitlement:
+2. **Network-denied packaging profiles.** The repository contains local packaging
+   profiles with no network entitlement:
    - **macOS** — App Sandbox, no `com.apple.security.network.*` entitlement.
    - **Windows** — AppContainer without the internet capability.
    - **Linux** — Flatpak with **no** `--share=network`; the decode worker also
-     installs a seccomp filter that returns `EPERM` for network syscalls.
-   Even a hypothetically compromised build cannot open a connection.
+     installs a seccomp filter that returns `EPERM` for classic socket and
+     io_uring networking paths.
+   A bare `cargo build` does not automatically apply App Sandbox, AppContainer, or
+   Flatpak confinement. Phase 7 tracks runtime verification of those profiles.
+   Independently, the dependency ban applies to every build, and Linux worker
+   spawn fails if its network-denying seccomp filter cannot be installed.
 3. **No analytics/telemetry SDKs, ever.** There is no analytics dependency to
    configure. This is also enforced by the dependency audit above.
-4. **Isolated decoding.** Untrusted image bytes are parsed in a restricted worker
-   with no network access (and platform process limits), so a malicious file
-   cannot exfiltrate anything over the network even in the worst case.
+4. **Split decode boundary.** Common pure-Rust formats decode in the main process
+   under shape, allocation, and concurrency limits, with a pre-parse input cap for
+   SVG. Optional C-backed formats decode from bounded inputs in a worker. Linux
+   denies that worker's classic socket and io_uring network paths; the documented
+   OS packages constrain the whole app.
+   Bare Windows and macOS Cargo builds do not claim that package-level boundary.
 
 ## Local data: what viewr does and doesn't write
 

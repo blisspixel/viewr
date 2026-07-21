@@ -118,19 +118,18 @@ the order in which formats are added.
 **Chosen:** the [`image`](https://github.com/image-rs/image) crate as the primary
 decoder, covering JPEG, PNG, GIF (including animation), WebP (including animation),
 BMP, TIFF, ICO, PNM, TGA, QOI, DDS, HDR, OpenEXR, and farbfeld out of the box.
-**[`jxl-oxide`](https://lib.rs/crates/jxl-oxide)** adds JPEG XL, **AVIF** is
-supported through image-rs, and **[`resvg`](https://lib.rs/crates/resvg)** (pure
-Rust) renders SVG.
+**[`jxl-oxide`](https://lib.rs/crates/jxl-oxide)** adds JPEG XL, and
+**[`resvg`](https://lib.rs/crates/resvg)** (pure Rust) renders SVG. AVIF is an
+optional C-backed worker feature in the current implementation.
 
 All of the above are **pure-Rust decoders**, which keeps the memory-safety
 guarantee intact across the whole untrusted-input path.
 
-**Formats that need care** (HEIC/HEIF and camera RAW: Canon, Nikon, Sony,
-Fujifilm, and the rest) currently lack a fully pure-Rust decoder. These are decoded
-**inside the sandboxed worker** (Decision 6) rather than linked into the main
-process, so breadth of format support never lowers the safety bar. Every format we
-add ships with golden-file decode tests and enters the fuzz corpus (see
-STANDARDS.md).
+**Formats that need care** (AVIF, HEIC/HEIF, and camera RAW) are routed to a
+resource-limited worker rather than linked into the main process. AVIF and HEIC
+are feature-gated; RAW remains explicitly deferred. Every format must ship with
+golden-file decode tests and enter the fuzz corpus before it is claimed complete
+(see STANDARDS.md).
 
 ## Decision 5 — System light/dark theme
 
@@ -154,15 +153,18 @@ users who explicitly want it.
 
 ## Decision 7 — Security posture: sandboxed, no network
 
-- **No networking crate is linked at all.** There is no HTTP client, no socket
-  code, nothing that can reach the network. This is verifiable from `Cargo.toml`
-  and enforceable in CI (see `PRIVACY.md`).
-- **Ship sandboxed with network denied:** macOS App Sandbox, Windows AppContainer,
-  Linux Flatpak with no `--share=network`. The app then *cannot* phone home even
-  if a decoder were somehow exploited.
-- **Isolate decoding.** Parsing untrusted images happens in a restricted worker
-  process (seccomp on Linux, reduced privileges elsewhere) so a malicious file
-  can't reach the filesystem or network even within the app.
+- **No networking client crate is linked.** The application implements no HTTP
+  or socket client. This dependency-level invariant is verifiable from Cargo
+  metadata and enforced in CI (see `PRIVACY.md`); syscall denial is a separate
+  runtime/package control.
+- **Ship sandboxed with network denied:** repository profiles target macOS App
+  Sandbox, Windows AppContainer, and Linux Flatpak without `--share=network`.
+  Runtime package verification remains a Phase 7 gate, and bare Cargo builds do
+  not inherit these profiles.
+- **Split decoding by risk.** Pure-Rust formats decode in-process with resource
+  and concurrency limits. Optional C-backed formats use a bounded worker; Linux
+  also denies its classic and io_uring networking syscalls. Filesystem narrowing
+  comes from the enclosing package profile.
 
 ## Supporting crates (planned)
 

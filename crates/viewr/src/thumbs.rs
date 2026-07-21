@@ -29,7 +29,7 @@ pub struct ThumbRgba {
 /// # Errors
 /// Returns a human-readable reason when decode or resize fails.
 pub fn generate_thumb(path: &Path) -> Result<ThumbRgba, String> {
-    let decoded = crate::decode::DecodedImage::load(path).map_err(|e| e.to_string())?;
+    let decoded = crate::decode::DecodedImage::load_background(path).map_err(|e| e.to_string())?;
     if decoded.width == 0 || decoded.height == 0 {
         return Err("empty image".into());
     }

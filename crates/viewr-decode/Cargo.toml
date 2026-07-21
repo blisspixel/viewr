@@ -24,11 +24,14 @@ raw = ["dep:libraw-rs"]
 all-c = ["avif", "heic", "raw"]
 
 [dependencies]
-shared_memory = "0.12.4"
+viewr-protocol = { path = "../viewr-protocol" }
 image = { version = "0.25", optional = true, default-features = false }
 libavif-image = { version = "0.14", optional = true }
 libheif-rs = { version = "2.7", optional = true }
 libraw-rs = { version = "0.0.4", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [lints]
 workspace = true

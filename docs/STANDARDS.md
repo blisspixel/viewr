@@ -84,7 +84,7 @@ honestly without a window or an external worker binary is excluded and covered b
 end-to-end verification instead:
 
 - `app.rs`, `gpu.rs`, `ui.rs` — windowing, GPU, and egui chrome
-- `sandbox.rs` — `viewr-decode` process pool and shared-memory IPC
+- `sandbox.rs` — `viewr-decode` process pool and bounded pixel-stream IPC
 - `worker_limit.rs` — OS Job Object / process-group glue
 - `error.rs`, `main.rs` — thin entry/error surfaces
 

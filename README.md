@@ -19,17 +19,18 @@ held to, and most are enforced in CI.
 1. It just works. Double-click an image and it is on screen before you finish
    letting go of the mouse. Arrow keys flip through the folder. Nothing to
    configure to get the obvious behavior.
-2. Maximum privacy, by construction. viewr contains no networking code. It cannot
-   phone home because there is nothing in it that can open a socket, and CI fails
-   the build if a network-capable dependency ever sneaks in. It ships sandboxed
-   with the network denied, so even a compromised build cannot leak.
+2. Maximum privacy, by construction. The shipped dependency graph contains no
+   networking client, and CI fails if a network-capable dependency enters it.
+   Network-denied OS packaging profiles add a syscall boundary when those packages
+   are used; the Linux C-decoder worker also denies classic and io_uring networking.
 3. Zero logs, zero insights. No telemetry, no analytics, no crash reporting, no
    usage improvement toggle. There is no opt-out because there is nothing to opt out
    of. Your filenames, folders, and photos never leave your machine.
-4. Safe with hostile files. Opening an image means parsing an untrusted file, which
-   is historically the largest source of remote code-execution bugs. viewr is
-   written in Rust and decodes images in a locked-down sandbox, so a booby-trapped
-   file has nowhere to go.
+4. Safe with hostile files. Opening an image means parsing untrusted bytes. The
+   pure-Rust core decoders run off the UI thread with strict decoded dimension and
+   allocation bounds; SVG also has a pre-parse input cap. Optional C-backed formats
+   run in a resource-limited worker; OS packaging profiles supply the
+   whole-application filesystem and network wall.
 5. Simple on the surface, uncompromising underneath. It looks simple and does
    exactly what you want with no friction. That simplicity sits on top of rock-solid
    memory safety, a decode sandbox, elite-level testing, broad format coverage, and
@@ -76,7 +77,7 @@ Full reasoning, including the alternatives we rejected, is in
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 89.74
+viewr targets 85 percent or higher test coverage on its logic (currently 87.23
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and mutation testing to keep the coverage honest. The full set of
 engineering standards is in [`docs/STANDARDS.md`](docs/STANDARDS.md), including how

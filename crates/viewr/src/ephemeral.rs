@@ -63,31 +63,25 @@ pub fn is_viewr_temp_name(name: &str) -> bool {
 
 /// Extract the process id embedded in a `TempWorkspace` name, if present.
 ///
-/// Expected shapes:
-/// - `viewr_{prefix}_{pid}_{nanos}` (current)
-/// - `viewr_{prefix}_{pid}` (older doctor/bench)
+/// Only the current form is recognized: `viewr_{prefix}_{pid}_{nanos}` where
+/// **both** trailing components are decimal integers. A single trailing number
+/// (e.g. `viewr_avif_smoke_orphan_42`) is **not** treated as a live PID — those
+/// are always safe to scrub.
 fn embedded_pid(name: &str) -> Option<u32> {
-    // Strip optional extension (e.g. viewr_job_smoke.avif — no pid).
+    // Strip optional extension (e.g. viewr_job_smoke.avif).
     let stem = name.split('.').next().unwrap_or(name);
     let mut parts = stem.split('_');
-    // "viewr"
     if parts.next()? != "viewr" {
         return None;
     }
     let rest: Vec<&str> = parts.collect();
-    if rest.is_empty() {
+    if rest.len() < 2 {
         return None;
     }
-    // viewr_edit_exif_12345_999nanos → …_{pid}_{nanos}
-    if rest.len() >= 2
-        && rest[rest.len() - 1].chars().all(|c| c.is_ascii_digit())
-        && rest[rest.len() - 2].chars().all(|c| c.is_ascii_digit())
-    {
-        return rest[rest.len() - 2].parse().ok();
-    }
-    // viewr_bench_12345
-    if rest[rest.len() - 1].chars().all(|c| c.is_ascii_digit()) {
-        return rest[rest.len() - 1].parse().ok();
+    let nanos = rest[rest.len() - 1];
+    let pid = rest[rest.len() - 2];
+    if nanos.chars().all(|c| c.is_ascii_digit()) && pid.chars().all(|c| c.is_ascii_digit()) {
+        return pid.parse().ok();
     }
     None
 }
@@ -171,8 +165,10 @@ mod tests {
     #[test]
     fn embedded_pid_parses_workspace_names() {
         assert_eq!(embedded_pid("viewr_edit_exif_4242_999"), Some(4242));
-        assert_eq!(embedded_pid("viewr_bench_77"), Some(77));
+        // Single trailing number is not a live workspace id.
+        assert_eq!(embedded_pid("viewr_bench_77"), None);
         assert_eq!(embedded_pid("viewr_avif_smoke.avif"), None);
+        assert_eq!(embedded_pid("viewr_avif_smoke_orphan_32212.avif"), None);
     }
 
     #[test]

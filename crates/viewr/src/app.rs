@@ -52,6 +52,8 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         last_trashed: None,
         current_image: None,
         show_exif: false,
+        // Privacy default: Save As strips EXIF/GPS unless the user opts in.
+        retain_exif: false,
         bg_override: None,
         image_loader_rx: None,
         flags: FlagSet::new(),
@@ -139,6 +141,8 @@ struct App {
     last_trashed: Option<TrashedFile>,
     current_image: Option<DecodedImage>,
     show_exif: bool,
+    /// When true, Save As copies EXIF from the source. Default **false** (strip).
+    retain_exif: bool,
     bg_override: Option<[f64; 4]>,
     image_loader_rx: Option<
         std::sync::mpsc::Receiver<(
@@ -753,8 +757,19 @@ impl App {
                     .add_filter("BMP", &["bmp"])
                     .save_file()
             {
-                match crate::edit::save(image, &save_path) {
-                    Ok(()) => self.show_toast("Saved"),
+                let opts = if self.retain_exif {
+                    crate::edit::SaveOptions::retain_exif()
+                } else {
+                    crate::edit::SaveOptions::strip()
+                };
+                match crate::edit::save_with_options(image, &save_path, Some(path), opts) {
+                    Ok(()) => {
+                        if self.retain_exif {
+                            self.show_toast("Saved · EXIF retained");
+                        } else {
+                            self.show_toast("Saved · metadata stripped");
+                        }
+                    }
                     Err(e) => {
                         log::error!("failed to save image");
                         self.show_toast(format!("Save failed: {e}"));
@@ -1226,6 +1241,7 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .map(|p| p.to_string_lossy().into_owned());
                 let show_exif = self.show_exif;
+                let retain_exif = self.retain_exif;
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
                 let is_panning =
@@ -1294,6 +1310,7 @@ impl ApplicationHandler for App {
                 let img_size = renderer.image_size();
                 let frame = crate::ui::UiFrameOwned {
                     show_exif,
+                    retain_exif,
                     file_path: path_str,
                     img_size,
                     is_cropping,
@@ -1375,6 +1392,14 @@ impl ApplicationHandler for App {
                         }
                         crate::ui::UiAction::ToggleExif => {
                             self.show_exif = !self.show_exif;
+                        }
+                        crate::ui::UiAction::ToggleRetainExif => {
+                            self.retain_exif = !self.retain_exif;
+                            self.show_toast(if self.retain_exif {
+                                "Save As will retain EXIF (session only)"
+                            } else {
+                                "Save As will strip metadata (default)"
+                            });
                         }
                         crate::ui::UiAction::RotateCw => {
                             self.transform.rotation_steps += 1;

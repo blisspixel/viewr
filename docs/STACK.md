@@ -177,7 +177,7 @@ users who explicitly want it.
 | Trash / recycle | `trash` | recoverable deletes |
 | OS theme | `dark-light` | XDG portal on Linux |
 | File dialogs | `rfd` | native open/save dialogs |
-| EXIF read/strip | `kamadak-exif` | for the metadata-strip-on-export feature |
+| EXIF retain (opt-in) | `little_exif` | Save As strips by default; retain is session-only |
 | Error handling | `thiserror` / `anyhow` | app-level ergonomics |
 | App icon | `winres` | embeds custom SVG/ICO app icons |
 

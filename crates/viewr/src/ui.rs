@@ -29,6 +29,8 @@ pub enum UiAction {
     SetBackground(Option<[f64; 4]>),
     /// Toggle the EXIF metadata panel.
     ToggleExif,
+    /// Toggle whether Save As retains EXIF (default off = strip).
+    ToggleRetainExif,
     /// Rotate the image clockwise.
     RotateCw,
     /// Rotate the image counter-clockwise.
@@ -64,6 +66,8 @@ pub enum UiAction {
 pub struct UiFrameOwned {
     /// Whether the metadata side panel is open.
     pub show_exif: bool,
+    /// Whether Save As will retain EXIF (default false = strip).
+    pub retain_exif: bool,
     /// Path of the current image (display only).
     pub file_path: Option<String>,
     /// Pixel dimensions of the current image, if any.
@@ -124,7 +128,7 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     }
 
     if frame.show_exif {
-        render_exif_panel(ui, frame);
+        render_exif_panel(ui, &mut actions, frame);
     }
 
     if frame.chrome_visible || frame.mouse_near_left || frame.is_cropping {
@@ -177,7 +181,7 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
     Panel::top("top_panel").frame(menu_frame()).show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            file_menu(ui, actions, frame.flag_count);
+            file_menu(ui, actions, frame.flag_count, frame.retain_exif);
             edit_menu(ui, actions, frame.is_cropping);
             view_menu(ui, actions);
             canvas_menu(ui, actions);
@@ -191,7 +195,7 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
     });
 }
 
-fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, flag_count: usize) {
+fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, flag_count: usize, retain_exif: bool) {
     ui.menu_button("File", |ui| {
         if ui.button("Open…          Ctrl+O").clicked() {
             actions.push(UiAction::Open);
@@ -200,6 +204,21 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, flag_count: usize) 
         if ui.button("Save As…       W").clicked() {
             actions.push(UiAction::SaveAs);
             ui.close();
+        }
+        let retain_label = if retain_exif {
+            "☑ Retain EXIF on Save As"
+        } else {
+            "☐ Retain EXIF on Save As (off)"
+        };
+        if ui
+            .button(retain_label)
+            .on_hover_text(
+                "Default is off: Save As re-encodes pixels only and strips GPS/EXIF. \
+                 Turn on for this session if you need to keep camera metadata.",
+            )
+            .clicked()
+        {
+            actions.push(UiAction::ToggleRetainExif);
         }
         ui.separator();
         if ui.button("Flag / Unflag  X").clicked() {
@@ -332,7 +351,7 @@ fn render_empty_state(ui: &mut egui::Ui) {
         });
 }
 
-fn render_exif_panel(ui: &mut egui::Ui, frame: &UiFrameOwned) {
+fn render_exif_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     Panel::right("exif_panel")
         .frame(
             Frame::new()
@@ -367,9 +386,35 @@ fn render_exif_panel(ui: &mut egui::Ui, frame: &UiFrameOwned) {
             ui.label(RichText::new(format!("Flagged: {}", frame.flag_count)).color(MUTED));
             ui.separator();
             ui.label(
-                RichText::new("Export re-encodes pixels and strips metadata.")
-                    .size(12.0)
-                    .color(MUTED),
+                RichText::new(if frame.retain_exif {
+                    "Save As: retain EXIF (session)"
+                } else {
+                    "Save As: strip metadata (default)"
+                })
+                .size(12.0)
+                .color(if frame.retain_exif { ACCENT } else { MUTED }),
+            );
+            if ui
+                .button(if frame.retain_exif {
+                    "Turn off retain EXIF"
+                } else {
+                    "Retain EXIF on Save As…"
+                })
+                .on_hover_text(
+                    "Privacy default is strip. Enabling keeps GPS/camera tags when you export.",
+                )
+                .clicked()
+            {
+                actions.push(UiAction::ToggleRetainExif);
+            }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(
+                    "By default export re-encodes pixels only — EXIF, GPS, and \
+                     serials are removed. Nothing is written to disk about this choice.",
+                )
+                .size(11.0)
+                .color(MUTED),
             );
         });
 }

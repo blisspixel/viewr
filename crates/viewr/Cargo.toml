@@ -45,6 +45,7 @@ bytemuck = "1.25.2"
 # present as paths. Feature expansion for full SVG text is a deliberate later choice.
 resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
 trash = { version = "5.2.6", default-features = false, features = ["coinit_apartmentthreaded"] }
+little_exif = "0.6.23"
 
 # Windows Job Object limits for the decode worker (kill-on-close with parent).
 [target.'cfg(windows)'.dependencies]

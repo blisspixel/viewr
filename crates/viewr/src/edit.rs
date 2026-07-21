@@ -1,13 +1,14 @@
 //! Non-destructive edits and export: cropping and saving to another format.
 //!
-//! Export re-encodes from raw pixels, which means any metadata in the source
-//! file (EXIF, GPS, camera serials) is dropped by default. That is a deliberate
-//! privacy property, not an accident: your location does not ride along inside a
-//! photo you save. See `docs/PRIVACY.md`.
+//! Export re-encodes from raw pixels. By default any metadata in the source
+//! file (EXIF, GPS, camera serials) is **dropped** — a deliberate privacy
+//! property. Users can opt in to retain EXIF for a session via
+//! [`SaveOptions::retain_exif`]. See `docs/PRIVACY.md`.
 
 use std::path::Path;
 
 use image::{DynamicImage, ImageFormat, RgbaImage};
+use little_exif::metadata::Metadata;
 
 use crate::decode::DecodedImage;
 use crate::error::Error;
@@ -43,6 +44,30 @@ impl Rect {
     }
 }
 
+/// Options for [`save_with_options`].
+///
+/// Defaults strip all metadata (privacy-first): `retain_exif` is `false`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SaveOptions {
+    /// When `true`, copy EXIF tags from the source file into the output after
+    /// encoding pixels. **Default is `false`** — metadata is removed.
+    pub retain_exif: bool,
+}
+
+impl SaveOptions {
+    /// Privacy default: re-encode pixels only, drop all metadata.
+    #[must_use]
+    pub const fn strip() -> Self {
+        Self { retain_exif: false }
+    }
+
+    /// Copy EXIF from the source path into the destination when possible.
+    #[must_use]
+    pub const fn retain_exif() -> Self {
+        Self { retain_exif: true }
+    }
+}
+
 /// Crop `src` to `rect`, returning a new image. The rectangle is clamped to the
 /// source bounds first, so out-of-range rectangles are safe and never panic.
 #[must_use]
@@ -61,15 +86,51 @@ pub fn crop(src: &DecodedImage, rect: Rect) -> DecodedImage {
     }
 }
 
-/// Save `image` to `path`, choosing the output format from the file extension.
-/// Formats without an alpha channel (JPEG, PNM, HDR) receive an RGB copy so that
-/// saving as any format "just works". Metadata is not written: the file contains
-/// only pixels.
+/// Save `image` to `path`, stripping all metadata (EXIF, GPS, …).
+///
+/// Equivalent to [`save_with_options`] with [`SaveOptions::strip`] and no source.
 ///
 /// # Errors
 /// Returns [`Error::Encode`] if the pixel buffer is malformed, the extension is
 /// not a recognized format, or the file cannot be encoded or written.
 pub fn save(image: &DecodedImage, path: &Path) -> Result<(), Error> {
+    save_with_options(image, path, None, SaveOptions::strip())
+}
+
+/// Save `image` to `dest`, optionally copying EXIF from `source`.
+///
+/// When `opts.retain_exif` is `false` (the default), the file contains **only
+/// pixels** — no EXIF, GPS, or other sidecar metadata. When `true` and
+/// `source` is provided, EXIF tags are best-effort copied from the source into
+/// the freshly encoded destination (supported containers: JPEG, PNG, WebP,
+/// TIFF, and related formats that `little_exif` understands).
+///
+/// # Errors
+/// Returns [`Error::Encode`] on encode failure or if EXIF copy was requested
+/// and could not be applied.
+pub fn save_with_options(
+    image: &DecodedImage,
+    dest: &Path,
+    source: Option<&Path>,
+    opts: SaveOptions,
+) -> Result<(), Error> {
+    encode_pixels_only(image, dest)?;
+
+    if opts.retain_exif {
+        let Some(src) = source else {
+            return Err(Error::Encode(
+                "retain EXIF requested but no source path was provided".into(),
+            ));
+        };
+        copy_exif(src, dest)?;
+    }
+    // When retain_exif is false: do nothing more. Pixel re-encode already
+    // left the file free of source metadata by construction.
+    Ok(())
+}
+
+/// Encode RGBA pixels to `path` with no metadata written.
+fn encode_pixels_only(image: &DecodedImage, path: &Path) -> Result<(), Error> {
     let buffer = RgbaImage::from_raw(image.width, image.height, image.rgba.clone())
         .ok_or_else(|| Error::Encode("pixel buffer does not match dimensions".to_string()))?;
     // Filename only — never the full path — so encode errors are safe in logs/toasts.
@@ -89,6 +150,41 @@ pub fn save(image: &DecodedImage, path: &Path) -> Result<(), Error> {
     }
 }
 
+/// Whether `path`'s extension is a container that can carry EXIF via `little_exif`.
+#[must_use]
+pub fn path_supports_exif(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "jpg" | "jpeg" | "png" | "webp" | "tif" | "tiff" | "jxl" | "heic" | "heif" | "avif" | "hif"
+    )
+}
+
+/// Copy EXIF from `source` into an already-encoded `dest`.
+fn copy_exif(source: &Path, dest: &Path) -> Result<(), Error> {
+    if !path_supports_exif(dest) {
+        return Err(Error::Encode(
+            "destination format cannot carry EXIF (use JPEG/PNG/WebP/TIFF, or turn retain off)"
+                .into(),
+        ));
+    }
+    if !path_supports_exif(source) {
+        // Source has no EXIF container we can read — treat as success (nothing to copy).
+        return Ok(());
+    }
+
+    let metadata = Metadata::new_from_path(source)
+        .map_err(|e| Error::Encode(format!("could not read EXIF from source: {e}")))?;
+    metadata
+        .write_to_file(dest)
+        .map_err(|e| Error::Encode(format!("could not write EXIF to output: {e}")))?;
+    Ok(())
+}
+
 /// Whether `format`'s encoder accepts an alpha channel. The few that do not get
 /// an RGB conversion before saving.
 fn supports_alpha(format: ImageFormat) -> bool {
@@ -100,8 +196,12 @@ fn supports_alpha(format: ImageFormat) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Rect, crop, save};
+    use super::{Rect, SaveOptions, crop, path_supports_exif, save, save_with_options};
     use crate::decode::DecodedImage;
+    use crate::ephemeral::TempWorkspace;
+    use little_exif::exif_tag::ExifTag;
+    use little_exif::metadata::Metadata;
+    use std::path::Path;
 
     /// A 4x4 image where each pixel's red channel encodes its (x + y*4) index,
     /// so crops can be checked precisely.
@@ -114,6 +214,18 @@ mod tests {
             rgba,
             width: 4,
             height: 4,
+        }
+    }
+
+    fn solid_rgba(w: u32, h: u32) -> DecodedImage {
+        DecodedImage {
+            rgba: vec![10, 20, 30, 255]
+                .into_iter()
+                .cycle()
+                .take((w * h * 4) as usize)
+                .collect(),
+            width: w,
+            height: h,
         }
     }
 
@@ -190,24 +302,83 @@ mod tests {
             width: 4,
             height: 4,
         };
-        let ws = crate::ephemeral::TempWorkspace::new("edit_bad").unwrap();
+        let ws = TempWorkspace::new("edit_bad").unwrap();
         let path = ws.path().join("viewr_bad.png");
         assert!(save(&bad, &path).is_err());
-        // ws drops → cleans any partial write
     }
 
     #[test]
     fn saves_to_alpha_less_format_by_dropping_alpha() {
-        // Regression: JPEG has no alpha channel; saving RGBA pixels must still
-        // succeed rather than error.
         let img = DecodedImage {
             rgba: vec![10, 20, 30, 255, 40, 50, 60, 255],
             width: 2,
             height: 1,
         };
-        let ws = crate::ephemeral::TempWorkspace::new("edit_jpeg").unwrap();
+        let ws = TempWorkspace::new("edit_jpeg").unwrap();
         let path = ws.path().join("viewr_jpeg.jpg");
         assert!(save(&img, &path).is_ok());
-        // ws drops → removes the jpeg
+    }
+
+    #[test]
+    fn save_options_default_strips_metadata() {
+        assert!(!SaveOptions::default().retain_exif);
+        assert!(!SaveOptions::strip().retain_exif);
+        assert!(SaveOptions::retain_exif().retain_exif);
+    }
+
+    #[test]
+    fn path_supports_exif_for_common_containers() {
+        assert!(path_supports_exif(Path::new("a.jpg")));
+        assert!(path_supports_exif(Path::new("a.PNG")));
+        assert!(path_supports_exif(Path::new("a.webp")));
+        assert!(!path_supports_exif(Path::new("a.bmp")));
+        assert!(!path_supports_exif(Path::new("a.gif")));
+    }
+
+    /// Build a JPEG with a known `ImageDescription`, then export with strip vs retain.
+    #[test]
+    fn default_save_strips_exif_retain_keeps_description() {
+        let ws = TempWorkspace::new("edit_exif").unwrap();
+        let source = ws.path().join("with_exif.jpg");
+        let stripped = ws.path().join("stripped.jpg");
+        let retained = ws.path().join("retained.jpg");
+
+        let img = solid_rgba(8, 8);
+        encode_and_stamp_description(&img, &source, "viewr-test-gps-should-not-leak");
+
+        // Default / strip path: no retain, description must not appear.
+        save_with_options(&img, &stripped, Some(&source), SaveOptions::strip()).unwrap();
+        assert!(
+            !file_has_description(&stripped, "viewr-test-gps-should-not-leak"),
+            "default Save As must strip EXIF description"
+        );
+
+        // Opt-in retain: description must survive.
+        save_with_options(&img, &retained, Some(&source), SaveOptions::retain_exif()).unwrap();
+        assert!(
+            file_has_description(&retained, "viewr-test-gps-should-not-leak"),
+            "retain_exif must copy ImageDescription from source"
+        );
+    }
+
+    fn encode_and_stamp_description(img: &DecodedImage, path: &Path, text: &str) {
+        save(img, path).unwrap();
+        let mut meta = Metadata::new();
+        meta.set_tag(ExifTag::ImageDescription(text.to_string()));
+        meta.write_to_file(path).unwrap();
+    }
+
+    fn file_has_description(path: &Path, expected: &str) -> bool {
+        let Ok(meta) = Metadata::new_from_path(path) else {
+            return false;
+        };
+        for tag in &meta {
+            if let ExifTag::ImageDescription(s) = tag
+                && s.contains(expected)
+            {
+                return true;
+            }
+        }
+        false
     }
 }

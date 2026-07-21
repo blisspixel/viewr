@@ -79,10 +79,13 @@ transmitted anywhere.
 Images carry EXIF metadata — often including **GPS coordinates**, camera serial
 numbers, and timestamps. Bloated apps silently preserve all of it when you export.
 
-viewr does the opposite: on **Save As / convert**, the app re-encodes the raw
-image pixels directly and drops EXIF, GPS, and all other metadata entirely by
-construction. Your address and identifying fields never ride along inside a photo
-you share.
+viewr does the opposite by default: on **Save As / convert**, the app re-encodes
+the raw image pixels and **drops EXIF, GPS, and all other metadata**. Your address
+and identifying fields do not ride along inside a photo you share unless you ask.
+
+**Retain EXIF on Save As** is an explicit session option (File menu or Image Info
+panel). It defaults to **off**. Turning it on keeps EXIF tags for the rest of that
+session only — the choice is never written to a settings file.
 
 ## Updates
 

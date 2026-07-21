@@ -146,10 +146,11 @@ of them just works.
 ## Phase 7: Hardening and the privacy proof
 
 Turn "we designed it to be private and safe" into something a third party can
-verify.
+verify **locally** (build, run, inspect). This phase is **not** about app-store
+submission.
 
-- [ ] Sandbox packaging on all three platforms with the network denied: macOS App
-  Sandbox, Windows AppContainer, and Linux Flatpak with no network share.
+- [ ] Sandbox *profiles* on all three platforms with the network denied (local
+  packaging sketches and runtime limits—not store listing):
   - [x] Flatpak manifest sketch (`packaging/flatpak/…`) with no `--share=network`.
   - [x] macOS entitlements sketch without network client/server keys.
   - [x] Windows AppContainer packaging notes (`packaging/windows/APPCONTAINER.md`).
@@ -162,29 +163,48 @@ verify.
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
   - [ ] cargo-fuzz continuous job still open.
-- Reproducible and signed builds, so a user can confirm the binary matches the
-  source.
+- Reproducible local/CI release binaries (checksums, pinned toolchain). **Not**
+  notarization or store signing (see out-of-scope below).
 - [x] Deletes use the system trash (`trash` crate), not a local `_trash` folder.
 
-Definition of done: the app runs correctly with the network entitlement off,
-fuzzing finds no crashes at the decode boundary, and the release binary is
-independently reproducible.
+Definition of done: the app runs correctly with network denied by packaging
+profile and/or process policy where implemented, fuzzing finds no crashes at the
+decode boundary, and a release binary can be built and verified from this repo
+without requiring third-party store accounts.
 
 ## Phase 8: 1.0, the viewer people recommend
 
-Polish, packaging, and distribution so switching costs nothing.
+Polish and **local-first** distribution so switching costs nothing for people who
+install from source or a simple GitHub-style release artifact.
 
-- Native installers and packages: Flatpak and AUR on Linux, a notarized disk image
-  on macOS, an installer and Store package on Windows.
-- Sensible file-association setup that never hijacks defaults silently.
-- Documentation, a static website with no trackers because we practice what we
-  preach, and a human-written changelog.
+- Local/CI install paths: `cargo build --release --workspace`, optional simple
+  installers (e.g. cargo-dist shell/PowerShell/MSI *as optional maintainer
+  tooling*), and clear dual-binary layout (`viewr` + `viewr-decode`).
+- Sensible file-association setup that never hijacks defaults silently (docs and
+  desktop entry; no silent store takeover).
+- Documentation, optional static website with no trackers, and a human-written
+  changelog.
 - Accessibility pass: keyboard complete, screen-reader labels, high-contrast check.
 - Performance budget locked in and regression-tested in CI: cold start, first
   pixel, and memory all within target.
 
-Definition of done: a non-technical person can install viewr, set it as their
-default image viewer, and never think about it again, which is the entire point.
+Definition of done: a careful user can build or download a release artifact, set
+viewr as their image viewer if they choose, and never think about bloat again.
+**Store shelves are not required for 1.0.**
+
+## Explicitly out of scope for now (maybe later)
+
+**Not** on the active roadmap until we deliberately opt in. Tracked here so it is
+not mistaken for Phase 7/8 work:
+
+- Apple notarized `.dmg` / Mac App Store
+- Microsoft Store MSIX / Partner Center publish
+- Flathub (or other store) *publication* (local Flatpak *build* sketches may still
+  exist for sandbox testing)
+- Any pipeline that requires paid developer accounts, store review, or
+  third-party signing secrets as a gate for product progress
+
+Revisit only after 1.0 local distribution and privacy proof are solid.
 
 ## Beyond 1.0, candidates held to the same bar
 

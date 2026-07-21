@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS App Sandbox entitlements for Phase 7.
+  Network client/server entitlements are intentionally ABSENT so the app
+  cannot open sockets even if a dependency regressed.
+  User-selected files (Open/Save) use the standard sandbox file access keys.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+  <!-- No com.apple.security.network.client -->
+  <!-- No com.apple.security.network.server -->
+</dict>
+</plist>

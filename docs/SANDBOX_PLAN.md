@@ -30,3 +30,17 @@ The main `viewr` process will remain pure-Rust, memory-safe, and dependency-ligh
 
 ## Why this is Exceptional
 Most photo viewers either silently link vulnerable C code into their UI process, or they just don't support modern formats at all. By isolating C-decoders into an ephemeral, network-denied, unprivileged child process, we provide 100% format coverage with 0% risk to the user's host machine. This is how exceptional, privacy-first software is built.
+
+## Implementation status (2026-07-21)
+
+| Item | Status |
+|------|--------|
+| Multi-binary workspace (`viewr` + `viewr-decode`) | Done (feature-gated C backends) |
+| stdin/stdout + shared-memory IPC | Done |
+| Feature-gated C deps (CI pure-Rust) | Done |
+| OS trash for curation | Done (`trash` crate) |
+| Flatpak manifest (no network) | Sketch in `packaging/flatpak/` |
+| macOS entitlements (no network) | Sketch in `packaging/macos/` |
+| Windows AppContainer plan | Sketch in `packaging/windows/` |
+| seccomp / Job Object privilege drop | Open (Phase 7 remaining) |
+| Continuous fuzz CI | Open |

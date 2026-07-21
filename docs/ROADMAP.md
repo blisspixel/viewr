@@ -152,6 +152,8 @@ verify.
 - [ ] Sandbox packaging on all three platforms with the network denied: macOS App
   Sandbox, Windows AppContainer, and Linux Flatpak with no network share.
   - [x] Flatpak manifest sketch (`packaging/flatpak/…`) with no `--share=network`.
+  - [x] macOS entitlements sketch without network client/server keys.
+  - [x] Windows AppContainer packaging notes (`packaging/windows/APPCONTAINER.md`).
 - The isolated decode worker fully in place, with seccomp on Linux and reduced
   privileges elsewhere.
   - [x] Workspace worker + SHM IPC (process isolation); OS privilege drop still open.

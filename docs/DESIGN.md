@@ -37,7 +37,10 @@ disappears. This spec is the converged result of two rounds of design critique
 - Zoom is focal-point anchored (pixel under cursor stays put). Trackpad pixel
   deltas and wheel detents both supported.
 - Bottom filmstrip: appears only near the bottom edge / when chrome is awake;
-  shows a window of neighbor basenames (flagged highlighted); click jumps.
+  shows a window of neighbor **thumbnails** (async decode+resize, flagged amber
+  dot); click jumps. Placeholders show the index until the thumb lands.
+- Space held + drag = temporary pan (classic hand tool); Space tap without drag
+  resets fit.
 
 ## Color
 

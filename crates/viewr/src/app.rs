@@ -4,8 +4,10 @@
 //! is borrowed without depending on a UI framework.
 #![allow(unsafe_code)]
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
@@ -20,6 +22,8 @@ use crate::decode::DecodedImage;
 use crate::error::Error;
 use crate::gpu::{FrameResult, Renderer};
 use crate::theme::Mode;
+use crate::thumbs::{self, ThumbRgba};
+use crate::ui::FilmstripItem;
 
 /// Start viewr: create the event loop and run the application to completion. The
 /// first command-line argument, if present, is the image to open.
@@ -30,6 +34,7 @@ pub fn run() -> Result<(), Error> {
     let event_loop = EventLoop::new()?;
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
+    let (thumb_result_tx, thumb_rx) = mpsc::channel();
     let mut app = App {
         image_path: std::env::args_os().nth(1).map(PathBuf::from),
         renderer: None,
@@ -49,6 +54,13 @@ pub fn run() -> Result<(), Error> {
         last_activity: Instant::now(),
         cursor_pos: (0.0, 0.0),
         last_click: None,
+        space_held: false,
+        space_dragged: false,
+        mouse_left_down: false,
+        thumb_result_tx,
+        thumb_rx,
+        thumbs_in_flight: HashSet::new(),
+        thumb_textures: HashMap::new(),
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -109,6 +121,7 @@ impl Default for Transform {
 }
 
 /// The whole application state. Deliberately small.
+#[allow(clippy::struct_excessive_bools)] // independent UI/session mode bits
 struct App {
     renderer: Option<Renderer>,
     image_path: Option<PathBuf>,
@@ -140,6 +153,20 @@ struct App {
     cursor_pos: (f64, f64),
     /// Last click time/pos for double-click fit toggle.
     last_click: Option<(Instant, (f64, f64))>,
+    /// Spacebar currently held (temporary hand / pan tool).
+    space_held: bool,
+    /// Whether a pan occurred while Space was held (skip reset on release).
+    space_dragged: bool,
+    /// Left mouse button currently down.
+    mouse_left_down: bool,
+    /// Completed thumbnail results (or failures) from background jobs.
+    thumb_result_tx: Sender<Result<ThumbRgba, (PathBuf, String)>>,
+    /// Receiver for thumbnail results.
+    thumb_rx: Receiver<Result<ThumbRgba, (PathBuf, String)>>,
+    /// Paths currently decoding for the filmstrip.
+    thumbs_in_flight: HashSet<PathBuf>,
+    /// Uploaded egui textures for filmstrip cells.
+    thumb_textures: HashMap<PathBuf, egui::TextureHandle>,
 }
 
 impl App {
@@ -474,7 +501,7 @@ impl App {
     }
 
     /// Window of playlist entries around the current index for the filmstrip.
-    fn filmstrip_entries(&self) -> Vec<(usize, String, bool)> {
+    fn filmstrip_entries(&self) -> Vec<FilmstripItem> {
         let Some(playlist) = &self.playlist else {
             return Vec::new();
         };
@@ -492,9 +519,73 @@ impl App {
                     |s| s.to_string_lossy().into_owned(),
                 );
                 let flagged = self.flags.contains(path);
-                (i, name, flagged)
+                let texture = self.thumb_textures.get(path).cloned();
+                FilmstripItem {
+                    index: i,
+                    name,
+                    flagged,
+                    texture,
+                }
             })
             .collect()
+    }
+
+    fn request_thumbs_for_filmstrip(&mut self) {
+        let Some(playlist) = &self.playlist else {
+            return;
+        };
+        if playlist.files.is_empty() {
+            return;
+        }
+        let n = playlist.files.len();
+        let start = playlist.index.saturating_sub(4);
+        let end = (playlist.index + 5).min(n);
+        let paths: Vec<PathBuf> = playlist.files[start..end].to_vec();
+        for path in paths {
+            if self.thumb_textures.contains_key(&path) || self.thumbs_in_flight.contains(&path) {
+                continue;
+            }
+            self.thumbs_in_flight.insert(path.clone());
+            let tx = self.thumb_result_tx.clone();
+            std::thread::spawn(move || {
+                let result = match thumbs::generate_thumb(&path) {
+                    Ok(thumb) => Ok(thumb),
+                    Err(err) => Err((path, err)),
+                };
+                let _ = tx.send(result);
+            });
+        }
+    }
+
+    fn poll_thumbnails(&mut self) {
+        let mut got = false;
+        while let Ok(msg) = self.thumb_rx.try_recv() {
+            got = true;
+            match msg {
+                Ok(thumb) => {
+                    self.thumbs_in_flight.remove(&thumb.path);
+                    if let Some(renderer) = &self.renderer {
+                        let image = egui::ColorImage::from_rgba_unmultiplied(
+                            [thumb.width as usize, thumb.height as usize],
+                            &thumb.rgba,
+                        );
+                        let id = format!("thumb:{}", thumb.path.display());
+                        let handle =
+                            renderer
+                                .egui_ctx
+                                .load_texture(id, image, egui::TextureOptions::LINEAR);
+                        self.thumb_textures.insert(thumb.path, handle);
+                    }
+                }
+                Err((path, err)) => {
+                    self.thumbs_in_flight.remove(&path);
+                    log::debug!("thumb failed for {}: {err}", path.display());
+                }
+            }
+        }
+        if got && let Some(r) = self.renderer.as_ref() {
+            r.window().request_redraw();
+        }
     }
 
     fn toggle_fit_actual(&mut self) {
@@ -817,7 +908,9 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 self.touch_activity();
-                if state == winit::event::ElementState::Pressed && !self.transform.is_cropping {
+                let pressed = state == winit::event::ElementState::Pressed;
+                self.mouse_left_down = pressed;
+                if pressed && !self.transform.is_cropping {
                     let now = Instant::now();
                     let pos = self.cursor_pos;
                     if let Some((t, (lx, ly))) = self.last_click {
@@ -830,8 +923,8 @@ impl ApplicationHandler for App {
                     }
                     self.last_click = Some((now, pos));
                 }
-                if self.transform.is_cropping {
-                    if state == winit::event::ElementState::Pressed {
+                if self.transform.is_cropping && !self.space_held {
+                    if pressed {
                         if let Some((x, y)) = self.transform.last_cursor {
                             self.transform.crop_start = self.screen_to_uv(x, y);
                             self.transform.crop_rect = None;
@@ -841,7 +934,7 @@ impl ApplicationHandler for App {
                         self.transform.crop_start = None;
                     }
                 } else {
-                    self.transform.is_panning = state == winit::event::ElementState::Pressed;
+                    self.transform.is_panning = pressed;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -898,9 +991,13 @@ impl ApplicationHandler for App {
                         v_max.clamp(0.0, 1.0),
                     ]);
                     self.renderer.as_mut().unwrap().window().request_redraw();
-                } else if self.transform.is_panning
+                } else if self.mouse_left_down
+                    && (self.transform.is_panning || self.space_held)
                     && let Some((last_x, last_y)) = self.transform.last_cursor
                 {
+                    if self.space_held {
+                        self.space_dragged = true;
+                    }
                     let dx = position.x - last_x;
                     let dy = position.y - last_y;
                     let win_size = self.renderer.as_mut().unwrap().window().inner_size();
@@ -915,14 +1012,35 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput {
                 event:
                     winit::event::KeyEvent {
-                        state: winit::event::ElementState::Pressed,
-                        logical_key,
-                        ..
+                        state, logical_key, ..
                     },
                 ..
             } => {
                 use winit::keyboard::{Key, NamedKey};
                 self.touch_activity();
+                let pressed = state == winit::event::ElementState::Pressed;
+                // Space: hold = temporary hand tool; tap (no drag) = reset view.
+                let is_space = matches!(&logical_key, Key::Named(NamedKey::Space))
+                    || matches!(&logical_key, Key::Character(c) if c.as_str() == " ");
+                if is_space {
+                    if pressed {
+                        self.space_held = true;
+                        self.space_dragged = false;
+                    } else {
+                        self.space_held = false;
+                        if !self.space_dragged {
+                            self.transform = Transform::default();
+                            if let Some(r) = self.renderer.as_mut() {
+                                r.window().request_redraw();
+                            }
+                        }
+                        self.space_dragged = false;
+                    }
+                    return;
+                }
+                if !pressed {
+                    return;
+                }
                 match logical_key {
                     Key::Character(c) if (c == "o" || c == "O") && self.modifiers.control_key() => {
                         if let Some(path) = rfd::FileDialog::new()
@@ -953,10 +1071,6 @@ impl ApplicationHandler for App {
                         {
                             self.load_and_scan(path);
                         }
-                    }
-                    Key::Character(c) if c == " " => {
-                        self.transform = Transform::default();
-                        self.renderer.as_mut().unwrap().window().request_redraw();
                     }
                     Key::Character(c) if c == "r" || c == "R" => {
                         self.transform.rotation_steps += 1;
@@ -1083,6 +1197,8 @@ impl ApplicationHandler for App {
                     .playlist
                     .as_ref()
                     .map(|p| (p.index.saturating_add(1), p.files.len().max(1)));
+                self.request_thumbs_for_filmstrip();
+                self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
                 let is_flagged = self
                     .image_path
@@ -1098,7 +1214,8 @@ impl ApplicationHandler for App {
                 let show_exif = self.show_exif;
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
-                let is_panning = self.transform.is_panning;
+                let is_panning =
+                    self.transform.is_panning || (self.space_held && self.mouse_left_down);
                 let bg_override = self.bg_override;
                 let zoom_t = self.transform.zoom;
                 let offset_x = self.transform.offset_x;
@@ -1313,6 +1430,7 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.poll_thumbnails();
         if let Some(rx) = &self.image_loader_rx
             && let Ok((path, result)) = rx.try_recv()
         {

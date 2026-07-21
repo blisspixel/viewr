@@ -1,11 +1,11 @@
 //! OS-level limits for the `viewr-decode` helper process.
 //!
-//! Goal: if the main process dies or a worker is discarded, helpers do not
-//! linger as orphans, and on Linux the child starts with `no_new_privs`.
-//! Full `seccomp-bpf` syscall allow-lists and App Container packaging remain
-//! packaging work on top of this foundation.
+//! - All platforms: terminate discarded workers; isolate process group (Unix).
+//! - Windows: Job Object with kill-on-close.
+//! - Linux: `no_new_privs`, non-dumpable, and a seccomp-bpf filter that **allows
+//!   by default** but returns `EPERM` for network syscalls (socket/connect/…).
 
-#![allow(unsafe_code)] // Win32 Job Object APIs, Unix process-group, Linux prctl
+#![allow(unsafe_code)] // Win32 Job Object APIs, Unix process-group, Linux prctl/seccomp
 
 use std::process::Child;
 
@@ -25,24 +25,16 @@ pub(crate) fn configure_command(cmd: &mut std::process::Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // New process group so the helper is not in the UI session group.
         cmd.process_group(0);
     }
 
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
-        // SAFETY: pre_exec runs in the child after fork, before exec. Calls are
-        // limited to async-signal-safe prctl helpers. Failures are non-fatal so
-        // decode still works on restricted environments.
+        // SAFETY: pre_exec runs post-fork pre-exec; only async-signal-safe work.
         unsafe {
             cmd.pre_exec(|| {
-                // Prevent privilege escalation after exec.
-                let _ = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-                // Reduce crash dump / ptrace surface for the helper.
-                let _ = libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
-                // Soft landlock-style intent: full seccomp-bpf allowlists land
-                // with packaging. Documented in packaging/linux/SECCOMP.md.
+                linux::apply_worker_sandbox();
                 Ok(())
             });
         }
@@ -55,6 +47,69 @@ pub(crate) fn configure_command(cmd: &mut std::process::Command) {
 pub(crate) fn terminate(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+    use std::collections::BTreeMap;
+    use std::convert::TryInto;
+
+    /// Install process-wide worker restrictions. Best-effort: never aborts spawn.
+    pub(super) fn apply_worker_sandbox() {
+        // Prevent privilege regain after exec.
+        let _ = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
+        // Reduce ptrace/core leak surface.
+        let _ = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
+
+        if let Ok(filter) = network_deny_filter() {
+            // apply_filter installs on the calling thread (the child, pre-exec).
+            let _ = seccompiler::apply_filter(&filter);
+        }
+    }
+
+    /// Default-allow filter that fails closed on network-related syscalls.
+    fn network_deny_filter() -> Result<seccompiler::BpfProgram, seccompiler::Error> {
+        // Empty rule vec = match syscall regardless of args.
+        let deny_syscalls: &[i64] = &[
+            libc::SYS_socket,
+            libc::SYS_connect,
+            libc::SYS_accept,
+            libc::SYS_accept4,
+            libc::SYS_bind,
+            libc::SYS_listen,
+            libc::SYS_getsockopt,
+            libc::SYS_setsockopt,
+            libc::SYS_sendto,
+            libc::SYS_recvfrom,
+            libc::SYS_sendmsg,
+            libc::SYS_recvmsg,
+            libc::SYS_sendmmsg,
+            libc::SYS_recvmmsg,
+            libc::SYS_shutdown,
+            // socketpair can be used for IPC but also networking patterns; deny
+            // keeps the worker honest (parent uses pipes + shmem only).
+            libc::SYS_socketpair,
+        ];
+
+        let mut map: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
+        for &nr in deny_syscalls {
+            map.insert(nr, Vec::new());
+        }
+
+        // mismatch_action = Allow (everything else)
+        // match_action = EPERM on listed network syscalls
+        let arch = TargetArch::try_from(std::env::consts::ARCH).map_err(|()| {
+            seccompiler::Error::InvalidArgument("unsupported arch for seccomp".into())
+        })?;
+        let filter = SeccompFilter::new(
+            map,
+            SeccompAction::Allow,
+            SeccompAction::Errno(libc::EPERM as u32),
+            arch,
+        )?;
+        filter.try_into()
+    }
 }
 
 #[cfg(windows)]
@@ -74,7 +129,7 @@ mod windows {
 
     // SAFETY: HANDLE is process-local and only touched from this crate.
     unsafe impl Send for JobHandle {}
-    // SAFETY: OnceLock initialization is single-threaded; later use is Assign only.
+    // SAFETY: OnceLock init is single-threaded; later use is Assign only.
     unsafe impl Sync for JobHandle {}
 
     impl Drop for JobHandle {

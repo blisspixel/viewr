@@ -15,6 +15,7 @@ pub mod fs;
 pub mod gpu;
 pub(crate) mod sandbox;
 pub mod theme;
+pub mod thumbs;
 /// The main user interface module utilizing egui for overlays.
 pub mod ui;
 pub mod view;

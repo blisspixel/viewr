@@ -14,7 +14,8 @@ All notable changes to this project are documented here. The format is human-wri
 
 - Interaction polish: progressive left floating toolbar (auto-hide), empty-state guidance, bottom status chip (name · size · position · zoom), trash toast, amber crop handles + ratio strip, Esc cancel crop, double-click fit/1:1 toggle, grab cursors.
 - Cursor-anchored wheel/trackpad zoom; progressive bottom filmstrip (near-bottom hover); monochrome painted toolbar icons.
-- Linux worker: `PR_SET_DUMPABLE=0` plus seccomp packaging plan (`packaging/linux/SECCOMP.md`).
+- Filmstrip shows async real thumbnails (`thumbs` module); Space-hold temporary pan, tap Space resets view.
+- Linux worker: `no_new_privs`, non-dumpable, and seccomp-bpf that EPERMs network syscalls (`seccompiler`).
 - Flag/batch cull (`X` / `B`) and Shift+Delete permanent delete with confirmation.
 - `viewr-decode` is a workspace member with feature-gated C backends (`avif`, `heic`, `raw`); default build needs no system libraries.
 - Folder navigation recognizes worker formats (AVIF/HEIC/RAW extensions); decode routes through the worker when present.

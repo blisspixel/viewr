@@ -45,5 +45,7 @@ Most photo viewers either silently link vulnerable C code into their UI process,
 | Windows Job Object (kill-on-close) for workers | Done (`worker_limit`) |
 | Unix process group for workers | Done (`worker_limit`) |
 | Linux no_new_privs + dumpable=0 | Done (`worker_limit` pre_exec) |
-| seccomp-bpf network deny on Linux worker | Planned (`packaging/linux/SECCOMP.md`) |
+| seccomp-bpf network deny (default-allow + EPERM list) | Done (`seccompiler` in `worker_limit`) |
+| Optional default-deny allowlist for C decoders | Open |
+| Filmstrip real thumbnails (async) | Done (`thumbs` + egui textures) |
 | Continuous fuzz CI | Open (adversarial corpus tests exist) |

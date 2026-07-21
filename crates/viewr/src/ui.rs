@@ -92,10 +92,23 @@ pub struct UiFrameOwned {
     pub mouse_near_left: bool,
     /// Mouse is near the bottom edge (force filmstrip).
     pub mouse_near_bottom: bool,
-    /// Neighbor basenames for the progressive filmstrip (index, name, flagged).
-    pub filmstrip: Vec<(usize, String, bool)>,
+    /// Neighbor filmstrip entries (index, name, flagged, optional texture).
+    pub filmstrip: Vec<FilmstripItem>,
     /// Crop rectangle in screen pixels `[x0, y0, x1, y1]` when previewing.
     pub crop_screen: Option<[f32; 4]>,
+}
+
+/// One cell in the progressive bottom filmstrip.
+#[derive(Clone)]
+pub struct FilmstripItem {
+    /// Playlist index.
+    pub index: usize,
+    /// File basename for tooltip / fallback label.
+    pub name: String,
+    /// Whether the path is flagged for batch cull.
+    pub flagged: bool,
+    /// Thumbnail texture when ready.
+    pub texture: Option<egui::TextureHandle>,
 }
 
 /// Render the UI overlays and return a list of actions triggered by the user.
@@ -583,36 +596,61 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
             glass_frame().show(ui, |ui| {
                 ui.set_max_width(ui.ctx().content_rect().width() - 48.0);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    for (idx, name, flagged) in &frame.filmstrip {
-                        let selected = current == Some(*idx);
-                        let fill = if selected {
-                            Color32::from_rgba_unmultiplied(247, 168, 69, 50)
-                        } else {
-                            Color32::from_rgba_unmultiplied(255, 255, 255, 10)
-                        };
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    for item in &frame.filmstrip {
+                        let selected = current == Some(item.index);
                         let border = if selected {
-                            Stroke::new(1.0, ACCENT)
-                        } else if *flagged {
-                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(247, 168, 69, 120))
+                            Stroke::new(1.5, ACCENT)
+                        } else if item.flagged {
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(247, 168, 69, 140))
                         } else {
-                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 20))
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 24))
                         };
-                        let label = if name.len() > 14 {
-                            format!("{}…", &name[..12])
+                        let fill = if selected {
+                            Color32::from_rgba_unmultiplied(247, 168, 69, 35)
                         } else {
-                            name.clone()
+                            Color32::from_rgba_unmultiplied(0, 0, 0, 90)
                         };
-                        let btn = egui::Button::new(
-                            RichText::new(format!("{}. {label}", idx + 1))
-                                .size(11.0)
-                                .color(TEXT),
-                        )
-                        .fill(fill)
-                        .stroke(border)
-                        .min_size(Vec2::new(88.0, 28.0));
-                        if ui.add(btn).on_hover_text(name).clicked() {
-                            actions.push(UiAction::NavigateTo(*idx));
+                        let (rect, response) =
+                            ui.allocate_exact_size(Vec2::new(76.0, 64.0), Sense::click());
+                        let painter = ui.painter();
+                        painter.rect_filled(rect, CornerRadius::same(6), fill);
+                        painter.rect_stroke(
+                            rect,
+                            CornerRadius::same(6),
+                            border,
+                            egui::StrokeKind::Outside,
+                        );
+                        if let Some(tex) = &item.texture {
+                            let img_rect = rect.shrink(3.0);
+                            let size = tex.size_vec2();
+                            let scale = (img_rect.width() / size.x).min(img_rect.height() / size.y);
+                            let draw = Rect::from_center_size(img_rect.center(), size * scale);
+                            painter.image(
+                                tex.id(),
+                                draw,
+                                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                        } else {
+                            painter.text(
+                                rect.center(),
+                                Align2::CENTER_CENTER,
+                                format!("{}", item.index + 1),
+                                egui::FontId::proportional(14.0),
+                                MUTED,
+                            );
+                        }
+                        if item.flagged {
+                            painter.circle_filled(
+                                rect.right_top() + Vec2::new(-8.0, 8.0),
+                                3.5,
+                                ACCENT,
+                            );
+                        }
+                        let _ = response.clone().on_hover_text(&item.name);
+                        if response.clicked() {
+                            actions.push(UiAction::NavigateTo(item.index));
                         }
                     }
                 });

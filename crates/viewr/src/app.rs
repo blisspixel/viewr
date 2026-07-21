@@ -21,6 +21,7 @@ use crate::curate::{FlagSet, TrashedFile};
 use crate::decode::DecodedImage;
 use crate::error::Error;
 use crate::gpu::{FrameResult, Renderer};
+use crate::prefetch::{self, PrefetchCache};
 use crate::theme::Mode;
 use crate::thumbs::{self, ThumbRgba};
 use crate::ui::FilmstripItem;
@@ -70,6 +71,9 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         thumb_rx,
         thumbs_in_flight: HashSet::new(),
         thumb_textures: HashMap::new(),
+        prefetch: PrefetchCache::with_capacity(prefetch::DEFAULT_CAPACITY),
+        prefetch_in_flight: HashSet::new(),
+        prefetch_rx: None,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -178,6 +182,12 @@ struct App {
     thumbs_in_flight: HashSet<PathBuf>,
     /// Uploaded egui textures for filmstrip cells.
     thumb_textures: HashMap<PathBuf, egui::TextureHandle>,
+    /// In-memory neighbor full-decode cache (never written to disk).
+    prefetch: PrefetchCache,
+    /// Paths currently being prefetched in the background.
+    prefetch_in_flight: HashSet<PathBuf>,
+    /// Completed prefetch jobs: `(path, result)`.
+    prefetch_rx: Option<Receiver<(PathBuf, Result<DecodedImage, String>)>>,
 }
 
 impl App {
@@ -306,7 +316,7 @@ impl App {
     }
 
     fn navigate(&mut self, delta: isize) {
-        if let Some(playlist) = &mut self.playlist {
+        if let Some(playlist) = &self.playlist {
             if playlist.files.is_empty() {
                 return;
             }
@@ -314,24 +324,86 @@ impl App {
             let new_index = (playlist.index.cast_signed() + delta)
                 .clamp(0, max_idx)
                 .cast_unsigned();
-
             if new_index != playlist.index {
-                playlist.index = new_index;
-                let next_path = playlist.files[new_index].clone();
-                self.image_path = Some(next_path.clone());
-                self.transform = Transform::default();
+                self.go_to_index(new_index);
+            }
+        }
+    }
 
-                let (tx, rx) = std::sync::mpsc::channel();
-                self.image_loader_rx = Some(rx);
-                let window = self.renderer.as_ref().map(|r| r.window.clone());
+    fn go_to_index(&mut self, new_index: usize) {
+        let Some(playlist) = &mut self.playlist else {
+            return;
+        };
+        if playlist.files.is_empty() || new_index >= playlist.files.len() {
+            return;
+        }
+        playlist.index = new_index;
+        let next_path = playlist.files[new_index].clone();
+        self.image_path = Some(next_path.clone());
+        self.transform = Transform::default();
 
-                std::thread::spawn(move || {
-                    let res = DecodedImage::load(&next_path).map_err(|e| e.to_string());
-                    let _ = tx.send((next_path, res));
-                    if let Some(w) = window {
-                        w.request_redraw();
-                    }
-                });
+        // Instant path: neighbor was already decoded into the RAM cache.
+        if let Some(image) = self.prefetch.take(&next_path) {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.set_image(&image);
+            }
+            self.current_image = Some(image);
+            self.image_loader_rx = None;
+            self.kick_prefetch();
+            if let Some(r) = self.renderer.as_ref() {
+                r.window().request_redraw();
+            }
+            return;
+        }
+
+        self.spawn_image_load(next_path);
+        self.kick_prefetch();
+    }
+
+    /// Decode nearby playlist entries into the in-memory cache (no disk writes).
+    fn kick_prefetch(&mut self) {
+        let Some(playlist) = &self.playlist else {
+            return;
+        };
+        let targets: Vec<PathBuf> =
+            prefetch::neighbor_indices(playlist.index, playlist.files.len(), 2)
+                .into_iter()
+                .map(|i| playlist.files[i].clone())
+                .filter(|p| !self.prefetch.contains(p) && !self.prefetch_in_flight.contains(p))
+                .collect();
+        if targets.is_empty() {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        // Keep the latest channel; older jobs still insert if they finish.
+        self.prefetch_rx = Some(rx);
+        for path in targets {
+            self.prefetch_in_flight.insert(path.clone());
+            let tx = tx.clone();
+            let window = self.renderer.as_ref().map(|r| r.window.clone());
+            std::thread::spawn(move || {
+                let res = DecodedImage::load(&path).map_err(|e| e.to_string());
+                let _ = tx.send((path, res));
+                if let Some(w) = window {
+                    w.request_redraw();
+                }
+            });
+        }
+    }
+
+    fn poll_prefetch(&mut self) {
+        let Some(rx) = &self.prefetch_rx else {
+            return;
+        };
+        while let Ok((path, result)) = rx.try_recv() {
+            self.prefetch_in_flight.remove(&path);
+            if let Ok(image) = result {
+                // Do not cache the currently displayed path as a neighbor entry;
+                // it already lives in `current_image`.
+                if self.image_path.as_ref() != Some(&path) {
+                    self.prefetch.insert(path, image);
+                }
             }
         }
     }
@@ -503,7 +575,7 @@ impl App {
     }
 
     fn navigate_to(&mut self, index: usize) {
-        let Some(playlist) = &mut self.playlist else {
+        let Some(playlist) = &self.playlist else {
             return;
         };
         if playlist.files.is_empty() || index >= playlist.files.len() {
@@ -512,11 +584,7 @@ impl App {
         if index == playlist.index {
             return;
         }
-        playlist.index = index;
-        let next_path = playlist.files[index].clone();
-        self.image_path = Some(next_path.clone());
-        self.transform = Transform::default();
-        self.spawn_image_load(next_path);
+        self.go_to_index(index);
     }
 
     /// Window of playlist entries around the current index for the filmstrip.
@@ -722,6 +790,19 @@ impl App {
     }
 
     fn spawn_image_load(&mut self, path: PathBuf) {
+        // Prefer RAM cache even for non-navigate loads (undo, filmstrip jump).
+        if let Some(image) = self.prefetch.take(&path) {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.set_image(&image);
+            }
+            self.current_image = Some(image);
+            self.image_loader_rx = None;
+            self.kick_prefetch();
+            if let Some(r) = self.renderer.as_ref() {
+                r.window().request_redraw();
+            }
+            return;
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         self.image_loader_rx = Some(rx);
         let window = self.renderer.as_ref().map(|r| r.window.clone());
@@ -1470,27 +1551,35 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         self.poll_thumbnails();
+        self.poll_prefetch();
         if let Some(rx) = &self.image_loader_rx
             && let Ok((path, result)) = rx.try_recv()
         {
             self.image_loader_rx = None;
-            if Some(&path) == self.image_path.as_ref() {
-                match result {
-                    Ok(image) => {
-                        if let Some(renderer) = self.renderer.as_mut() {
-                            renderer.set_image(&image);
-                        }
-                        self.current_image = Some(image);
+            let is_current = self.image_path.as_ref() == Some(&path);
+            match result {
+                Ok(image) if is_current => {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.set_image(&image);
                     }
-                    Err(e) => {
-                        // Decode errors may embed a path from lower layers; toast is enough.
-                        log::error!("decode failed");
-                        self.show_toast(format!("Could not decode: {e}"));
+                    self.current_image = Some(image);
+                    self.kick_prefetch();
+                    if let Some(r) = self.renderer.as_mut() {
+                        r.window().request_redraw();
                     }
                 }
-                if let Some(r) = self.renderer.as_mut() {
-                    r.window().request_redraw();
+                Ok(image) => {
+                    // Late load that is no longer current still seeds the RAM cache.
+                    self.prefetch.insert(path, image);
                 }
+                Err(e) if is_current => {
+                    log::error!("decode failed");
+                    self.show_toast(format!("Could not decode: {e}"));
+                    if let Some(r) = self.renderer.as_mut() {
+                        r.window().request_redraw();
+                    }
+                }
+                Err(_) => {}
             }
         }
 
@@ -1500,7 +1589,11 @@ impl ApplicationHandler for App {
             self.scanner_rx = None;
             if let Some(current) = &self.image_path {
                 let index = files.iter().position(|p| p == current).unwrap_or(0);
+                // New folder: drop any RAM cache from the previous folder.
+                self.prefetch.clear();
+                self.prefetch_in_flight.clear();
                 self.playlist = Some(Playlist { files, index });
+                self.kick_prefetch();
             }
         }
     }

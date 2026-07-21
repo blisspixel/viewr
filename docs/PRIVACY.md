@@ -67,8 +67,9 @@ A promise you can verify beats a promise you have to trust.
 ## Local data: what viewr does and doesn't write
 
 - viewr **does not** write a settings file, history, recently-opened list,
-  thumbnail database, or search index of your library. Flags and picks live
-  **only in memory for the current session** and disappear when the app closes.
+  thumbnail database, or search index of your library. Flags, picks, filmstrip
+  thumbs, and neighbor **prefetch** live **only in RAM for the current session**
+  and disappear when the app closes (never under temp or beside your photos).
 - viewr **does not** create companion files next to your photos (no `_picks.txt`,
   no sidecar caches).
 - **Save As / convert** only writes the file path you choose in the save dialog.

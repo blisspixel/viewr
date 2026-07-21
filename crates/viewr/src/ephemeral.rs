@@ -4,7 +4,8 @@
 //! Prefer **in-memory** paths (doctor / default benchmark) so product use writes
 //! nothing under `%TEMP%` / `/tmp` at all. When a temp dir is unavoidable (tests),
 //! [`TempWorkspace`] deletes it on drop, and [`scrub_stale_viewr_temps`] clears
-//! any leftover `viewr_*` names from prior crashes or older builds.
+//! leftovers from prior crashes or older builds **without** touching live
+//! workspaces of the current process.
 //!
 //! User photo libraries are never used for probes.
 
@@ -60,11 +61,56 @@ pub fn is_viewr_temp_name(name: &str) -> bool {
         || lower.starts_with("viewr-")
 }
 
+/// Extract the process id embedded in a `TempWorkspace` name, if present.
+///
+/// Expected shapes:
+/// - `viewr_{prefix}_{pid}_{nanos}` (current)
+/// - `viewr_{prefix}_{pid}` (older doctor/bench)
+fn embedded_pid(name: &str) -> Option<u32> {
+    // Strip optional extension (e.g. viewr_job_smoke.avif — no pid).
+    let stem = name.split('.').next().unwrap_or(name);
+    let mut parts = stem.split('_');
+    // "viewr"
+    if parts.next()? != "viewr" {
+        return None;
+    }
+    let rest: Vec<&str> = parts.collect();
+    if rest.is_empty() {
+        return None;
+    }
+    // viewr_edit_exif_12345_999nanos → …_{pid}_{nanos}
+    if rest.len() >= 2
+        && rest[rest.len() - 1].chars().all(|c| c.is_ascii_digit())
+        && rest[rest.len() - 2].chars().all(|c| c.is_ascii_digit())
+    {
+        return rest[rest.len() - 2].parse().ok();
+    }
+    // viewr_bench_12345
+    if rest[rest.len() - 1].chars().all(|c| c.is_ascii_digit()) {
+        return rest[rest.len() - 1].parse().ok();
+    }
+    None
+}
+
+/// True when this entry is safe to delete (not a live workspace of *this* process).
+///
+/// Entries tagged with another PID are treated as leftovers from a previous run
+/// (product paths no longer use temp dirs; tests always use the current PID).
+fn is_safe_to_scrub(name: &str) -> bool {
+    if !is_viewr_temp_name(name) {
+        return false;
+    }
+    match embedded_pid(name) {
+        Some(pid) if pid == std::process::id() => false,
+        Some(_) | None => true,
+    }
+}
+
 /// Remove leftover `viewr_*` files and directories from the system temp folder.
 ///
-/// Safe to call at process start: only names matching [`is_viewr_temp_name`] are
-/// considered. Returns how many entries were removed (best-effort; failures are
-/// ignored so a locked file never aborts launch).
+/// Skips workspaces belonging to the current process so concurrent unit tests
+/// and in-flight tools are not deleted mid-run. Returns how many entries were
+/// removed (best-effort).
 #[must_use]
 pub fn scrub_stale_viewr_temps() -> usize {
     let root = std::env::temp_dir();
@@ -77,11 +123,10 @@ pub fn scrub_stale_viewr_temps() -> usize {
         let Some(name) = name.to_str() else {
             continue;
         };
-        if !is_viewr_temp_name(name) {
+        if !is_safe_to_scrub(name) {
             continue;
         }
         let path = entry.path();
-        // Never follow symlinks outside temp; only remove the entry itself.
         let ok = if path.is_dir() {
             std::fs::remove_dir_all(&path).is_ok()
         } else {
@@ -96,7 +141,9 @@ pub fn scrub_stale_viewr_temps() -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{TempWorkspace, is_viewr_temp_name, scrub_stale_viewr_temps};
+    use super::{
+        TempWorkspace, embedded_pid, is_safe_to_scrub, is_viewr_temp_name, scrub_stale_viewr_temps,
+    };
     use std::fs;
 
     #[test]
@@ -122,24 +169,45 @@ mod tests {
     }
 
     #[test]
-    fn scrub_removes_orphaned_viewr_entry() {
+    fn embedded_pid_parses_workspace_names() {
+        assert_eq!(embedded_pid("viewr_edit_exif_4242_999"), Some(4242));
+        assert_eq!(embedded_pid("viewr_bench_77"), Some(77));
+        assert_eq!(embedded_pid("viewr_avif_smoke.avif"), None);
+    }
+
+    #[test]
+    fn scrub_skips_current_process_workspaces() {
+        let ws = TempWorkspace::new("live_scrub_guard").unwrap();
+        let name = ws
+            .path()
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap()
+            .to_string();
+        assert!(
+            !is_safe_to_scrub(&name),
+            "must not scrub live workspace of this process"
+        );
+        let _ = scrub_stale_viewr_temps();
+        assert!(
+            ws.path().is_dir(),
+            "scrub must leave current-process TempWorkspace alone"
+        );
+    }
+
+    #[test]
+    fn scrub_removes_legacy_orphans_without_pid() {
         let root = std::env::temp_dir();
         let orphan = root.join(format!(
-            "viewr_scrub_test_{}_{}",
-            std::process::id(),
+            "viewr_avif_smoke_orphan_{}.avif",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_nanos())
         ));
-        fs::create_dir_all(&orphan).unwrap();
-        fs::write(orphan.join("leak.txt"), b"should not linger").unwrap();
-        assert!(orphan.is_dir());
-
+        fs::write(&orphan, b"not an image").unwrap();
+        assert!(orphan.is_file());
         let n = scrub_stale_viewr_temps();
-        assert!(n >= 1, "scrub should remove at least the orphan we created");
-        assert!(
-            !orphan.exists(),
-            "orphaned viewr_* dir must be gone after scrub"
-        );
+        assert!(n >= 1, "scrub should remove at least the legacy orphan");
+        assert!(!orphan.exists(), "legacy viewr_* smoke file must be gone");
     }
 }

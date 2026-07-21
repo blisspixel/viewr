@@ -15,6 +15,7 @@ pub mod ephemeral;
 pub mod error;
 pub mod fs;
 pub mod gpu;
+pub mod prefetch;
 pub(crate) mod sandbox;
 pub mod theme;
 pub mod thumbs;

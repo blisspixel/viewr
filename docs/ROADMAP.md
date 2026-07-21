@@ -162,7 +162,9 @@ submission.
   - [ ] Optional default-deny allowlist for C-decoder builds (when avif/heic features are used in production).
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
-  - [ ] cargo-fuzz continuous job still open.
+  - [x] Fuzz notes / local cargo-fuzz entrypoint sketch (`fuzz/README.md`).
+  - [ ] Optional CI job for cargo-fuzz (nightly host) still open.
+- [x] Neighbor full-decode prefetch into a bounded in-memory LRU (no disk cache).
 - Reproducible local/CI release binaries (checksums, pinned toolchain). **Not**
   notarization or store signing (see out-of-scope below).
 - [x] Deletes use the system trash (`trash` crate), not a local `_trash` folder.

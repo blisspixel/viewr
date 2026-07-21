@@ -57,6 +57,37 @@ impl DecodedImage {
         })
     }
 
+    /// Decode image bytes already in memory (no temp file, no path on disk).
+    ///
+    /// Used by doctor / default benchmark so product diagnostics leave **zero**
+    /// debris under the system temp directory.
+    ///
+    /// # Errors
+    /// Returns [`Error::Decode`] if the bytes are not a supported, well-formed image.
+    pub fn load_from_memory(bytes: &[u8]) -> Result<Self, Error> {
+        // SVG is not handled by `image::load_from_memory`; sniff the payload.
+        let trimmed = bytes
+            .iter()
+            .position(|&b| !b.is_ascii_whitespace())
+            .map_or(bytes, |i| &bytes[i..]);
+        if trimmed.starts_with(b"<svg")
+            || trimmed.starts_with(b"<?xml")
+            || trimmed.starts_with(b"<SVG")
+        {
+            return Self::load_svg_bytes(trimmed);
+        }
+
+        let decoded = image::load_from_memory(bytes)
+            .map_err(|e| Error::Decode(format!("decode failed: {e}")))?
+            .into_rgba8();
+        let (width, height) = decoded.dimensions();
+        Ok(Self {
+            rgba: decoded.into_raw(),
+            width,
+            height,
+        })
+    }
+
     fn load_jxl(path: &Path) -> Result<Self, Error> {
         let file = std::fs::File::open(path).map_err(|e| Error::Decode(e.to_string()))?;
         let jxl = jxl_oxide::integration::JxlDecoder::new(file)
@@ -75,8 +106,13 @@ impl DecodedImage {
     /// Render an SVG to RGBA8 with pure-Rust `resvg` / `usvg`.
     fn load_svg(path: &Path) -> Result<Self, Error> {
         let data = std::fs::read(path).map_err(|e| Error::Decode(e.to_string()))?;
+        Self::load_svg_bytes(&data)
+    }
+
+    /// Render SVG markup already held in memory (no temp file).
+    fn load_svg_bytes(data: &[u8]) -> Result<Self, Error> {
         let options = resvg::usvg::Options::default();
-        let tree = resvg::usvg::Tree::from_data(&data, &options)
+        let tree = resvg::usvg::Tree::from_data(data, &options)
             .map_err(|e| Error::Decode(format!("failed to parse SVG: {e}")))?;
 
         let size = tree.size();
@@ -166,6 +202,22 @@ mod tests {
     fn missing_file_is_decode_error() {
         let path = PathBuf::from("definitely_missing_viewr_image_xyz.png");
         assert!(DecodedImage::load(&path).is_err());
+    }
+
+    #[test]
+    fn load_from_memory_png_and_svg() {
+        use std::io::Cursor;
+        let rgb = image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]));
+        let mut png = Cursor::new(Vec::new());
+        rgb.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let img = DecodedImage::load_from_memory(png.get_ref()).expect("png mem");
+        assert_eq!((img.width, img.height), (4, 3));
+
+        let svg = br##"<svg width="12" height="8" xmlns="http://www.w3.org/2000/svg">
+            <rect width="12" height="8" fill="#00ff00"/>
+        </svg>"##;
+        let s = DecodedImage::load_from_memory(svg).expect("svg mem");
+        assert_eq!((s.width, s.height), (12, 8));
     }
 
     #[test]

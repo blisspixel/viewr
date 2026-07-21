@@ -39,5 +39,8 @@ if grep -q 'default_filter_or' crates/viewr/src/main.rs; then
   exit 1
 fi
 test -f crates/viewr/src/ephemeral.rs
+grep -q 'scrub_stale_viewr_temps' crates/viewr/src/ephemeral.rs
+grep -q 'load_from_memory' crates/viewr/src/cli.rs
+grep -q 'scrub_stale_viewr_temps' crates/viewr/src/main.rs
 
 echo "privacy-check: OK"

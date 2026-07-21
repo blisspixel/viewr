@@ -65,6 +65,21 @@ if (-not (Test-Path "crates/viewr/src/ephemeral.rs")) {
     Write-Error "missing ephemeral TempWorkspace cleaner"
     exit 1
 }
+$eph = Get-Content "crates/viewr/src/ephemeral.rs" -Raw
+if ($eph -notmatch "scrub_stale_viewr_temps") {
+    Write-Error "ephemeral.rs must export scrub_stale_viewr_temps"
+    exit 1
+}
+$cli = Get-Content "crates/viewr/src/cli.rs" -Raw
+if ($cli -notmatch "load_from_memory") {
+    Write-Error "cli doctor/benchmark must use in-memory decode (load_from_memory)"
+    exit 1
+}
+$mainSrc = Get-Content "crates/viewr/src/main.rs" -Raw
+if ($mainSrc -notmatch "scrub_stale_viewr_temps") {
+    Write-Error "main.rs must scrub stale viewr temp debris on launch"
+    exit 1
+}
 
 Write-Host "privacy-check: OK"
 exit 0

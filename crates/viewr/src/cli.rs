@@ -135,8 +135,8 @@ Usage:
   viewr version                Show version
 
 Privacy:
-  No network client, no telemetry, no activity log by default.
-  Doctor/benchmark temp files are always deleted on exit.
+  No network client, no telemetry, no activity log, no log files.
+  Doctor and default benchmark are fully in-memory (zero temp files).
   `update` only prints build instructions (never downloads).
 
 Examples:
@@ -220,7 +220,7 @@ pub fn doctor() -> bool {
         std::env::consts::OS,
         std::env::consts::ARCH
     );
-    println!("[ok]   privacy: no network client in the product design");
+    println!("[ok]   privacy: no network, no log files, doctor is in-memory (zero temp)");
 
     // --- decode self-test ---
     match decode_self_test() {
@@ -251,52 +251,20 @@ pub fn doctor() -> bool {
 }
 
 fn decode_self_test() -> Result<(u32, u32, f64), String> {
-    // RAII: directory is always removed on drop, even if load fails mid-way.
-    let ws = crate::ephemeral::TempWorkspace::new("doctor").map_err(|e| e.to_string())?;
-    let path = ws.path().join("probe.png");
-    image::RgbImage::from_fn(64, 48, |x, y| {
-        image::Rgb([(x % 255) as u8, (y % 255) as u8, 90])
-    })
-    .save(&path)
-    .map_err(|e| e.to_string())?;
-
+    // Fully in-memory: zero temp files, zero debris under %TEMP% / /tmp.
+    let png = encode_png_memory(64, 48).map_err(|e| e.to_string())?;
     let start = Instant::now();
-    let img = DecodedImage::load(&path).map_err(|e| e.to_string())?;
+    let img = DecodedImage::load_from_memory(&png).map_err(|e| e.to_string())?;
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok((img.width, img.height, ms))
 }
 
-/// Benchmark decode throughput. When `dir` is `None`, builds a tiny temp corpus.
+/// Benchmark decode throughput.
+///
+/// When `dir` is `None`, runs an **in-memory** synthetic corpus (no temp files).
+/// When `dir` is set, times real files the user pointed at (read-only).
 pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
     const ITERATIONS: u32 = 5;
-
-    // Keep the workspace alive for the whole function so Drop cleans up last.
-    let owned_temp = if dir.is_none() {
-        println!("benchmark: using generated temp corpus (removed on exit)");
-        Some(make_temp_corpus()?)
-    } else {
-        None
-    };
-    let root: &Path = match (dir, owned_temp.as_ref()) {
-        (Some(d), _) => d,
-        (None, Some(ws)) => ws.path(),
-        (None, None) => unreachable!("temp corpus is created when dir is None"),
-    };
-
-    if !root.is_dir() {
-        return Err("not a directory".into());
-    }
-
-    let mut entries: Vec<_> = std::fs::read_dir(root)
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && crate::fs::is_supported_image(p))
-        .collect();
-    entries.sort();
-    if entries.is_empty() {
-        return Err("no supported images in the given directory".into());
-    }
 
     println!(
         "{:<28} {:>10} {:>12} {:>12}",
@@ -304,55 +272,100 @@ pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
     );
     println!("{}", "-".repeat(64));
 
-    for path in entries {
-        let mut times = Vec::with_capacity(ITERATIONS as usize);
-        let mut pixels = 0u64;
-        for _ in 0..ITERATIONS {
-            let start = Instant::now();
-            match DecodedImage::load(&path) {
-                Ok(img) => {
-                    times.push(start.elapsed().as_secs_f64() * 1000.0);
-                    pixels = u64::from(img.width) * u64::from(img.height);
-                }
-                Err(e) => {
-                    let name = path
-                        .file_name()
-                        .map_or_else(|| "(file)".into(), |s| s.to_string_lossy().into_owned());
-                    eprintln!("skip {name}: {e}");
-                    times.clear();
-                    break;
-                }
-            }
+    if let Some(root) = dir {
+        if !root.is_dir() {
+            return Err("not a directory".into());
         }
-        if times.len() as u32 == ITERATIONS {
-            let ms = median(times);
-            let mps = (pixels as f64 / 1_000_000.0) / (ms / 1000.0);
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            println!("{name:<28} {pixels:>10} {ms:>12.2} {mps:>12.1}");
+        let mut entries: Vec<_> = std::fs::read_dir(root)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && crate::fs::is_supported_image(p))
+            .collect();
+        entries.sort();
+        if entries.is_empty() {
+            return Err("no supported images in the given directory".into());
+        }
+        for path in entries {
+            bench_one_path(&path, ITERATIONS);
+        }
+    } else {
+        println!("benchmark: in-memory corpus (no temp files written)");
+        for (name, w, h) in [
+            ("mem_a.png", 256u32, 256u32),
+            ("mem_b.png", 640, 480),
+            ("mem_c.png", 128, 128),
+        ] {
+            let png = encode_png_memory(w, h).map_err(|e| e.to_string())?;
+            bench_one_bytes(name, &png, ITERATIONS);
         }
     }
-    // owned_temp drops here → temp corpus always cleaned.
     Ok(())
 }
 
-fn make_temp_corpus() -> Result<crate::ephemeral::TempWorkspace, String> {
-    let ws = crate::ephemeral::TempWorkspace::new("bench").map_err(|e| e.to_string())?;
-    for (name, w, h) in [
-        ("a.png", 256u32, 256u32),
-        ("b.png", 640, 480),
-        ("c.png", 128, 128),
-    ] {
-        let path = ws.path().join(name);
-        image::RgbImage::from_fn(w, h, |x, y| {
-            image::Rgb([(x % 255) as u8, (y % 255) as u8, 40])
-        })
-        .save(&path)
-        .map_err(|e| e.to_string())?;
+fn bench_one_path(path: &Path, iterations: u32) {
+    let mut times = Vec::with_capacity(iterations as usize);
+    let mut pixels = 0u64;
+    for _ in 0..iterations {
+        let start = Instant::now();
+        match DecodedImage::load(path) {
+            Ok(img) => {
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                pixels = u64::from(img.width) * u64::from(img.height);
+            }
+            Err(e) => {
+                let name = path
+                    .file_name()
+                    .map_or_else(|| "(file)".into(), |s| s.to_string_lossy().into_owned());
+                eprintln!("skip {name}: {e}");
+                return;
+            }
+        }
     }
-    Ok(ws)
+    print_bench_row(
+        &path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        pixels,
+        &times,
+    );
+}
+
+fn bench_one_bytes(name: &str, bytes: &[u8], iterations: u32) {
+    let mut times = Vec::with_capacity(iterations as usize);
+    let mut pixels = 0u64;
+    for _ in 0..iterations {
+        let start = Instant::now();
+        match DecodedImage::load_from_memory(bytes) {
+            Ok(img) => {
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                pixels = u64::from(img.width) * u64::from(img.height);
+            }
+            Err(e) => {
+                eprintln!("skip {name}: {e}");
+                return;
+            }
+        }
+    }
+    print_bench_row(name, pixels, &times);
+}
+
+fn print_bench_row(name: &str, pixels: u64, times: &[f64]) {
+    let ms = median(times.to_vec());
+    let mps = (pixels as f64 / 1_000_000.0) / (ms / 1000.0);
+    println!("{name:<28} {pixels:>10} {ms:>12.2} {mps:>12.1}");
+}
+
+/// Encode a synthetic RGB gradient PNG entirely in RAM (no disk).
+fn encode_png_memory(w: u32, h: u32) -> Result<Vec<u8>, image::ImageError> {
+    use std::io::Cursor;
+    let img = image::RgbImage::from_fn(w, h, |x, y| {
+        image::Rgb([(x % 255) as u8, (y % 255) as u8, 40])
+    });
+    let mut buf = Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png)?;
+    Ok(buf.into_inner())
 }
 
 fn median(mut samples: Vec<f64>) -> f64 {

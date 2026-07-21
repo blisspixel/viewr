@@ -11,22 +11,28 @@ code, and where possible it's enforced in CI so it can't quietly regress.
   "help us improve" data, no crash reports sent anywhere.
 - viewr **keeps no logs of your activity.** Which files you open, which folders you
   browse, and which images you delete are never recorded to a server, and **not
-  written to any log or side-file on disk by default**.
+  written to any log or side-file on disk**. There is **no log file** — not even
+  an empty one.
 - viewr **has no account and no cloud.** There is nothing to sign into and nothing
   to sync.
 - Your photos, filenames, and folder structure **never leave your machine.**
-- **Temp probes are cleaned.** Doctor and benchmark may create short-lived files
-  under the system temp directory; they are removed when the command finishes
-  (including on error). Unit tests use the same pattern.
+  viewr does **not** build or retain a library index, thumbnail database, or
+  "recent folders" list of your collection.
+- **Zero product temp debris.** The GUI never writes under the system temp folder
+  for probes. `viewr doctor` and `viewr benchmark` (without a directory) run
+  fully **in memory**. On launch, viewr also scrubs any leftover `viewr_*` names
+  it may have left under temp from older builds or crashes. Unit tests use a
+  RAII temp workspace that deletes itself on drop.
 
 There is no setting to turn any of this off, because none of the corresponding
 machinery exists in the first place.
 
-## Logging is opt-in
+## Logging is opt-in (stderr only — never a log file)
 
-By default the process is silent: no `log` output, no log files.
+By default the process is silent: no `log` output, **no log files on disk**.
 
-If you want diagnostics while developing, set an environment variable yourself:
+If you want diagnostics while developing, set an environment variable yourself.
+Output goes to **stderr only**; viewr never opens a `.log` file:
 
 ```text
 RUST_LOG=viewr=debug

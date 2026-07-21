@@ -27,6 +27,9 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Changed
 
+- ROADMAP: store/notarized publish (Mac App Store, Microsoft Store, Flathub
+  listing, notarized DMG as a store path) is **out of scope for now**—maybe later.
+  Phase 7/8 stay local-first (build, sandbox profiles, simple release artifacts).
 - Extracted `sandbox.rs` for the `viewr-decode` worker client so process/IPC glue is separate from pure decode logic.
 - Phase 6 residuals closed in ROADMAP; next milestone is Phase 7 OS sandbox packaging.
 - `deny.toml`: allow OFL/Ubuntu font licenses for egui default fonts; ignore known unmaintained gtk3-rs advisories pulled only by `muda` on Linux (not on the decode path).

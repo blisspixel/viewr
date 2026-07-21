@@ -9,7 +9,7 @@ echo "== cargo deny (network crate ban + licenses) =="
 cargo deny check
 
 echo "== packaging artifacts must omit network grants =="
-if grep -q -- '--share=network' packaging/flatpak/com.github.viewr.viewr.yml; then
+if grep -q -- '--share=network' packaging/flatpak/com.github.blisspixel.viewr.yml; then
   echo "Flatpak manifest must not contain --share=network" >&2
   exit 1
 fi

@@ -11,7 +11,7 @@ cargo deny check
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "== packaging artifacts must omit network grants =="
-$flatpak = Get-Content "packaging/flatpak/com.github.viewr.viewr.yml" -Raw
+$flatpak = Get-Content "packaging/flatpak/com.github.blisspixel.viewr.yml" -Raw
 if ($flatpak -match "--share=network") {
     Write-Error "Flatpak manifest must not contain --share=network"
     exit 1

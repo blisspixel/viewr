@@ -91,10 +91,8 @@ fn adversarial_bytes_do_not_panic() {
             b"GIF89a\x01\x00\x01\x00\x00\x00\x00\x21\xff",
         ),
         ("not_tiff.tif", b"II*\x00not-a-tiff"),
-        (
-            "bom_svg.svg",
-            b"\xef\xbb\xbf<svg xmlns='http://www.w3.org/2000/svg'/>",
-        ),
+        // Unclosed root: not a complete SVG document.
+        ("trunc_svg.svg", b"<svg xmlns='http://www.w3.org/2000/svg'"),
     ];
     for (name, bytes) in cases {
         let path = dir.join(name);

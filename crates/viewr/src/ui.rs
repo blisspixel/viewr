@@ -41,6 +41,8 @@ pub enum UiAction {
     ToggleFullscreen,
     /// Navigate to a relative file index.
     Navigate(isize),
+    /// Jump to an absolute playlist index.
+    NavigateTo(usize),
     /// Toggle the crop tool mode.
     ToggleCrop,
     /// Apply the current crop area.
@@ -88,6 +90,10 @@ pub struct UiFrameOwned {
     pub chrome_visible: bool,
     /// Mouse is near the left edge (force toolbar).
     pub mouse_near_left: bool,
+    /// Mouse is near the bottom edge (force filmstrip).
+    pub mouse_near_bottom: bool,
+    /// Neighbor basenames for the progressive filmstrip (index, name, flagged).
+    pub filmstrip: Vec<(usize, String, bool)>,
     /// Crop rectangle in screen pixels `[x0, y0, x1, y1]` when previewing.
     pub crop_screen: Option<[f32; 4]>,
 }
@@ -110,6 +116,10 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
 
     if frame.chrome_visible || frame.mouse_near_left || frame.is_cropping {
         render_left_toolbar(ui, &mut actions, frame);
+    }
+
+    if (frame.chrome_visible || frame.mouse_near_bottom) && frame.filmstrip.len() > 1 {
+        render_filmstrip(ui, &mut actions, frame);
     }
 
     render_status_chip(ui, frame);
@@ -351,6 +361,19 @@ fn render_exif_panel(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         });
 }
 
+#[derive(Clone, Copy)]
+enum ToolIcon {
+    RotateCcw,
+    RotateCw,
+    FlipH,
+    FlipV,
+    Crop,
+    Flag,
+    Trash,
+    Save,
+    Batch,
+}
+
 fn render_left_toolbar(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     Area::new("left_toolbar".into())
         .anchor(Align2::LEFT_CENTER, [14.0, 0.0])
@@ -360,30 +383,38 @@ fn render_left_toolbar(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &U
                 ui.set_width(44.0);
                 ui.vertical_centered(|ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
-                    tool_btn(ui, "↺", "Rotate CCW (L)", || {
+                    icon_btn(ui, ToolIcon::RotateCcw, "Rotate CCW (L)", false, || {
                         actions.push(UiAction::RotateCcw);
                     });
-                    tool_btn(ui, "↻", "Rotate CW (R)", || {
+                    icon_btn(ui, ToolIcon::RotateCw, "Rotate CW (R)", false, || {
                         actions.push(UiAction::RotateCw);
                     });
-                    tool_btn(ui, "↔", "Flip H (H)", || actions.push(UiAction::FlipH));
-                    tool_btn(ui, "↕", "Flip V (V)", || actions.push(UiAction::FlipV));
+                    icon_btn(ui, ToolIcon::FlipH, "Flip H (H)", false, || {
+                        actions.push(UiAction::FlipH);
+                    });
+                    icon_btn(ui, ToolIcon::FlipV, "Flip V (V)", false, || {
+                        actions.push(UiAction::FlipV);
+                    });
                     ui.add_space(4.0);
-                    let crop_active = frame.is_cropping;
-                    tool_btn_active(ui, "✂", "Crop (C)", crop_active, || {
+                    icon_btn(ui, ToolIcon::Crop, "Crop (C)", frame.is_cropping, || {
                         actions.push(UiAction::ToggleCrop);
                     });
-                    tool_btn_active(ui, "★", "Flag (X)", frame.is_flagged, || {
+                    icon_btn(ui, ToolIcon::Flag, "Flag (X)", frame.is_flagged, || {
                         actions.push(UiAction::ToggleFlag);
                     });
-                    tool_btn(ui, "🗑", "Trash (Del)", || actions.push(UiAction::Trash));
-                    tool_btn(ui, "💾", "Save As (W)", || actions.push(UiAction::SaveAs));
+                    icon_btn(ui, ToolIcon::Trash, "Trash (Del)", false, || {
+                        actions.push(UiAction::Trash);
+                    });
+                    icon_btn(ui, ToolIcon::Save, "Save As (W)", false, || {
+                        actions.push(UiAction::SaveAs);
+                    });
                     if frame.flag_count > 0 {
                         ui.add_space(4.0);
-                        tool_btn(
+                        icon_btn(
                             ui,
-                            &format!("{}", frame.flag_count),
-                            "Trash flagged (B)",
+                            ToolIcon::Batch,
+                            &format!("Trash flagged ({}) [B]", frame.flag_count),
+                            true,
                             || actions.push(UiAction::TrashFlagged),
                         );
                     }
@@ -392,35 +423,201 @@ fn render_left_toolbar(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &U
         });
 }
 
-fn tool_btn(ui: &mut egui::Ui, label: &str, tip: &str, on_click: impl FnOnce()) {
-    tool_btn_active(ui, label, tip, false, on_click);
-}
-
-fn tool_btn_active(
-    ui: &mut egui::Ui,
-    label: &str,
-    tip: &str,
-    active: bool,
-    on_click: impl FnOnce(),
-) {
+fn icon_btn(ui: &mut egui::Ui, icon: ToolIcon, tip: &str, active: bool, on_click: impl FnOnce()) {
+    let size = Vec2::splat(36.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let fill = if active {
         Color32::from_rgba_unmultiplied(247, 168, 69, 40)
+    } else if response.hovered() {
+        Color32::from_rgba_unmultiplied(255, 255, 255, 18)
     } else {
         Color32::from_rgba_unmultiplied(255, 255, 255, 8)
     };
-    let stroke = if active {
+    let border = if active {
         Stroke::new(1.0, ACCENT)
     } else {
         Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 18))
     };
-    let btn = egui::Button::new(RichText::new(label).size(16.0).color(TEXT))
-        .fill(fill)
-        .stroke(stroke)
-        .min_size(Vec2::splat(36.0));
-    let response = ui.add(btn).on_hover_text(tip);
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(8), fill);
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(8),
+        border,
+        egui::StrokeKind::Inside,
+    );
+    let ink = if active { ACCENT } else { TEXT };
+    paint_icon(painter, rect, icon, ink);
+    let _ = response.clone().on_hover_text(tip);
     if response.clicked() {
         on_click();
     }
+}
+
+#[allow(clippy::too_many_lines)] // one match arm per toolbar glyph
+fn paint_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color32) {
+    let c = rect.center();
+    let s = rect.width() * 0.28;
+    let stroke = Stroke::new(1.75, color);
+    match icon {
+        ToolIcon::RotateCw => {
+            painter.circle_stroke(c, s, stroke);
+            painter.arrow(
+                c + Vec2::new(s * 0.7, -s * 0.2),
+                Vec2::new(s * 0.35, s * 0.45),
+                stroke,
+            );
+        }
+        ToolIcon::RotateCcw => {
+            painter.circle_stroke(c, s, stroke);
+            painter.arrow(
+                c + Vec2::new(-s * 0.7, -s * 0.2),
+                Vec2::new(-s * 0.35, s * 0.45),
+                stroke,
+            );
+        }
+        ToolIcon::FlipH => {
+            painter.line_segment([c + Vec2::new(0.0, -s), c + Vec2::new(0.0, s)], stroke);
+            painter.arrow(
+                c + Vec2::new(-s * 0.2, 0.0),
+                Vec2::new(-s * 0.7, 0.0),
+                stroke,
+            );
+            painter.arrow(c + Vec2::new(s * 0.2, 0.0), Vec2::new(s * 0.7, 0.0), stroke);
+        }
+        ToolIcon::FlipV => {
+            painter.line_segment([c + Vec2::new(-s, 0.0), c + Vec2::new(s, 0.0)], stroke);
+            painter.arrow(
+                c + Vec2::new(0.0, -s * 0.2),
+                Vec2::new(0.0, -s * 0.7),
+                stroke,
+            );
+            painter.arrow(c + Vec2::new(0.0, s * 0.2), Vec2::new(0.0, s * 0.7), stroke);
+        }
+        ToolIcon::Crop => {
+            let r = Rect::from_center_size(c, Vec2::splat(s * 1.5));
+            painter.rect_stroke(r, CornerRadius::ZERO, stroke, egui::StrokeKind::Outside);
+            painter.line_segment(
+                [
+                    r.left_top() + Vec2::new(-3.0, 0.0),
+                    r.left_top() + Vec2::new(6.0, 0.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    r.left_top() + Vec2::new(0.0, -3.0),
+                    r.left_top() + Vec2::new(0.0, 6.0),
+                ],
+                stroke,
+            );
+        }
+        ToolIcon::Flag => {
+            let points = [
+                c + Vec2::new(-s * 0.5, s),
+                c + Vec2::new(-s * 0.5, -s),
+                c + Vec2::new(s * 0.6, -s * 0.55),
+                c + Vec2::new(-s * 0.5, -s * 0.1),
+            ];
+            painter.line_segment([points[0], points[1]], stroke);
+            painter.line_segment([points[1], points[2]], stroke);
+            painter.line_segment([points[2], points[3]], stroke);
+        }
+        ToolIcon::Trash => {
+            let top = c + Vec2::new(0.0, -s * 0.7);
+            painter.line_segment(
+                [
+                    c + Vec2::new(-s * 0.7, -s * 0.45),
+                    c + Vec2::new(s * 0.7, -s * 0.45),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    top + Vec2::new(-s * 0.25, 0.0),
+                    top + Vec2::new(s * 0.25, 0.0),
+                ],
+                stroke,
+            );
+            painter.rect_stroke(
+                Rect::from_min_max(
+                    c + Vec2::new(-s * 0.55, -s * 0.35),
+                    c + Vec2::new(s * 0.55, s * 0.75),
+                ),
+                CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Outside,
+            );
+        }
+        ToolIcon::Save => {
+            let r = Rect::from_center_size(c, Vec2::splat(s * 1.6));
+            painter.rect_stroke(r, CornerRadius::same(2), stroke, egui::StrokeKind::Outside);
+            painter.rect_filled(
+                Rect::from_min_max(
+                    r.left_top() + Vec2::new(4.0, 2.0),
+                    r.right_top() + Vec2::new(-4.0, 10.0),
+                ),
+                CornerRadius::ZERO,
+                color,
+            );
+        }
+        ToolIcon::Batch => {
+            painter.circle_stroke(c, s * 0.9, stroke);
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                "n",
+                egui::FontId::proportional(12.0),
+                color,
+            );
+        }
+    }
+}
+
+fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let current = frame.playlist_pos.map(|(i, _)| i.saturating_sub(1));
+    Area::new("filmstrip".into())
+        .anchor(Align2::CENTER_BOTTOM, [0.0, -10.0])
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            glass_frame().show(ui, |ui| {
+                ui.set_max_width(ui.ctx().content_rect().width() - 48.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for (idx, name, flagged) in &frame.filmstrip {
+                        let selected = current == Some(*idx);
+                        let fill = if selected {
+                            Color32::from_rgba_unmultiplied(247, 168, 69, 50)
+                        } else {
+                            Color32::from_rgba_unmultiplied(255, 255, 255, 10)
+                        };
+                        let border = if selected {
+                            Stroke::new(1.0, ACCENT)
+                        } else if *flagged {
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(247, 168, 69, 120))
+                        } else {
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 20))
+                        };
+                        let label = if name.len() > 14 {
+                            format!("{}…", &name[..12])
+                        } else {
+                            name.clone()
+                        };
+                        let btn = egui::Button::new(
+                            RichText::new(format!("{}. {label}", idx + 1))
+                                .size(11.0)
+                                .color(TEXT),
+                        )
+                        .fill(fill)
+                        .stroke(border)
+                        .min_size(Vec2::new(88.0, 28.0));
+                        if ui.add(btn).on_hover_text(name).clicked() {
+                            actions.push(UiAction::NavigateTo(*idx));
+                        }
+                    }
+                });
+            });
+        });
 }
 
 fn render_status_chip(ui: &mut egui::Ui, frame: &UiFrameOwned) {
@@ -465,8 +662,14 @@ fn render_status_chip(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         return;
     }
 
+    // Sit above the filmstrip when it is visible.
+    let bottom = if frame.mouse_near_bottom || frame.filmstrip.len() > 1 {
+        -56.0
+    } else {
+        -16.0
+    };
     Area::new("status_chip".into())
-        .anchor(Align2::LEFT_BOTTOM, [16.0, -16.0])
+        .anchor(Align2::LEFT_BOTTOM, [16.0, bottom])
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
             Frame::new()
@@ -619,6 +822,7 @@ mod tests {
         let _ = UiAction::CancelCrop;
         let _ = UiAction::SetCropRatio(crate::app::CropRatio::Square);
         let _ = UiAction::Navigate(1);
+        let _ = UiAction::NavigateTo(0);
         let _ = UiAction::ToggleFlag;
         let _ = UiAction::TrashFlagged;
         let _ = UiAction::PermanentDelete;

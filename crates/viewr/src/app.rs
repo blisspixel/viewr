@@ -429,6 +429,74 @@ impl App {
         Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
     }
 
+    fn zoom_at_cursor(&mut self, factor: f32) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let win = renderer.window().inner_size();
+        let Some(ndc) = crate::view::cursor_to_ndc(self.cursor_pos, (win.width, win.height)) else {
+            return;
+        };
+        let old = self.transform.zoom;
+        let new_zoom = (old * factor).clamp(0.05, 64.0);
+        let applied = new_zoom / old;
+        if (applied - 1.0).abs() < 1e-6 {
+            return;
+        }
+        let off = crate::view::pan_after_zoom_at_cursor(
+            [self.transform.offset_x, self.transform.offset_y],
+            ndc,
+            applied,
+        );
+        self.transform.zoom = new_zoom;
+        self.transform.offset_x = off[0];
+        self.transform.offset_y = off[1];
+        if let Some(r) = self.renderer.as_mut() {
+            r.window().request_redraw();
+        }
+    }
+
+    fn navigate_to(&mut self, index: usize) {
+        let Some(playlist) = &mut self.playlist else {
+            return;
+        };
+        if playlist.files.is_empty() || index >= playlist.files.len() {
+            return;
+        }
+        if index == playlist.index {
+            return;
+        }
+        playlist.index = index;
+        let next_path = playlist.files[index].clone();
+        self.image_path = Some(next_path.clone());
+        self.transform = Transform::default();
+        self.spawn_image_load(next_path);
+    }
+
+    /// Window of playlist entries around the current index for the filmstrip.
+    fn filmstrip_entries(&self) -> Vec<(usize, String, bool)> {
+        let Some(playlist) = &self.playlist else {
+            return Vec::new();
+        };
+        if playlist.files.is_empty() {
+            return Vec::new();
+        }
+        let n = playlist.files.len();
+        let start = playlist.index.saturating_sub(4);
+        let end = (playlist.index + 5).min(n);
+        (start..end)
+            .map(|i| {
+                let path = &playlist.files[i];
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |s| s.to_string_lossy().into_owned(),
+                );
+                let flagged = self.flags.contains(path);
+                (i, name, flagged)
+            })
+            .collect()
+    }
+
     fn toggle_fit_actual(&mut self) {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
@@ -729,14 +797,19 @@ impl ApplicationHandler for App {
                 self.touch_activity();
                 self.load_and_scan(path);
             }
-            WindowEvent::MouseWheel {
-                delta: winit::event::MouseScrollDelta::LineDelta(_, y),
-                ..
-            } => {
+            WindowEvent::MouseWheel { delta, .. } => {
                 self.touch_activity();
-                let zoom_factor = if y > 0.0 { 1.15 } else { 1.0 / 1.15 };
-                self.transform.zoom = (self.transform.zoom * zoom_factor).clamp(0.05, 64.0);
-                self.renderer.as_mut().unwrap().window().request_redraw();
+                let steps = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => {
+                        // Trackpad: ~50 px ≈ one detent.
+                        ((p.y as f32) / 50.0).clamp(-4.0, 4.0)
+                    }
+                };
+                if steps.abs() > f32::EPSILON {
+                    let factor = 1.15_f32.powf(steps);
+                    self.zoom_at_cursor(factor);
+                }
             }
             WindowEvent::MouseInput {
                 state,
@@ -1001,10 +1074,16 @@ impl ApplicationHandler for App {
                 let chrome_visible = self.transform.is_cropping
                     || self.last_activity.elapsed() < Duration::from_millis(2800);
                 let mouse_near_left = self.cursor_pos.0 < 72.0;
+                let win_h = self
+                    .renderer
+                    .as_ref()
+                    .map_or(0.0, |r| f64::from(r.window().inner_size().height));
+                let mouse_near_bottom = win_h > 0.0 && self.cursor_pos.1 > win_h - 80.0;
                 let playlist_pos = self
                     .playlist
                     .as_ref()
                     .map(|p| (p.index.saturating_add(1), p.files.len().max(1)));
+                let filmstrip = self.filmstrip_entries();
                 let is_flagged = self
                     .image_path
                     .as_ref()
@@ -1095,8 +1174,10 @@ impl ApplicationHandler for App {
                     playlist_pos,
                     zoom,
                     toast,
-                    chrome_visible: chrome_visible || mouse_near_left,
+                    chrome_visible: chrome_visible || mouse_near_left || mouse_near_bottom,
                     mouse_near_left,
+                    mouse_near_bottom,
+                    filmstrip,
                     crop_screen,
                 };
 
@@ -1200,6 +1281,7 @@ impl ApplicationHandler for App {
                             }
                         }
                         crate::ui::UiAction::Navigate(d) => self.navigate(d),
+                        crate::ui::UiAction::NavigateTo(i) => self.navigate_to(i),
                         crate::ui::UiAction::ToggleCrop => {
                             self.transform.is_cropping = !self.transform.is_cropping;
                             if !self.transform.is_cropping {

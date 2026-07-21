@@ -157,7 +157,8 @@ verify.
   privileges elsewhere.
   - [x] Workspace worker + SHM IPC (process isolation).
   - [x] Windows Job Object kill-on-close + Unix process group (`worker_limit`).
-  - [ ] Linux seccomp-bpf still open.
+  - [x] Linux `no_new_privs` + `dumpable=0` in worker pre_exec; full BPF filter plan in `packaging/linux/SECCOMP.md`.
+  - [ ] Linux seccomp-bpf allowlist install still open.
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
   - [ ] cargo-fuzz continuous job still open.

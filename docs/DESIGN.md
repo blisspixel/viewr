@@ -34,6 +34,10 @@ disappears. This spec is the converged result of two rounds of design critique
   is visible. Empty state centers drop/open guidance plus the privacy line.
 - Crop mode: GPU dims outside the live UV rect (~45%); egui draws amber handles, a
   top ratio strip (Free/1:1/4:3/16:9), and Apply/Cancel. Esc cancels; Enter applies.
+- Zoom is focal-point anchored (pixel under cursor stays put). Trackpad pixel
+  deltas and wheel detents both supported.
+- Bottom filmstrip: appears only near the bottom edge / when chrome is awake;
+  shows a window of neighbor basenames (flagged highlighted); click jumps.
 
 ## Color
 

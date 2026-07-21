@@ -44,5 +44,6 @@ Most photo viewers either silently link vulnerable C code into their UI process,
 | Windows AppContainer plan | Sketch in `packaging/windows/` |
 | Windows Job Object (kill-on-close) for workers | Done (`worker_limit`) |
 | Unix process group for workers | Done (`worker_limit`) |
-| seccomp-bpf network/FS deny on Linux worker | Open |
+| Linux no_new_privs + dumpable=0 | Done (`worker_limit` pre_exec) |
+| seccomp-bpf network deny on Linux worker | Planned (`packaging/linux/SECCOMP.md`) |
 | Continuous fuzz CI | Open (adversarial corpus tests exist) |

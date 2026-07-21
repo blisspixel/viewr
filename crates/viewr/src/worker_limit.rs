@@ -32,17 +32,17 @@ pub(crate) fn configure_command(cmd: &mut std::process::Command) {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
-        // SAFETY: pre_exec runs in the child after fork, before exec. We only
-        // call prctl(PR_SET_NO_NEW_PRIVS) which is async-signal-safe and does
-        // not allocate. Failure is ignored so decode still works on kernels
-        // without the feature; hardening is best-effort.
+        // SAFETY: pre_exec runs in the child after fork, before exec. Calls are
+        // limited to async-signal-safe prctl helpers. Failures are non-fatal so
+        // decode still works on restricted environments.
         unsafe {
             cmd.pre_exec(|| {
-                let rc = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-                if rc != 0 {
-                    // Non-fatal: worker still runs without the bit.
-                    let _ = rc;
-                }
+                // Prevent privilege escalation after exec.
+                let _ = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+                // Reduce crash dump / ptrace surface for the helper.
+                let _ = libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+                // Soft landlock-style intent: full seccomp-bpf allowlists land
+                // with packaging. Documented in packaging/linux/SECCOMP.md.
                 Ok(())
             });
         }

@@ -49,9 +49,35 @@ pub fn fit_to_window(viewport: (u32, u32), image: (u32, u32), rotated90: bool) -
     }
 }
 
+/// Apply a multiplicative zoom while keeping the NDC point under the cursor fixed.
+///
+/// `cursor_ndc` is the pointer position in normalized device coordinates
+/// (`[-1, 1]` on each axis, y up). `offset` is the current pan in NDC.
+/// Returns the pan that should be used after `zoom` becomes `zoom * factor`.
+#[must_use]
+pub fn pan_after_zoom_at_cursor(offset: [f32; 2], cursor_ndc: [f32; 2], factor: f32) -> [f32; 2] {
+    // offset' = cursor - (cursor - offset) * factor
+    [
+        cursor_ndc[0] - (cursor_ndc[0] - offset[0]) * factor,
+        cursor_ndc[1] - (cursor_ndc[1] - offset[1]) * factor,
+    ]
+}
+
+/// Convert a physical-pixel cursor position to NDC (y up).
+#[must_use]
+pub fn cursor_to_ndc(cursor_px: (f64, f64), viewport: (u32, u32)) -> Option<[f32; 2]> {
+    let (vw, vh) = (viewport.0 as f32, viewport.1 as f32);
+    if vw <= 0.0 || vh <= 0.0 {
+        return None;
+    }
+    let ndc_x = (cursor_px.0 as f32 / vw) * 2.0 - 1.0;
+    let ndc_y = 1.0 - (cursor_px.1 as f32 / vh) * 2.0;
+    Some([ndc_x, ndc_y])
+}
+
 #[cfg(test)]
 mod tests {
-    use super::fit_to_window;
+    use super::{cursor_to_ndc, fit_to_window, pan_after_zoom_at_cursor};
 
     fn is_zero(v: [f32; 2]) -> bool {
         v[0].abs() < f32::EPSILON && v[1].abs() < f32::EPSILON
@@ -97,5 +123,29 @@ mod tests {
     fn degenerate_dimensions_are_hidden_not_panicking() {
         assert!(is_zero(fit_to_window((0, 0), (100, 100), false).scale));
         assert!(is_zero(fit_to_window((100, 100), (0, 0), false).scale));
+    }
+
+    #[test]
+    fn zoom_at_cursor_keeps_cursor_point_fixed() {
+        // Point under cursor relative to image center should stay fixed after zoom.
+        let offset = [0.2_f32, -0.1];
+        let cursor = [0.5_f32, 0.25];
+        let factor = 1.15_f32;
+        let new_off = pan_after_zoom_at_cursor(offset, cursor, factor);
+        // (cursor - offset) / 1  == (cursor - new_off) / factor
+        let old_rel = [cursor[0] - offset[0], cursor[1] - offset[1]];
+        let new_rel = [
+            (cursor[0] - new_off[0]) / factor,
+            (cursor[1] - new_off[1]) / factor,
+        ];
+        assert!((old_rel[0] - new_rel[0]).abs() < 1e-5);
+        assert!((old_rel[1] - new_rel[1]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cursor_to_ndc_center_is_origin() {
+        let n = cursor_to_ndc((400.0, 300.0), (800, 600)).unwrap();
+        assert!(n[0].abs() < 1e-5);
+        assert!(n[1].abs() < 1e-5);
     }
 }

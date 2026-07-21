@@ -18,6 +18,7 @@ All notable changes to this project are documented here. The format is human-wri
 - System trash via the `trash` crate (`curate` module) with undo from the OS recycle bin / trash.
 - Adversarial truncated/garbage image fixtures assert decode returns errors without panicking.
 - packaging sketches for Flatpak (no network), macOS sandbox entitlements, Windows AppContainer.
+- Decode workers join a Windows Job Object (kill-on-close with parent) and a private Unix process group; discarded workers are terminated on drop.
 
 ### Changed
 

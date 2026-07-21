@@ -156,7 +156,9 @@ verify.
   - [x] Windows AppContainer packaging notes (`packaging/windows/APPCONTAINER.md`).
 - The isolated decode worker fully in place, with seccomp on Linux and reduced
   privileges elsewhere.
-  - [x] Workspace worker + SHM IPC (process isolation); OS privilege drop still open.
+  - [x] Workspace worker + SHM IPC (process isolation).
+  - [x] Windows Job Object kill-on-close + Unix process group (`worker_limit`).
+  - [ ] Linux seccomp-bpf still open.
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
   - [ ] cargo-fuzz continuous job still open.

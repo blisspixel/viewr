@@ -85,6 +85,16 @@ fn adversarial_bytes_do_not_panic() {
         ("garbage.webp", b"RIFF\x00\x00\x00\x00WEBP"),
         ("bad.svg", b"<svg"),
         ("zeros.jxl", &[0u8; 64]),
+        ("huge_header.jpg", &[0xff, 0xd8, 0xff, 0xe0, 0xff, 0xff]),
+        (
+            "polyglot.gif",
+            b"GIF89a\x01\x00\x01\x00\x00\x00\x00\x21\xff",
+        ),
+        ("not_tiff.tif", b"II*\x00not-a-tiff"),
+        (
+            "bom_svg.svg",
+            b"\xef\xbb\xbf<svg xmlns='http://www.w3.org/2000/svg'/>",
+        ),
     ];
     for (name, bytes) in cases {
         let path = dir.join(name);

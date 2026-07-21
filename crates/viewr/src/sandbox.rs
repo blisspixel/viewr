@@ -4,6 +4,9 @@
 //! shared memory. It is process/IPC glue rather than pure image logic: unit
 //! coverage requires a built worker binary and OS shared-memory, so CI treats
 //! this file like other display/IPC glue (see `docs/STANDARDS.md`).
+//!
+//! Workers are lifetime-hardened via [`crate::worker_limit`]: Windows Job Object
+//! (kill-on-close) and a private Unix process group.
 
 #![allow(unsafe_code)] // shared-memory mapping requires a raw slice until a safe API exists
 
@@ -14,6 +17,7 @@ use std::sync::Mutex;
 
 use crate::decode::DecodedImage;
 use crate::error::Error;
+use crate::worker_limit;
 
 /// Decode via the isolated `viewr-decode` worker (AVIF / HEIC / RAW paths).
 pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
@@ -93,9 +97,15 @@ pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
 }
 
 struct DaemonWorker {
-    _child: Child,
+    child: Child,
     stdin: std::process::ChildStdin,
     stdout: BufReader<std::process::ChildStdout>,
+}
+
+impl Drop for DaemonWorker {
+    fn drop(&mut self) {
+        worker_limit::terminate(&mut self.child);
+    }
 }
 
 impl DaemonWorker {
@@ -113,6 +123,8 @@ impl DaemonWorker {
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        worker_limit::configure_command(&mut cmd);
+
         // Avoid flashing a console window for the helper on Windows desktops.
         #[cfg(windows)]
         {
@@ -120,9 +132,12 @@ impl DaemonWorker {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+
         let mut child = cmd
             .spawn()
             .map_err(|e| Error::Decode(format!("failed to spawn worker: {e}")))?;
+
+        worker_limit::harden_child(&child);
 
         let stdin = child
             .stdin
@@ -135,7 +150,7 @@ impl DaemonWorker {
                 .ok_or_else(|| Error::Decode("worker stdout missing".into()))?,
         );
         Ok(Self {
-            _child: child,
+            child,
             stdin,
             stdout,
         })
@@ -197,5 +212,6 @@ fn return_worker(worker: DaemonWorker) {
         && workers.len() < 4
     {
         workers.push(worker);
+        // If the pool is full, `worker` drops here and `Drop` terminates the child.
     }
 }

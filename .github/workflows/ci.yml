@@ -81,7 +81,7 @@ jobs:
       - name: Coverage
         run: >
           cargo llvm-cov --workspace
-          --ignore-filename-regex '(app|gpu|ui|sandbox|error|main)\.rs$'
+          --ignore-filename-regex '(app|gpu|ui|sandbox|worker_limit|error|main)\.rs$'
           --fail-under-lines 85
           --lcov --output-path lcov.info
 

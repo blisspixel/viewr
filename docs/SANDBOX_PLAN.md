@@ -42,5 +42,7 @@ Most photo viewers either silently link vulnerable C code into their UI process,
 | Flatpak manifest (no network) | Sketch in `packaging/flatpak/` |
 | macOS entitlements (no network) | Sketch in `packaging/macos/` |
 | Windows AppContainer plan | Sketch in `packaging/windows/` |
-| seccomp / Job Object privilege drop | Open (Phase 7 remaining) |
-| Continuous fuzz CI | Open |
+| Windows Job Object (kill-on-close) for workers | Done (`worker_limit`) |
+| Unix process group for workers | Done (`worker_limit`) |
+| seccomp-bpf network/FS deny on Linux worker | Open |
+| Continuous fuzz CI | Open (adversarial corpus tests exist) |

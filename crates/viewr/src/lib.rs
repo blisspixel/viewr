@@ -18,6 +18,7 @@ pub mod theme;
 /// The main user interface module utilizing egui for overlays.
 pub mod ui;
 pub mod view;
+pub(crate) mod worker_limit;
 
 pub use app::run;
 pub use error::Error;

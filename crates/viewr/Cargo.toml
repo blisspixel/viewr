@@ -45,6 +45,15 @@ bytemuck = "1.25.2"
 resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
 trash = { version = "5.2.6", default-features = false, features = ["coinit_apartmentthreaded"] }
 
+# Windows Job Object limits for the decode worker (kill-on-close with parent).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 # Pure-Rust decoders for the always-on core formats. Exotic/C-backed formats
 # (HEIC, RAW, AVIF) come later behind feature flags. See docs/STANDARDS.md.
 [dependencies.image]

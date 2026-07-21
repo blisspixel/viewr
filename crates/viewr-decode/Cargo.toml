@@ -1,20 +1,34 @@
-[workspace]
 [package]
 name = "viewr-decode"
-description = "Isolated decode worker for viewr"
-version = "0.0.0"
-edition = "2024"
-rust-version = "1.96"
-license = "Apache-2.0"
-authors = ["viewr contributors"]
-repository = "https://github.com/viewr/viewr"
+description = "Isolated decode worker for C-backed image formats"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "viewr-decode"
+path = "src/main.rs"
+
+[features]
+default = []
+# Opt-in C/C++ decoder backends. Off by default so the workspace builds on CI
+# without system libraries. Enable for local/dev builds that have the deps:
+#   cargo build -p viewr-decode --features avif,heic
+avif = ["dep:libavif-image", "dep:image"]
+heic = ["dep:libheif-rs"]
+raw = ["dep:libraw-rs"]
+all-c = ["avif", "heic", "raw"]
 
 [dependencies]
 shared_memory = "0.12.4"
-image = "0.25"
-libavif-image = "0.14"
-libheif-rs = "2.7"
-libraw-rs = "0.0.4"
+image = { version = "0.25", optional = true, default-features = false }
+libavif-image = { version = "0.14", optional = true }
+libheif-rs = { version = "2.7", optional = true }
+libraw-rs = { version = "0.0.4", optional = true }
 
-[lints.rust]
-unsafe_code = "deny"
+[lints]
+workspace = true

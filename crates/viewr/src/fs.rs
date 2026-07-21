@@ -7,21 +7,55 @@ use std::iter::Peekable;
 use std::path::Path;
 use std::str::Chars;
 
-/// File extensions viewr recognizes as images in the always-on core build.
-/// Formats that need heavy or C-backed decoders are added behind Cargo features
-/// later (see `docs/STANDARDS.md` dependency policy), not here.
+/// Pure-Rust formats always decoded in the main process.
 const CORE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "ico", "qoi", "tga", "ppm", "pgm",
     "pbm", "pnm", "hdr", "exr", "ff", "dds", "jxl", "svg",
 ];
 
-/// Return `true` if `path` has an extension viewr can open in the core build.
+/// Formats decoded only by the `viewr-decode` worker (C-backed or deferred).
+/// Listed so folder navigation includes them; actual success depends on a
+/// co-located worker binary and its Cargo features (see `docs/FORMATS.md`).
+const WORKER_EXTENSIONS: &[&str] = &[
+    "avif", "heic", "heif", "cr2", "nef", "arw", "dng", "rw2", "orf", "raf",
+];
+
+/// Return `true` if `path` has an extension viewr knows about (core or worker).
 #[must_use]
 pub fn is_supported_image(path: &Path) -> bool {
-    path.extension()
+    extension_kind(path).is_some()
+}
+
+/// Return `true` if the file must be decoded in the isolated worker process.
+#[must_use]
+pub fn is_worker_format(path: &Path) -> bool {
+    matches!(extension_kind(path), Some(ExtensionKind::Worker))
+}
+
+/// Return `true` if the file is a core pure-Rust format.
+#[must_use]
+pub fn is_core_format(path: &Path) -> bool {
+    matches!(extension_kind(path), Some(ExtensionKind::Core))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionKind {
+    Core,
+    Worker,
+}
+
+fn extension_kind(path: &Path) -> Option<ExtensionKind> {
+    let ext = path
+        .extension()
         .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .is_some_and(|e| CORE_EXTENSIONS.contains(&e.as_str()))
+        .map(str::to_ascii_lowercase)?;
+    if CORE_EXTENSIONS.contains(&ext.as_str()) {
+        Some(ExtensionKind::Core)
+    } else if WORKER_EXTENSIONS.contains(&ext.as_str()) {
+        Some(ExtensionKind::Worker)
+    } else {
+        None
+    }
 }
 
 /// Compare two file names the way a human reads them: runs of digits are
@@ -69,7 +103,7 @@ fn take_number(it: &mut Peekable<Chars>) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_supported_image, natural_cmp};
+    use super::{is_core_format, is_supported_image, is_worker_format, natural_cmp};
     use std::cmp::Ordering;
     use std::path::Path;
 
@@ -79,6 +113,17 @@ mod tests {
         assert!(is_supported_image(Path::new("A.PNG")));
         assert!(is_supported_image(Path::new("x.jxl")));
         assert!(is_supported_image(Path::new("/some/dir/photo.webp")));
+        assert!(is_core_format(Path::new("a.svg")));
+    }
+
+    #[test]
+    fn recognizes_worker_formats_for_browsing() {
+        assert!(is_supported_image(Path::new("shot.avif")));
+        assert!(is_supported_image(Path::new("phone.HEIC")));
+        assert!(is_supported_image(Path::new("raw.CR2")));
+        assert!(is_worker_format(Path::new("shot.avif")));
+        assert!(!is_core_format(Path::new("shot.avif")));
+        assert!(!is_worker_format(Path::new("a.png")));
     }
 
     #[test]

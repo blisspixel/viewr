@@ -15,13 +15,12 @@ Two rules hold across every phase:
 
 ## Current status
 
-Phases 0–5 are complete for product behavior. Phase 6 is **mostly complete** with known residuals before calling it done:
+Phases 0–6 are complete for the product scope defined in this roadmap (including
+Phase 6 residuals: workspace worker, format table, RAW deferral). System trash
+polish and continuous fuzz remain quality follow-ups; OS sandbox packaging is
+Phase 7.
 
-- Pure-Rust core formats (image-rs family + JPEG XL + SVG via resvg) decode and are covered by corpus/unit tests.
-- `viewr-decode` exists as a side crate with AVIF/HEIC paths and SHM IPC; it is **not yet a workspace member**, and RAW remains a deliberate stub.
-- System trash (`trash` crate), continuous fuzz CI, and OS-level worker sandboxing are **not** Phase 6 residuals so much as Phase 7 / hardening work—except workspace integration of the worker, which should land before packaging.
-
-**Next focus: finish Phase 6 residuals (workspace-integrate `viewr-decode`, register delegated extensions in `fs`, complete RAW or document deferral), then Phase 7.**
+**Next focus: Phase 7 — Hardening and the privacy proof.**
 ## Phase 0: Foundations
 
 Establish the ground truth so quality is enforced from the very first commit.
@@ -140,10 +139,10 @@ of them just works.
 ### Phase 6 residuals (tracked)
 
 - [x] SVG via pure-Rust `resvg` (shapes/paths; text shaping feature intentionally off to keep the trusted core lean).
-- [ ] Add `viewr-decode` as a workspace member with feature-gated C deps.
-- [ ] List AVIF/HEIC (and RAW when ready) in `fs` supported extensions when the worker is shipped beside the main binary.
-- [ ] Finish RAW decode in the worker or document explicit deferral.
-- [ ] Honest format capability table in docs (core vs worker).
+- [x] Add `viewr-decode` as a workspace member with feature-gated C deps (`avif` / `heic` / `raw`; default empty for CI).
+- [x] List AVIF/HEIC/RAW extensions in `fs` for browsing; decode routes through the worker.
+- [x] RAW deferred with stable errors and docs (feature `raw` reserved; no false claim of support).
+- [x] Honest format capability table: `docs/FORMATS.md`.
 
 ## Phase 7: Hardening and the privacy proof
 

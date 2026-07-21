@@ -100,17 +100,12 @@ struct DaemonWorker {
 
 impl DaemonWorker {
     fn new() -> Result<Self, Error> {
-        let current_exe = std::env::current_exe()
-            .map_err(|e| Error::Decode(format!("failed to get current exe: {e}")))?;
-        let mut decode_exe = current_exe.clone();
-        decode_exe.set_file_name("viewr-decode");
-        if cfg!(windows) {
-            decode_exe.set_extension("exe");
-        }
-
-        if !decode_exe.exists() {
+        let decode_exe = resolve_worker_binary();
+        // If the path is not absolute/PATH-only, verify the co-located binary exists.
+        if decode_exe.is_absolute() && !decode_exe.is_file() {
             return Err(Error::Decode(
-                "viewr-decode worker executable not found".into(),
+                "viewr-decode worker executable not found beside viewr (build with `cargo build -p viewr-decode`)"
+                    .into(),
             ));
         }
 
@@ -136,6 +131,43 @@ impl DaemonWorker {
             stdin,
             stdout,
         })
+    }
+}
+
+/// Locate `viewr-decode` next to the running binary, then fall back to `PATH`.
+fn resolve_worker_binary() -> std::path::PathBuf {
+    let mut candidates = Vec::new();
+
+    if let Ok(explicit) = std::env::var("VIEWR_DECODE_BIN") {
+        candidates.push(std::path::PathBuf::from(explicit));
+    }
+
+    if let Ok(current) = std::env::current_exe() {
+        let mut beside = current.clone();
+        beside.set_file_name(worker_file_name());
+        candidates.push(beside);
+
+        // `cargo run` places both binaries in the same target profile dir.
+        if let Some(dir) = current.parent() {
+            candidates.push(dir.join(worker_file_name()));
+        }
+    }
+
+    for path in candidates {
+        if path.is_file() {
+            return path;
+        }
+    }
+
+    // Last resort: rely on PATH resolution at spawn time.
+    std::path::PathBuf::from(worker_file_name())
+}
+
+fn worker_file_name() -> &'static str {
+    if cfg!(windows) {
+        "viewr-decode.exe"
+    } else {
+        "viewr-decode"
     }
 }
 

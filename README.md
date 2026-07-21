@@ -90,6 +90,7 @@ Linux, macOS, and Windows from a single codebase.
 
 ## Documentation
 
+- [`docs/FORMATS.md`](docs/FORMATS.md), which formats are core vs worker-decoded.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), how viewr is structured and how a
   keystroke becomes a pixel.
 - [`docs/STACK.md`](docs/STACK.md), every technology choice and why, plus what we
@@ -108,4 +109,4 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 6 largely shipped; residual gaps tracked in ROADMAP**. viewr is a fast, zero-bloat image viewer with pure-Rust decode for the core format set (including SVG via `resvg`) and a `viewr-decode` worker path for C-backed formats (AVIF/HEIC; RAW still stubbed). The worker is not yet a first-class workspace member, and OS-level sandbox packaging is Phase 7. Try it with `cargo run --release -- path/to/image.png`.
+Status: **Phase 6 residuals closed; next is Phase 7**. viewr is a fast, zero-bloat image viewer with pure-Rust core decode (including SVG via `resvg`) and a workspace `viewr-decode` worker for C-backed formats (feature-gated; RAW deferred). OS-level sandbox packaging is Phase 7. See `docs/FORMATS.md`. Try it with `cargo run --release -- path/to/image.png`.

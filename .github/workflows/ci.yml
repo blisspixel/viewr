@@ -43,13 +43,17 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
-      # Pedantic clippy with warnings as errors. This also enforces rustc lints
-      # such as missing_docs and the unsafe_code = "forbid" from the workspace.
+      # Pedantic clippy with warnings as errors. Do not pass --all-features on the
+      # whole workspace: viewr-decode's avif/heic/raw features need system C
+      # libraries and are opt-in for local builds (see docs/FORMATS.md).
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace
+
+      - name: Build decode worker (default features)
+        run: cargo build -p viewr-decode
 
   coverage:
     name: coverage (>= 85% on logic)
@@ -76,7 +80,7 @@ jobs:
       # the line-coverage floor. See docs/STANDARDS.md.
       - name: Coverage
         run: >
-          cargo llvm-cov --workspace --all-features
+          cargo llvm-cov --workspace
           --ignore-filename-regex '(app|gpu|ui|sandbox|error|main)\.rs$'
           --fail-under-lines 85
           --lcov --output-path lcov.info

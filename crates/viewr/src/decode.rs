@@ -33,10 +33,7 @@ impl DecodedImage {
             .unwrap_or("")
             .to_lowercase();
 
-        if matches!(
-            ext.as_str(),
-            "avif" | "heic" | "heif" | "cr2" | "nef" | "arw" | "dng"
-        ) {
+        if crate::fs::is_worker_format(path) {
             return crate::sandbox::load_via_worker(path);
         }
 

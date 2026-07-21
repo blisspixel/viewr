@@ -22,7 +22,7 @@ build is signed and notarized, so macOS opens it without warnings.
 Download and run the `.msi` installer from the releases page, or:
 
 ```powershell
-irm https://github.com/viewr/viewr/releases/latest/download/viewr-installer.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/latest/download/viewr-installer.ps1 | iex
 ```
 
 The installer registers viewr as an option in "Open with" and adds a Start menu
@@ -43,7 +43,7 @@ paru -S viewr        # or your AUR helper of choice
 Or the portable installer:
 
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/viewr/viewr/releases/latest/download/viewr-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/blisspixel/viewr/releases/latest/download/viewr-installer.sh | sh
 ```
 
 The Flatpak ships with no network permission at all (see `docs/PRIVACY.md`), so it

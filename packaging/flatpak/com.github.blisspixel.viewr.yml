@@ -4,7 +4,7 @@
 # Privacy invariant: do NOT add --share=network. Files open via portals / user
 # grants. See docs/SANDBOX_PLAN.md and docs.flatpak.org sandbox-permissions.
 
-app-id: com.github.viewr.viewr
+app-id: com.github.blisspixel.viewr
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk

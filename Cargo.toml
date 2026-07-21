@@ -10,7 +10,7 @@ edition = "2024"
 rust-version = "1.96"
 license = "Apache-2.0"
 authors = ["viewr contributors"]
-repository = "https://github.com/viewr/viewr"
+repository = "https://github.com/blisspixel/viewr"
 
 # Quality bar, enforced by `cargo clippy -- -D warnings` in CI.
 # See docs/STANDARDS.md.

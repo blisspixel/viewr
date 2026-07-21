@@ -101,3 +101,6 @@ jobs:
 
       - name: cargo-audit
         run: cargo audit
+
+      - name: privacy-check (packaging + tree)
+        run: bash scripts/privacy-check.sh

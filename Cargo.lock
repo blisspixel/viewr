@@ -4423,6 +4423,7 @@ dependencies = [
  "env_logger",
  "image",
  "jxl-oxide",
+ "libc",
  "log",
  "muda",
  "pollster 1.0.1",

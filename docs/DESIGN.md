@@ -27,9 +27,13 @@ disappears. This spec is the converged result of two rounds of design critique
   far right in tabular figures so it does not jitter as you page. Height ~46px,
   with a soft top scrim no heavier than needed (or a small backdrop-blur chip
   behind the text so bright photos do not wash it out).
-- Toolbar: slick, left-aligned floating toolbar powered by `egui`, featuring a Hand Tool
-  (for panning) and a Crop Tool. Grouped neatly to remain out of the way. Icon buttons
-  are a fixed 36x36.
+- Toolbar: left-aligned floating glass toolbar (36×36 icon buttons) that appears when
+  the pointer moves, when it is near the left edge, or while crop mode is active; it
+  auto-hides after ~2.8s idle. Classic top menus remain as discovery/accessibility.
+- Status chip (bottom-left, low contrast): `name · W × H · i / n · zoom%` when chrome
+  is visible. Empty state centers drop/open guidance plus the privacy line.
+- Crop mode: GPU dims outside the live UV rect (~45%); egui draws amber handles, a
+  top ratio strip (Free/1:1/4:3/16:9), and Apply/Cancel. Esc cancels; Enter applies.
 
 ## Color
 

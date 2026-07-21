@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- Interaction polish: progressive left floating toolbar (auto-hide), empty-state guidance, bottom status chip (name · size · position · zoom), trash toast, amber crop handles + ratio strip, Esc cancel crop, double-click fit/1:1 toggle, grab cursors.
+- Flag/batch cull (`X` / `B`) and Shift+Delete permanent delete with confirmation.
 - `viewr-decode` is a workspace member with feature-gated C backends (`avif`, `heic`, `raw`); default build needs no system libraries.
 - Folder navigation recognizes worker formats (AVIF/HEIC/RAW extensions); decode routes through the worker when present.
 - `docs/FORMATS.md` capability table (core vs worker, RAW deferred).

@@ -56,7 +56,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (place.crop_rect.z > place.crop_rect.x) {
         if (in.uv.x < place.crop_rect.x || in.uv.x > place.crop_rect.z || 
             in.uv.y < place.crop_rect.y || in.uv.y > place.crop_rect.w) {
-            color = vec4<f32>(color.rgb * 0.3, color.a);
+            // ~50% dim outside the live crop (DESIGN: mode must be obvious).
+            color = vec4<f32>(color.rgb * 0.45, color.a);
         }
     }
     return color;

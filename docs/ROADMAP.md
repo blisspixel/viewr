@@ -86,14 +86,13 @@ just wants the photo.
 
 The feature that makes viewr a daily tool, done carefully.
 
-- Delete to the system trash via the trash crate, with a non-blocking Undo toast
+- [x] Delete to the system trash via the trash crate, with a non-blocking Undo toast
   and index preservation, so the view lands on the image that replaced the deleted
   one rather than jumping to the top.
-- Undo (Ctrl+Z) restores the last deleted file from the trash.
-- Flag-then-batch cull mode: flag images while browsing, then delete all flagged at
-  once, still to trash and still undoable. This is the default recommended flow.
-- Shift+Delete performs a permanent delete and is the only action that asks for
-  confirmation.
+- [x] Undo (`U`) restores the last deleted file from the trash.
+- [x] Flag-then-batch cull: `X` flags, `B` batch-trashes flagged (tests on `FlagSet` /
+  playlist removal).
+- [x] Shift+Delete permanent delete with explicit confirmation dialog (only modal).
 
 Definition of done: a user can move through a folder deleting junk quickly, never
 loses a file to a misfire, never hits a modal during normal culling, and

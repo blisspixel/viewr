@@ -6,13 +6,16 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
+use crate::curate::{FlagSet, TrashedFile};
 use crate::decode::DecodedImage;
 use crate::error::Error;
 use crate::gpu::{FrameResult, Renderer};
@@ -39,6 +42,13 @@ pub fn run() -> Result<(), Error> {
         show_exif: false,
         bg_override: None,
         image_loader_rx: None,
+        flags: FlagSet::new(),
+        modifiers: ModifiersState::default(),
+        toast: None,
+        toast_until: None,
+        last_activity: Instant::now(),
+        cursor_pos: (0.0, 0.0),
+        last_click: None,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -48,8 +58,6 @@ struct Playlist {
     files: Vec<PathBuf>,
     index: usize,
 }
-
-use crate::curate::TrashedFile;
 
 /// The aspect ratio to enforce when cropping.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -101,7 +109,6 @@ impl Default for Transform {
 }
 
 /// The whole application state. Deliberately small.
-#[derive(Default)]
 struct App {
     renderer: Option<Renderer>,
     image_path: Option<PathBuf>,
@@ -119,6 +126,20 @@ struct App {
             Result<crate::decode::DecodedImage, String>,
         )>,
     >,
+    /// Paths flagged for batch cull (photographer workflow).
+    flags: FlagSet,
+    /// Latest keyboard modifiers (for Shift+Delete, etc.).
+    modifiers: ModifiersState,
+    /// Bottom toast message.
+    toast: Option<String>,
+    /// When the toast should disappear.
+    toast_until: Option<Instant>,
+    /// Last mouse/keyboard activity for chrome auto-hide.
+    last_activity: Instant,
+    /// Latest cursor position in physical pixels.
+    cursor_pos: (f64, f64),
+    /// Last click time/pos for double-click fit toggle.
+    last_click: Option<(Instant, (f64, f64))>,
 }
 
 impl App {
@@ -272,6 +293,21 @@ impl App {
         }
     }
 
+    fn toggle_flag_current(&mut self) {
+        let Some(path) = self.image_path.clone() else {
+            return;
+        };
+        let flagged = self.flags.toggle(&path);
+        log::info!(
+            "{} {}",
+            if flagged { "Flagged" } else { "Unflagged" },
+            path.display()
+        );
+        if let Some(r) = self.renderer.as_mut() {
+            r.window().request_redraw();
+        }
+    }
+
     fn trash_current(&mut self) {
         let Some(path) = self.image_path.clone() else {
             return;
@@ -284,14 +320,181 @@ impl App {
 
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
         self.last_trashed = Some(TrashedFile {
-            original_path: path,
+            original_path: path.clone(),
             playlist_index,
         });
+        self.flags.remove(&path);
+        self.show_toast("Moved to trash · Undo with U");
+        self.after_paths_removed(&[path], playlist_index);
+    }
 
+    fn trash_flagged(&mut self) {
+        let flagged = self.flags.take_all_sorted();
+        if flagged.is_empty() {
+            return;
+        }
+        let current_index = self.playlist.as_ref().map_or(0, |p| p.index);
+        let (ok, err) = crate::curate::trash_many(&flagged);
+        if let Some(e) = err {
+            log::error!("Batch trash partial failure: {e}");
+        }
+        if let Some(last) = ok.last() {
+            self.last_trashed = Some(TrashedFile {
+                original_path: last.clone(),
+                playlist_index: current_index,
+            });
+        }
+        if !ok.is_empty() {
+            self.show_toast(format!("Trashed {} file(s) · Undo with U", ok.len()));
+            self.after_paths_removed(&ok, current_index);
+        }
+    }
+
+    fn show_toast(&mut self, msg: impl Into<String>) {
+        self.toast = Some(msg.into());
+        self.toast_until = Some(Instant::now() + Duration::from_secs(3));
+        if let Some(r) = self.renderer.as_ref() {
+            r.window().request_redraw();
+        }
+    }
+
+    fn cancel_crop(&mut self) {
+        self.transform.is_cropping = false;
+        self.transform.crop_rect = None;
+        self.transform.crop_start = None;
+        if let Some(r) = self.renderer.as_mut() {
+            r.window().request_redraw();
+        }
+    }
+
+    fn touch_activity(&mut self) {
+        self.last_activity = Instant::now();
+    }
+
+    /// Project image UV to screen pixels (inverse of [`Self::screen_to_uv`]).
+    fn uv_to_screen(&self, uv_x: f32, uv_y: f32) -> Option<(f32, f32)> {
+        let renderer = self.renderer.as_ref()?;
+        let win_size = renderer.window().inner_size();
+        if win_size.width == 0 || win_size.height == 0 {
+            return None;
+        }
+        let image_size = renderer.image_size()?;
+        let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
+        let mut place =
+            crate::view::fit_to_window((win_size.width, win_size.height), image_size, rotated90);
+        place.scale[0] *= self.transform.zoom;
+        place.scale[1] *= self.transform.zoom;
+        place.offset[0] = self.transform.offset_x;
+        place.offset[1] = self.transform.offset_y;
+
+        let rot = self.transform.rotation_steps.rem_euclid(4);
+        let mut matrix = match rot {
+            1 => [0.0_f32, -1.0, 1.0, 0.0],
+            2 => [-1.0, 0.0, 0.0, -1.0],
+            3 => [0.0, 1.0, -1.0, 0.0],
+            _ => [1.0, 0.0, 0.0, 1.0],
+        };
+        if self.transform.flip_h {
+            matrix[0] = -matrix[0];
+            matrix[2] = -matrix[2];
+        }
+        if self.transform.flip_v {
+            matrix[1] = -matrix[1];
+            matrix[3] = -matrix[3];
+        }
+        // uv = M * centered + 0.5; invert M.
+        let det = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+        if det.abs() < 1e-8 {
+            return None;
+        }
+        let du = uv_x - 0.5;
+        let dv = uv_y - 0.5;
+        let centered_x = (matrix[3] * du - matrix[2] * dv) / det;
+        let centered_y = (-matrix[1] * du + matrix[0] * dv) / det;
+        let base_u = centered_x + 0.5;
+        let base_v = centered_y + 0.5;
+        let corner_x = base_u * 2.0 - 1.0;
+        let corner_y = 1.0 - base_v * 2.0;
+        let ndc_x = corner_x * place.scale[0] + place.offset[0];
+        let ndc_y = corner_y * place.scale[1] + place.offset[1];
+        let screen_x = (ndc_x + 1.0) * 0.5 * win_size.width as f32;
+        let screen_y = (1.0 - ndc_y) * 0.5 * win_size.height as f32;
+        Some((screen_x, screen_y))
+    }
+
+    fn crop_screen_rect(&self) -> Option<[f32; 4]> {
+        let rect = self.transform.crop_rect?;
+        let (x0, y0) = self.uv_to_screen(rect[0], rect[1])?;
+        let (x1, y1) = self.uv_to_screen(rect[2], rect[3])?;
+        Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
+    }
+
+    fn toggle_fit_actual(&mut self) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let win = renderer.window().inner_size();
+        let Some(image) = renderer.image_size() else {
+            return;
+        };
+        let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
+        let (iw, ih) = if rotated90 {
+            (image.1 as f32, image.0 as f32)
+        } else {
+            (image.0 as f32, image.1 as f32)
+        };
+        let (vw, vh) = (win.width as f32, win.height as f32);
+        if iw <= 0.0 || ih <= 0.0 || vw <= 0.0 || vh <= 0.0 {
+            return;
+        }
+        let fit_s = (vw / iw).min(vh / ih);
+        let actual_zoom = if fit_s > 0.0 { 1.0 / fit_s } else { 1.0 };
+        if (self.transform.zoom - 1.0).abs() < 0.05 {
+            self.transform.zoom = actual_zoom;
+            self.transform.offset_x = 0.0;
+            self.transform.offset_y = 0.0;
+        } else {
+            self.transform.zoom = 1.0;
+            self.transform.offset_x = 0.0;
+            self.transform.offset_y = 0.0;
+        }
+        if let Some(r) = self.renderer.as_mut() {
+            r.window().request_redraw();
+        }
+    }
+
+    fn permanent_delete_current(&mut self) {
+        let Some(path) = self.image_path.clone() else {
+            return;
+        };
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
+        let confirmed = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Permanently delete?")
+            .set_description(format!(
+                "Delete \"{name}\" forever?\n\nThis skips the Recycle Bin and cannot be undone from viewr."
+            ))
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        if confirmed != rfd::MessageDialogResult::Ok {
+            return;
+        }
+        if let Err(e) = crate::curate::permanent_delete(&path) {
+            log::error!("Permanent delete failed: {e}");
+            return;
+        }
+        self.flags.remove(&path);
+        let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
+        self.last_trashed = None; // not restorable
+        self.after_paths_removed(&[path], playlist_index);
+    }
+
+    fn after_paths_removed(&mut self, removed: &[PathBuf], old_index: usize) {
         if let Some(playlist) = &mut self.playlist {
-            if playlist.index < playlist.files.len() {
-                playlist.files.remove(playlist.index);
-            }
+            crate::curate::remove_from_playlist(&mut playlist.files, removed);
             if playlist.files.is_empty() {
                 self.image_path = None;
                 self.current_image = None;
@@ -299,7 +502,8 @@ impl App {
                     renderer.clear_image();
                 }
             } else {
-                playlist.index = playlist.index.min(playlist.files.len().saturating_sub(1));
+                playlist.index =
+                    crate::curate::index_after_removals(&playlist.files, old_index, removed);
                 let next_path = playlist.files[playlist.index].clone();
                 self.image_path = Some(next_path.clone());
                 self.transform = Transform::default();
@@ -517,16 +721,21 @@ impl ApplicationHandler for App {
         }
 
         match event {
+            WindowEvent::ModifiersChanged(mods) => {
+                self.modifiers = mods.state();
+            }
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::DroppedFile(path) => {
+                self.touch_activity();
                 self.load_and_scan(path);
             }
             WindowEvent::MouseWheel {
                 delta: winit::event::MouseScrollDelta::LineDelta(_, y),
                 ..
             } => {
-                let zoom_factor = if y > 0.0 { 1.1 } else { 0.9 };
-                self.transform.zoom *= zoom_factor;
+                self.touch_activity();
+                let zoom_factor = if y > 0.0 { 1.15 } else { 1.0 / 1.15 };
+                self.transform.zoom = (self.transform.zoom * zoom_factor).clamp(0.05, 64.0);
                 self.renderer.as_mut().unwrap().window().request_redraw();
             }
             WindowEvent::MouseInput {
@@ -534,6 +743,20 @@ impl ApplicationHandler for App {
                 button: winit::event::MouseButton::Left,
                 ..
             } => {
+                self.touch_activity();
+                if state == winit::event::ElementState::Pressed && !self.transform.is_cropping {
+                    let now = Instant::now();
+                    let pos = self.cursor_pos;
+                    if let Some((t, (lx, ly))) = self.last_click {
+                        let near = (pos.0 - lx).hypot(pos.1 - ly) < 6.0;
+                        if near && now.duration_since(t) < Duration::from_millis(350) {
+                            self.toggle_fit_actual();
+                            self.last_click = None;
+                            return;
+                        }
+                    }
+                    self.last_click = Some((now, pos));
+                }
                 if self.transform.is_cropping {
                     if state == winit::event::ElementState::Pressed {
                         if let Some((x, y)) = self.transform.last_cursor {
@@ -549,6 +772,8 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_pos = (position.x, position.y);
+                self.touch_activity();
                 if self.transform.is_cropping
                     && let Some(start) = self.transform.crop_start
                     && let Some(end) = self.screen_to_uv(position.x, position.y)
@@ -624,7 +849,23 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 use winit::keyboard::{Key, NamedKey};
+                self.touch_activity();
                 match logical_key {
+                    Key::Character(c) if (c == "o" || c == "O") && self.modifiers.control_key() => {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter(
+                                "Images",
+                                &[
+                                    "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff",
+                                    "tga", "hdr", "avif", "heic", "heif", "cr2", "nef", "arw",
+                                    "dng", "jxl", "svg",
+                                ],
+                            )
+                            .pick_file()
+                        {
+                            self.load_and_scan(path);
+                        }
+                    }
                     Key::Character(c) if c == "o" || c == "O" => {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter(
@@ -632,7 +873,7 @@ impl ApplicationHandler for App {
                                 &[
                                     "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff",
                                     "tga", "hdr", "avif", "heic", "heif", "cr2", "nef", "arw",
-                                    "dng",
+                                    "dng", "jxl", "svg",
                                 ],
                             )
                             .pick_file()
@@ -677,9 +918,25 @@ impl ApplicationHandler for App {
                     Key::Named(NamedKey::Enter) => {
                         self.apply_crop_rect();
                     }
+                    Key::Named(NamedKey::Escape) => {
+                        if self.transform.is_cropping {
+                            self.cancel_crop();
+                        }
+                    }
                     Key::Character(c) if c == "u" || c == "U" => {
                         self.undo_trash();
                         self.renderer.as_mut().unwrap().window().request_redraw();
+                    }
+                    // Flag for batch cull (photographer workflow). F remains fullscreen.
+                    Key::Character(c) if c == "x" || c == "X" => {
+                        self.toggle_flag_current();
+                    }
+                    // Batch-trash all flagged files.
+                    Key::Character(c) if c == "b" || c == "B" => {
+                        self.trash_flagged();
+                        if let Some(r) = self.renderer.as_mut() {
+                            r.window().request_redraw();
+                        }
                     }
                     Key::Character(c) if c == "f" || c == "F" => {
                         self.is_fullscreen = !self.is_fullscreen;
@@ -697,7 +954,12 @@ impl ApplicationHandler for App {
                     Key::Named(NamedKey::Home) => self.navigate(-999_999),
                     Key::Named(NamedKey::End) => self.navigate(999_999),
                     Key::Named(NamedKey::Delete | NamedKey::Backspace) => {
-                        self.trash_current();
+                        if self.modifiers.shift_key() {
+                            // Only permanent delete asks for confirmation (modal).
+                            self.permanent_delete_current();
+                        } else {
+                            self.trash_current();
+                        }
                         if let Some(r) = self.renderer.as_mut() {
                             r.window().request_redraw();
                         }
@@ -728,10 +990,49 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 let mut ui_actions = Vec::new();
+                if let Some(until) = self.toast_until
+                    && Instant::now() > until
+                {
+                    self.toast = None;
+                    self.toast_until = None;
+                }
+                // Snapshot UI/transform state before exclusive borrow of the renderer.
+                let crop_screen = self.crop_screen_rect();
+                let chrome_visible = self.transform.is_cropping
+                    || self.last_activity.elapsed() < Duration::from_millis(2800);
+                let mouse_near_left = self.cursor_pos.0 < 72.0;
+                let playlist_pos = self
+                    .playlist
+                    .as_ref()
+                    .map(|p| (p.index.saturating_add(1), p.files.len().max(1)));
+                let is_flagged = self
+                    .image_path
+                    .as_ref()
+                    .is_some_and(|p| self.flags.contains(p));
+                let flag_count = self.flags.len();
+                let zoom = self.transform.zoom;
+                let toast = self.toast.clone();
+                let path_str = self
+                    .image_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned());
+                let show_exif = self.show_exif;
+                let is_cropping = self.transform.is_cropping;
+                let crop_ratio = self.transform.crop_ratio;
+                let is_panning = self.transform.is_panning;
+                let bg_override = self.bg_override;
+                let zoom_t = self.transform.zoom;
+                let offset_x = self.transform.offset_x;
+                let offset_y = self.transform.offset_y;
+                let rot_steps = self.transform.rotation_steps;
+                let flip_h = self.transform.flip_h;
+                let flip_v = self.transform.flip_v;
+                let crop_rect = self.transform.crop_rect;
+
                 let renderer = self.renderer.as_mut().unwrap();
                 renderer.window().set_visible(true);
 
-                if let Some(bg) = self.bg_override {
+                if let Some(bg) = bg_override {
                     renderer.set_clear_color(bg);
                 } else {
                     renderer.set_mode(crate::theme::Mode::from_winit_or_dark(
@@ -741,19 +1042,19 @@ impl ApplicationHandler for App {
 
                 let placement = if let Some(size) = renderer.image_size() {
                     let win_size = renderer.window().inner_size();
-                    let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
+                    let rotated90 = rot_steps.rem_euclid(2) != 0;
                     let mut p = crate::view::fit_to_window(
                         (win_size.width, win_size.height),
                         size,
                         rotated90,
                     );
 
-                    p.scale[0] *= self.transform.zoom;
-                    p.scale[1] *= self.transform.zoom;
-                    p.offset[0] = self.transform.offset_x;
-                    p.offset[1] = self.transform.offset_y;
+                    p.scale[0] *= zoom_t;
+                    p.scale[1] *= zoom_t;
+                    p.offset[0] = offset_x;
+                    p.offset[1] = offset_y;
 
-                    let rot = self.transform.rotation_steps.rem_euclid(4);
+                    let rot = rot_steps.rem_euclid(4);
                     let mut uv_matrix = match rot {
                         1 => [0.0, -1.0, 1.0, 0.0],
                         2 => [-1.0, 0.0, 0.0, -1.0],
@@ -761,17 +1062,17 @@ impl ApplicationHandler for App {
                         _ => [1.0, 0.0, 0.0, 1.0],
                     };
 
-                    if self.transform.flip_h {
+                    if flip_h {
                         uv_matrix[0] = -uv_matrix[0];
                         uv_matrix[2] = -uv_matrix[2];
                     }
-                    if self.transform.flip_v {
+                    if flip_v {
                         uv_matrix[1] = -uv_matrix[1];
                         uv_matrix[3] = -uv_matrix[3];
                     }
                     p.uv_matrix = uv_matrix;
 
-                    if let Some(cr) = self.transform.crop_rect {
+                    if let Some(cr) = crop_rect {
                         p.crop_rect = cr;
                     }
 
@@ -780,29 +1081,35 @@ impl ApplicationHandler for App {
                     None
                 };
 
-                let path_str = self
-                    .image_path
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().into_owned());
                 let img_size = renderer.image_size();
-                let show_exif = self.show_exif;
-                let is_cropping = self.transform.is_cropping;
-                let crop_ratio = self.transform.crop_ratio;
-                let is_panning = self.transform.is_panning;
+                let frame = crate::ui::UiFrameOwned {
+                    show_exif,
+                    file_path: path_str,
+                    img_size,
+                    is_cropping,
+                    crop_ratio,
+                    is_panning,
+                    is_flagged,
+                    flag_count,
+                    has_image: img_size.is_some(),
+                    playlist_pos,
+                    zoom,
+                    toast,
+                    chrome_visible: chrome_visible || mouse_near_left,
+                    mouse_near_left,
+                    crop_screen,
+                };
 
                 match renderer.render(placement, |ui| {
-                    ui_actions = crate::ui::render(
-                        ui,
-                        show_exif,
-                        path_str.as_deref(),
-                        img_size,
-                        is_cropping,
-                        crop_ratio,
-                        is_panning,
-                    );
+                    ui_actions = crate::ui::render(ui, &frame);
                 }) {
                     FrameResult::Presented | FrameResult::Skipped => {}
                     FrameResult::NeedsReconfigure => renderer.reconfigure(),
+                }
+
+                // Keep redrawing while toast/chrome animations are live.
+                if self.toast.is_some() || chrome_visible {
+                    renderer.window().request_redraw();
                 }
 
                 for action in ui_actions {
@@ -814,7 +1121,7 @@ impl ApplicationHandler for App {
                                     &[
                                         "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff",
                                         "tga", "hdr", "avif", "heic", "heif", "cr2", "nef", "arw",
-                                        "dng",
+                                        "dng", "jxl", "svg",
                                     ],
                                 )
                                 .pick_file()
@@ -825,6 +1132,19 @@ impl ApplicationHandler for App {
                         crate::ui::UiAction::SaveAs => self.save_as(),
                         crate::ui::UiAction::Trash => {
                             self.trash_current();
+                            if let Some(r) = self.renderer.as_mut() {
+                                r.window().request_redraw();
+                            }
+                        }
+                        crate::ui::UiAction::ToggleFlag => self.toggle_flag_current(),
+                        crate::ui::UiAction::TrashFlagged => {
+                            self.trash_flagged();
+                            if let Some(r) = self.renderer.as_mut() {
+                                r.window().request_redraw();
+                            }
+                        }
+                        crate::ui::UiAction::PermanentDelete => {
+                            self.permanent_delete_current();
                             if let Some(r) = self.renderer.as_mut() {
                                 r.window().request_redraw();
                             }
@@ -886,12 +1206,16 @@ impl ApplicationHandler for App {
                                 self.transform.crop_rect = None;
                                 self.transform.crop_start = None;
                             }
+                            self.touch_activity();
                             if let Some(r) = self.renderer.as_mut() {
                                 r.window().request_redraw();
                             }
                         }
                         crate::ui::UiAction::ApplyCrop => {
                             self.apply_crop_rect();
+                        }
+                        crate::ui::UiAction::CancelCrop => {
+                            self.cancel_crop();
                         }
                         crate::ui::UiAction::SetCropRatio(r) => {
                             self.transform.crop_ratio = r;

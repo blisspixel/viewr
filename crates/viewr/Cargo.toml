@@ -54,6 +54,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
 ] }
 
+# Linux worker: no_new_privs (seccomp-bpf filters can layer on later).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 # Pure-Rust decoders for the always-on core formats. Exotic/C-backed formats
 # (HEIC, RAW, AVIF) come later behind feature flags. See docs/STANDARDS.md.
 [dependencies.image]

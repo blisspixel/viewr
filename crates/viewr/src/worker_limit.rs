@@ -1,10 +1,11 @@
 //! OS-level limits for the `viewr-decode` helper process.
 //!
 //! Goal: if the main process dies or a worker is discarded, helpers do not
-//! linger as orphans. This is process-lifetime hardening, not a full sandbox
-//! (`seccomp` / App Container packaging remain separate packaging work).
+//! linger as orphans, and on Linux the child starts with `no_new_privs`.
+//! Full `seccomp-bpf` syscall allow-lists and App Container packaging remain
+//! packaging work on top of this foundation.
 
-#![allow(unsafe_code)] // Win32 Job Object APIs and Unix process-group setup
+#![allow(unsafe_code)] // Win32 Job Object APIs, Unix process-group, Linux prctl
 
 use std::process::Child;
 
@@ -19,7 +20,7 @@ pub(crate) fn harden_child(child: &Child) {
     }
 }
 
-/// Configure the command before spawn (Unix process group, etc.).
+/// Configure the command before spawn (Unix process group, Linux privileges).
 pub(crate) fn configure_command(cmd: &mut std::process::Command) {
     #[cfg(unix)]
     {
@@ -27,6 +28,26 @@ pub(crate) fn configure_command(cmd: &mut std::process::Command) {
         // New process group so the helper is not in the UI session group.
         cmd.process_group(0);
     }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: pre_exec runs in the child after fork, before exec. We only
+        // call prctl(PR_SET_NO_NEW_PRIVS) which is async-signal-safe and does
+        // not allocate. Failure is ignored so decode still works on kernels
+        // without the feature; hardening is best-effort.
+        unsafe {
+            cmd.pre_exec(|| {
+                let rc = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+                if rc != 0 {
+                    // Non-fatal: worker still runs without the bit.
+                    let _ = rc;
+                }
+                Ok(())
+            });
+        }
+    }
+
     let _ = cmd;
 }
 

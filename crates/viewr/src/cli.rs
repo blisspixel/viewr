@@ -5,9 +5,11 @@
 
 #![allow(unsafe_code)] // Windows AttachConsole / AllocConsole for CLI under GUI subsystem
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
+use std::{io, io::Write};
 
 use crate::decode::DecodedImage;
 
@@ -89,41 +91,60 @@ where
 /// Run a CLI subcommand. Returns a process exit code.
 #[must_use]
 pub fn run(inv: Invocation) -> ExitCode {
+    let stdout = io::stdout();
+    let stderr = io::stderr();
+    let explicit_worker = std::env::var_os("VIEWR_DECODE_BIN");
+    run_with_io(
+        inv,
+        &mut stdout.lock(),
+        &mut stderr.lock(),
+        explicit_worker.as_deref(),
+    )
+    .unwrap_or(ExitCode::FAILURE)
+}
+
+fn run_with_io(
+    inv: Invocation,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+    explicit_worker: Option<&OsStr>,
+) -> io::Result<ExitCode> {
     match inv {
-        Invocation::Gui { .. } => ExitCode::FAILURE, // caller should launch GUI
+        Invocation::Gui { .. } => Ok(ExitCode::FAILURE), // caller should launch GUI
         Invocation::Help => {
-            print_help();
-            ExitCode::SUCCESS
+            print_help(stdout)?;
+            Ok(ExitCode::SUCCESS)
         }
         Invocation::Version => {
-            println!("viewr {VERSION}");
-            ExitCode::SUCCESS
+            writeln!(stdout, "viewr {VERSION}")?;
+            Ok(ExitCode::SUCCESS)
         }
         Invocation::Doctor => {
-            if doctor() {
-                ExitCode::SUCCESS
+            if doctor_to(stdout, explicit_worker)? {
+                Ok(ExitCode::SUCCESS)
             } else {
-                ExitCode::from(1)
+                Ok(ExitCode::from(1))
             }
         }
-        Invocation::Benchmark { dir } => match benchmark(dir.as_deref()) {
-            Ok(()) => ExitCode::SUCCESS,
+        Invocation::Benchmark { dir } => match benchmark_to(dir.as_deref(), stdout, stderr) {
+            Ok(()) => Ok(ExitCode::SUCCESS),
             Err(e) => {
-                eprintln!("benchmark failed: {e}");
-                ExitCode::from(1)
+                writeln!(stderr, "benchmark failed: {e}")?;
+                Ok(ExitCode::from(1))
             }
         },
         Invocation::Update => {
-            print_update();
-            ExitCode::SUCCESS
+            print_update(stdout)?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
 
-fn print_help() {
-    println!(
+fn print_help(stdout: &mut impl Write) -> io::Result<()> {
+    writeln!(
+        stdout,
         "\
-viewr {VERSION} — a photo viewer that just shows your photos.
+viewr {VERSION} - a photo viewer that just shows your photos.
 
 Usage:
   viewr [path]                 Open the GUI (optional image path)
@@ -144,13 +165,14 @@ Examples:
   viewr doctor
   viewr benchmark corpus
 "
-    );
+    )
 }
 
-fn print_update() {
-    println!(
+fn print_update(stdout: &mut impl Write) -> io::Result<()> {
+    writeln!(
+        stdout,
         "\
-viewr update — local only
+viewr update - local only
 
 viewr never phones home and does not download updates for you.
 That is intentional (see docs/PRIVACY.md and docs/ROADMAP.md).
@@ -172,20 +194,26 @@ Optional C-backed worker formats (needs system libraries):
 If you installed with cargo-dist or a manual copy, replace those files with a
 fresh build. There is no background updater and no `viewr update --download`.
 "
-    );
+    )
 }
 
 /// Run diagnostics. Returns `true` if all critical checks passed.
 #[must_use]
 pub fn doctor() -> bool {
-    println!("viewr doctor {VERSION}");
-    println!("{}", "-".repeat(48));
+    let stdout = io::stdout();
+    let explicit_worker = std::env::var_os("VIEWR_DECODE_BIN");
+    doctor_to(&mut stdout.lock(), explicit_worker.as_deref()).unwrap_or(false)
+}
+
+fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Result<bool> {
+    writeln!(stdout, "viewr doctor {VERSION}")?;
+    writeln!(stdout, "{}", "-".repeat(48))?;
     let mut ok = true;
 
     // --- binary layout ---
     match std::env::current_exe() {
         Ok(exe) => {
-            println!("[ok]   executable: {}", exe.display());
+            writeln!(stdout, "[ok]   executable: {}", exe.display())?;
             let mut worker = exe.clone();
             worker.set_file_name(if cfg!(windows) {
                 "viewr-decode.exe"
@@ -193,61 +221,78 @@ pub fn doctor() -> bool {
                 "viewr-decode"
             });
             if worker.is_file() {
-                println!("[ok]   worker beside exe: {}", worker.display());
-            } else if let Ok(explicit) = std::env::var("VIEWR_DECODE_BIN") {
-                if Path::new(&explicit).is_file() {
-                    println!("[ok]   worker via VIEWR_DECODE_BIN: {explicit}");
+                writeln!(stdout, "[ok]   worker beside exe: {}", worker.display())?;
+            } else if let Some(explicit) = explicit_worker {
+                let explicit = Path::new(explicit);
+                if explicit.is_file() {
+                    writeln!(
+                        stdout,
+                        "[ok]   worker via VIEWR_DECODE_BIN: {}",
+                        explicit.display()
+                    )?;
                 } else {
-                    println!("[WARN] VIEWR_DECODE_BIN set but missing: {explicit}");
+                    writeln!(
+                        stdout,
+                        "[WARN] VIEWR_DECODE_BIN set but missing: {}",
+                        explicit.display()
+                    )?;
                     ok = false;
                 }
             } else {
-                println!(
+                writeln!(
+                    stdout,
                     "[WARN] viewr-decode not found beside exe
        (AVIF/HEIC need: cargo build -p viewr-decode)"
-                );
+                )?;
                 // Not a hard failure: core pure-Rust formats still work.
             }
         }
         Err(e) => {
-            println!("[FAIL] cannot resolve current_exe: {e}");
+            writeln!(stdout, "[FAIL] cannot resolve current_exe: {e}")?;
             ok = false;
         }
     }
 
-    println!(
+    writeln!(
+        stdout,
         "[ok]   platform: {} / {}",
         std::env::consts::OS,
         std::env::consts::ARCH
-    );
-    println!("[ok]   privacy: no network, no log files, doctor is in-memory (zero temp)");
+    )?;
+    writeln!(
+        stdout,
+        "[ok]   privacy: no network, no log files, doctor is in-memory (zero temp)"
+    )?;
 
     // --- decode self-test ---
     match decode_self_test() {
         Ok((w, h, ms)) => {
-            println!("[ok]   decode self-test: {w}x{h} PNG in {ms:.2} ms");
+            writeln!(stdout, "[ok]   decode self-test: {w}x{h} PNG in {ms:.2} ms")?;
         }
         Err(e) => {
-            println!("[FAIL] decode self-test: {e}");
+            writeln!(stdout, "[FAIL] decode self-test: {e}")?;
             ok = false;
         }
     }
 
     // --- optional source-tree checks ---
     if Path::new("deny.toml").is_file() {
-        println!("[ok]   source tree: deny.toml present (run `cargo deny check` in CI)");
+        writeln!(
+            stdout,
+            "[ok]   source tree: deny.toml present (run `cargo deny check` in CI)"
+        )?;
     }
     if Path::new("docs/PRIVACY.md").is_file() {
-        println!("[ok]   source tree: docs/PRIVACY.md present");
+        writeln!(stdout, "[ok]   source tree: docs/PRIVACY.md present")?;
     }
 
-    println!("{}", "-".repeat(48));
+    writeln!(stdout, "{}", "-".repeat(48))?;
     if ok {
-        println!("doctor: critical checks passed");
+        writeln!(stdout, "doctor: critical checks passed")?;
     } else {
-        println!("doctor: one or more critical checks failed");
+        writeln!(stdout, "doctor: one or more critical checks failed")?;
     }
-    ok
+    Ok(ok)
 }
 
 fn decode_self_test() -> Result<(u32, u32, f64), String> {
@@ -264,13 +309,25 @@ fn decode_self_test() -> Result<(u32, u32, f64), String> {
 /// When `dir` is `None`, runs an **in-memory** synthetic corpus (no temp files).
 /// When `dir` is set, times real files the user pointed at (read-only).
 pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
+    let stdout = io::stdout();
+    let stderr = io::stderr();
+    benchmark_to(dir, &mut stdout.lock(), &mut stderr.lock())
+}
+
+fn benchmark_to(
+    dir: Option<&Path>,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<(), String> {
     const ITERATIONS: u32 = 5;
 
-    println!(
+    writeln!(
+        stdout,
         "{:<28} {:>10} {:>12} {:>12}",
         "file", "pixels", "median ms", "MP/s"
-    );
-    println!("{}", "-".repeat(64));
+    )
+    .map_err(|e| e.to_string())?;
+    writeln!(stdout, "{}", "-".repeat(64)).map_err(|e| e.to_string())?;
 
     if let Some(root) = dir {
         if !root.is_dir() {
@@ -287,23 +344,32 @@ pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
             return Err("no supported images in the given directory".into());
         }
         for path in entries {
-            bench_one_path(&path, ITERATIONS);
+            bench_one_path(&path, ITERATIONS, stdout, stderr)?;
         }
     } else {
-        println!("benchmark: in-memory corpus (no temp files written)");
+        writeln!(
+            stdout,
+            "benchmark: in-memory corpus (no temp files written)"
+        )
+        .map_err(|e| e.to_string())?;
         for (name, w, h) in [
             ("mem_a.png", 256u32, 256u32),
             ("mem_b.png", 640, 480),
             ("mem_c.png", 128, 128),
         ] {
             let png = encode_png_memory(w, h).map_err(|e| e.to_string())?;
-            bench_one_bytes(name, &png, ITERATIONS);
+            bench_one_bytes(name, &png, ITERATIONS, stdout, stderr)?;
         }
     }
     Ok(())
 }
 
-fn bench_one_path(path: &Path, iterations: u32) {
+fn bench_one_path(
+    path: &Path,
+    iterations: u32,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<(), String> {
     let mut times = Vec::with_capacity(iterations as usize);
     let mut pixels = 0u64;
     for _ in 0..iterations {
@@ -317,8 +383,8 @@ fn bench_one_path(path: &Path, iterations: u32) {
                 let name = path
                     .file_name()
                     .map_or_else(|| "(file)".into(), |s| s.to_string_lossy().into_owned());
-                eprintln!("skip {name}: {e}");
-                return;
+                writeln!(stderr, "skip {name}: {e}").map_err(|e| e.to_string())?;
+                return Ok(());
             }
         }
     }
@@ -329,10 +395,18 @@ fn bench_one_path(path: &Path, iterations: u32) {
             .unwrap_or_default(),
         pixels,
         &times,
-    );
+        stdout,
+    )
+    .map_err(|e| e.to_string())
 }
 
-fn bench_one_bytes(name: &str, bytes: &[u8], iterations: u32) {
+fn bench_one_bytes(
+    name: &str,
+    bytes: &[u8],
+    iterations: u32,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<(), String> {
     let mut times = Vec::with_capacity(iterations as usize);
     let mut pixels = 0u64;
     for _ in 0..iterations {
@@ -343,18 +417,23 @@ fn bench_one_bytes(name: &str, bytes: &[u8], iterations: u32) {
                 pixels = u64::from(img.width) * u64::from(img.height);
             }
             Err(e) => {
-                eprintln!("skip {name}: {e}");
-                return;
+                writeln!(stderr, "skip {name}: {e}").map_err(|e| e.to_string())?;
+                return Ok(());
             }
         }
     }
-    print_bench_row(name, pixels, &times);
+    print_bench_row(name, pixels, &times, stdout).map_err(|e| e.to_string())
 }
 
-fn print_bench_row(name: &str, pixels: u64, times: &[f64]) {
+fn print_bench_row(
+    name: &str,
+    pixels: u64,
+    times: &[f64],
+    stdout: &mut impl Write,
+) -> io::Result<()> {
     let ms = median(times.to_vec());
     let mps = (pixels as f64 / 1_000_000.0) / (ms / 1000.0);
-    println!("{name:<28} {pixels:>10} {ms:>12.2} {mps:>12.1}");
+    writeln!(stdout, "{name:<28} {pixels:>10} {ms:>12.2} {mps:>12.1}")
 }
 
 /// Encode a synthetic RGB gradient PNG entirely in RAM (no disk).
@@ -392,8 +471,22 @@ pub fn ensure_console() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Invocation, parse_args};
-    use std::path::PathBuf;
+    use super::{Invocation, benchmark_to, decode_self_test, median, parse_args, run_with_io};
+    use crate::ephemeral::TempWorkspace;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::ExitCode;
+
+    fn invoke(invocation: Invocation) -> (ExitCode, String, String) {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_with_io(invocation, &mut stdout, &mut stderr, None).unwrap();
+        (
+            code,
+            String::from_utf8(stdout).unwrap(),
+            String::from_utf8(stderr).unwrap(),
+        )
+    }
 
     #[test]
     fn parse_empty_is_gui() {
@@ -448,5 +541,117 @@ mod tests {
                 image: Some(PathBuf::from("x.png"))
             }
         );
+    }
+
+    #[test]
+    fn parse_rejects_unknown_option() {
+        let error = parse_args(["viewr", "--download"]).unwrap_err();
+        assert!(error.contains("unknown option '--download'"));
+    }
+
+    #[test]
+    fn static_commands_report_their_contract() {
+        let (code, help, error) = invoke(Invocation::Help);
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(error.is_empty());
+        assert!(help.contains("Usage:"));
+        assert!(help.contains("No network client"));
+
+        let (code, version, error) = invoke(Invocation::Version);
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(error.is_empty());
+        assert!(version.starts_with("viewr "));
+
+        let (code, update, error) = invoke(Invocation::Update);
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(error.is_empty());
+        assert!(update.contains("never phones home"));
+        assert!(update.contains("There is no background updater"));
+
+        let (code, output, error) = invoke(Invocation::Gui { image: None });
+        assert_eq!(code, ExitCode::FAILURE);
+        assert!(output.is_empty());
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn doctor_runs_the_in_memory_decode_check() {
+        let (width, height, elapsed_ms) = decode_self_test().unwrap();
+        assert_eq!((width, height), (64, 48));
+        assert!(elapsed_ms >= 0.0);
+
+        let (code, output, error) = invoke(Invocation::Doctor);
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(error.is_empty());
+        assert!(output.contains("decode self-test: 64x48 PNG"));
+        assert!(output.contains("doctor: critical checks passed"));
+    }
+
+    #[test]
+    fn in_memory_benchmark_decodes_the_synthetic_corpus() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        benchmark_to(None, &mut stdout, &mut stderr).unwrap();
+
+        let output = String::from_utf8(stdout).unwrap();
+        assert!(stderr.is_empty());
+        assert!(output.contains("in-memory corpus (no temp files written)"));
+        assert!(output.contains("mem_a.png"));
+        assert!(output.contains("mem_b.png"));
+        assert!(output.contains("mem_c.png"));
+    }
+
+    #[test]
+    fn directory_benchmark_reports_images_and_skips_bad_inputs() {
+        let workspace = TempWorkspace::new("cli_benchmark_directory").unwrap();
+        let good = workspace.path().join("good.png");
+        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
+            .save(&good)
+            .unwrap();
+        fs::write(workspace.path().join("bad.png"), b"not a PNG").unwrap();
+        fs::write(workspace.path().join("ignored.txt"), b"not an image").unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        benchmark_to(Some(workspace.path()), &mut stdout, &mut stderr).unwrap();
+
+        let output = String::from_utf8(stdout).unwrap();
+        let error = String::from_utf8(stderr).unwrap();
+        assert!(output.contains("good.png"));
+        assert!(!output.contains("ignored.txt"));
+        assert!(error.contains("skip bad.png"));
+    }
+
+    #[test]
+    fn directory_benchmark_rejects_missing_or_empty_directories() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        assert_eq!(
+            benchmark_to(
+                Some(Path::new("definitely_missing_viewr_benchmark_dir")),
+                &mut stdout,
+                &mut stderr,
+            )
+            .unwrap_err(),
+            "not a directory"
+        );
+
+        let workspace = TempWorkspace::new("cli_benchmark_empty").unwrap();
+        assert_eq!(
+            benchmark_to(Some(workspace.path()), &mut stdout, &mut stderr).unwrap_err(),
+            "no supported images in the given directory"
+        );
+
+        let (code, output, error) = invoke(Invocation::Benchmark {
+            dir: Some(PathBuf::from("definitely_missing_viewr_benchmark_dir")),
+        });
+        assert_eq!(code, ExitCode::from(1));
+        assert!(output.contains("median ms"));
+        assert!(error.contains("benchmark failed: not a directory"));
+    }
+
+    #[test]
+    fn median_selects_the_middle_ordered_sample() {
+        assert!((median(vec![9.0, 1.0, 5.0, 3.0, 7.0]) - 5.0).abs() < f64::EPSILON);
     }
 }

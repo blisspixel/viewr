@@ -24,19 +24,12 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 
-    # gtk3-rs stack (unmaintained, not a vulnerability). Pulled only by `muda`
-    # for native menus on Linux. No safe upgrade yet; not on the untrusted
-    # image-decode path. Tracked for removal when muda moves off gtk3.
-    "RUSTSEC-2024-0412",
-    "RUSTSEC-2024-0413",
-    "RUSTSEC-2024-0415",
-    "RUSTSEC-2024-0416",
-    "RUSTSEC-2024-0418",
-    "RUSTSEC-2024-0419",
-    "RUSTSEC-2024-0420",
-    # paste / proc-macro-error: unmaintained build-time macros via gtk3-macros.
+    # `paste` is unmaintained but has no known vulnerability or safe upgrade.
+    # It is used by little_exif and image's EXR decoder, both of which remain
+    # required for the documented format and metadata features. Reassess when
+    # either dependency removes it; runtime vulnerabilities are never ignored.
     "RUSTSEC-2024-0436",
-    "RUSTSEC-2024-0370",
+
 ]
 
 [licenses]

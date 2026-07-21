@@ -33,7 +33,6 @@ anyhow = "1"
 rfd = "0.17.2"
 jxl-oxide = { version = "0.12.6", features = ["image"] }
 shared_memory = "0.12.4"
-muda = "0.19.3"
 egui = "0.35"
 egui-winit = "0.35"
 egui-wgpu = "0.35"

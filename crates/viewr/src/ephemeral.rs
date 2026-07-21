@@ -9,11 +9,15 @@
 //!
 //! User photo libraries are never used for probes.
 
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+
+const WORKSPACE_LOCK: &str = ".viewr-lock";
 
 /// A directory under the process temp root, deleted when this value is dropped.
 pub struct TempWorkspace {
     path: PathBuf,
+    lock: Option<File>,
 }
 
 impl TempWorkspace {
@@ -31,7 +35,27 @@ impl TempWorkspace {
         ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path)?;
-        Ok(Self { path })
+        let lock = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(path.join(WORKSPACE_LOCK))
+        {
+            Ok(lock) => lock,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&path);
+                return Err(error);
+            }
+        };
+        if let Err(error) = lock.lock() {
+            drop(lock);
+            let _ = std::fs::remove_dir_all(&path);
+            return Err(error);
+        }
+        Ok(Self {
+            path,
+            lock: Some(lock),
+        })
     }
 
     /// Borrow the workspace path.
@@ -43,8 +67,31 @@ impl TempWorkspace {
 
 impl Drop for TempWorkspace {
     fn drop(&mut self) {
+        if let Some(lock) = self.lock.take() {
+            let _ = lock.unlock();
+            drop(lock);
+        }
         // Best-effort: never leave probes behind, even after panics in tests.
         let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn workspace_is_locked(path: &Path) -> bool {
+    let lock = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path.join(WORKSPACE_LOCK))
+    {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    match lock.try_lock() {
+        Ok(()) => {
+            let _ = lock.unlock();
+            false
+        }
+        Err(_) => true,
     }
 }
 
@@ -102,9 +149,9 @@ fn is_safe_to_scrub(name: &str) -> bool {
 
 /// Remove leftover `viewr_*` files and directories from the system temp folder.
 ///
-/// Skips workspaces belonging to the current process so concurrent unit tests
-/// and in-flight tools are not deleted mid-run. Returns how many entries were
-/// removed (best-effort).
+/// Skips workspaces belonging to the current process and any workspace holding
+/// its lock, so concurrent processes are not deleted mid-run. Returns how many
+/// entries were removed (best-effort).
 #[must_use]
 pub fn scrub_stale_viewr_temps() -> usize {
     let root = std::env::temp_dir();
@@ -121,6 +168,9 @@ pub fn scrub_stale_viewr_temps() -> usize {
             continue;
         }
         let path = entry.path();
+        if path.is_dir() && workspace_is_locked(&path) {
+            continue;
+        }
         let ok = if path.is_dir() {
             std::fs::remove_dir_all(&path).is_ok()
         } else {
@@ -138,7 +188,8 @@ mod tests {
     use super::{
         TempWorkspace, embedded_pid, is_safe_to_scrub, is_viewr_temp_name, scrub_stale_viewr_temps,
     };
-    use std::fs;
+    use std::fs::{self, OpenOptions};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn drop_removes_directory() {
@@ -189,6 +240,34 @@ mod tests {
             ws.path().is_dir(),
             "scrub must leave current-process TempWorkspace alone"
         );
+    }
+
+    #[test]
+    fn scrub_skips_locked_workspace_from_another_process() {
+        let other_pid = std::process::id().checked_add(1).unwrap_or(1);
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("viewr_other_live_{other_pid}_{nonce}"));
+        fs::create_dir(&path).unwrap();
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(path.join(".viewr-lock"))
+            .unwrap();
+        lock.lock().unwrap();
+
+        let _ = scrub_stale_viewr_temps();
+        assert!(
+            path.is_dir(),
+            "scrub must leave a locked workspace from another process alone"
+        );
+
+        lock.unlock().unwrap();
+        drop(lock);
+        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

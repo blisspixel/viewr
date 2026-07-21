@@ -7,8 +7,10 @@ All notable changes to this project are documented here. The format is human-wri
 ### Fixed
 
 - Restored the quality baseline: `cargo fmt`, pedantic `clippy -D warnings`, and the full test suite are green again.
+- Raised measured logic coverage from 79.61% to 89.74% by testing CLI behavior through injected output streams, including diagnostics, benchmark success/error paths, and the in-memory corpus contract.
+- Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
 - Implemented SVG decode with pure-Rust `resvg` (corpus and unit tests pass). Default features avoid system fonts and text shaping so the trusted core stays free of unmaintained shaping crates.
-- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is above 90% lines under that floor.
+- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is 89.74% lines under that floor.
 
 ### Added
 
@@ -30,9 +32,11 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Changed
 
+- Removed the unused `muda` dependency and its GTK3 dependency chain, reducing the lockfile by 41 packages and eliminating eight obsolete advisory exceptions.
+- CI now runs on pushes to both `main` and the repository's current `master` branch.
 - ROADMAP: store/notarized publish (Mac App Store, Microsoft Store, Flathub
   listing, notarized DMG as a store path) is **out of scope for now**—maybe later.
   Phase 7/8 stay local-first (build, sandbox profiles, simple release artifacts).
 - Extracted `sandbox.rs` for the `viewr-decode` worker client so process/IPC glue is separate from pure decode logic.
 - Phase 6 residuals closed in ROADMAP; next milestone is Phase 7 OS sandbox packaging.
-- `deny.toml`: allow OFL/Ubuntu font licenses for egui default fonts; ignore known unmaintained gtk3-rs advisories pulled only by `muda` on Linux (not on the decode path).
+- `deny.toml`: allow OFL/Ubuntu font licenses for egui default fonts; retain a documented exception for the unmaintained but vulnerability-free `paste` crate while required by EXR and metadata dependencies.

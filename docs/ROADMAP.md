@@ -158,6 +158,8 @@ verify.
   privileges elsewhere.
   - [x] Workspace worker + SHM IPC (process isolation); OS privilege drop still open.
 - Continuous fuzzing of every decoder, with any crash a release blocker.
+  - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
+  - [ ] cargo-fuzz continuous job still open.
 - Reproducible and signed builds, so a user can confirm the binary matches the
   source.
 - [x] Deletes use the system trash (`trash` crate), not a local `_trash` folder.

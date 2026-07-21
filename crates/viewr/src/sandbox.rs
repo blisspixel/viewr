@@ -109,10 +109,18 @@ impl DaemonWorker {
             ));
         }
 
-        let mut child = Command::new(decode_exe)
-            .stdin(Stdio::piped())
+        let mut cmd = Command::new(decode_exe);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        // Avoid flashing a console window for the helper on Windows desktops.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = cmd
             .spawn()
             .map_err(|e| Error::Decode(format!("failed to spawn worker: {e}")))?;
 

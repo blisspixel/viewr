@@ -74,6 +74,31 @@ fn opening_a_non_image_is_a_clean_error_not_a_panic() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Hostile / truncated inputs must fail as `Error::Decode`, never panic.
+#[test]
+fn adversarial_bytes_do_not_panic() {
+    let dir = scratch("hostile");
+    let cases: &[(&str, &[u8])] = &[
+        ("empty.png", b""),
+        ("trunc.jpg", b"\xff\xd8\xff"),
+        ("trunc.png", b"\x89PNG\r\n\x1a\n"),
+        ("garbage.webp", b"RIFF\x00\x00\x00\x00WEBP"),
+        ("bad.svg", b"<svg"),
+        ("zeros.jxl", &[0u8; 64]),
+    ];
+    for (name, bytes) in cases {
+        let path = dir.join(name);
+        fs::write(&path, bytes).unwrap();
+        let result = std::panic::catch_unwind(|| DecodedImage::load(&path));
+        assert!(result.is_ok(), "decode panicked on hostile sample {name}");
+        assert!(
+            result.unwrap().is_err(),
+            "hostile sample {name} should not decode as a valid image"
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn crop_then_save_as_roundtrips_across_formats() {
     let dir = scratch("cropsave");

@@ -73,7 +73,6 @@ fn f64_to_px(v: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{THUMB_EDGE, fit_size, generate_thumb};
-    use std::fs;
 
     #[test]
     fn fit_size_preserves_aspect_and_caps_edge() {
@@ -85,10 +84,8 @@ mod tests {
 
     #[test]
     fn generate_thumb_from_png() {
-        let dir = std::env::temp_dir().join(format!("viewr_thumb_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("big.png");
+        let ws = crate::ephemeral::TempWorkspace::new("thumb").unwrap();
+        let path = ws.path().join("big.png");
         image::RgbImage::from_fn(120, 80, |x, y| {
             image::Rgb([(x % 255) as u8, (y % 255) as u8, 40])
         })
@@ -98,6 +95,5 @@ mod tests {
         assert!(thumb.width <= THUMB_EDGE);
         assert!(thumb.height <= THUMB_EDGE);
         assert_eq!(thumb.rgba.len(), (thumb.width * thumb.height * 4) as usize);
-        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -45,8 +45,9 @@ impl DecodedImage {
             return Self::load_svg(path);
         }
 
+        // Never embed full filesystem paths in error strings (privacy / logs).
         let decoded = image::open(path)
-            .map_err(|e| Error::Decode(format!("{}: {e}", path.display())))?
+            .map_err(|e| Error::Decode(format!("open/decode failed: {e}")))?
             .into_rgba8();
         let (width, height) = decoded.dimensions();
         Ok(Self {
@@ -116,21 +117,14 @@ pub(crate) fn positive_f32_to_px(v: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{DecodedImage, positive_f32_to_px};
+    use crate::ephemeral::TempWorkspace;
     use std::fs;
     use std::path::PathBuf;
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("viewr_decode_unit_{name}_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn svg_renders_to_declared_size() {
-        let dir = scratch("svg");
-        let path = dir.join("box.svg");
+        let ws = TempWorkspace::new("decode_svg").unwrap();
+        let path = ws.path().join("box.svg");
         fs::write(
             &path,
             r##"<svg width="40" height="30" xmlns="http://www.w3.org/2000/svg">
@@ -145,22 +139,20 @@ mod tests {
         assert_eq!(img.rgba.len(), 40 * 30 * 4);
         assert_eq!(img.rgba[0], 255);
         assert_eq!(img.rgba[3], 255);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn non_image_is_decode_error() {
-        let dir = scratch("bad");
-        let path = dir.join("x.txt");
+        let ws = TempWorkspace::new("decode_bad").unwrap();
+        let path = ws.path().join("x.txt");
         fs::write(&path, b"not an image").unwrap();
         assert!(DecodedImage::load(&path).is_err());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn png_round_trip_dimensions() {
-        let dir = scratch("png");
-        let path = dir.join("g.png");
+        let ws = TempWorkspace::new("decode_png").unwrap();
+        let path = ws.path().join("g.png");
         let img = image::RgbImage::from_fn(8, 6, |x, y| {
             image::Rgb([(x * 20) as u8, (y * 30) as u8, 100])
         });
@@ -168,7 +160,6 @@ mod tests {
         let decoded = DecodedImage::load(&path).expect("png");
         assert_eq!((decoded.width, decoded.height), (8, 6));
         assert_eq!(decoded.rgba.len(), 8 * 6 * 4);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -191,11 +182,10 @@ mod tests {
 
     #[test]
     fn sandboxed_extension_without_worker_is_error() {
-        let dir = scratch("avif");
-        let path = dir.join("x.avif");
+        let ws = TempWorkspace::new("decode_avif").unwrap();
+        let path = ws.path().join("x.avif");
         fs::write(&path, b"not really avif").unwrap();
         // Worker binary is absent in unit tests; path still routes through sandbox.
         assert!(DecodedImage::load(&path).is_err());
-        let _ = fs::remove_dir_all(&dir);
     }
 }

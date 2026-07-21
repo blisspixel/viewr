@@ -2,13 +2,17 @@
 //! every core-encodable format and size at test time (nothing is committed),
 //! then confirm that every file opens to the expected dimensions and that the
 //! crop and save-as pipeline round-trips.
+//!
+//! Temp dirs use [`viewr::ephemeral::TempWorkspace`] so debris is always removed,
+//! including on panic.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use image::{DynamicImage, Rgb, RgbImage};
 use viewr::decode::DecodedImage;
 use viewr::edit::{self, Rect};
+use viewr::ephemeral::TempWorkspace;
 
 const FORMATS: &[&str] = &["png", "jpg", "bmp", "tiff", "gif", "qoi", "tga", "ppm"];
 const SIZES: &[(u32, u32)] = &[(16, 16), (640, 426), (1920, 1080)];
@@ -32,52 +36,40 @@ fn save_one(img: &RgbImage, path: &Path) {
     }
 }
 
-/// A fresh, isolated directory for one test (named after the test so parallel
-/// runs do not collide), cleaned before use.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("viewr_test_{}_{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
 #[test]
 fn every_format_and_size_decodes_to_expected_dimensions() {
-    let dir = scratch("decode");
+    let ws = TempWorkspace::new("corpus_decode").unwrap();
     for &(w, h) in SIZES {
         let img = gradient(w, h);
         for fmt in FORMATS {
-            let path = dir.join(format!("g_{w}x{h}.{fmt}"));
+            let path = ws.path().join(format!("g_{w}x{h}.{fmt}"));
             save_one(&img, &path);
 
             let decoded = DecodedImage::load(&path)
-                .unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
-            assert_eq!(decoded.width, w, "width for {}", path.display());
-            assert_eq!(decoded.height, h, "height for {}", path.display());
+                .unwrap_or_else(|e| panic!("failed to open {fmt} {w}x{h}: {e}"));
+            assert_eq!(decoded.width, w, "width for {fmt} {w}x{h}");
+            assert_eq!(decoded.height, h, "height for {fmt} {w}x{h}");
             assert_eq!(
                 decoded.rgba.len(),
                 (w * h * 4) as usize,
-                "buffer length for {}",
-                path.display()
+                "buffer length for {fmt} {w}x{h}"
             );
         }
     }
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn opening_a_non_image_is_a_clean_error_not_a_panic() {
-    let dir = scratch("notimage");
-    let path = dir.join("notes.txt");
+    let ws = TempWorkspace::new("corpus_notimage").unwrap();
+    let path = ws.path().join("notes.txt");
     fs::write(&path, b"this is not an image").unwrap();
     assert!(DecodedImage::load(&path).is_err());
-    let _ = fs::remove_dir_all(&dir);
 }
 
 /// Hostile / truncated inputs must fail as `Error::Decode`, never panic.
 #[test]
 fn adversarial_bytes_do_not_panic() {
-    let dir = scratch("hostile");
+    let ws = TempWorkspace::new("corpus_hostile").unwrap();
     let cases: &[(&str, &[u8])] = &[
         ("empty.png", b""),
         ("trunc.jpg", b"\xff\xd8\xff"),
@@ -95,7 +87,7 @@ fn adversarial_bytes_do_not_panic() {
         ("trunc_svg.svg", b"<svg xmlns='http://www.w3.org/2000/svg'"),
     ];
     for (name, bytes) in cases {
-        let path = dir.join(name);
+        let path = ws.path().join(name);
         fs::write(&path, bytes).unwrap();
         let result = std::panic::catch_unwind(|| DecodedImage::load(&path));
         assert!(result.is_ok(), "decode panicked on hostile sample {name}");
@@ -104,13 +96,12 @@ fn adversarial_bytes_do_not_panic() {
             "hostile sample {name} should not decode as a valid image"
         );
     }
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn crop_then_save_as_roundtrips_across_formats() {
-    let dir = scratch("cropsave");
-    let source = dir.join("source.png");
+    let ws = TempWorkspace::new("corpus_cropsave").unwrap();
+    let source = ws.path().join("source.png");
     save_one(&gradient(200, 120), &source);
 
     let original = DecodedImage::load(&source).unwrap();
@@ -127,17 +118,16 @@ fn crop_then_save_as_roundtrips_across_formats() {
 
     // Save the crop into several formats, reload each, confirm dimensions hold.
     for fmt in ["png", "jpg", "bmp", "tiff"] {
-        let out = dir.join(format!("crop.{fmt}"));
+        let out = ws.path().join(format!("crop.{fmt}"));
         edit::save(&cropped, &out).unwrap_or_else(|e| panic!("save {fmt}: {e}"));
         let reloaded = DecodedImage::load(&out).unwrap();
         assert_eq!((reloaded.width, reloaded.height), (100, 60), "format {fmt}");
     }
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn lossless_save_preserves_pixels_exactly() {
-    let dir = scratch("lossless");
+    let ws = TempWorkspace::new("corpus_lossless").unwrap();
     let original = DecodedImage {
         rgba: gradient(64, 48)
             .into_raw()
@@ -147,28 +137,26 @@ fn lossless_save_preserves_pixels_exactly() {
         width: 64,
         height: 48,
     };
-    let out = dir.join("roundtrip.png");
+    let out = ws.path().join("roundtrip.png");
     edit::save(&original, &out).unwrap();
     let reloaded = DecodedImage::load(&out).unwrap();
     assert_eq!(
         reloaded.rgba, original.rgba,
         "PNG round-trip must be lossless"
     );
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn svg_decodes_to_expected_dimensions() {
-    let dir = scratch("svgdecode");
+    let ws = TempWorkspace::new("corpus_svg").unwrap();
     let svg_content = r#"<svg width="200" height="150" xmlns="http://www.w3.org/2000/svg">
         <rect width="200" height="150" fill="red" />
     </svg>"#;
-    let path = dir.join("test.svg");
+    let path = ws.path().join("test.svg");
     fs::write(&path, svg_content).unwrap();
 
     let decoded = DecodedImage::load(&path).expect("failed to open SVG");
     assert_eq!(decoded.width, 200, "SVG width");
     assert_eq!(decoded.height, 150, "SVG height");
     assert_eq!(decoded.rgba.len(), (200 * 150 * 4), "SVG buffer size");
-    let _ = fs::remove_dir_all(&dir);
 }

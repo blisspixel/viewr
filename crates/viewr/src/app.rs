@@ -211,7 +211,12 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to load {}: {}", path.display(), e);
+                    // Paths never go to logs (privacy). Surface failures via toast.
+                    log::error!("failed to load image");
+                    self.show_toast(format!("Could not open image: {e}"));
+                    if let Some(r) = self.renderer.as_ref() {
+                        r.window().request_redraw();
+                    }
                     return;
                 }
             }
@@ -332,11 +337,12 @@ impl App {
             return;
         };
         let flagged = self.flags.toggle(&path);
-        log::info!(
-            "{} {}",
-            if flagged { "Flagged" } else { "Unflagged" },
-            path.display()
-        );
+        // Session-only memory; never write flag state to disk.
+        self.show_toast(if flagged {
+            format!("Flagged · {} total", self.flags.len())
+        } else {
+            format!("Unflagged · {} remaining", self.flags.len())
+        });
         if let Some(r) = self.renderer.as_mut() {
             r.window().request_redraw();
         }
@@ -348,7 +354,8 @@ impl App {
         };
 
         if let Err(e) = crate::curate::move_to_trash(&path) {
-            log::error!("Failed to move file to trash: {e}");
+            log::error!("failed to move file to trash");
+            self.show_toast(format!("Trash failed: {e}"));
             return;
         }
 
@@ -370,7 +377,8 @@ impl App {
         let current_index = self.playlist.as_ref().map_or(0, |p| p.index);
         let (ok, err) = crate::curate::trash_many(&flagged);
         if let Some(e) = err {
-            log::error!("Batch trash partial failure: {e}");
+            log::error!("batch trash partial failure");
+            self.show_toast(format!("Some files could not be trashed: {e}"));
         }
         if let Some(last) = ok.last() {
             self.last_trashed = Some(TrashedFile {
@@ -586,7 +594,8 @@ impl App {
                 }
                 Err((path, err)) => {
                     self.thumbs_in_flight.remove(&path);
-                    log::debug!("thumb failed for {}: {err}", path.display());
+                    // Filename-only (no directory) if the user opted into RUST_LOG.
+                    log::debug!("thumb failed: {err}");
                 }
             }
         }
@@ -649,7 +658,8 @@ impl App {
             return;
         }
         if let Err(e) = crate::curate::permanent_delete(&path) {
-            log::error!("Permanent delete failed: {e}");
+            log::error!("permanent delete failed");
+            self.show_toast(format!("Delete failed: {e}"));
             return;
         }
         self.flags.remove(&path);
@@ -690,7 +700,8 @@ impl App {
         };
 
         if let Err(e) = crate::curate::restore_from_trash(&trashed.original_path) {
-            log::error!("Failed to restore file from trash: {e}");
+            log::error!("failed to restore from trash");
+            self.show_toast(format!("Restore failed: {e}"));
             self.last_trashed = Some(trashed);
             return;
         }
@@ -719,25 +730,16 @@ impl App {
         });
     }
 
-    fn star_current(&self) {
-        use std::io::Write;
-        if let Some(path) = &self.image_path
-            && let Some(parent) = path.parent()
-            && let Some(file_name) = path.file_name()
-        {
-            let picks_file = parent.join("_picks.txt");
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(picks_file)
-            {
-                let name = file_name.to_string_lossy();
-                let _ = writeln!(file, "{name}");
-            }
-        }
+    /// Mark the current image as a pick for this session only.
+    ///
+    /// Deliberately never writes `_picks.txt` or any other side-file next to
+    /// the user's photos. Flag with `X` for the batch-cull workflow.
+    fn star_current(&mut self) {
+        // Alias to the in-memory flag set so S and X stay privacy-safe.
+        self.toggle_flag_current();
     }
 
-    fn save_as(&self) {
+    fn save_as(&mut self) {
         if let Some(path) = &self.image_path
             && let Some(image) = &self.current_image
         {
@@ -750,9 +752,14 @@ impl App {
                     .add_filter("WebP", &["webp"])
                     .add_filter("BMP", &["bmp"])
                     .save_file()
-                && let Err(e) = crate::edit::save(image, &save_path)
             {
-                log::error!("Failed to save image: {e}");
+                match crate::edit::save(image, &save_path) {
+                    Ok(()) => self.show_toast("Saved"),
+                    Err(e) => {
+                        log::error!("failed to save image");
+                        self.show_toast(format!("Save failed: {e}"));
+                    }
+                }
             }
         }
     }
@@ -1450,7 +1457,11 @@ impl ApplicationHandler for App {
                         }
                         self.current_image = Some(image);
                     }
-                    Err(e) => log::error!("{e}"),
+                    Err(e) => {
+                        // Decode errors may embed a path from lower layers; toast is enough.
+                        log::error!("decode failed");
+                        self.show_toast(format!("Could not decode: {e}"));
+                    }
                 }
                 if let Some(r) = self.renderer.as_mut() {
                     r.window().request_redraw();

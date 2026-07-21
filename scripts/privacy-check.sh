@@ -9,11 +9,13 @@ echo "== cargo deny (network crate ban + licenses) =="
 cargo deny check
 
 echo "== packaging artifacts must omit network grants =="
-if grep -q -- '--share=network' packaging/flatpak/com.github.blisspixel.viewr.yml; then
-  echo "Flatpak manifest must not contain --share=network" >&2
+# Only flag real finish-args, not comments that say "do NOT add --share=network".
+if grep -v '^\s*#' packaging/flatpak/com.github.blisspixel.viewr.yml | grep -q -- '--share=network'; then
+  echo "Flatpak manifest must not grant --share=network" >&2
   exit 1
 fi
-if grep -Eq 'network\.(client|server)' packaging/macos/viewr.entitlements; then
+# Real grants are <key>…network.client|server</key> outside HTML comments.
+if grep -v '<!--' packaging/macos/viewr.entitlements | grep -Eq '<key>com\.apple\.security\.network\.(client|server)</key>'; then
   echo "macOS entitlements must not grant network client/server" >&2
   exit 1
 fi
@@ -26,5 +28,16 @@ for crate in reqwest hyper rustls native-tls; do
     exit 1
   fi
 done
+
+echo "== source must not write activity side-files or always-on logging =="
+if grep -q 'OpenOptions' crates/viewr/src/app.rs; then
+  echo "app.rs must not use OpenOptions (activity side-files are forbidden)" >&2
+  exit 1
+fi
+if grep -q 'default_filter_or' crates/viewr/src/main.rs; then
+  echo "main.rs must not enable env_logger by default (opt-in only via RUST_LOG/VIEWR_LOG)" >&2
+  exit 1
+fi
+test -f crates/viewr/src/ephemeral.rs
 
 echo "privacy-check: OK"

@@ -169,7 +169,10 @@ pub fn trash_many(paths: &[PathBuf]) -> (Vec<PathBuf>, Option<String>) {
             Ok(()) => ok.push(path.clone()),
             Err(e) => {
                 if first_err.is_none() {
-                    first_err = Some(format!("{}: {e}", path.display()));
+                    let name = path
+                        .file_name()
+                        .map_or_else(|| "file".into(), |s| s.to_string_lossy().into_owned());
+                    first_err = Some(format!("{name}: {e}"));
                 }
             }
         }
@@ -183,15 +186,8 @@ mod tests {
         FlagSet, TrashedFile, index_after_removals, move_to_trash, permanent_delete,
         remove_from_playlist, restore_from_trash, trash_many,
     };
-    use std::fs;
+    use crate::ephemeral::TempWorkspace;
     use std::path::PathBuf;
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("viewr_curate_{name}_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     #[test]
     fn trashed_file_record_holds_path() {
@@ -241,38 +237,36 @@ mod tests {
 
     #[test]
     fn permanent_delete_removes_file() {
-        let dir = scratch("perm");
-        let path = dir.join("gone.png");
+        let ws = TempWorkspace::new("curate_perm").unwrap();
+        let path = ws.path().join("gone.png");
         image::RgbImage::from_pixel(2, 2, image::Rgb([9, 9, 9]))
             .save(&path)
             .unwrap();
         assert!(path.is_file());
         permanent_delete(&path).unwrap();
         assert!(!path.is_file());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn trash_many_partial_success() {
-        let dir = scratch("many");
-        let good = dir.join("ok.png");
+        let ws = TempWorkspace::new("curate_many").unwrap();
+        let good = ws.path().join("ok.png");
         image::RgbImage::from_pixel(2, 2, image::Rgb([1, 1, 1]))
             .save(&good)
             .unwrap();
-        let missing = dir.join("missing.png");
+        let missing = ws.path().join("missing.png");
         let (ok, err) = trash_many(&[good.clone(), missing]);
         // Either trash works (ok contains good) or environment forbids trash.
         if err.is_none() {
             assert!(ok.contains(&good));
             assert!(!good.is_file());
         }
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn trash_and_restore_roundtrip() {
-        let dir = scratch("roundtrip");
-        let path = dir.join("photo.png");
+        let ws = TempWorkspace::new("curate_roundtrip").unwrap();
+        let path = ws.path().join("photo.png");
         let img = image::RgbImage::from_pixel(4, 4, image::Rgb([1, 2, 3]));
         img.save(&path).unwrap();
         assert!(path.is_file());
@@ -287,6 +281,5 @@ mod tests {
             }
             Err(e) => eprintln!("trash API unavailable in this environment: {e}"),
         }
-        let _ = fs::remove_dir_all(&dir);
     }
 }

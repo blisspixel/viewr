@@ -72,7 +72,11 @@ pub fn crop(src: &DecodedImage, rect: Rect) -> DecodedImage {
 pub fn save(image: &DecodedImage, path: &Path) -> Result<(), Error> {
     let buffer = RgbaImage::from_raw(image.width, image.height, image.rgba.clone())
         .ok_or_else(|| Error::Encode("pixel buffer does not match dimensions".to_string()))?;
-    let encode = |e: image::ImageError| Error::Encode(format!("{}: {e}", path.display()));
+    // Filename only — never the full path — so encode errors are safe in logs/toasts.
+    let name = path
+        .file_name()
+        .map_or_else(|| "output".into(), |s| s.to_string_lossy().into_owned());
+    let encode = |e: image::ImageError| Error::Encode(format!("{name}: {e}"));
 
     let format = ImageFormat::from_path(path).map_err(encode)?;
     let image = DynamicImage::ImageRgba8(buffer);
@@ -186,8 +190,10 @@ mod tests {
             width: 4,
             height: 4,
         };
-        let path = std::env::temp_dir().join("viewr_bad.png");
+        let ws = crate::ephemeral::TempWorkspace::new("edit_bad").unwrap();
+        let path = ws.path().join("viewr_bad.png");
         assert!(save(&bad, &path).is_err());
+        // ws drops → cleans any partial write
     }
 
     #[test]
@@ -199,8 +205,9 @@ mod tests {
             width: 2,
             height: 1,
         };
-        let path = std::env::temp_dir().join(format!("viewr_jpeg_{}.jpg", std::process::id()));
+        let ws = crate::ephemeral::TempWorkspace::new("edit_jpeg").unwrap();
+        let path = ws.path().join("viewr_jpeg.jpg");
         assert!(save(&img, &path).is_ok());
-        let _ = std::fs::remove_file(path);
+        // ws drops → removes the jpeg
     }
 }

@@ -19,6 +19,9 @@ use crate::decode::DecodedImage;
 use crate::error::Error;
 use crate::worker_limit;
 
+/// Soft cap: 256 megapixels × 4 bytes ≈ 1 GiB RGBA — above this is hostile input.
+const MAX_WORKER_RGBA_BYTES: usize = 256 * 1024 * 1024 * 4;
+
 /// Decode via the isolated `viewr-decode` worker (AVIF / HEIC / RAW paths).
 pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
     use shared_memory::ShmemConf;
@@ -58,7 +61,18 @@ pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
         let height: u32 = parts[2]
             .parse()
             .map_err(|_| Error::Decode("invalid height".into()))?;
-        let expected_size = (width * height * 4) as usize;
+        // Reject zero / absurd sizes before allocating (overflow-safe).
+        if width == 0 || height == 0 {
+            return Err(Error::Decode("invalid image dimensions".into()));
+        }
+        let expected_size = u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|px| px.checked_mul(4))
+            .and_then(|b| usize::try_from(b).ok())
+            .ok_or_else(|| Error::Decode("image dimensions too large".into()))?;
+        if expected_size > MAX_WORKER_RGBA_BYTES {
+            return Err(Error::Decode("image dimensions exceed safety limit".into()));
+        }
 
         let shmem = ShmemConf::new()
             .os_id(shm_id)
@@ -72,6 +86,7 @@ pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
         // # Safety
         // `ShmemConf::open` mapped a region of at least `expected_size` bytes owned
         // by the worker until we ACK. We copy out immediately, then release.
+        // `expected_size` is bounded above and checked against the mapping length.
         let mut rgba = vec![0_u8; expected_size];
         let slice = unsafe { std::slice::from_raw_parts(shmem.as_ptr(), expected_size) };
         rgba.copy_from_slice(slice);

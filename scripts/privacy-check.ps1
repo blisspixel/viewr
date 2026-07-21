@@ -11,15 +11,27 @@ cargo deny check
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "== packaging artifacts must omit network grants =="
-$flatpak = Get-Content "packaging/flatpak/com.github.blisspixel.viewr.yml" -Raw
-if ($flatpak -match "--share=network") {
-    Write-Error "Flatpak manifest must not contain --share=network"
-    exit 1
+# Only flag real finish-args, not comments that say "do NOT add --share=network".
+$flatpakLines = Get-Content "packaging/flatpak/com.github.blisspixel.viewr.yml"
+foreach ($line in $flatpakLines) {
+    $t = $line.Trim()
+    if ($t.StartsWith("#")) { continue }
+    if ($t -match "--share=network") {
+        Write-Error "Flatpak manifest must not grant --share=network"
+        exit 1
+    }
 }
-$ents = Get-Content "packaging/macos/viewr.entitlements" -Raw
-if ($ents -match "network\.client" -or $ents -match "network\.server") {
-    Write-Error "macOS entitlements must not grant network client/server"
-    exit 1
+# Real grants look like <key>com.apple.security.network.client</key> outside comments.
+$entsLines = Get-Content "packaging/macos/viewr.entitlements"
+foreach ($line in $entsLines) {
+    $t = $line.Trim()
+    if ($t.StartsWith("<!--") -or $t.StartsWith("-->") -or $t -match "^<!--" -or $t -match "-->") {
+        continue
+    }
+    if ($t -match "<key>com\.apple\.security\.network\.(client|server)</key>") {
+        Write-Error "macOS entitlements must not grant network client/server"
+        exit 1
+    }
 }
 if (-not (Test-Path "packaging/windows/APPCONTAINER.md")) {
     Write-Error "Missing Windows AppContainer plan"
@@ -36,6 +48,22 @@ foreach ($crate in @("reqwest", "hyper", "rustls", "native-tls")) {
             exit 1
         }
     }
+}
+
+Write-Host "== source must not write activity side-files or always-on logging =="
+# No OpenOptions append-to-disk activity log next to user photos.
+if (Select-String -Path "crates/viewr/src/app.rs" -Pattern "OpenOptions" -Quiet) {
+    Write-Error "app.rs must not use OpenOptions (activity side-files are forbidden)"
+    exit 1
+}
+$main = Get-Content "crates/viewr/src/main.rs" -Raw
+if ($main -match "default_filter_or") {
+    Write-Error "main.rs must not enable env_logger by default (opt-in only via RUST_LOG/VIEWR_LOG)"
+    exit 1
+}
+if (-not (Test-Path "crates/viewr/src/ephemeral.rs")) {
+    Write-Error "missing ephemeral TempWorkspace cleaner"
+    exit 1
 }
 
 Write-Host "privacy-check: OK"

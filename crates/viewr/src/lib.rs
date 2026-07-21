@@ -11,6 +11,7 @@ pub mod cli;
 pub mod curate;
 pub mod decode;
 pub mod edit;
+pub mod ephemeral;
 pub mod error;
 pub mod fs;
 pub mod gpu;

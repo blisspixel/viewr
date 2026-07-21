@@ -135,7 +135,9 @@ Usage:
   viewr version                Show version
 
 Privacy:
-  viewr has no network client. `update` only prints build/update instructions.
+  No network client, no telemetry, no activity log by default.
+  Doctor/benchmark temp files are always deleted on exit.
+  `update` only prints build instructions (never downloads).
 
 Examples:
   viewr photos\\IMG_001.jpg
@@ -249,10 +251,9 @@ pub fn doctor() -> bool {
 }
 
 fn decode_self_test() -> Result<(u32, u32, f64), String> {
-    let dir = std::env::temp_dir().join(format!("viewr_doctor_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join("probe.png");
+    // RAII: directory is always removed on drop, even if load fails mid-way.
+    let ws = crate::ephemeral::TempWorkspace::new("doctor").map_err(|e| e.to_string())?;
+    let path = ws.path().join("probe.png");
     image::RgbImage::from_fn(64, 48, |x, y| {
         image::Rgb([(x % 255) as u8, (y % 255) as u8, 90])
     })
@@ -262,25 +263,28 @@ fn decode_self_test() -> Result<(u32, u32, f64), String> {
     let start = Instant::now();
     let img = DecodedImage::load(&path).map_err(|e| e.to_string())?;
     let ms = start.elapsed().as_secs_f64() * 1000.0;
-    let dims = (img.width, img.height);
-    let _ = std::fs::remove_dir_all(&dir);
-    Ok((dims.0, dims.1, ms))
+    Ok((img.width, img.height, ms))
 }
 
 /// Benchmark decode throughput. When `dir` is `None`, builds a tiny temp corpus.
 pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
     const ITERATIONS: u32 = 5;
 
-    let owned_temp;
-    let root: &Path = if let Some(d) = dir {
-        d
+    // Keep the workspace alive for the whole function so Drop cleans up last.
+    let owned_temp = if dir.is_none() {
+        println!("benchmark: using generated temp corpus (removed on exit)");
+        Some(make_temp_corpus()?)
     } else {
-        owned_temp = make_temp_corpus()?;
-        owned_temp.as_path()
+        None
+    };
+    let root: &Path = match (dir, owned_temp.as_ref()) {
+        (Some(d), _) => d,
+        (None, Some(ws)) => ws.path(),
+        (None, None) => unreachable!("temp corpus is created when dir is None"),
     };
 
     if !root.is_dir() {
-        return Err(format!("not a directory: {}", root.display()));
+        return Err("not a directory".into());
     }
 
     let mut entries: Vec<_> = std::fs::read_dir(root)
@@ -291,7 +295,7 @@ pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
         .collect();
     entries.sort();
     if entries.is_empty() {
-        return Err(format!("no supported images in {}", root.display()));
+        return Err("no supported images in the given directory".into());
     }
 
     println!(
@@ -311,7 +315,10 @@ pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
                     pixels = u64::from(img.width) * u64::from(img.height);
                 }
                 Err(e) => {
-                    eprintln!("skip {}: {e}", path.display());
+                    let name = path
+                        .file_name()
+                        .map_or_else(|| "(file)".into(), |s| s.to_string_lossy().into_owned());
+                    eprintln!("skip {name}: {e}");
                     times.clear();
                     break;
                 }
@@ -327,27 +334,25 @@ pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
             println!("{name:<28} {pixels:>10} {ms:>12.2} {mps:>12.1}");
         }
     }
+    // owned_temp drops here → temp corpus always cleaned.
     Ok(())
 }
 
-fn make_temp_corpus() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join(format!("viewr_bench_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+fn make_temp_corpus() -> Result<crate::ephemeral::TempWorkspace, String> {
+    let ws = crate::ephemeral::TempWorkspace::new("bench").map_err(|e| e.to_string())?;
     for (name, w, h) in [
         ("a.png", 256u32, 256u32),
         ("b.png", 640, 480),
         ("c.png", 128, 128),
     ] {
-        let path = dir.join(name);
+        let path = ws.path().join(name);
         image::RgbImage::from_fn(w, h, |x, y| {
             image::Rgb([(x % 255) as u8, (y % 255) as u8, 40])
         })
         .save(&path)
         .map_err(|e| e.to_string())?;
     }
-    println!("benchmark: using temp corpus {}", dir.display());
-    Ok(dir)
+    Ok(ws)
 }
 
 fn median(mut samples: Vec<f64>) -> f64 {

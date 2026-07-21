@@ -10,9 +10,10 @@ use std::process::ExitCode;
 use viewr::cli::{self, Invocation};
 
 fn main() -> ExitCode {
-    // Respect RUST_LOG if set; otherwise stay quiet for GUI. CLI commands still
-    // print their own structured output on stdout.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // Maximum privacy default: no log output unless the user explicitly opts in.
+    // Set `RUST_LOG` or `VIEWR_LOG` (e.g. `RUST_LOG=viewr=debug`) to enable stderr
+    // diagnostics. Nothing is written to a log file.
+    init_logging_opt_in();
 
     let inv = match cli::parse_args(std::env::args_os()) {
         Ok(i) => i,
@@ -38,4 +39,17 @@ fn main() -> ExitCode {
             cli::run(other)
         }
     }
+}
+
+/// Initialize `env_logger` only when the user asked for logs.
+///
+/// Default is silence: no activity log, no path leakage to stderr, no log files.
+fn init_logging_opt_in() {
+    let filter = std::env::var("RUST_LOG")
+        .or_else(|_| std::env::var("VIEWR_LOG"))
+        .ok();
+    let Some(filter) = filter else {
+        return;
+    };
+    let _ = env_logger::Builder::new().parse_filters(&filter).try_init();
 }

@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Fixed
 
+- Initial image decode and sibling-folder discovery now start before GPU
+  initialization and wake the event loop when their background work completes.
+  The first window stays responsive with an explicit loading state, and small
+  images no longer collapse the application into a cramped layout.
+- Persistent tools, folder previews, and Image Information now reserve viewport
+  space. Expanding them refits and recenters the photo instead of covering it.
+  Empty-state guidance remains readable on a pure-white image background.
+- Image drawing is GPU-scissored to the panel-safe viewport at every zoom and pan
+  level, and crop geometry is converted from physical pixels to logical UI points
+  on high-DPI displays. Load failures now remain visible in the empty state.
+- Keyboard shortcuts remain active when a non-text control has accessibility
+  focus, while open menus and control activation keep ownership of their keys.
+  macOS now uses Command for Open File and Open Folder instead of displaying or
+  requiring a Windows-style Control shortcut.
+- Delayed egui repaints now drive the sleeping event loop, so stationary-hover
+  tooltips and other timed UI appear without unrelated input. Static toasts
+  schedule only their expiry repaint instead of forcing a continuous redraw.
+- Folder-preview textures are retained only for the bounded visible window and
+  completed off-screen thumbnail work is discarded, keeping image-cache memory
+  independent of folder length.
 - macOS bundles now receive Finder and Open With requests by adding the missing
   Launch Services selector to winit's existing application delegate, preserving
   winit lifecycle ownership and waking its event loop through `EventLoopProxy`.
@@ -16,11 +36,11 @@ All notable changes to this project are documented here. The format is human-wri
   item from the latest batch, retains failed receipts for retry, and keeps files
   that failed to move flagged instead of silently dropping them from the batch.
 - Restored the quality baseline: `cargo fmt`, pedantic `clippy -D warnings`, and the full test suite are green again.
-- Raised measured logic coverage from 79.61% to 88.16% by testing CLI behavior and decode-boundary invariants, including diagnostics, benchmark paths, resource limits, explicit in-memory format dispatch, trash receipts, and the corpus contract.
+- Raised measured logic coverage from 79.61% to 89.16% by testing CLI behavior and decode-boundary invariants, including diagnostics, benchmark paths, resource limits, explicit in-memory format dispatch, trash receipts, viewport geometry, and the corpus contract.
 - Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
 - Serialized tests that invoke global stale-debris cleanup so parallel test execution cannot erase another test's scrub-safe fixture.
 - Implemented SVG decode with pure-Rust `resvg` (corpus and unit tests pass). Default features avoid system fonts and text shaping so the trusted core stays free of unmaintained shaping crates.
-- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is 88.16% lines under that floor.
+- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is 89.16% lines under that floor.
 - Initial image decode now runs off the winit event thread, invalidates stale displayed pixels, and applies only if its path is still current. A two-slot, foreground-priority decode gate bounds aggregate work, and superseded foreground jobs cancel before file access.
 - Decode resource limits reject zero, oversized, or inconsistent pixel shapes before parent allocation and pixel-stream copy. SVG and worker inputs are capped, while the C-worker address-space ceiling also bounds allocations performed inside third-party decoders.
 - Worker-bound host files are verified as regular files and read with a bounded, fallible allocator before a worker is reserved. The IPC deadline thread now contains only cancellable child-pipe work, and encoded bytes are released immediately after transfer.
@@ -44,8 +64,19 @@ All notable changes to this project are documented here. The format is human-wri
 - CLI: `viewr help`, `doctor`, `benchmark [dir]`, `update` (local instructions only),
   `version`, `open <path>`; image path still opens the GUI. Windows console attach
   for subcommands under the GUI subsystem.
-- Interaction polish: progressive left floating toolbar (auto-hide), empty-state guidance, bottom status chip (name · size · position · zoom), trash toast, amber crop handles + ratio strip, Esc cancel crop, double-click fit/1:1 toggle, grab cursors.
-- Cursor-anchored wheel/trackpad zoom; progressive bottom filmstrip (near-bottom hover); monochrome painted toolbar icons.
+- Interaction polish: responsive File/Edit/View menus with aligned shortcuts,
+  stable filename and folder status, a high-contrast empty/loading card, trash
+  toast, an honest crop border and ratio strip, Esc cancel crop, double-click
+  fit/actual-size toggle, and grab cursors.
+- Cursor-anchored wheel/trackpad zoom; compact disclosure rails for docked Tools
+  and Folder Previews; asynchronous real thumbnails; consistent vector icons;
+  and keyboard/menu commands for fit, actual size, zoom in, and zoom out.
+- The zoom readout now reports physical image scale, so Actual Size is 100 percent
+  instead of exposing the internal multiplier relative to Fit.
+- Accessibility semantics for custom-painted tool, disclosure, and thumbnail
+  controls and exact crop bounds; visible keyboard focus; automated WCAG AA
+  contrast checks; and a native AccessKit bridge on Windows and macOS. The bridge
+  is integrated without admitting AccessKit's network-capable Unix D-Bus stack.
 - Filmstrip shows async real thumbnails (`thumbs` module); Space-hold temporary pan, tap Space resets view.
 - Linux worker: `no_new_privs`, non-dumpable, and seccomp-bpf that EPERMs classic and io_uring network paths (`seccompiler`).
 - Flag/batch cull (`X` / `B`) and Shift+Delete permanent delete with confirmation.

@@ -20,9 +20,14 @@ trash, operational core fuzzing, locally verifiable OS sandbox profiles,
 checksummed local/CI release artifacts, and the feature-gated production
 C-decoder syscall allowlist are complete. Phase 8 local install guidance,
 user-controlled file associations, and canonical documentation are complete;
-accessibility and enforced performance budgets remain.
+keyboard access, Windows/macOS native screen-reader delivery, semantic labels,
+and contrast checks are complete. A privacy-compatible Linux screen-reader bridge,
+cross-platform assistive-technology validation, and enforced performance budgets
+remain.
 
-**Next focus: Phase 8 accessibility, followed by enforced performance budgets.**
+**Next focus: lock in enforced performance budgets on the now-stable viewer path.
+Privacy-compatible Linux accessibility delivery and manual target-OS validation
+remain required platform-evidence work.**
 ## Phase 0: Foundations
 
 Establish the ground truth so quality is enforced from the very first commit.
@@ -72,17 +77,21 @@ cover ordering and cache eviction.
 
 Make viewing excellent, not merely functional.
 
-- [x] GPU pan by dragging with the Hand Tool, zoom by scroll and keyboard, spacebar toggles fit against
-  actual pixels.
+- [x] GPU pan by dragging or holding Space, focal-point scroll zoom, and explicit
+  keyboard commands for fit (`0`), actual pixels (`1`), zoom in (`+`), and zoom
+  out (`-`). A Space tap resets fit; double-click toggles fit and actual pixels.
 - [x] Rotate 90 degrees either direction, and flip.
 - [x] Fullscreen and a frameless immersive mode that is just the picture.
-- [x] System-driven light and dark theme via winit, updating live when the
-  operating system setting changes.
-- [x] Slick left-aligned floating toolbar built with `egui` that auto-hides, keyboard first, still discoverable.
+- [x] System-driven default image background via winit, updating live when the
+  operating-system setting changes, with explicit black, neutral-gray, and white
+  alternatives. Chrome retains a stable high-contrast dark surface.
+- [x] Compact docked `egui` controls with keyboard shortcuts and explicit
+  disclosure rails. Persistent chrome reserves viewport space and never covers
+  the image.
 
-Definition of done: viewing feels polished and obvious, the theme matches and
-follows the operating system live, and there is no visible interface when the user
-just wants the photo.
+Definition of done: viewing feels polished and obvious, the default image
+background follows the operating system live, persistent chrome stays compact and
+collapsible, and no control or preview covers the photo.
 
 ## Phase 4: Curation, delete and cull
 
@@ -199,7 +208,12 @@ install from source or a simple GitHub-style release artifact.
   declarations; Flatpak desktop assets; native open delivery; and opt-in docs.
 - [x] Canonical tracked documentation and a human-written changelog, with no
   analytics, remote scripts, or tracker-bearing website required for 1.0.
-- [ ] Accessibility pass: keyboard complete, screen-reader labels, high-contrast check.
+- [ ] Accessibility pass:
+  - [x] Keyboard-complete menus, docked controls, navigation, zoom, and crop.
+  - [x] Screen-reader labels and state for custom controls and exact crop bounds.
+  - [x] Automated WCAG AA checks for the production chrome palette.
+  - [x] Native AccessKit delivery on Windows and macOS without adding a network-capable dependency.
+  - [ ] Privacy-compatible Linux assistive-technology delivery plus manual screen-reader validation on all three platforms.
 - [ ] Performance budget locked in and regression-tested in CI: cold start, first
   pixel, and memory all within target.
 
@@ -231,11 +245,15 @@ silence, and so that scope creep stays visible and deliberate.
   only if they stay simple and never turn viewr into an editor.
 - A simple slideshow.
 - Localization.
+- A user-initiated **Check for Updates** command after a canonical release
+  repository and signed release policy exist. It must never run at launch or in
+  the background, and it must show the destination before opening a browser or
+  downloading anything.
 
 ## Explicit non-goals, the anti-bloat charter
 
 viewr will not add, now or later: accounts, cloud sync, sharing services, ads,
-discover or feed surfaces, face or AI grouping, background services, phone-home
-update checks, telemetry or analytics of any kind, or a plugin marketplace. These
+discover or feed surfaces, face or AI grouping, background services, automatic or
+background update checks, telemetry or analytics of any kind, or a plugin marketplace. These
 are the features that turned every big-company photo app into the thing we are
 replacing. Leaving them out is a permanent part of the product, not a stage of it.

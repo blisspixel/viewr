@@ -13,6 +13,15 @@ measure, how, and the current numbers, so a regression is visible rather than fe
 - (Planned) Steady-state memory across a large folder, which the bounded texture
   cache is designed to keep flat.
 
+## Current startup path
+
+The requested image decode and sibling-folder scan are scheduled before renderer
+initialization. They run independently, report completion through a typed event-loop
+wake, and never require an existing window to make progress. The window presents a
+high-contrast loading state until the texture is ready. This removes avoidable
+serialization, but it is not a substitute for the cold-start and first-pixel gate
+still required by Phase 8.
+
 ## How to reproduce
 
 ```

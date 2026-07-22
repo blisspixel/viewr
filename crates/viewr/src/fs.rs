@@ -265,10 +265,11 @@ fn take_number(it: &mut Peekable<Chars>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::canonical_existing_file_path;
     use super::{
-        CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_existing_file_path, canonical_file_path,
-        is_core_format, is_supported_image, is_worker_format, natural_cmp, scan_images,
-        supported_extensions,
+        CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_file_path, is_core_format,
+        is_supported_image, is_worker_format, natural_cmp, scan_images, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;

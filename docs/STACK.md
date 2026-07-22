@@ -50,7 +50,7 @@ Secondary wins that also matter:
 [wgpu](https://wgpu.rs/) for rendering, with our own render pipeline and an `egui` overlay for chrome.**
 
 viewr is not a forms application with an image in it. It is a GPU image canvas with
-a small amount of chrome (toolbar, toasts, crop handles, optional filmstrip). The
+a small amount of chrome (menus, docked tools, toasts, a crop border, and optional folder previews). The
 parts that have to be exceptional (decode-to-texture upload, high-quality
 resampling, pan and zoom latency, flat memory under a very large folder, and color
 management) are exactly the parts a general GUI framework abstracts away and
@@ -63,9 +63,14 @@ pipeline instead of inheriting one.
   layer rather than adding one.
 - **wgpu** gives us the GPU, and we write our own pipeline for the image, so
   texture upload, mipmaps, resampling quality, and color are decisions we make.
-- **egui** provides the UI overlay, giving us an immediate-mode GUI for our left-aligned floating toolbar (Hand Tool, Crop Tool) and dialogs.
-- Accessibility is real, not skipped, via **[accesskit](https://lib.rs/crates/accesskit)**
-  wired to winit.
+- **egui** provides immediate-mode desktop chrome for the docked menu, tools,
+  folder previews, Image Information panel, crop controls, and dialogs. Persistent
+  panels reserve image-viewport space instead of floating over the photo.
+- **AccessKit** nodes describe custom controls and crop state. A direct,
+  default-feature-disabled `accesskit_winit` adapter delivers them to native
+  assistive technology on Windows and macOS without pulling the network-capable
+  Unix D-Bus stack into the dependency graph. Linux native delivery remains an
+  explicit Phase 8 gap rather than weakening the privacy invariant.
 
 This yields the smallest, most auditable dependency tree, which directly serves the
 trust and privacy goals, and total control over the details that separate
@@ -131,17 +136,14 @@ are feature-gated; RAW remains explicitly deferred. Every format must ship with
 golden-file decode tests and enter the fuzz corpus before it is claimed complete
 (see STANDARDS.md).
 
-## Decision 5 — System light/dark theme
+## Decision 5: System light/dark image background
 
-**Chosen:** the [`dark-light`](https://docs.rs/dark-light) crate to detect the OS
-color-scheme preference, then select our light or dark palette accordingly.
-`dark-light` supports macOS, Windows, Linux, and BSDs, and on Linux queries the
-XDG Desktop Portal over D-Bus — which means it works **inside a Flatpak sandbox
-without filesystem access**, aligning with our sandboxing goals. We watch for
-changes so the app re-themes live when the user flips their OS setting.
-
-(This is the one area where Slint would have been free out of the box; the ~15
-lines of wiring here are a small price for keeping a permissive license.)
+**Chosen:** use winit's native window theme signal, which is already part of the
+event loop, to select the default image background and react to theme changes. No
+additional theme-detection dependency or background service is required. The user
+can override the image background with black, neutral gray, or white. Persistent
+chrome remains dark so control contrast is stable against every photo and every
+background choice.
 
 ## Decision 6 — Deletes: the `trash` crate + sandbox
 
@@ -173,11 +175,11 @@ users who explicitly want it.
 | Windowing + input | `winit` | de-facto standard, minimal |
 | GPU rendering | `wgpu` | our own pipeline on top |
 | Text rendering | `egui` | immediate mode GUI overlay |
-| Accessibility | `accesskit` | wired to winit |
+| Accessibility | `accesskit` / `accesskit_winit` | semantic tree everywhere; native Windows/macOS bridge; Linux bridge pending |
 | Decode (common formats) | `image` | pure-Rust |
 | Decode JPEG XL | `jxl-oxide` | pure-Rust |
 | Trash / recycle | `trash` | recoverable deletes |
-| OS theme | `dark-light` | XDG portal on Linux |
+| OS theme | `winit` window theme | default image background only; no extra dependency |
 | File dialogs | `rfd` | native open/save dialogs |
 | EXIF retain (opt-in) | `little_exif` | Save As strips by default; retain is session-only |
 | Error handling | `thiserror` / `anyhow` | app-level ergonomics |

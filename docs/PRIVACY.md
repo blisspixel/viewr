@@ -51,6 +51,10 @@ A promise you can verify beats a promise you have to trust.
    job audits the full dependency tree (e.g. `cargo-deny` / a dependency check) and
    **fails the build** if a networking-capable crate appears. The absence of
    networking is a tested invariant, not a habit.
+   Native accessibility preserves this rule: Windows and macOS use AccessKit's
+   platform adapters with default features disabled. Linux native screen-reader
+   delivery remains pending because the current upstream Unix adapter introduces
+   a general D-Bus transport stack that can parse network addresses.
 2. **Network-denied packaging profiles.** The repository contains local packaging
    profiles with no network entitlement:
    - **macOS** — App Sandbox, no `com.apple.security.network.*` entitlement.
@@ -112,9 +116,9 @@ viewr does the opposite by default: on **Save As / convert**, the app re-encodes
 the raw image pixels and **drops EXIF, GPS, and all other metadata**. Your address
 and identifying fields do not ride along inside a photo you share unless you ask.
 
-**Retain EXIF on Save As** is an explicit session option (File menu or Image Info
-panel). It defaults to **off**. Turning it on keeps EXIF tags for the rest of that
-session only — the choice is never written to a settings file.
+**Keep camera metadata when saving** is an explicit checkbox in the Image
+Information panel. It defaults to **off**. Turning it on keeps supported EXIF tags
+for the rest of that session only; the choice is never written to a settings file.
 
 ## Updates
 
@@ -122,7 +126,9 @@ viewr does **not** check for updates in the background or contact any server on
 launch. The `viewr update` CLI command only prints how to rebuild or replace the
 binary locally; it never downloads anything. Updates are delivered through the
 platform's normal channels (your package manager, store, or a manual download you
-initiate). The app closed is the app doing nothing at all.
+initiate). A future graphical check is eligible only after a canonical signed
+release source exists, and it must run solely on an explicit user command. The app
+closed is the app doing nothing at all.
 
 ## Freedom
 

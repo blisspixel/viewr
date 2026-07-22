@@ -194,3 +194,12 @@ screen. Current release archives are portable files and do not register file
 associations or modify the operating system. The source-built platform bundles
 and desktop entry make viewr an available handler, but changing a default always
 requires an explicit user choice.
+
+## GPU-driver overlays
+
+viewr requests the operating system's low-power graphics adapter, but the platform
+and graphics driver make the final adapter choice. NVIDIA App, GeForce Experience,
+and similar driver software may display their own overlay when a new GPU-backed
+application starts. That overlay is not rendered by viewr, and viewr does not use
+vendor APIs or install an overlay. Disable it in the graphics vendor's own overlay
+settings if desired; viewr does not attempt unsupported suppression tricks.

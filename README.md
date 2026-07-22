@@ -3,9 +3,11 @@
 **A photo viewer that just shows your photos.**
 
 viewr opens an image and gets out of the way. No account. No cloud. No AI-enhanced
-memories. No telemetry. No background service. No update nag. It launches instantly,
-shows the picture, lets you flip through a folder, crop, convert, and delete the
-junk, and that is the whole product, on purpose.
+memories. No telemetry. No background service. No update nag. It starts image
+decoding while the window initializes, lets you flip through a folder,
+crop, convert, and delete the junk, and that is the whole product, on purpose. Cold
+start and first-pixel latency are being locked into reproducible Phase 8 budgets;
+until those gates land, the repository does not claim universal launch numbers.
 
 It is built for people who are tired of watching a simple image viewer turn into an
 advertising surface with a photos app bolted on. It looks simple, and that simplicity
@@ -16,9 +18,9 @@ is the visible result of a great deal of underlying discipline, not the absence 
 These are not marketing lines. Every one of them is a constraint the codebase is
 held to, and most are enforced in CI.
 
-1. It just works. Double-click an image and it is on screen before you finish
-   letting go of the mouse. Arrow keys flip through the folder. Nothing to
-   configure to get the obvious behavior.
+1. It just works. Double-click an image and decode begins without waiting for the
+   renderer or sibling-folder scan. Arrow keys flip through the folder. Nothing
+   needs configuration for the obvious behavior.
 2. Maximum privacy, by construction. The shipped dependency graph contains no
    networking client, and CI fails if a network-capable dependency enters it.
    Network-denied OS packaging profiles add a syscall boundary when those packages
@@ -42,17 +44,29 @@ held to, and most are enforced in CI.
 ## What it does, and deliberately does not
 
 Does: open essentially any image format you have (see below), pan and zoom on the
-GPU, flip through a folder instantly, rotate, crop, Save As and convert with an
-optional metadata strip, and delete to the system trash with undo.
+GPU, flip through a folder, rotate, crop, Save As and convert with metadata stripped
+by default, and delete to the system trash with undo.
 
 Network-denied packages expose both **Open File** and **Open Folder**. Opening a
 folder is the explicit, session-only consent path that enables sibling navigation
 without granting viewr broad access to a photo library.
 
 Does not, and will not: accounts, cloud sync, sharing services, ads, discover
-feeds, face grouping, phone-home update checks, telemetry, or a settings screen
+feeds, face grouping, automatic or background update checks, telemetry, or a settings screen
 with two hundred switches. If a big-company photos app is famous for it, that is a
 strong signal we do not want it.
+
+## Interaction
+
+The image always owns a dedicated viewport. The menu bar, Tools rail, optional
+Folder Previews rail, and Image Information panel are docked around that viewport;
+expanding a panel refits the image instead of covering it. Tools and folder previews
+start collapsed and can be expanded with their chevrons or with `T` and `G`.
+`I` opens Image Information, where the explicit session-only export-metadata choice
+lives. The View menu exposes Fit Image to View (`0`), Actual Size (`1`), Zoom In
+(`+`), and Zoom Out (`-`) so zoom never depends on a mouse or trackpad. The empty,
+loading, and load-error states use an opaque high-contrast surface, so they remain
+readable even when the image background is white.
 
 ## Formats
 
@@ -68,7 +82,8 @@ worker (feature-gated C backends; RAW deferred). Full table:
 - Language: Rust, for memory safety on the exact code that touches untrusted files,
   one compact desktop binary plus an isolated decode helper, no runtime, no GC pauses.
 - UI foundation: [winit](https://lib.rs/crates/winit) plus [wgpu](https://wgpu.rs/)
-  and an `egui` UI overlay. We still own the render pipeline but use `egui` for a slick left-aligned floating toolbar.
+  and an `egui` UI layer. We still own the render pipeline; persistent controls use
+  compact, collapsible docked panels that never cover the image.
 - Rendering: our own wgpu pipeline, for GPU-accelerated pan, zoom, and scaling with
   control over resampling quality and color.
 - Decoding: [image-rs](https://github.com/image-rs/image) plus jxl-oxide and
@@ -78,15 +93,17 @@ worker (feature-gated C backends; RAW deferred). Full table:
   Windows and Linux use the `trash` crate; macOS retains the exact
   `NSFileManager` result URL so in-app Undo can restore the same item safely.
   Undo covers every successful item in the latest single or batch trash action.
-- Theme and icon: winit follows the operating-system theme, while a custom
-  SVG/ICO app icon is embedded via `winres`.
+- Theme and icon: the image background follows the operating-system theme unless
+  the user selects black, neutral gray, or white. Chrome stays neutral dark for
+  stable contrast around every photo. A custom SVG/ICO app icon is embedded via
+  `winres`.
 
 Full reasoning, including the alternatives we rejected, is in
 [`docs/STACK.md`](docs/STACK.md).
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 88.16
+viewr targets 85 percent or higher test coverage on its logic (currently 89.16
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and behavior-level contract tests that keep the coverage honest.
 The full set of engineering standards is in
@@ -118,7 +135,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, cull UI, local CLI (`doctor`, `benchmark`, `update`, `help`), and opt-in core-format associations for Linux, macOS, and Windows are in place. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
+Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, keyboard-complete docked chrome, native Windows/macOS screen-reader integration, local CLI (`doctor`, `benchmark`, `update`, `help`), and opt-in core-format associations for Linux, macOS, and Windows are in place. A privacy-compatible Linux screen-reader bridge, cross-platform assistive-technology validation, and enforced cold-start, first-pixel, and memory budgets remain before Phase 8 is complete. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

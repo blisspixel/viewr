@@ -3,6 +3,7 @@
 //! phases add the neighbor texture cache and zoom/pan on top of this.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use winit::window::Window;
 
@@ -30,6 +31,13 @@ pub struct Renderer {
     pub egui_ctx: egui::Context,
     /// The winit state integration for egui.
     pub egui_state: egui_winit::State,
+    /// Native accessibility bridge on platforms whose adapters do not require
+    /// a network-capable IPC dependency.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    accesskit: Option<accesskit_winit::Adapter>,
+    /// Accessibility actions queued by the native bridge for the next frame.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pending_accesskit_actions: Vec<egui::accesskit::ActionRequest>,
     /// The wgpu renderer integration for egui.
     pub egui_renderer: egui_wgpu::Renderer,
 }
@@ -151,6 +159,10 @@ impl Renderer {
             placement,
             egui_ctx,
             egui_state,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            accesskit: None,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            pending_accesskit_actions: Vec::new(),
             egui_renderer,
         })
     }
@@ -159,6 +171,68 @@ impl Renderer {
     #[must_use]
     pub fn window(&self) -> &Arc<Window> {
         &self.window
+    }
+
+    /// Initialize native accessibility before the initially hidden window is shown.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub fn init_accessibility<T>(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        proxy: winit::event_loop::EventLoopProxy<T>,
+    ) where
+        T: From<accesskit_winit::Event> + Send + 'static,
+    {
+        self.accesskit = Some(accesskit_winit::Adapter::with_event_loop_proxy(
+            event_loop,
+            self.window.as_ref(),
+            proxy,
+        ));
+    }
+
+    /// Forward a native window event to the accessibility adapter.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub fn process_accessibility_window_event(
+        &mut self,
+        window: &Window,
+        event: &winit::event::WindowEvent,
+    ) {
+        if let Some(adapter) = self.accesskit.as_mut() {
+            adapter.process_event(window, event);
+        }
+    }
+
+    /// Queue an assistive-technology action for egui's next input frame.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub fn queue_accessibility_action(&mut self, request: egui::accesskit::ActionRequest) {
+        self.pending_accesskit_actions.push(request);
+    }
+
+    fn append_accessibility_actions(&mut self, input: &mut egui::RawInput) {
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        input.events.extend(
+            self.pending_accesskit_actions
+                .drain(..)
+                .map(egui::Event::AccessKitActionRequest),
+        );
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = self;
+            let _ = input;
+        }
+    }
+
+    fn publish_accessibility_update(&mut self, output: &mut egui::PlatformOutput) {
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        if let (Some(adapter), Some(update)) =
+            (self.accesskit.as_mut(), output.accesskit_update.take())
+        {
+            adapter.update_if_active(|| update);
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = self;
+            let _ = output;
+        }
     }
 
     /// The current image size, if any.
@@ -269,25 +343,23 @@ impl Renderer {
     pub fn render(
         &mut self,
         placement: Option<crate::view::Placement>,
+        image_viewport: Option<crate::view::PhysicalViewport>,
         mut app_ui: impl FnMut(&mut egui::Ui),
-    ) -> FrameResult {
+    ) -> FrameOutput {
         let (frame, suboptimal) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) => (f, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(f) => (f, true),
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                return FrameResult::NeedsReconfigure;
+                return FrameOutput::without_egui(FrameResult::NeedsReconfigure);
             }
             wgpu::CurrentSurfaceTexture::Timeout
             | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => return FrameResult::Skipped,
+            | wgpu::CurrentSurfaceTexture::Validation => {
+                return FrameOutput::without_egui(FrameResult::Skipped);
+            }
         };
 
         if let Some(placement_matrix) = placement {
-            self.queue
-                .write_buffer(&self.placement, 0, &pack_placement(&placement_matrix));
-        } else if let Some(image) = &self.image {
-            let placement_matrix =
-                view::fit_to_window((self.config.width, self.config.height), image.size, false);
             self.queue
                 .write_buffer(&self.placement, 0, &pack_placement(&placement_matrix));
         }
@@ -296,12 +368,19 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let raw_input = self.egui_state.take_egui_input(self.window.as_ref());
+        let mut raw_input = self.egui_state.take_egui_input(self.window.as_ref());
+        self.append_accessibility_actions(&mut raw_input);
         let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
             app_ui(ui);
         });
+        let repaint_after = full_output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(Duration::MAX, |output| output.repaint_delay);
+        let mut platform_output = full_output.platform_output;
+        self.publish_accessibility_update(&mut platform_output);
         self.egui_state
-            .handle_platform_output(self.window.as_ref(), full_output.platform_output);
+            .handle_platform_output(self.window.as_ref(), platform_output);
 
         let tris = self
             .egui_ctx
@@ -348,7 +427,14 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            if let Some(image) = &self.image {
+            if let (Some(image), Some(viewport), Some(_)) = (
+                &self.image,
+                image_viewport.and_then(|viewport| {
+                    viewport.intersect((self.config.width, self.config.height))
+                }),
+                placement,
+            ) {
+                rpass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
                 rpass.set_pipeline(&self.pipeline);
                 rpass.set_bind_group(0, &image.bind_group, &[]);
                 rpass.draw(0..6, 0..1);
@@ -385,10 +471,32 @@ impl Renderer {
             self.egui_renderer.free_texture(id);
         }
 
-        if suboptimal {
+        let result = if suboptimal {
             FrameResult::NeedsReconfigure
         } else {
             FrameResult::Presented
+        };
+        FrameOutput {
+            result,
+            repaint_after: Some(repaint_after),
+        }
+    }
+}
+
+/// Rendering result plus egui's next requested root-viewport repaint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameOutput {
+    /// Surface presentation outcome.
+    pub result: FrameResult,
+    /// Delay until the next egui repaint, or `None` when egui did not run.
+    pub repaint_after: Option<Duration>,
+}
+
+impl FrameOutput {
+    const fn without_egui(result: FrameResult) -> Self {
+        Self {
+            result,
+            repaint_after: None,
         }
     }
 }

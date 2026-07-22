@@ -37,8 +37,10 @@ or independently mutable UI model.
 ```
 
 Image decoding and folder scanning run off the event thread. Their results return
-through channels, request a redraw, and are applied only if they still match the
-current path or generation. Native dialogs and trash operations are short,
+through channels, wake the event loop through a typed `UserEvent`, request a
+redraw, and are applied only if they still match the current path or generation.
+The initial decode and folder scan start before renderer initialization, so GPU
+setup does not unnecessarily serialize first-pixel work. Native dialogs and trash operations are short,
 user-triggered platform calls; the performance gate measures them rather than
 assuming they are free.
 
@@ -46,24 +48,27 @@ assuming they are free.
 
 ```rust
 struct Viewr {
-    // The working set: the folder being browsed, in display order.
-    entries: Vec<PathBuf>,
-    current: usize,
+    // Selected source plus the naturally sorted, session-scoped folder view.
+    image_path: Option<PathBuf>,
+    playlist: Option<Playlist>,
 
-    // What's on screen and nearby, decoded and ready.
-    cache: PrefetchCache,          // bounded neighboring RGBA frames in RAM
+    // Exact source/pixel match on screen plus a bounded neighbor cache.
+    current_image: Option<DecodedImage>,
+    loaded_image_path: Option<PathBuf>,
+    prefetch: PrefetchCache,
 
-    // View transform for the current image.
-    zoom: f32,
-    pan: Vec2,
-    fit_mode: FitMode,             // FitToWindow | ActualPixels
+    // View and crop state for the current image.
+    transform: Transform,
+
+    // Docked chrome and the session-only export-privacy choice.
+    tools_panel_open: bool,
+    filmstrip_panel_open: bool,
+    show_image_info: bool,
+    retain_exif: bool,
 
     // Curation.
-    flagged: HashSet<PathBuf>,     // "mark for delete" set (batch cull mode)
-    undo: Vec<TrashedFile>,        // latest single or batch trash action
-
-    theme: Theme,                  // driven by the OS light/dark setting
-    settings: Settings,           // tiny; e.g. confirm-on-permanent-delete
+    flags: FlagSet,
+    last_trashed: Vec<TrashedFile>,
 }
 ```
 
@@ -74,18 +79,21 @@ registry, no scene graph; a viewer does not need them.
 
 Shipped:
 
-- **`app`**: the message loop on winit (state, `Message`, `update`, `render`). The
-  spine. Opens the image named on the command line.
-- **`gpu`**: the wgpu pipeline. Clears to the theme background and draws the
-  current image as a textured quad scaled to fit.
+- **`app`**: the winit application handler and centralized state/input dispatch.
+  It opens command-line and native file requests, schedules background work, and
+  feeds one immutable frame snapshot to the UI.
+- **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
+  textured quad, scissored to the physical-pixel viewport left after docked
+  chrome. Egui draws in a separate full-window pass. No scene graph.
 - **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on
   background threads via the `image` crate. For complex C-backed formats, the
   main process opens the selected file and delegates bounded encoded bytes to an
   isolated `viewr-decode` helper using versioned request frames and a
   length-validated RGBA8 stream. The parent acknowledges each complete pixel
   stream before the worker returns to the idle pool and accepts another request.
-- **`view`**: pure geometry for placing an image in the viewport (fit math, later
-  zoom and pan). Unit-tested without a GPU.
+- **`view`**: pure geometry for placing an image in the viewport, including
+  physical-pixel insets reserved by docked chrome, fit math, zoom, and pan.
+  Unit-tested without a GPU.
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
   metadata by construction.
 - **`curate`**: move to the OS trash or recycle bin and restore for undo. On
@@ -98,21 +106,26 @@ Shipped:
   helpers.
 - **`fs`**: recognizing image files (core and worker extensions) and natural-sort
   ordering (`img2` before `img10`).
-- **`theme`**: reads the OS light/dark setting via winit and maps it to our palette,
-  live-updating on change.
+- **`theme`**: reads the OS light/dark setting via winit and maps it to the default
+  image background, live-updating on change. Chrome keeps its stable dark palette.
 - **`error`**: the typed error set for the app.
-- **`ui`**: the `egui` overlay for the toolbar, status, filmstrip, crop controls,
-  and toasts. Keyboard dispatch remains centralized in `app` rather than adding
-  a second input abstraction.
+- **`ui`**: the `egui` layer for the conventional menu bar, collapsible docked
+  tools and folder previews, Image Information, crop controls, and transient
+  toasts. Persistent chrome never covers the image; its exact insets feed the
+  same `view` geometry used by hit testing and rendering. Keyboard dispatch
+  remains centralized in `app` rather than adding a second input abstraction.
+  Custom controls publish AccessKit semantics. A native adapter is initialized
+  before the hidden window becomes visible on Windows and macOS; Linux native
+  delivery remains pending to preserve the dependency-level network ban.
 
 ## The hot path: opening and flipping through images
 
 This is the experience that makes or breaks the app, so it gets first-class
 treatment.
 
-1. **On open**, `fs` scans the containing folder once, off-thread, and returns the
-   ordered `entries`. Meanwhile `decode` is already working on the requested file;
-   we do not wait for the scan to show the first image. If an OS sandbox grants only
+1. **On open**, foreground decode and the containing-folder scan are scheduled
+   before renderer initialization and run independently off-thread. We do not wait
+   for the scan or GPU setup before starting image work. If an OS sandbox grants only
    the selected file, viewr keeps that file openable as a one-item playlist and asks
    the user to choose **Open Folder** for explicit, session-scoped sibling access.
 2. **Decode is prioritized:** the *current* image is decoded at highest priority.
@@ -125,7 +138,8 @@ treatment.
    results in RAM. Navigation can upload an already-decoded frame immediately.
 4. **Caches are bounded.** Full decoded neighbors use a fixed-capacity RAM cache,
    thumbnail work has an in-flight bound, and the renderer owns only the current
-   full-size GPU texture. Memory does not grow with folder length.
+   full-size GPU texture. Image-cache memory does not grow with folder length;
+   the lightweight playlist path index necessarily does.
 5. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are just changes to the sampling transform. No re-decode, no CPU work per frame.
 

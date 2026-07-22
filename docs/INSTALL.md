@@ -1,63 +1,23 @@
 # Installing viewr
 
-The goal is that getting viewr is one step on any operating system, and that it
-behaves like a native app once installed: it opens when you double-click an image,
-it shows up in your app menu, and it never asks anything of you.
+## Current availability
 
-## For users
+viewr does not yet publish signed installers, GitHub Releases, Homebrew formulas,
+Flathub listings, Windows Store packages, or Arch packages. Commands that imply
+those channels exist would be unsafe and misleading, so this document only covers
+paths that can be reproduced from the current repository.
 
-Once releases are published, installing is a single command.
+The supported paths today are a source build, a locally verified sandbox-profile
+artifact, or a checksummed dual-binary release archive. The CI release workflow
+retains the same archives as workflow artifacts; it deliberately does not create
+a public release.
 
-### macOS
-
-```
-brew install viewr
-```
-
-Or download the `.dmg` from the releases page and drag viewr to Applications. The
-build is signed and notarized, so macOS opens it without warnings.
-
-### Windows
-
-Download and run the `.msi` installer from the releases page, or:
-
-```powershell
-irm https://github.com/blisspixel/viewr/releases/latest/download/viewr-installer.ps1 | iex
-```
-
-The installer registers viewr as an option in "Open with" and adds a Start menu
-shortcut. It does not set itself as your default viewer without asking.
-
-### Linux
-
-```
-flatpak install viewr
-```
-
-Or, on Arch:
-
-```
-paru -S viewr        # or your AUR helper of choice
-```
-
-Or the portable installer:
-
-```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/blisspixel/viewr/releases/latest/download/viewr-installer.sh | sh
-```
-
-The Flatpak grants no direct network access (see `docs/PRIVACY.md`). Desktop
-portals may still delegate explicit host actions, so the independent dependency
-ban remains part of the privacy proof. Use **File > Open Folder** when you want
-next/previous navigation in a sandboxed package; that picker supplies the
-session-scoped directory consent without a broad filesystem grant.
-
-### From source (any OS)
+## Build from source (any OS)
 
 With a Rust toolchain installed (see `rust-toolchain.toml`):
 
 ```
-cargo build --release --workspace
+cargo build --release --workspace --locked
 # Binaries land in target/release/viewr and target/release/viewr-decode
 # Keep them side by side so C-backed formats can spawn the worker.
 ```
@@ -111,35 +71,57 @@ install -Dm644 assets/icon.svg ~/.local/share/icons/hicolor/scalable/apps/viewr.
 update-desktop-database ~/.local/share/applications
 ```
 
-## For maintainers: cutting a release
+## Build and verify a release archive
 
-Installers and binaries for all three operating systems are produced by
-[`dist`](https://github.com/axodotdev/cargo-dist) from a single tag. The seed
-configuration is in the root `Cargo.toml` under `[workspace.metadata.dist]`
-(targets, installer types, no auto-updater). To set it up once:
+The release archive contains the main executable and `viewr-decode` side by side,
+plus the license, README, and a canonical file manifest. The packaging tool checks
+that both executable formats match the requested target, normalizes text files,
+uses a commit-derived `SOURCE_DATE_EPOCH`, stores deterministic ZIP metadata, and
+writes a standard SHA-256 sidecar.
 
+Build the locked workspace with the pinned toolchain, then package the native
+target. On Windows x86-64:
+
+```powershell
+cargo build --release --workspace --locked
+python scripts/release_artifact.py build `
+  --target x86_64-pc-windows-msvc `
+  --binary-dir target/release
+python scripts/release_artifact.py verify `
+  target/release-artifacts/viewr-0.0.0-x86_64-pc-windows-msvc.zip
 ```
-cargo install cargo-dist
-dist init            # pins the tool version and generates the release workflow
-git add . && git commit -m "ci: set up dist"
-```
 
-Then every release is:
+On Linux x86-64, Intel macOS, or Apple Silicon macOS, replace the target with one
+of the following and point `--binary-dir` at the matching Cargo output:
 
-```
-git tag v0.1.0
-git push --tags      # the release workflow builds the .dmg, .msi, shell/ps1
-                     # installers, and checksummed archives, and attaches them
-```
+- `x86_64-unknown-linux-gnu`
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
 
-Signing and notarization (macOS) and code signing (Windows) use secrets configured
-in the CI environment; those are the only manual maintainer setup beyond `dist
-init`. viewr's installers deliberately include no auto-updater: the app never
-contacts a server on its own, and updates come through the same channels users
-already trust (their package manager or a download they choose to run).
+For an explicit target build, Cargo writes binaries beneath
+`target/<target>/release`. The workspace version in `Cargo.toml` determines the
+archive name; do not copy the example version blindly after it changes.
 
-## What installing does not do
+Phase 7 CI archives use the workspace's default pure-Rust feature set. They do
+not claim AVIF, HEIC, or RAW support from optional C backends; those builds still
+require platform libraries and the production allowlist work tracked in the
+roadmap.
+
+The tag-triggered `.github/workflows/release.yml` repeats this contract for all
+four targets. A tag must equal `v<workspace-version>` or packaging fails closed.
+Manual workflow runs are allowed for pre-release verification. The workflow has
+read-only repository permission and retains archives for inspection; it does not
+publish, sign, notarize, install, or create a GitHub Release. Artifact jobs wait
+for the repository's complete reusable CI and short fuzz workflows, including
+coverage, supply-chain, privacy, and native package-profile checks.
+
+The archive is reproducible from the same checked-out source, target, compiler,
+lockfile, and binary inputs. The manifest and sidecar make every produced byte
+verifiable. This is not a claim that different operating-system images or linker
+versions produce identical executables.
+
+## What current build and archive paths do not do
 
 No account. No background service. No auto-update daemon. No telemetry opt-in
-screen. Installing viewr adds an app and its file associations, and nothing else
-runs when the app is closed.
+screen. Current release archives are portable files and do not register file
+associations or modify the operating system.

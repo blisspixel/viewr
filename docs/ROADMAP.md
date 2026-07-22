@@ -17,9 +17,9 @@ Two rules hold across every phase:
 
 Phases 0-6 are complete for the product scope defined in this roadmap (including
 Phase 6 residuals: workspace worker, format table, RAW deferral). System trash,
-operational core fuzzing, and locally verifiable OS sandbox profiles are complete;
-the optional production C-decoder syscall allowlist and reproducible release
-artifacts remain Phase 7 work.
+operational core fuzzing, locally verifiable OS sandbox profiles, and checksummed
+local/CI release artifacts are complete. The optional production C-decoder
+syscall allowlist remains Phase 7 work.
 
 **Next focus: Phase 7: Hardening and the privacy proof.**
 ## Phase 0: Foundations
@@ -169,8 +169,13 @@ submission.
   - [x] Buildable cargo-fuzz targets and seed corpora for every core decoder and the worker protocol (`fuzz/`).
   - [x] Pinned nightly cargo-fuzz smoke runs on changes plus 600-second scheduled runs (`.github/workflows/fuzz.yml`).
 - [x] Neighbor full-decode prefetch into a bounded in-memory LRU (no disk cache).
-- Reproducible local/CI release binaries (checksums, pinned toolchain). **Not**
-  notarization or store signing (see out-of-scope below).
+- [x] Reproducibly buildable local/CI release artifacts: a pinned Rust toolchain,
+  locked dependencies, exact target validation, deterministic dual-binary ZIP
+  assembly, an internal file manifest, SHA-256 sidecars, and a read-only four-target
+  CI workflow gated by the complete CI and fuzz contracts. This is repeatable
+  source-to-artifact verification, not a claim of bit-identical linker output
+  across different host images. **Not** notarization, public release creation, or
+  store signing (see out-of-scope below).
 - [x] Deletes use the system trash (`trash` crate), not a local `_trash` folder.
 
 Definition of done: the app runs correctly with network denied by packaging

@@ -1,0 +1,92 @@
+name: Release artifacts
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  fuzz:
+    uses: ./.github/workflows/fuzz.yml
+    permissions:
+      contents: read
+
+  build:
+    name: ${{ matrix.target }}
+    needs: [quality, fuzz]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux GUI build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-dev libx11-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - name: Set up pinned Rust target
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build locked release binaries
+        run: cargo build --release --workspace --locked --target ${{ matrix.target }}
+
+      - name: Package and verify branch artifact
+        if: github.ref_type != 'tag'
+        run: >
+          python scripts/release_artifact.py build
+          --target ${{ matrix.target }}
+          --binary-dir target/${{ matrix.target }}/release
+
+      - name: Package and verify tag artifact
+        if: github.ref_type == 'tag'
+        env:
+          VIEWR_RELEASE_TAG: ${{ github.ref_name }}
+        run: >
+          python scripts/release_artifact.py build
+          --target ${{ matrix.target }}
+          --binary-dir target/${{ matrix.target }}/release
+          --expected-tag-from-env
+
+      - name: Retain checksummed release artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: viewr-${{ matrix.target }}
+          path: target/release-artifacts/
+          if-no-files-found: error
+          retention-days: 30

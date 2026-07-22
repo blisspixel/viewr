@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main, master]
   pull_request:
@@ -44,6 +45,29 @@ jobs:
         run: rustup show
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install pinned Python quality tools
+        if: runner.os == 'Linux'
+        run: python -m pip install --require-hashes -r scripts/requirements-quality.txt
+
+      - name: Lint release tooling
+        if: runner.os == 'Linux'
+        run: |
+          ruff check scripts/release_artifact.py scripts/tests/test_release_artifact.py
+          ruff format --check scripts/release_artifact.py scripts/tests/test_release_artifact.py
+
+      - name: Test release artifact contract
+        if: runner.os != 'Linux'
+        run: python -B -m unittest discover -s scripts/tests -v
+
+      - name: Measure release tooling coverage
+        if: runner.os == 'Linux'
+        env:
+          COVERAGE_FILE: target/release-tooling-coverage
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          coverage run --source=scripts.release_artifact -m unittest discover -s scripts/tests
+          coverage report --precision=2 --show-missing --fail-under=85
 
       - name: Format
         run: cargo fmt --all --check

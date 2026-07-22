@@ -1,6 +1,7 @@
 name: Fuzz
 
 on:
+  workflow_call:
   push:
     branches: [main, master]
     paths:

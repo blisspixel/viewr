@@ -66,7 +66,7 @@ worker (feature-gated C backends; RAW deferred). Full table:
 ## Stack, short version
 
 - Language: Rust, for memory safety on the exact code that touches untrusted files,
-  one small native binary, no runtime, no GC pauses.
+  one compact desktop binary plus an isolated decode helper, no runtime, no GC pauses.
 - UI foundation: [winit](https://lib.rs/crates/winit) plus [wgpu](https://wgpu.rs/)
   and an `egui` UI overlay. We still own the render pipeline but use `egui` for a slick left-aligned floating toolbar.
 - Rendering: our own wgpu pipeline, for GPU-accelerated pan, zoom, and scaling with
@@ -113,7 +113,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 6 residuals closed; Phase 7 hardening in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, three locally verifiable OS sandbox profiles, cull UI, and local CLI (`doctor`, `benchmark`, `update`, `help`) are in place. Reproducible release artifacts and the optional production C-decoder syscall allowlist remain. Store publication is out of scope. See `docs/FORMATS.md`.
+Status: **Phase 6 residuals closed; Phase 7 hardening in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, three locally verifiable OS sandbox profiles, checksummed release archives, cull UI, and local CLI (`doctor`, `benchmark`, `update`, `help`) are in place. The optional production C-decoder syscall allowlist remains. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

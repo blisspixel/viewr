@@ -56,6 +56,9 @@ with intent, not as though it was assembled from plausible fragments.
   stylistic advice into a build failure is the point.
 - No warnings of any kind in a merged build. A warning is a bug that has not
   happened yet.
+- Repository-owned Python release tooling is gated by a version- and wheel-hash-
+  pinned Ruff check/format pass, cross-platform unit tests, and an 85 percent line
+  coverage floor. Python bytecode caches remain ignored build debris.
 
 ## Safety
 
@@ -184,7 +187,19 @@ rules keep it honest.
 ## Releases
 
 - Semantic versioning, with `cargo-semver-checks` guarding public API changes.
-- Reproducible, signed builds so a user can verify the binary matches the source.
+- Release builds use the exact compiler in `rust-toolchain.toml`, the committed
+  lockfile, and `--locked`. The two required executables are target-validated and
+  assembled into a deterministic stored ZIP with normalized documentation,
+  commit-derived timestamps, an internal per-file SHA-256 manifest, and an
+  external SHA-256 sidecar. The verifier rejects extra members, unsafe paths,
+  leading or trailing ZIP data, target-label mismatches, non-canonical metadata,
+  and checksum drift.
+- CI retains these archives as read-only workflow artifacts for the four declared
+  desktop targets only after the complete reusable CI and fuzz workflows pass. It
+  does not create a public release, install software, sign a package, or claim
+  cross-environment bit-for-bit linker reproducibility.
+- Publicly distributed builds must be signed and, where required, notarized.
+  That is later distribution work, not part of the local Phase 7 proof.
 - A human-written changelog. People deserve to know what changed and why.
 
 ## A note on humility

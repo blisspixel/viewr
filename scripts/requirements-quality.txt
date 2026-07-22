@@ -1,0 +1,5 @@
+# CI-only Python quality tools. Every executable wheel is version- and hash-pinned.
+coverage==7.14.1 \
+    --hash=sha256:a252f21c27e38347e60111a3266b03827422a7d5525951aceee313aa68bab1d2
+ruff==0.15.16 \
+    --hash=sha256:bb27515fa6240fb586ae82b901a59e67d24acff86f2190b433dc542fe0435aeb

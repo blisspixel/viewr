@@ -5,7 +5,8 @@
 viewr opens an image and gets out of the way. No account. No cloud. No AI-enhanced
 memories. No telemetry. No background service. No update nag. It starts image
 decoding while the window initializes, lets you flip through a folder,
-crop, convert, and delete the junk, and that is the whole product, on purpose. Cold
+crop, repair a small blemish, convert, and delete the junk, and that is the whole
+product, on purpose. Cold
 start, first-pixel, navigation, settled-idle redraw, and folder-scaling budgets are
 regression-tested in CI. Those conservative virtual-runner limits are not presented
 as universal launch numbers.
@@ -48,8 +49,10 @@ held to, and most are enforced in CI.
 ## What it does, and deliberately does not
 
 Does: open essentially any image format you have (see below), pan and zoom on the
-GPU, flip through a folder, rotate, crop, Save As and convert with metadata stripped
-by default, and delete to the system trash with undo.
+GPU, flip through a folder, rotate, crop, repair a small blemish, Save As and
+convert with metadata stripped by default, and delete to the system trash with
+undo. Spot Heal is deterministic, local, and in-memory; the edit persists only if
+you explicitly save a copy.
 
 Network-denied packages expose both **Open File** and **Open Folder**. Opening a
 folder is the explicit, session-only consent path that enables sibling navigation
@@ -67,7 +70,9 @@ Information are optional docked panels that reserve their own space and never co
 the photo. `T`, `G`, and `I` show or fully hide them; Tools and Folder Previews can
 also collapse to quiet disclosure rails. View > Panel Position independently docks
 Tools and Image Information on the left or right. Every visibility, collapse, or
-position change refits and recenters the image. Image Information contains the
+position change refits and recenters the image. `J` opens a temporary docked Spot
+Heal inspector that also reserves its own space; only its brush mask is drawn over
+the photo. Image Information contains the
 explicit session-only export-metadata choice. View also exposes Fit Image to View
 (`0`), Actual Size (`1`), Zoom In (`+`), and Zoom Out (`-`) so zoom never depends on
 a mouse or trackpad. The empty, loading, and load-error states use an opaque
@@ -101,6 +106,10 @@ worker (feature-gated C backends; RAW deferred). Full table:
   Windows and Linux use the `trash` crate; macOS retains the exact
   `NSFileManager` result URL so in-app Undo can restore the same item safely.
   Undo covers every successful item in the latest single or batch trash action.
+- Spot Heal: a bounded pure-Rust patch-matching worker repairs the painted region
+  without a model dependency, source-file write, cache, or sidecar. Pixel-patch
+  undo and redo stay in memory, and only the changed GPU texture region is
+  uploaded after each edit.
 - Theme and icon: the image background follows the operating-system theme unless
   the user selects black, neutral gray, or white. Chrome stays neutral dark for
   stable contrast around every photo. A custom SVG/ICO app icon is embedded via
@@ -111,7 +120,7 @@ Full reasoning, including the alternatives we rejected, is in
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 89.04
+viewr targets 85 percent or higher test coverage on its logic (currently about 88
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and behavior-level contract tests that keep the coverage honest.
 The full set of engineering standards is in
@@ -137,6 +146,8 @@ Linux, macOS, and Windows from a single codebase.
   how the code enforces it.
 - [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md), what we measure and the current
   numbers.
+- [`docs/LOCAL-INTELLIGENCE.md`](docs/LOCAL-INTELLIGENCE.md), the strict product,
+  privacy, runtime, and evaluation gate for any optional local model.
 - [`docs/INSTALL.md`](docs/INSTALL.md), how to install on each OS and cut a release.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md), the phased plan from first window to 1.0 and
   beyond.

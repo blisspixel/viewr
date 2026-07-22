@@ -15,6 +15,7 @@ pub mod ephemeral;
 pub mod error;
 pub mod fs;
 pub mod gpu;
+pub mod heal;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod performance;

@@ -185,11 +185,17 @@ users who explicitly want it.
 | OS theme | `winit` window theme | default image background only; no extra dependency |
 | File dialogs | `rfd` | native open/save dialogs |
 | EXIF retain (opt-in) | `little_exif` | Save As strips by default; retain is session-only |
+| Spot heal | no additional crate | pure-Rust bounded patch matching and in-memory undo |
 | Error handling | `thiserror` / `anyhow` | app-level ergonomics |
 | App icon | `winres` | embeds custom SVG/ICO app icons |
 
 The dependency list is treated as a liability, not an asset: every crate added is
 new code we ship and audit. Keeping it short is a feature.
+
+No model runtime is part of the current stack. The optional local-description
+evaluation and the process boundary required before one may ship are documented
+in `LOCAL-INTELLIGENCE.md`. A localhost model server is intentionally outside the
+accepted architecture.
 
 ## Prior art we studied (and how viewr differs)
 

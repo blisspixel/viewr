@@ -43,6 +43,7 @@ pub struct Renderer {
 
 /// The currently displayed image: its GPU binding and pixel dimensions.
 struct Image {
+    texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     size: (u32, u32),
 }
@@ -301,10 +302,72 @@ impl Renderer {
         });
 
         self.image = Some(Image {
+            texture,
             bind_group,
             size: (width, height),
         });
         self.window.request_redraw();
+    }
+
+    /// Upload one tightly packed RGBA8 patch into the current image texture.
+    ///
+    /// Returns `false` without writing when the patch shape does not exactly fit
+    /// inside the displayed texture. Normal Spot Heal operations use this path
+    /// so committing a small edit never reallocates or uploads the full image.
+    #[must_use]
+    pub fn update_image_patch(&self, patch: &crate::heal::ImagePatch) -> bool {
+        let Some(image) = self.image.as_ref() else {
+            return false;
+        };
+        let bounds = patch.bounds;
+        let Some(right) = bounds.x.checked_add(bounds.width) else {
+            return false;
+        };
+        let Some(bottom) = bounds.y.checked_add(bounds.height) else {
+            return false;
+        };
+        let Some(expected_bytes) = usize::try_from(bounds.width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(bounds.height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+        else {
+            return false;
+        };
+        if bounds.width == 0
+            || bounds.height == 0
+            || right > image.size.0
+            || bottom > image.size.1
+            || patch.rgba.len() != expected_bytes
+        {
+            return false;
+        }
+
+        let mut destination = image.texture.as_image_copy();
+        destination.origin = wgpu::Origin3d {
+            x: bounds.x,
+            y: bounds.y,
+            z: 0,
+        };
+        self.queue.write_texture(
+            destination,
+            &patch.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bounds.width * 4),
+                rows_per_image: Some(bounds.height),
+            },
+            wgpu::Extent3d {
+                width: bounds.width,
+                height: bounds.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.window.request_redraw();
+        true
     }
 
     /// Set the clear color.

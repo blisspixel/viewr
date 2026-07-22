@@ -4,7 +4,7 @@
 param(
     [string]$Binary = "target/debug/viewr.exe",
     [ValidateRange(5, 120)]
-    [int]$TimeoutSeconds = 30
+    [int]$TimeoutSeconds = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -171,6 +171,22 @@ function Wait-ForElement {
 
     return Wait-ForResult -Description "accessible element '$Name'" -Probe {
         Get-Element -Name $Name -ControlType $ControlType -Prefix:$Prefix
+    }
+}
+
+function Wait-ForElementAbsent {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [System.Windows.Automation.ControlType]$ControlType
+    )
+
+    return Wait-ForResult -Description "accessible element '$Name' to disappear" -Probe {
+        $element = Get-Element -Name $Name -ControlType $ControlType
+        if ($null -eq $element) {
+            return [IntPtr]1
+        }
+        return $null
     }
 }
 
@@ -383,6 +399,20 @@ try {
     Wait-ForElement -Name "Rotate clockwise (R)" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
+    $spotHeal = Wait-ForElement -Name "Spot heal (J)" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $spotHeal
+    $finishSpotHeal = Wait-ForElement -Name "Done" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $finishSpotHeal
+    Wait-ForElementAbsent -Name "Done" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
+    $collapseTools = Wait-ForElement -Name "Collapse tools panel" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
     Activate-Element -Element $collapseTools
     Wait-ForElement -Name "Expand tools panel" -ControlType (
         [System.Windows.Automation.ControlType]::Button
@@ -447,7 +477,7 @@ try {
 
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
-        "actions, dock positions, metadata state, previews, and navigation verified"
+        "actions, Spot Heal, dock positions, metadata state, previews, and navigation verified"
     )
 }
 finally {

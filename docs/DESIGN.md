@@ -116,6 +116,25 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   accessibility tree. Confirming applies the crop directly. Esc cancels crop
   before it can affect fullscreen state.
 
+### Spot Heal
+
+- Enter with `J`, Edit > Spot Heal, or the Tools icon. The temporary inspector
+  docks beside Tools on the selected left or right edge and reserves viewport
+  space. It never floats over the photo.
+- The inspector exposes only brush radius, Undo, Redo, and Done. A translucent
+  brush mask and cursor ring are the only elements drawn over the image.
+- Drag over one small blemish and release to repair it off the UI thread. The
+  source file remains untouched; Save As is the only persistence path.
+- Repair, undo, and redo update only the bounded changed texture region. If the
+  GPU cannot display the complete decoded image in one texture, Spot Heal is
+  unavailable instead of risking an edit at the wrong source coordinate.
+- `Ctrl+Z` or `Command+Z` undoes an in-memory pixel patch, the shifted equivalent
+  redoes it, and Esc leaves the tool. A submitted repair finishes and applies
+  after the inspector closes; navigation clears edit history and any stale worker
+  result.
+- Spot Heal is deliberately scoped to small repairs. It does not expose prompts,
+  model settings, generative fill choices, or an automatic enhancement mode.
+
 ### Micro-interactions
 - Buttons use deterministic hover, active, selected, and focus colors. Custom
   controls paint a visible 2px amber focus ring.

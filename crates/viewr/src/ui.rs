@@ -30,6 +30,8 @@ pub const TOP_BAR_HEIGHT: f32 = 40.0;
 pub const TOOLS_RAIL_WIDTH: f32 = 44.0;
 /// Logical width of the expanded tools panel.
 pub const TOOLS_PANEL_WIDTH: f32 = 64.0;
+/// Logical width of the temporary spot-heal inspector.
+pub const HEAL_PANEL_WIDTH: f32 = 248.0;
 /// Logical height of the collapsed folder-preview rail.
 pub const FILMSTRIP_RAIL_HEIGHT: f32 = 44.0;
 /// Logical height of the expanded folder-preview panel.
@@ -64,6 +66,8 @@ pub struct ChromeLayout {
     pub tools: DockState,
     /// Edge used by the tools rail or panel.
     pub tools_side: DockSide,
+    /// Whether the temporary spot-heal inspector is visible beside Tools.
+    pub heal: bool,
     /// Folder-preview rail or expanded preview panel.
     pub filmstrip: DockState,
     /// Edge used by Image Information when the panel is visible.
@@ -81,8 +85,9 @@ pub fn viewport_insets(layout: ChromeLayout) -> crate::view::ViewportInsets {
         DockState::Collapsed => TOOLS_RAIL_WIDTH,
         DockState::Expanded => TOOLS_PANEL_WIDTH,
     };
+    let edit_width = if layout.heal { HEAL_PANEL_WIDTH } else { 0.0 };
     let left = if layout.tools_side == DockSide::Left {
-        tools_width
+        tools_width + edit_width
     } else {
         0.0
     } + if layout.image_info == Some(DockSide::Left) {
@@ -91,7 +96,7 @@ pub fn viewport_insets(layout: ChromeLayout) -> crate::view::ViewportInsets {
         0.0
     };
     let right = if layout.tools_side == DockSide::Right {
-        tools_width
+        tools_width + edit_width
     } else {
         0.0
     } + if layout.image_info == Some(DockSide::Right) {
@@ -171,6 +176,14 @@ pub enum UiAction {
     CancelCrop,
     /// Set the aspect ratio for the crop tool.
     SetCropRatio(crate::app::CropRatio),
+    /// Enter or leave the focused spot-heal tool.
+    ToggleHeal,
+    /// Change the spot-heal radius in source-image pixels.
+    SetHealBrushRadius(u32),
+    /// Undo the latest in-memory pixel edit.
+    UndoEdit,
+    /// Reapply the latest undone in-memory pixel edit.
+    RedoEdit,
     /// Toggle flag on the current image for batch cull.
     ToggleFlag,
     /// Move all flagged images to the system trash.
@@ -208,6 +221,18 @@ pub struct UiFrameOwned {
     pub is_cropping: bool,
     /// Active crop aspect lock.
     pub crop_ratio: crate::app::CropRatio,
+    /// Focused spot-heal mode is active.
+    pub is_healing: bool,
+    /// The displayed texture represents every source pixel and can be edited.
+    pub can_heal: bool,
+    /// A spot-heal worker is processing the current stroke.
+    pub heal_busy: bool,
+    /// Spot-heal radius in source-image pixels.
+    pub heal_brush_radius: u32,
+    /// Whether an in-memory pixel edit can be undone.
+    pub can_undo_edit: bool,
+    /// Whether an undone in-memory pixel edit can be reapplied.
+    pub can_redo_edit: bool,
     /// Hand tool is currently dragging.
     pub is_panning: bool,
     /// Current image is in the flag set.
@@ -232,6 +257,12 @@ pub struct UiFrameOwned {
     pub crop_uv: Option<[f32; 4]>,
     /// Image-safe viewport in logical UI coordinates `[x0, y0, x1, y1]`.
     pub image_viewport: Option<[f32; 4]>,
+    /// Current spot-heal stroke projected into logical screen coordinates.
+    pub heal_stroke_screen: Vec<[f32; 2]>,
+    /// Current pointer position in logical screen coordinates while healing.
+    pub heal_cursor_screen: Option<[f32; 2]>,
+    /// Brush radius in logical screen pixels.
+    pub heal_brush_screen_radius: f32,
 }
 
 /// One cell in the progressive bottom filmstrip.
@@ -272,6 +303,11 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
 
     if frame.show_tools_panel {
         render_tools_panel(ui, &mut actions, frame);
+    }
+
+    if frame.is_healing {
+        render_heal_panel(ui, &mut actions, frame);
+        render_heal_overlay(ui, frame);
     }
 
     if let Some(msg) = &frame.toast {
@@ -393,7 +429,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.has_image,
+                frame.has_image && !frame.heal_busy,
                 egui::Button::new("Save As...")
                     .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+S")),
             )
@@ -481,6 +517,7 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             actions.push(UiAction::ApplyCrop);
             ui.close();
         }
+        spot_heal_menu_items(ui, actions, frame);
         ui.separator();
         if ui
             .add_enabled(
@@ -523,6 +560,49 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.close();
         }
     });
+}
+
+fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let heal_label = if frame.is_healing {
+        "Finish Spot Heal"
+    } else if frame.heal_busy {
+        "Finishing Spot Heal..."
+    } else {
+        "Spot Heal"
+    };
+    let shortcut = if frame.is_healing { "Esc" } else { "J" };
+    if ui
+        .add_enabled(
+            frame.can_heal && (!frame.heal_busy || frame.is_healing),
+            egui::Button::new(heal_label).shortcut_text(shortcut),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::ToggleHeal);
+        ui.close();
+    }
+    ui.separator();
+    if ui
+        .add_enabled(
+            frame.can_undo_edit,
+            egui::Button::new("Undo Spot Heal").shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::UndoEdit);
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            frame.can_redo_edit,
+            egui::Button::new("Redo Spot Heal")
+                .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::RedoEdit);
+        ui.close();
+    }
 }
 
 fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -870,6 +950,7 @@ enum ToolIcon {
     FlipH,
     FlipV,
     Crop,
+    Heal,
     Flag,
 }
 
@@ -994,6 +1075,16 @@ fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                         icon_btn(ui, ToolIcon::Crop, "Crop (C)", frame.is_cropping, || {
                             actions.push(UiAction::ToggleCrop);
                         });
+                        let heal_tip = if frame.can_heal {
+                            "Spot heal (J)"
+                        } else {
+                            "Spot heal is unavailable for images larger than the GPU texture limit"
+                        };
+                        ui.add_enabled_ui(frame.can_heal || frame.is_healing, |ui| {
+                            icon_btn(ui, ToolIcon::Heal, heal_tip, frame.is_healing, || {
+                                actions.push(UiAction::ToggleHeal);
+                            });
+                        });
                         icon_btn(
                             ui,
                             ToolIcon::Flag,
@@ -1109,6 +1200,18 @@ fn paint_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color3
                 stroke,
             );
         }
+        ToolIcon::Heal => {
+            painter.circle_stroke(c, s * 0.72, stroke);
+            painter.line_segment(
+                [c + Vec2::new(-s * 0.42, 0.0), c + Vec2::new(s * 0.42, 0.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [c + Vec2::new(0.0, -s * 0.42), c + Vec2::new(0.0, s * 0.42)],
+                stroke,
+            );
+            painter.circle_filled(c + Vec2::new(s * 0.82, -s * 0.82), 1.8, color);
+        }
         ToolIcon::Flag => {
             let points = [
                 c + Vec2::new(-s * 0.5, s),
@@ -1120,6 +1223,133 @@ fn paint_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color3
             painter.line_segment([points[1], points[2]], stroke);
             painter.line_segment([points[2], points[3]], stroke);
         }
+    }
+}
+
+fn render_heal_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let panel = match frame.tools_panel_side {
+        DockSide::Left => Panel::left("spot_heal_panel"),
+        DockSide::Right => Panel::right("spot_heal_panel"),
+    };
+    panel
+        .exact_size(HEAL_PANEL_WIDTH)
+        .resizable(false)
+        .frame(docked_frame().inner_margin(egui::Margin::same(14)))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("SPOT HEAL").size(11.0).color(ACCENT).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Done").clicked() {
+                        actions.push(UiAction::ToggleHeal);
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Paint over a small blemish, then release to repair it.")
+                        .size(12.5)
+                        .color(TEXT),
+                )
+                .wrap(),
+            );
+            ui.add_space(12.0);
+
+            let mut radius = frame.heal_brush_radius;
+            ui.label(RichText::new("Brush radius").size(11.5).color(MUTED));
+            let slider = egui::Slider::new(
+                &mut radius,
+                crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
+            )
+            .suffix(" px");
+            if ui.add_enabled(!frame.heal_busy, slider).changed() {
+                actions.push(UiAction::SetHealBrushRadius(radius));
+            }
+
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(frame.can_undo_edit, egui::Button::new("Undo"))
+                    .clicked()
+                {
+                    actions.push(UiAction::UndoEdit);
+                }
+                if ui
+                    .add_enabled(frame.can_redo_edit, egui::Button::new("Redo"))
+                    .clicked()
+                {
+                    actions.push(UiAction::RedoEdit);
+                }
+            });
+
+            ui.add_space(14.0);
+            if frame.heal_busy {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(
+                        RichText::new("Repairing in memory...")
+                            .size(12.0)
+                            .color(TEXT),
+                    );
+                });
+            } else {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!(
+                            "Drag to paint  |  {PRIMARY_MODIFIER}+Z to undo  |  Esc to finish"
+                        ))
+                        .size(11.0)
+                        .color(MUTED),
+                    )
+                    .wrap(),
+                );
+            }
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        "The original file stays untouched. Use Save As to keep the edit.",
+                    )
+                    .size(11.0)
+                    .color(MUTED),
+                )
+                .wrap(),
+            );
+        });
+}
+
+fn render_heal_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned) {
+    let image_viewport = image_viewport_rect(ui.ctx(), frame);
+    let painter = ui
+        .ctx()
+        .layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("spot_heal_draw"),
+        ))
+        .with_clip_rect(image_viewport);
+    let radius = frame.heal_brush_screen_radius.max(1.0);
+    let mask = if frame.heal_busy {
+        Color32::from_rgba_unmultiplied(247, 168, 69, 72)
+    } else {
+        Color32::from_rgba_unmultiplied(247, 168, 69, 92)
+    };
+    let outline = Stroke::new(1.25, Color32::from_rgba_unmultiplied(255, 228, 188, 220));
+    for point in &frame.heal_stroke_screen {
+        painter.circle_filled(Pos2::new(point[0], point[1]), radius, mask);
+    }
+    for pair in frame.heal_stroke_screen.windows(2) {
+        painter.line_segment(
+            [
+                Pos2::new(pair[0][0], pair[0][1]),
+                Pos2::new(pair[1][0], pair[1][1]),
+            ],
+            Stroke::new(radius * 2.0, mask),
+        );
+    }
+    if !frame.heal_busy
+        && let Some(cursor) = frame.heal_cursor_screen
+    {
+        painter.circle_stroke(Pos2::new(cursor[0], cursor[1]), radius, outline);
     }
 }
 
@@ -1462,7 +1692,7 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     if ui.ctx().is_pointer_over_egui() {
         return;
     }
-    if frame.is_cropping {
+    if frame.is_cropping || frame.is_healing {
         ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
     } else if frame.is_panning {
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -1475,8 +1705,9 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
 mod tests {
     use super::{
         ACCENT, ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
-        FilmstripItem, IMAGE_INFO_PANEL_WIDTH, INK, MUTED, PANEL, TEXT, TOOLS_PANEL_WIDTH,
-        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, UiAction, UiFrameOwned, render, viewport_insets,
+        FilmstripItem, HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, INK, MUTED, PANEL, TEXT,
+        TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, UiAction, UiFrameOwned, render,
+        viewport_insets,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -1519,6 +1750,12 @@ mod tests {
             img_size: Some((1920, 1080)),
             is_cropping: false,
             crop_ratio: crate::app::CropRatio::Free,
+            is_healing: false,
+            can_heal: true,
+            heal_busy: false,
+            heal_brush_radius: 18,
+            can_undo_edit: false,
+            can_redo_edit: false,
             is_panning: false,
             is_flagged: false,
             flag_count: 1,
@@ -1544,6 +1781,9 @@ mod tests {
             crop_screen: None,
             crop_uv: None,
             image_viewport: Some([64.0, 40.0, 896.0, 688.0]),
+            heal_stroke_screen: Vec::new(),
+            heal_cursor_screen: None,
+            heal_brush_screen_radius: 0.0,
         }
     }
 
@@ -1564,6 +1804,10 @@ mod tests {
         let _ = UiAction::ApplyCrop;
         let _ = UiAction::CancelCrop;
         let _ = UiAction::SetCropRatio(crate::app::CropRatio::Square);
+        let _ = UiAction::ToggleHeal;
+        let _ = UiAction::SetHealBrushRadius(18);
+        let _ = UiAction::UndoEdit;
+        let _ = UiAction::RedoEdit;
         let _ = UiAction::Navigate(1);
         let _ = UiAction::NavigateTo(0);
         let _ = UiAction::ToggleFlag;
@@ -1587,6 +1831,7 @@ mod tests {
         let insets = viewport_insets(ChromeLayout {
             tools: DockState::Expanded,
             tools_side: DockSide::Left,
+            heal: false,
             filmstrip: DockState::Expanded,
             image_info: Some(DockSide::Right),
             scale_factor: 1.5,
@@ -1602,6 +1847,7 @@ mod tests {
         let insets = viewport_insets(ChromeLayout {
             tools: DockState::Collapsed,
             tools_side: DockSide::Left,
+            heal: false,
             filmstrip: DockState::Collapsed,
             image_info: None,
             scale_factor: 1.0,
@@ -1616,6 +1862,7 @@ mod tests {
         let insets = viewport_insets(ChromeLayout {
             tools: DockState::Expanded,
             tools_side: DockSide::Right,
+            heal: false,
             filmstrip: DockState::Hidden,
             image_info: Some(DockSide::Right),
             scale_factor: 1.0,
@@ -1631,6 +1878,7 @@ mod tests {
         let insets = viewport_insets(ChromeLayout {
             tools: DockState::Hidden,
             tools_side: DockSide::Right,
+            heal: false,
             filmstrip: DockState::Hidden,
             image_info: None,
             scale_factor: 1.0,
@@ -1639,6 +1887,22 @@ mod tests {
         assert!(insets.right.abs() < f32::EPSILON);
         assert!((insets.top - TOP_BAR_HEIGHT).abs() < f32::EPSILON);
         assert!(insets.bottom.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn spot_heal_inspector_reserves_space_on_the_tools_edge() {
+        let insets = viewport_insets(ChromeLayout {
+            tools: DockState::Expanded,
+            tools_side: DockSide::Right,
+            heal: true,
+            filmstrip: DockState::Hidden,
+            image_info: None,
+            scale_factor: 1.25,
+        });
+        assert!(insets.left.abs() < f32::EPSILON);
+        assert!(
+            (insets.right - (TOOLS_PANEL_WIDTH + HEAL_PANEL_WIDTH) * 1.25).abs() < f32::EPSILON
+        );
     }
 
     #[test]
@@ -1670,6 +1934,7 @@ mod tests {
         for expected in [
             "Collapse tools panel",
             "Rotate clockwise (R)",
+            "Spot heal (J)",
             "Collapse folder previews",
             "image 1: current.png",
             "Flagged image 2: flagged.png",

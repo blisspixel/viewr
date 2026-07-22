@@ -24,6 +24,9 @@ keyboard access, native Windows/macOS/Linux screen-reader delivery, semantic
 labels, a native Windows provider/action smoke gate, configurable panel-safe
 chrome, contrast checks, and enforced GUI performance budgets are complete.
 Manual cross-platform assistive-technology validation remains.
+Phase 5 now also includes the completed focused Spot Heal workflow. Optional
+model-backed description remains a gated post-1.0 candidate, not active Phase 8
+scope.
 
 **Next focus: manual target-OS assistive-technology validation.**
 
@@ -116,13 +119,19 @@ The simple tools people actually reach for, and nothing beyond them.
 
 - [x] Crop with a GPU preview, usable by keyboard and mouse, with aspect
   presets (Free, 1:1, 4:3, 16:9) and applying crops directly.
+- [x] Focused Spot Heal for small blemishes: sparse image-space brush input,
+  bounded deterministic patch matching off the UI thread, feathered compositing,
+  in-memory undo/redo, bounded GPU texture-region updates, and a temporary docked
+  inspector that never covers the photo. It adds no model or native dependency,
+  refuses ambiguous GPU-clamped source mappings, and never changes the source
+  file.
 - Save As and convert between formats.
 - Metadata strip on export, presented prominently, with location and identifying
   fields stripped by default for privacy-sensitive output.
 
-Definition of done: a user can crop an image, export it to another format, and be
-confident their location data did not ride along, with tests over the export and
-metadata-strip paths.
+Definition of done: a user can crop or spot-heal an image, export it to another
+format, and be confident their location data did not ride along, with tests over
+the edit, undo/redo, export, and metadata-strip paths.
 
 ## Phase 6: Support every format, the VLC of image viewers
 
@@ -256,6 +265,12 @@ silence, and so that scope creep stays visible and deliberate.
   repository and signed release policy exist. It must never run at launch or in
   the background, and it must show the destination before opening a browser or
   downloading anything.
+- Optional **Describe Image** after the offline bake-off and process-level privacy
+  proof in `docs/LOCAL-INTELLIGENCE.md` pass on Windows, Linux, and macOS. It must
+  be absent without a separately installed model pack, run only on explicit
+  activation, receive decoded pixels rather than a source path, retain no result
+  after navigation, and produce no app-owned logs or files. Built-in speech and
+  model-assisted large-area removal remain separate later decisions.
 
 ## Explicit non-goals, the anti-bloat charter
 
@@ -264,3 +279,7 @@ discover or feed surfaces, face or AI grouping, background services, automatic o
 background update checks, telemetry or analytics of any kind, or a plugin marketplace. These
 are the features that turned every big-company photo app into the thing we are
 replacing. Leaving them out is a permanent part of the product, not a stage of it.
+
+An explicit one-image local model action does not relax this charter. Optional
+models may not become a library scanner, automatic classifier, required runtime,
+background process, download client, or reason to retain user data.

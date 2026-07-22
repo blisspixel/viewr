@@ -77,13 +77,14 @@ measurement surface small and auditable.
 
 ## Current local evidence
 
-On the Windows development host on 2026-07-22, the latest three-run debug GUI
-probe passed the 50,000-file contract with a 1,063 ms median first frame and first
-image, 265 ms slowest sampled navigation, two settled redraws, 247.41 MiB
-small-folder peak resident set, 256.36 MiB large-folder peak resident set, and
-8.95 MiB displayed peak difference. The idle-aware gate first exposed and then
-verified removal of a self-sustaining egui event-loop repaint cycle and
-paint-dependent background-work starvation.
+On the Windows development host on 2026-07-22, the latest three-run optimized GUI
+probe passed the 50,000-file contract with an 885.88 ms median first frame and
+first image, 57.66 ms slowest sampled navigation, one settled redraw, 229.03 MiB
+small-folder peak resident set, 250.60 MiB large-folder peak resident set, and
+21.57 MiB displayed peak difference. The idle-aware gate first exposed and then
+verified removal of a self-sustaining egui event-loop repaint cycle,
+paint-dependent background-work starvation, and cursor-position-dependent hover
+repaint noise in its own observation window.
 
 Those numbers validate the local harness and provide a reference observation.
 Only the release-mode Ubuntu job enforces the canonical CI result. No hosted run

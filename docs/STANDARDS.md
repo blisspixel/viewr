@@ -91,7 +91,7 @@ end-to-end verification instead:
 - `worker_limit.rs` — OS Job Object / process-group glue
 - `error.rs`, `main.rs` — thin entry/error surfaces
 
-Everything else (decode pure paths, edit, fs ordering, view math, theme) is in
+Everything else (decode pure paths, edit, heal, fs ordering, view math, theme) is in
 the coverage floor. Coverage is a floor and a signal, not the goal. The real goal
 is that the tests would catch a regression, which is why we also run mutation
 testing.
@@ -99,7 +99,7 @@ testing.
 - `cargo nextest` as the test runner for speed and clear output.
 - Unit tests next to the code they cover.
 - Integration tests for the real flows: open, navigate, delete-and-undo, crop,
-  convert, strip metadata.
+  spot-heal and edit undo/redo, convert, strip metadata.
 - External native accessibility tests must exercise the platform provider and
   action path, not only inspect an in-process semantic tree. Windows CI runs the
   dependency-free UI Automation smoke script. Manual Narrator, VoiceOver, and

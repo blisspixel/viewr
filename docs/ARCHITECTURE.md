@@ -105,6 +105,14 @@ Shipped:
   Unit-tested without a GPU.
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
   metadata by construction.
+- **`heal`**: pure-Rust spot-heal preparation, bounded region extraction,
+  deterministic patch matching, feathered compositing, and byte-bounded
+  in-memory pixel-patch history. A path-free worker shares immutable decoded
+  pixels just long enough to copy the bounded working region, drops the full
+  image, and then computes the repair. Apply, undo, and redo upload only the
+  changed GPU texture rectangle. The tool is unavailable if the adapter cannot
+  represent the complete decoded image in one texture, preventing an ambiguous
+  source-to-display coordinate mapping.
 - **`curate`**: move to the OS trash or recycle bin and restore for undo. On
   macOS, a native receipt retains the exact resulting trash URL so restoration
   does not depend on an unsupported global trash listing.
@@ -122,7 +130,8 @@ Shipped:
 - **`error`**: the typed error set for the app.
 - **`ui`**: the `egui` layer for the conventional menu bar, fully hideable and
   collapsible docked tools and folder previews, left/right Image Information,
-  crop controls, and transient toasts. Visible chrome never covers the image; its
+  crop controls, the temporary docked Spot Heal inspector, and transient toasts.
+  Visible chrome never covers the image; its
   exact edge-aware insets feed the same `view` geometry used by hit testing and
   rendering. Keyboard dispatch remains centralized in `app` rather than adding a
   second input abstraction. Custom controls publish AccessKit semantics. Native

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -87,6 +87,7 @@ fn run_internal(
         playlist: None,
         scanner_rx: None,
         transform: Transform::default(),
+        heal: HealTool::default(),
         is_fullscreen: false,
         last_trashed: Vec::new(),
         current_image: None,
@@ -201,6 +202,11 @@ impl PerformanceProbe {
             self.navigation_target = None;
         }
     }
+
+    fn reset_idle_observation(&mut self) {
+        self.idle_until = None;
+        self.idle_redraws = 0;
+    }
 }
 
 fn schedule_performance_wake(
@@ -298,6 +304,87 @@ impl Default for Transform {
     }
 }
 
+const EDIT_HISTORY_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_HEAL_BRUSH_RADIUS: u32 = 18;
+
+struct HealTool {
+    active: bool,
+    brush_radius: u32,
+    stroke: Vec<crate::heal::StrokePoint>,
+    painting: bool,
+    worker: Option<HealWorker>,
+    history: crate::heal::PatchHistory,
+}
+
+struct HealWorker {
+    result_rx: Receiver<Result<crate::heal::ImagePatch, String>>,
+    cancel: Arc<AtomicBool>,
+    apply_result: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HealStrokeUpdate {
+    Added,
+    Unchanged,
+    LeftImage,
+    TooManyPoints,
+}
+
+fn append_heal_stroke_point(
+    stroke: &mut Vec<crate::heal::StrokePoint>,
+    point: Option<crate::heal::StrokePoint>,
+    brush_radius: u32,
+) -> HealStrokeUpdate {
+    let Some(point) = point else {
+        return HealStrokeUpdate::LeftImage;
+    };
+    let spacing = (brush_radius as f32 * 0.2).max(1.0);
+    if stroke
+        .last()
+        .is_some_and(|last| (point.x - last.x).hypot(point.y - last.y) < spacing)
+    {
+        return HealStrokeUpdate::Unchanged;
+    }
+    if stroke.len() >= crate::heal::MAX_STROKE_POINTS {
+        return HealStrokeUpdate::TooManyPoints;
+    }
+    stroke.push(point);
+    HealStrokeUpdate::Added
+}
+
+impl Default for HealTool {
+    fn default() -> Self {
+        Self {
+            active: false,
+            brush_radius: DEFAULT_HEAL_BRUSH_RADIUS,
+            stroke: Vec::new(),
+            painting: false,
+            worker: None,
+            history: crate::heal::PatchHistory::new(EDIT_HISTORY_BYTES),
+        }
+    }
+}
+
+impl HealTool {
+    fn reset_for_image(&mut self) {
+        self.cancel_worker();
+        self.stroke.clear();
+        self.painting = false;
+        self.history.clear();
+    }
+
+    fn is_busy(&self) -> bool {
+        self.worker.is_some()
+    }
+
+    fn cancel_worker(&mut self) {
+        if let Some(worker) = self.worker.as_mut() {
+            worker.apply_result = false;
+            worker.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 /// The whole application state. Deliberately small.
 #[allow(clippy::struct_excessive_bools)] // independent UI/session mode bits
 struct App {
@@ -306,9 +393,10 @@ struct App {
     playlist: Option<Playlist>,
     scanner_rx: Option<Receiver<FolderScan>>,
     transform: Transform,
+    heal: HealTool,
     is_fullscreen: bool,
     last_trashed: Vec<TrashedFile>,
-    current_image: Option<DecodedImage>,
+    current_image: Option<Arc<DecodedImage>>,
     /// Source path corresponding exactly to `current_image` and the GPU texture.
     loaded_image_path: Option<PathBuf>,
     show_image_info: bool,
@@ -394,7 +482,11 @@ fn single_key_shortcut_allowed(modifiers: ModifiersState) -> bool {
     !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
 }
 
-fn route_consumed_keyboard_key(key: &winit::keyboard::Key, is_cropping: bool) -> bool {
+fn route_consumed_keyboard_key(
+    key: &winit::keyboard::Key,
+    is_cropping: bool,
+    is_healing: bool,
+) -> bool {
     use winit::keyboard::{Key, NamedKey};
 
     match key {
@@ -402,15 +494,21 @@ fn route_consumed_keyboard_key(key: &winit::keyboard::Key, is_cropping: bool) ->
             let character = character.as_str();
             matches!(character, "0" | "1" | "+" | "=" | "-" | "_")
                 || [
-                    "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "u", "x", "b", "f",
+                    "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "x", "b", "f", "z",
+                    "y",
                 ]
                 .iter()
                 .any(|shortcut| character.eq_ignore_ascii_case(shortcut))
         }
         Key::Named(NamedKey::ArrowRight | NamedKey::ArrowLeft) => true,
-        Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp | NamedKey::Escape) => is_cropping,
+        Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp) => is_cropping,
+        Key::Named(NamedKey::Escape) => is_cropping || is_healing,
         _ => false,
     }
+}
+
+fn image_is_fully_displayed(source: Option<(u32, u32)>, displayed: Option<(u32, u32)>) -> bool {
+    source.is_some() && source == displayed
 }
 
 impl App {
@@ -533,11 +631,12 @@ impl App {
         if should_resize && uploaded {
             self.resize_on_load = None;
         }
-        self.current_image = Some(image);
+        self.current_image = Some(Arc::new(image));
         self.loaded_image_path = Some(path.to_owned());
     }
 
     fn invalidate_displayed_image(&mut self) {
+        self.heal.reset_for_image();
         self.current_image = None;
         self.loaded_image_path = None;
         if let Some(renderer) = self.renderer.as_mut() {
@@ -580,6 +679,7 @@ impl App {
                 crate::ui::DockState::Collapsed
             },
             tools_side: self.tools_panel_side,
+            heal: has_image && self.heal.active,
             filmstrip: if !has_image || !has_filmstrip || !self.show_filmstrip_panel {
                 crate::ui::DockState::Hidden
             } else if self.filmstrip_panel_open {
@@ -694,6 +794,7 @@ impl App {
                 self.request_redraw();
             }
             "c" | "C" => self.toggle_crop_mode(),
+            "j" | "J" => self.toggle_heal_mode(),
             "u" | "U" => self.undo_trash(),
             "x" | "X" => self.toggle_flag_current(),
             "b" | "B" => self.trash_flagged(),
@@ -915,7 +1016,15 @@ impl App {
             self.cancel_crop();
             return;
         }
+        if self.heal.is_busy() {
+            self.show_toast("Spot heal is still finishing");
+            return;
+        }
 
+        self.heal.active = false;
+        self.heal.stroke.clear();
+        self.heal.painting = false;
+        self.heal.cancel_worker();
         self.transform.is_cropping = true;
         self.transform.crop_start = None;
         self.transform.crop_rect = self
@@ -941,6 +1050,272 @@ impl App {
         }
         if let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
+        }
+    }
+
+    fn toggle_heal_mode(&mut self) {
+        if self.current_image.is_none() {
+            return;
+        }
+        if !self.heal.active && self.heal.is_busy() {
+            self.show_toast("Spot heal is still finishing");
+            return;
+        }
+        if !self.heal.active && !self.can_heal_current_image() {
+            self.show_toast(
+                "Spot Heal is unavailable for images larger than the GPU texture limit",
+            );
+            return;
+        }
+        if self.heal.active {
+            if self.heal.painting {
+                self.finish_heal_stroke();
+            }
+            self.heal.active = false;
+            self.heal.stroke.clear();
+            self.heal.painting = false;
+            if self.heal.is_busy() {
+                self.show_toast("Finishing spot heal in memory");
+            }
+        } else {
+            self.heal.active = true;
+            self.heal.stroke.clear();
+            self.heal.painting = false;
+            self.cancel_crop();
+            self.show_tools_panel = true;
+            self.tools_panel_open = true;
+        }
+        self.request_redraw();
+    }
+
+    fn can_heal_current_image(&self) -> bool {
+        image_is_fully_displayed(
+            self.current_image
+                .as_ref()
+                .map(|image| (image.width, image.height)),
+            self.renderer.as_ref().and_then(Renderer::image_size),
+        )
+    }
+
+    fn set_heal_brush_radius(&mut self, radius: u32) {
+        self.heal.brush_radius =
+            radius.clamp(crate::heal::MIN_BRUSH_RADIUS, crate::heal::MAX_BRUSH_RADIUS);
+        self.request_redraw();
+    }
+
+    fn heal_point_at(&self, screen: (f64, f64)) -> Option<crate::heal::StrokePoint> {
+        let renderer = self.renderer.as_ref()?;
+        let image = self.current_image.as_ref()?;
+        if renderer.image_size() != Some((image.width, image.height)) {
+            return None;
+        }
+        let size = renderer.window().inner_size();
+        let viewport =
+            crate::view::safe_viewport_rect((size.width, size.height), self.viewport_insets())?;
+        let left = f64::from(viewport.x);
+        let top = f64::from(viewport.y);
+        let right = left + f64::from(viewport.width);
+        let bottom = top + f64::from(viewport.height);
+        if !screen.0.is_finite()
+            || !screen.1.is_finite()
+            || screen.0 < left
+            || screen.0 >= right
+            || screen.1 < top
+            || screen.1 >= bottom
+        {
+            return None;
+        }
+        let (u, v) = self.screen_to_uv(screen.0, screen.1)?;
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+            return None;
+        }
+        Some(crate::heal::StrokePoint {
+            x: (u * image.width as f32).clamp(0.0, image.width.saturating_sub(1) as f32),
+            y: (v * image.height as f32).clamp(0.0, image.height.saturating_sub(1) as f32),
+        })
+    }
+
+    fn begin_heal_stroke(&mut self) {
+        if !self.heal.active || self.heal.is_busy() {
+            return;
+        }
+        self.heal.stroke.clear();
+        let Some(point) = self.heal_point_at(self.cursor_pos) else {
+            self.heal.painting = false;
+            return;
+        };
+        self.heal.stroke.push(point);
+        self.heal.painting = true;
+        self.request_redraw();
+    }
+
+    fn continue_heal_stroke(&mut self) {
+        if !self.heal.painting || self.heal.is_busy() {
+            return;
+        }
+        let point = self.heal_point_at(self.cursor_pos);
+        match append_heal_stroke_point(&mut self.heal.stroke, point, self.heal.brush_radius) {
+            HealStrokeUpdate::Added => self.request_redraw(),
+            HealStrokeUpdate::Unchanged => {}
+            HealStrokeUpdate::LeftImage => self.finish_heal_stroke(),
+            HealStrokeUpdate::TooManyPoints => {
+                self.heal.painting = false;
+                self.heal.stroke.clear();
+                self.show_toast("Spot-heal stroke is too long; use shorter strokes");
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn finish_heal_stroke(&mut self) {
+        if !self.heal.painting {
+            return;
+        }
+        self.heal.painting = false;
+        let Some(image) = self.current_image.as_ref().map(Arc::clone) else {
+            self.heal.stroke.clear();
+            return;
+        };
+        let points = std::mem::take(&mut self.heal.stroke);
+        let brush_radius = self.heal.brush_radius;
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let spawn = std::thread::Builder::new()
+            .name("viewr-spot-heal".into())
+            .spawn(move || {
+                let result = if worker_cancel.load(Ordering::Relaxed) {
+                    Err(crate::heal::HealError::Cancelled)
+                } else {
+                    let prepared =
+                        crate::heal::SpotHealJob::prepare(image.as_ref(), &points, brush_radius);
+                    drop(image);
+                    match prepared {
+                        Ok(Some(job)) => job.run_cancellable(&worker_cancel),
+                        Ok(None) => Err(crate::heal::HealError::InvalidStroke),
+                        Err(error) => Err(error),
+                    }
+                }
+                .map_err(|error| error.to_string());
+                let _ = sender.send(result);
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
+        match spawn {
+            Ok(_) => {
+                self.heal.worker = Some(HealWorker {
+                    result_rx: receiver,
+                    cancel,
+                    apply_result: true,
+                });
+                self.request_redraw();
+            }
+            Err(error) => {
+                self.heal.stroke.clear();
+                self.show_toast(format!("Could not start spot heal: {error}"));
+            }
+        }
+    }
+
+    fn poll_heal_result(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+
+        let polled = self
+            .heal
+            .worker
+            .as_ref()
+            .map(|worker| (worker.result_rx.try_recv(), worker.apply_result));
+        let (result, apply_result) = match polled {
+            Some((Ok(result), apply_result)) => (Some(result), apply_result),
+            Some((Err(TryRecvError::Disconnected), apply_result)) => {
+                self.heal.worker = None;
+                self.heal.stroke.clear();
+                if apply_result {
+                    self.show_toast("Spot heal stopped unexpectedly");
+                }
+                return;
+            }
+            Some((Err(TryRecvError::Empty), _)) | None => (None, false),
+        };
+        let Some(result) = result else {
+            return;
+        };
+        self.heal.worker = None;
+        self.heal.stroke.clear();
+        if !apply_result {
+            self.request_redraw();
+            return;
+        }
+        match result {
+            Ok(patch) => {
+                let apply_result = self
+                    .current_image
+                    .as_mut()
+                    .and_then(Arc::get_mut)
+                    .ok_or(crate::heal::HealError::InvalidImageBuffer)
+                    .and_then(|image| crate::heal::apply_patch(image, &patch));
+                match apply_result {
+                    Ok(inverse) => {
+                        self.heal.history.record(inverse);
+                        self.update_rendered_patch(&patch);
+                        self.show_toast("Spot healed. Undo is available.");
+                    }
+                    Err(error) => self.show_toast(format!("Spot heal failed: {error}")),
+                }
+            }
+            Err(error) => self.show_toast(format!("Spot heal failed: {error}")),
+        }
+        self.request_redraw();
+    }
+
+    fn undo_edit(&mut self) {
+        if self.heal.is_busy() {
+            return;
+        }
+        let result = self
+            .current_image
+            .as_mut()
+            .and_then(Arc::get_mut)
+            .map(|image| self.heal.history.undo_patch(image));
+        match result {
+            Some(Ok(Some(patch))) => {
+                self.update_rendered_patch(&patch);
+                self.show_toast("Undid spot heal");
+            }
+            Some(Err(error)) => self.show_toast(format!("Could not undo edit: {error}")),
+            Some(Ok(None)) | None => {}
+        }
+    }
+
+    fn redo_edit(&mut self) {
+        if self.heal.is_busy() {
+            return;
+        }
+        let result = self
+            .current_image
+            .as_mut()
+            .and_then(Arc::get_mut)
+            .map(|image| self.heal.history.redo_patch(image));
+        match result {
+            Some(Ok(Some(patch))) => {
+                self.update_rendered_patch(&patch);
+                self.show_toast("Redid spot heal");
+            }
+            Some(Err(error)) => self.show_toast(format!("Could not redo edit: {error}")),
+            Some(Ok(None)) | None => {}
+        }
+    }
+
+    fn update_rendered_patch(&mut self, patch: &crate::heal::ImagePatch) {
+        let updated = self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.update_image_patch(patch));
+        if !updated
+            && let (Some(image), Some(renderer)) =
+                (self.current_image.as_ref(), self.renderer.as_mut())
+        {
+            renderer.set_image(image);
         }
     }
 
@@ -1027,6 +1402,44 @@ impl App {
         let (x0, y0) = self.uv_to_screen(rect[0], rect[1])?;
         let (x1, y1) = self.uv_to_screen(rect[2], rect[3])?;
         Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)])
+    }
+
+    fn heal_overlay_geometry(&self, scale_factor: f64) -> (Vec<[f32; 2]>, Option<[f32; 2]>, f32) {
+        if !self.heal.active || !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return (Vec::new(), None, 0.0);
+        }
+        let Some(image) = self.current_image.as_ref() else {
+            return (Vec::new(), None, 0.0);
+        };
+        let scale = scale_factor as f32;
+        let project = |point: crate::heal::StrokePoint| {
+            let u = point.x / image.width as f32;
+            let v = point.y / image.height as f32;
+            self.uv_to_screen(u, v).map(|(x, y)| [x / scale, y / scale])
+        };
+        let stroke: Vec<[f32; 2]> = self
+            .heal
+            .stroke
+            .iter()
+            .filter_map(|point| project(*point))
+            .collect();
+        let cursor_point = self.heal_point_at(self.cursor_pos);
+        let cursor = cursor_point.and_then(project);
+        let anchor = cursor_point
+            .or_else(|| self.heal.stroke.last().copied())
+            .unwrap_or(crate::heal::StrokePoint {
+                x: image.width as f32 * 0.5,
+                y: image.height as f32 * 0.5,
+            });
+        let center = project(anchor);
+        let edge = project(crate::heal::StrokePoint {
+            x: anchor.x + self.heal.brush_radius as f32,
+            y: anchor.y,
+        });
+        let radius = center.zip(edge).map_or(0.0, |(center, edge)| {
+            (edge[0] - center[0]).hypot(edge[1] - center[1])
+        });
+        (stroke, cursor, radius)
     }
 
     fn zoom_at_cursor(&mut self, factor: f32) {
@@ -1395,6 +1808,10 @@ impl App {
     }
 
     fn save_as(&mut self) {
+        if self.heal.is_busy() {
+            self.show_toast("Wait for spot heal to finish before saving");
+            return;
+        }
         if let Some(path) = &self.image_path
             && let Some(image) = &self.current_image
             && self.loaded_image_path.as_ref() == Some(path)
@@ -1464,7 +1881,8 @@ impl App {
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.set_image(&cropped);
         }
-        self.current_image = Some(cropped);
+        self.current_image = Some(Arc::new(cropped));
+        self.heal.reset_for_image();
         self.transform = Transform::default();
         if let Some(r) = self.renderer.as_mut() {
             r.window().request_redraw();
@@ -1492,6 +1910,7 @@ impl App {
         if !self.performance_probe_has_presented_current()
             || !self.prefetch_in_flight.is_empty()
             || !self.thumbs_in_flight.is_empty()
+            || self.egui_repaint_at.is_some()
         {
             return false;
         }
@@ -1599,6 +2018,11 @@ impl App {
         }
 
         if !self.performance_probe_is_settled() {
+            if let Some(probe) = self.performance_probe.as_mut()
+                && probe.idle_until.is_some()
+            {
+                probe.reset_idle_observation();
+            }
             return;
         }
 
@@ -1955,12 +2379,21 @@ impl ApplicationHandler<UserEvent> for App {
                 | WindowEvent::DroppedFile(_)
                 | WindowEvent::ModifiersChanged(_)
                 | WindowEvent::Resized(_)
-                | WindowEvent::ThemeChanged(_) => true,
+                | WindowEvent::ThemeChanged(_)
+                | WindowEvent::Focused(_)
+                | WindowEvent::CursorLeft { .. }
+                | WindowEvent::MouseInput {
+                    state: winit::event::ElementState::Released,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } => true,
+                WindowEvent::CursorMoved { .. } if self.heal.painting => true,
                 WindowEvent::KeyboardInput { event, .. } => {
                     !egui_popup_open
                         && route_consumed_keyboard_key(
                             &event.logical_key,
                             self.transform.is_cropping,
+                            self.heal.active,
                         )
                 }
                 _ => false,
@@ -1973,6 +2406,24 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
+            }
+            WindowEvent::Focused(false) => {
+                self.mouse_left_down = false;
+                self.space_held = false;
+                self.space_dragged = false;
+                self.transform.is_panning = false;
+                self.transform.crop_start = None;
+                self.heal.painting = false;
+                self.heal.stroke.clear();
+                self.request_redraw();
+            }
+            WindowEvent::CursorLeft { .. } => {
+                if self.heal.painting {
+                    self.finish_heal_stroke();
+                }
+                self.mouse_left_down = false;
+                self.transform.is_panning = false;
+                self.transform.crop_start = None;
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::DroppedFile(path) => {
@@ -1998,7 +2449,10 @@ impl ApplicationHandler<UserEvent> for App {
             } => {
                 let pressed = state == winit::event::ElementState::Pressed;
                 self.mouse_left_down = pressed;
-                if pressed && !self.transform.is_cropping {
+                if !pressed {
+                    self.transform.is_panning = false;
+                }
+                if pressed && !self.transform.is_cropping && !self.heal.active {
                     let now = Instant::now();
                     let pos = self.cursor_pos;
                     if let Some((t, (lx, ly))) = self.last_click {
@@ -2011,7 +2465,13 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     self.last_click = Some((now, pos));
                 }
-                if self.transform.is_cropping && !self.space_held {
+                if !pressed && self.heal.painting {
+                    self.finish_heal_stroke();
+                } else if self.heal.active && !self.space_held {
+                    if pressed {
+                        self.begin_heal_stroke();
+                    }
+                } else if self.transform.is_cropping && !self.space_held {
                     if pressed {
                         if let Some((x, y)) = self.transform.last_cursor {
                             self.transform.crop_start = self.screen_to_uv(x, y);
@@ -2027,7 +2487,14 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = (position.x, position.y);
-                if self.transform.is_cropping
+                if self.heal.active
+                    && self.heal.painting
+                    && self.mouse_left_down
+                    && !self.space_held
+                {
+                    self.continue_heal_stroke();
+                    self.request_redraw();
+                } else if self.transform.is_cropping
                     && let Some(start) = self.transform.crop_start
                     && let Some(end) = self.screen_to_uv(position.x, position.y)
                 {
@@ -2110,6 +2577,9 @@ impl ApplicationHandler<UserEvent> for App {
                     || matches!(&logical_key, Key::Character(c) if c.as_str() == " ");
                 if is_space {
                     if pressed {
+                        if self.heal.painting {
+                            self.finish_heal_stroke();
+                        }
                         self.space_held = true;
                         self.space_dragged = false;
                     } else {
@@ -2147,6 +2617,20 @@ impl ApplicationHandler<UserEvent> for App {
                     {
                         self.open_image_dialog();
                     }
+                    Key::Character(c)
+                        if (c == "z" || c == "Z") && primary_modifier_pressed(self.modifiers) =>
+                    {
+                        if self.modifiers.shift_key() {
+                            self.redo_edit();
+                        } else {
+                            self.undo_edit();
+                        }
+                    }
+                    Key::Character(c)
+                        if (c == "y" || c == "Y") && primary_modifier_pressed(self.modifiers) =>
+                    {
+                        self.redo_edit();
+                    }
                     Key::Character(c) if single_key_shortcut_allowed(self.modifiers) => {
                         self.handle_single_key_shortcut(c.as_str());
                     }
@@ -2156,6 +2640,8 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Named(NamedKey::Escape) => {
                         if self.transform.is_cropping {
                             self.cancel_crop();
+                        } else if self.heal.active {
+                            self.toggle_heal_mode();
                         }
                     }
                     Key::Named(NamedKey::ArrowRight) if self.transform.is_cropping => {
@@ -2217,6 +2703,8 @@ impl ApplicationHandler<UserEvent> for App {
                     .renderer
                     .as_ref()
                     .map_or(1.0, |renderer| renderer.window().scale_factor());
+                let (heal_stroke_screen, heal_cursor_screen, heal_brush_screen_radius) =
+                    self.heal_overlay_geometry(scale_factor);
                 let crop_screen = self
                     .crop_screen_rect()
                     .and_then(|rect| crate::view::physical_rect_to_logical(rect, scale_factor));
@@ -2247,8 +2735,17 @@ impl ApplicationHandler<UserEvent> for App {
                 let filmstrip_panel_open = self.filmstrip_panel_open;
                 let image_info_side = self.image_info_side;
                 let retain_exif = self.retain_exif;
+                let source_image_size = self
+                    .current_image
+                    .as_ref()
+                    .map(|image| (image.width, image.height));
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
+                let is_healing = self.heal.active;
+                let heal_busy = self.heal.is_busy();
+                let heal_brush_radius = self.heal.brush_radius;
+                let can_undo_edit = !heal_busy && self.heal.history.can_undo();
+                let can_redo_edit = !heal_busy && self.heal.history.can_redo();
                 let is_panning =
                     self.transform.is_panning || (self.space_held && self.mouse_left_down);
                 let bg_override = self.bg_override;
@@ -2319,6 +2816,7 @@ impl ApplicationHandler<UserEvent> for App {
                 };
 
                 let img_size = renderer.image_size();
+                let can_heal = image_is_fully_displayed(source_image_size, img_size);
                 let frame = crate::ui::UiFrameOwned {
                     show_image_info,
                     retain_exif,
@@ -2333,6 +2831,12 @@ impl ApplicationHandler<UserEvent> for App {
                     img_size,
                     is_cropping,
                     crop_ratio,
+                    is_healing,
+                    can_heal,
+                    heal_busy,
+                    heal_brush_radius,
+                    can_undo_edit,
+                    can_redo_edit,
                     is_panning,
                     is_flagged,
                     flag_count,
@@ -2345,6 +2849,9 @@ impl ApplicationHandler<UserEvent> for App {
                     crop_screen,
                     crop_uv: crop_rect,
                     image_viewport: logical_image_viewport,
+                    heal_stroke_screen,
+                    heal_cursor_screen,
+                    heal_brush_screen_radius,
                 };
 
                 let presents_image = placement.is_some();
@@ -2517,6 +3024,12 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::SetCropRatio(r) => {
                             self.set_crop_ratio(r);
                         }
+                        crate::ui::UiAction::ToggleHeal => self.toggle_heal_mode(),
+                        crate::ui::UiAction::SetHealBrushRadius(radius) => {
+                            self.set_heal_brush_radius(radius);
+                        }
+                        crate::ui::UiAction::UndoEdit => self.undo_edit(),
+                        crate::ui::UiAction::RedoEdit => self.redo_edit(),
                     }
                 }
             }
@@ -2556,6 +3069,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_thumbnails();
         self.poll_prefetch();
+        self.poll_heal_result();
         if let Some(rx) = &self.image_loader_rx
             && let Ok((path, result)) = rx.try_recv()
         {
@@ -2693,6 +3207,48 @@ mod test {
     }
 
     #[test]
+    fn heal_stroke_exit_is_terminal_and_point_collection_is_bounded() {
+        let point = crate::heal::StrokePoint { x: 4.0, y: 5.0 };
+        let mut stroke = vec![point];
+        assert_eq!(
+            append_heal_stroke_point(&mut stroke, None, DEFAULT_HEAL_BRUSH_RADIUS),
+            HealStrokeUpdate::LeftImage
+        );
+        assert_eq!(stroke, vec![point]);
+
+        let mut full = vec![point; crate::heal::MAX_STROKE_POINTS];
+        assert_eq!(
+            append_heal_stroke_point(
+                &mut full,
+                Some(crate::heal::StrokePoint { x: 100.0, y: 100.0 }),
+                DEFAULT_HEAL_BRUSH_RADIUS,
+            ),
+            HealStrokeUpdate::TooManyPoints
+        );
+        assert_eq!(full.len(), crate::heal::MAX_STROKE_POINTS);
+    }
+
+    #[test]
+    fn canceling_a_heal_retains_and_invalidates_the_single_worker() {
+        let (_sender, result_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut heal = HealTool {
+            worker: Some(HealWorker {
+                result_rx,
+                cancel: cancel.clone(),
+                apply_result: true,
+            }),
+            ..HealTool::default()
+        };
+
+        heal.cancel_worker();
+
+        assert!(heal.is_busy());
+        assert!(cancel.load(Ordering::Relaxed));
+        assert!(!heal.worker.as_ref().unwrap().apply_result);
+    }
+
+    #[test]
     fn test_load_icon() {
         assert!(load_icon().is_some(), "load_icon returned None!");
     }
@@ -2703,41 +3259,78 @@ mod test {
 
         assert!(route_consumed_keyboard_key(
             &Key::Character("t".into()),
-            false
+            false,
+            false,
         ));
         assert!(route_consumed_keyboard_key(
             &Key::Character("+".into()),
-            false
+            false,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Character("j".into()),
+            false,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Character("z".into()),
+            false,
+            false,
         ));
         assert!(route_consumed_keyboard_key(
             &Key::Named(NamedKey::ArrowRight),
-            true
+            true,
+            false,
         ));
         assert!(route_consumed_keyboard_key(
             &Key::Named(NamedKey::Escape),
-            true
+            true,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Named(NamedKey::Escape),
+            false,
+            true,
         ));
         assert!(route_consumed_keyboard_key(
             &Key::Named(NamedKey::ArrowRight),
-            false
+            false,
+            false,
         ));
         assert!(!route_consumed_keyboard_key(
             &Key::Named(NamedKey::ArrowDown),
-            false
+            false,
+            true,
         ));
         assert!(!route_consumed_keyboard_key(
             &Key::Named(NamedKey::Enter),
-            true
+            true,
+            false,
         ));
         assert!(!route_consumed_keyboard_key(
             &Key::Named(NamedKey::Space),
-            false
+            false,
+            false,
         ));
         assert!(single_key_shortcut_allowed(ModifiersState::default()));
         assert!(single_key_shortcut_allowed(ModifiersState::SHIFT));
         assert!(!single_key_shortcut_allowed(ModifiersState::CONTROL));
         assert!(!single_key_shortcut_allowed(ModifiersState::ALT));
         assert!(!single_key_shortcut_allowed(ModifiersState::SUPER));
+    }
+
+    #[test]
+    fn spot_heal_requires_the_complete_source_image_on_the_gpu() {
+        assert!(image_is_fully_displayed(
+            Some((16_384, 8_192)),
+            Some((16_384, 8_192))
+        ));
+        assert!(!image_is_fully_displayed(
+            Some((32_768, 8_192)),
+            Some((16_384, 8_192))
+        ));
+        assert!(!image_is_fully_displayed(Some((1, 1)), None));
+        assert!(!image_is_fully_displayed(None, None));
     }
 
     #[test]
@@ -2762,6 +3355,18 @@ mod test {
             VecDeque::from([2, 4, 6, 7])
         );
         assert_eq!(performance_navigation_targets(1, 2), VecDeque::from([0]));
+    }
+
+    #[test]
+    fn unsettled_ui_restarts_the_idle_observation_window() {
+        let mut probe = PerformanceProbe::new(Instant::now());
+        probe.idle_until = Some(Instant::now());
+        probe.idle_redraws = 42;
+
+        probe.reset_idle_observation();
+
+        assert_eq!(probe.idle_until, None);
+        assert_eq!(probe.idle_redraws, 0);
     }
 
     #[test]

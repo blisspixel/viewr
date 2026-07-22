@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format is human-wri
 - Egui redraw requests no longer schedule another redraw from inside the current
   redraw event. The settled viewer now returns to the sleeping event loop instead
   of continuously presenting frames, and repeated identical chrome styling no
-  longer requests needless visual updates.
+  longer requests needless visual updates. The performance probe now waits for
+  legitimate delayed hover repaints to finish before measuring settled idle, so
+  machine cursor placement cannot create a false regression.
 - Bounded prefetch and thumbnail work now refills from completion events instead
   of depending on incidental paint events. Explicit timer wakes make the
   performance probe's idle interval and one-minute deadline deterministic, while
@@ -53,18 +55,36 @@ All notable changes to this project are documented here. The format is human-wri
 - Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
 - Serialized tests that invoke global stale-debris cleanup so parallel test execution cannot erase another test's scrub-safe fixture.
 - Implemented SVG decode with pure-Rust `resvg` (corpus and unit tests pass). Default features avoid system fonts and text shaping so the trusted core stays free of unmaintained shaping crates.
-- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Current measured logic coverage is 89.04% lines under that floor.
+- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Current measured logic coverage remains above 88% lines under that floor, including above 86% for the new healing core.
 - Initial image decode now runs off the winit event thread, invalidates stale displayed pixels, and applies only if its path is still current. A two-slot, foreground-priority decode gate bounds aggregate work, and superseded foreground jobs cancel before file access.
 - Decode resource limits reject zero, oversized, or inconsistent pixel shapes before parent allocation and pixel-stream copy. SVG and worker inputs are capped, while the C-worker address-space ceiling also bounds allocations performed inside third-party decoders.
 - Worker-bound host files are verified as regular files and read with a bounded, fallible allocator before a worker is reserved. The IPC deadline thread now contains only cancellable child-pipe work, and encoded bytes are released immediately after transfer.
 - Sandboxed file opens now degrade safely to a one-image playlist when sibling enumeration is denied. **Open Folder** provides explicit session-scoped directory consent for next/previous navigation without broad filesystem capabilities.
+- The Windows accessibility smoke gate now allows its complete multi-action UIA
+  flow 60 seconds while retaining per-step polling, process-exit detection, and
+  the existing hard 120-second parameter ceiling. This removes a reproducible
+  cold-machine CI timeout without weakening any accessibility assertion.
 
 ### Added
 
+- Added focused Spot Heal for small blemishes. `J` opens a temporary docked
+  inspector that reserves image space; sparse image-space strokes run through a
+  bounded pure-Rust patch-matching worker with feathered compositing and
+  byte-bounded in-memory undo/redo. Repairs never write the source file and add
+  no model or native dependency. Done and Esc leave the tool without dropping an
+  already-submitted repair, and integration coverage verifies repair, undo, redo,
+  pixel-only export, and reopen as one flow. Repair, undo, and redo upload only
+  the changed texture region; editing is unavailable when a GPU texture limit
+  prevents the complete source image from being displayed.
+- Documented the strict gate for any future optional local description model:
+  explicit one-image activation, separate model packs, path-free pixel IPC,
+  process-level network and write denial, zero app-owned logs, no automatic
+  speech, and a cross-platform offline model bake-off. No model runtime ships yet.
 - Added a dependency-free Windows UI Automation smoke gate over the real app and
   native AccessKit provider. It verifies focusable menus, image context, default
   panel state, panel and disclosure actions, distinct left/right docking state,
-  metadata checked state, previews, and accessible thumbnail navigation. The
+  metadata checked state, the Spot Heal action path, previews, and accessible
+  thumbnail navigation. The
   canonical manual Narrator, VoiceOver, and Orca matrix remains required and is
   documented separately.
 - Added independent left/right docking for Tools and Image Information through

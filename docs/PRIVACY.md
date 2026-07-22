@@ -109,6 +109,8 @@ A promise you can verify beats a promise you have to trust.
   beside your photos).
 - viewr **does not** create companion files next to your photos (no `_picks.txt`,
   no sidecar caches).
+- Spot-heal strokes, repair regions, and undo/redo pixel patches exist only in
+  bounded RAM. Navigation clears them. The source file is never edited in place.
 - **Save As / convert** only writes the file path you choose in the save dialog.
 - Deletes go to the **system trash**, so your OS (not viewr) holds the recoverable
   copy under its normal rules. Permanent delete requires an explicit confirmation
@@ -117,6 +119,15 @@ A promise you can verify beats a promise you have to trust.
 If a convenience feature like "remember window size" is ever added, it will be
 **opt-in, local-only, and clearable in one click** — and it will still never be
 transmitted anywhere.
+
+## Optional local models
+
+No model runtime or model weights currently ship with viewr. Any future Describe
+Image or advanced repair model must remain separately installed and explicitly
+invoked. It may not use localhost HTTP, receive a photo path, write a prompt,
+response, history, cache, or log, or run automatically. The process boundary,
+network denial, zero-write contract, model bake-off, and release acceptance gate
+are specified in `docs/LOCAL-INTELLIGENCE.md`.
 
 ## Metadata is yours
 

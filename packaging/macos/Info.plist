@@ -4,6 +4,41 @@
 <dict>
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>jpg</string>
+        <string>jpeg</string>
+        <string>png</string>
+        <string>gif</string>
+        <string>webp</string>
+        <string>bmp</string>
+        <string>tif</string>
+        <string>tiff</string>
+        <string>ico</string>
+        <string>qoi</string>
+        <string>tga</string>
+        <string>ppm</string>
+        <string>pgm</string>
+        <string>pbm</string>
+        <string>pnm</string>
+        <string>hdr</string>
+        <string>exr</string>
+        <string>ff</string>
+        <string>dds</string>
+        <string>jxl</string>
+        <string>svg</string>
+      </array>
+      <key>CFBundleTypeName</key>
+      <string>Images supported by viewr</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+    </dict>
+  </array>
   <key>CFBundleDisplayName</key>
   <string>viewr</string>
   <key>CFBundleExecutable</key>

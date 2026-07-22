@@ -50,6 +50,7 @@ little_exif = "0.6.23"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Security",
     "Win32_System_Console",
     "Win32_System_JobObjects",
@@ -62,6 +63,20 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 viewr-seccomp = { path = "../viewr-seccomp" }
+
+# Launch Services delivers Finder/Open With requests through the application
+# delegate rather than argv. Keep this glue macOS-only and use the same objc2
+# versions already selected by winit.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "NSArray",
+    "NSError",
+    "NSFileManager",
+    "NSObject",
+    "NSURL",
+] }
 
 # Pure-Rust decoders for the always-on core formats. Exotic/C-backed formats
 # (HEIC, RAW, AVIF) come later behind feature flags. See docs/STANDARDS.md.

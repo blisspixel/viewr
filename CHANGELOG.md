@@ -6,12 +6,21 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Fixed
 
+- macOS bundles now receive Finder and Open With requests by adding the missing
+  Launch Services selector to winit's existing application delegate, preserving
+  winit lifecycle ownership and waking its event loop through `EventLoopProxy`.
+  macOS trash Undo also preserves the exact resulting item URL and refuses to
+  replace an existing restore target.
+- Trash receipts now store absolute original paths so relative command-line
+  opens restore correctly on Windows and Linux. Undo restores every successful
+  item from the latest batch, retains failed receipts for retry, and keeps files
+  that failed to move flagged instead of silently dropping them from the batch.
 - Restored the quality baseline: `cargo fmt`, pedantic `clippy -D warnings`, and the full test suite are green again.
-- Raised measured logic coverage from 79.61% to 87.25% by testing CLI behavior and decode-boundary invariants, including diagnostics, benchmark paths, resource limits, explicit in-memory format dispatch, and the corpus contract.
+- Raised measured logic coverage from 79.61% to 88.16% by testing CLI behavior and decode-boundary invariants, including diagnostics, benchmark paths, resource limits, explicit in-memory format dispatch, trash receipts, and the corpus contract.
 - Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
 - Serialized tests that invoke global stale-debris cleanup so parallel test execution cannot erase another test's scrub-safe fixture.
 - Implemented SVG decode with pure-Rust `resvg` (corpus and unit tests pass). Default features avoid system fonts and text shaping so the trusted core stays free of unmaintained shaping crates.
-- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is 87.25% lines under that floor.
+- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is 88.16% lines under that floor.
 - Initial image decode now runs off the winit event thread, invalidates stale displayed pixels, and applies only if its path is still current. A two-slot, foreground-priority decode gate bounds aggregate work, and superseded foreground jobs cancel before file access.
 - Decode resource limits reject zero, oversized, or inconsistent pixel shapes before parent allocation and pixel-stream copy. SVG and worker inputs are capped, while the C-worker address-space ceiling also bounds allocations performed inside third-party decoders.
 - Worker-bound host files are verified as regular files and read with a bounded, fallible allocator before a worker is reserved. The IPC deadline thread now contains only cancellable child-pipe work, and encoded bytes are released immediately after transfer.
@@ -19,6 +28,11 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- Added exact-set, opt-in core-image associations for the Linux desktop entry,
+  macOS application bundle, and Windows AppContainer manifest. The Flatpak build
+  now installs its desktop entry and scalable icon. Contract tests keep all
+  declarations aligned with the default pure-Rust decoder set and reject silent
+  default-viewer takeover behavior.
 - Added a shared, feature-gated Linux default-deny seccomp policy for production AVIF/HEIC workers. It permits only measured decoder, read-only plugin, thread, memory, signal-runtime, time, and pipe syscalls; denies direct and inherited-pipe cross-process signaling; proves activation with an unlisted syscall; and is exercised by release-mode AVIF and HEIC protocol decodes on Ubuntu 24.04 CI.
 - Added deterministic dual-binary release archives for Linux x86-64, Windows x86-64, and Intel/Apple Silicon macOS. Each archive revalidates the exact archived executable structures, contains a canonical per-file manifest, has a SHA-256 sidecar, and is built only after the reusable complete CI and fuzz gates pass. The workflow is read-only and does not publish or sign.
 - Added exact-set verified Flatpak, macOS App Sandbox, and Windows AppContainer profiles. Platform CI performs a checksum-pinned offline Flatpak build and worker probe, verifies and probes an ad-hoc signed macOS bundle, and validates an unsigned dual-binary MSIX with the Windows SDK. Destructive packaging outputs are fixed beneath `target/profile-check` and reject symlink or reparse-point staging paths.

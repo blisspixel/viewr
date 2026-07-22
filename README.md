@@ -74,19 +74,24 @@ worker (feature-gated C backends; RAW deferred). Full table:
 - Decoding: [image-rs](https://github.com/image-rs/image) plus jxl-oxide and
   friends, safe decoders across a wide format set. Async image decoding runs on a
   background thread (using `std::sync::mpsc`) so navigation stays perfectly snappy.
-- Deletes: the trash crate, recoverable, never a raw delete by default.
-- Theme & Icon: [dark-light](https://docs.rs/dark-light) follows the operating system, and a custom SVG/ICO app icon is embedded via `winres`.
+- Deletes: native system trash APIs, recoverable, never a raw delete by default.
+  Windows and Linux use the `trash` crate; macOS retains the exact
+  `NSFileManager` result URL so in-app Undo can restore the same item safely.
+  Undo covers every successful item in the latest single or batch trash action.
+- Theme and icon: winit follows the operating-system theme, while a custom
+  SVG/ICO app icon is embedded via `winres`.
 
 Full reasoning, including the alternatives we rejected, is in
 [`docs/STACK.md`](docs/STACK.md).
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 87.29
+viewr targets 85 percent or higher test coverage on its logic (currently 88.16
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
-decode path, and mutation testing to keep the coverage honest. The full set of
-engineering standards is in [`docs/STANDARDS.md`](docs/STANDARDS.md), including how
-we guard against AI slop.
+decode path, and behavior-level contract tests that keep the coverage honest.
+The full set of engineering standards is in
+[`docs/STANDARDS.md`](docs/STANDARDS.md), including the additional quality gates
+required before a 1.0 release.
 
 ## Platforms
 
@@ -113,7 +118,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 7 hardening and privacy proof complete; Phase 8 polish is next**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, cull UI, and local CLI (`doctor`, `benchmark`, `update`, `help`) are in place. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
+Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, cull UI, local CLI (`doctor`, `benchmark`, `update`, `help`), and opt-in core-format associations for Linux, macOS, and Windows are in place. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

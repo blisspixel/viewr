@@ -58,18 +58,84 @@ Platform-native verification commands and their limits are documented in
 signed artifacts under `target/profile-check/`; they do not publish or install
 anything.
 
-## Desktop integration on Linux
+## Opt-in desktop integration
+
+Packaging declares only the formats supported by the default pure-Rust build.
+Optional AVIF, HEIC, HEIF, and RAW worker formats are not advertised until a
+future package can prove those decoders are present. None of the paths below
+changes the user's default image viewer during installation.
+
+### Linux
 
 The launcher entry and MIME associations live in `assets/linux/viewr.desktop`, and
-the app icon is `assets/icon.svg`. Packaging installs them into the standard XDG
-locations so viewr appears in menus and as an "Open with" choice. For a local
-source build you can install them by hand:
+the app icon is `assets/icon.svg`. The Flatpak profile installs both under the
+application ID `com.github.blisspixel.viewr`. For a local source build, keep the
+two executables together and install the same desktop assets into the user's XDG
+locations:
 
 ```
-install -Dm644 assets/linux/viewr.desktop ~/.local/share/applications/viewr.desktop
-install -Dm644 assets/icon.svg ~/.local/share/icons/hicolor/scalable/apps/viewr.svg
+install -Dm755 target/release/viewr ~/.local/bin/viewr
+install -Dm755 target/release/viewr-decode ~/.local/bin/viewr-decode
+install -Dm644 assets/linux/viewr.desktop ~/.local/share/applications/com.github.blisspixel.viewr.desktop
+install -Dm644 assets/icon.svg ~/.local/share/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg
 update-desktop-database ~/.local/share/applications
 ```
+
+The desktop entry uses a single-file `%f` launch because one viewr window opens
+one selected image. Installing it only adds viewr to Open With menus. To opt in
+as the default for a format, use the desktop environment's Open With dialog and
+choose its remember or default option. The equivalent explicit command for JPEG
+is:
+
+```
+xdg-mime default com.github.blisspixel.viewr.desktop image/jpeg
+```
+
+Run that command only for MIME types the user deliberately chooses. Removing
+the two binaries and the two application-ID files above unregisters the local
+source install; it does not change or delete photos.
+
+### macOS
+
+Launch Services associations require an application bundle. Build the release
+binaries, create the locally ad-hoc-signed sandbox bundle, and copy the bundle to
+the per-user Applications folder:
+
+```
+cargo build --release --workspace --locked
+bash scripts/build-macos-sandboxed-app.sh target/release
+mkdir -p "$HOME/Applications"
+cp -R target/profile-check/macos/viewr.app "$HOME/Applications/viewr.app"
+```
+
+The bundle declares viewr as an alternate viewer for the core extension set.
+Finder delivers selected files through Launch Services, which viewr handles
+without relying on argv. To make viewr the default for a format, select a file in
+Finder, open Get Info, choose viewr under Open with, and use Change All. Remove
+the app bundle through Finder to uninstall this local build.
+
+This is a local, ad-hoc-signed development bundle. It is not notarized and is not
+presented as a public distribution artifact.
+
+### Windows
+
+Keep `viewr.exe` and `viewr-decode.exe` side by side in a stable folder chosen by
+the user. Right-click an image, select Open with, then Choose another app and
+Choose an app on your PC, and select `viewr.exe`. Select Always only when the
+user intends to change that extension's default.
+
+The AppContainer manifest declares the same core extension set and remains
+capability-free. The repository can schema-validate an unsigned MSIX with:
+
+```powershell
+cargo build --workspace --locked
+.\scripts\build-windows-appcontainer.ps1 -BinaryDirectory target\debug
+```
+
+The resulting package is an inspection artifact, not an installable public
+release. It does not justify importing a signing certificate or weakening local
+Windows policy. A portable source build can be uninstalled by removing its two
+binaries after choosing another default viewer if necessary.
 
 ## Build and verify a release archive
 
@@ -102,7 +168,7 @@ For an explicit target build, Cargo writes binaries beneath
 `target/<target>/release`. The workspace version in `Cargo.toml` determines the
 archive name; do not copy the example version blindly after it changes.
 
-Phase 7 CI archives use the workspace's default pure-Rust feature set. They do
+CI archives use the workspace's default pure-Rust feature set. They do
 not claim AVIF, HEIC, or RAW support from optional C backends. AVIF/HEIC builds
 still require their native toolchain and libheif dependencies; on Linux, those
 features activate the tested default-deny policy documented in
@@ -125,4 +191,6 @@ versions produce identical executables.
 
 No account. No background service. No auto-update daemon. No telemetry opt-in
 screen. Current release archives are portable files and do not register file
-associations or modify the operating system.
+associations or modify the operating system. The source-built platform bundles
+and desktop entry make viewr an available handler, but changing a default always
+requires an explicit user choice.

@@ -15,6 +15,9 @@ internet capability**, matching Microsoft’s least-privilege AppContainer model
   `broadFileSystemAccess`, or `runFullTrust` capability.
 - User-selected files remain the intended access path. Broad library or host
   filesystem capabilities are outside this profile.
+- The package advertises exactly the default pure-Rust core extensions as one
+  `windows.fileTypeAssociation`. Registration makes viewr an available handler;
+  Windows still requires the user to choose it as a default.
 - The File menu exposes a separate **Open Folder** picker for explicit,
   session-scoped sibling access. If a file picker grants only one file, viewr
   keeps that image usable and does not assume access to its parent directory.
@@ -33,13 +36,13 @@ AppContainer token. Its existing Job Object adds a separate lifetime boundary:
 uses the Windows SDK's `MakeAppx.exe` schema validator. It creates an unsigned
 local inspection artifact at
 `target/profile-check/windows/viewr-appcontainer.msix` only; signing,
-installation, and publication are not part of Phase 7.
+installation, and publication are not part of the local verification path.
 
 ## Verification
 
 - `cargo deny check` still bans network crates in the dependency tree.
 - `cargo test -p viewr --test sandbox_profiles` checks the exact empty
-  capability set and AppContainer trust level.
+  capability set, AppContainer trust level, and core extension association.
 - `scripts/build-windows-appcontainer.ps1` must produce a schema-valid MSIX
   from `viewr.exe` and `viewr-decode.exe`.
 - Installation requires a trusted local signing certificate and is intentionally

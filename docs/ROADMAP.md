@@ -15,13 +15,14 @@ Two rules hold across every phase:
 
 ## Current status
 
-Phases 0-6 are complete for the product scope defined in this roadmap (including
-Phase 6 residuals: workspace worker, format table, RAW deferral). System trash,
-operational core fuzzing, locally verifiable OS sandbox profiles, checksummed
-local/CI release artifacts, and the feature-gated production C-decoder syscall
-allowlist are complete.
+Phases 0-7 are complete for the product scope defined in this roadmap. System
+trash, operational core fuzzing, locally verifiable OS sandbox profiles,
+checksummed local/CI release artifacts, and the feature-gated production
+C-decoder syscall allowlist are complete. Phase 8 local install guidance,
+user-controlled file associations, and canonical documentation are complete;
+accessibility and enforced performance budgets remain.
 
-**Next focus: Phase 8: 1.0, the viewer people recommend.**
+**Next focus: Phase 8 accessibility, followed by enforced performance budgets.**
 ## Phase 0: Foundations
 
 Establish the ground truth so quality is enforced from the very first commit.
@@ -59,8 +60,8 @@ The core experience, which is flipping through a folder with no perceptible lag.
 - Scan the containing folder off-thread, in natural-sort order so img2 comes before
   img10.
 - Left and right arrows, Home and End, navigate the folder.
-- Neighbor prefetch into a bounded GPU LRU cache, so the next image is already
-  decoded and uploaded before it is requested.
+- Neighbor prefetch into a bounded decoded-image RAM cache, so the next image is
+  usually decoded before it is requested and needs only a GPU upload.
 - Animated GIF and WebP playback with correct frame timing.
 
 Definition of done: holding the arrow key through a folder of 4K images is smooth
@@ -75,7 +76,7 @@ Make viewing excellent, not merely functional.
   actual pixels.
 - [x] Rotate 90 degrees either direction, and flip.
 - [x] Fullscreen and a frameless immersive mode that is just the picture.
-- [x] System-driven light and dark theme via dark-light, updating live when the
+- [x] System-driven light and dark theme via winit, updating live when the
   operating system setting changes.
 - [x] Slick left-aligned floating toolbar built with `egui` that auto-hides, keyboard first, still discoverable.
 
@@ -90,7 +91,8 @@ The feature that makes viewr a daily tool, done carefully.
 - [x] Delete to the system trash via the trash crate, with a non-blocking Undo toast
   and index preservation, so the view lands on the image that replaced the deleted
   one rather than jumping to the top.
-- [x] Undo (`U`) restores the last deleted file from the trash.
+- [x] Undo (`U`) restores the latest trash action, including every successful
+  item in a batch, while retaining failed receipts for retry.
 - [x] Flag-then-batch cull: `X` flags, `B` batch-trashes flagged (tests on `FlagSet` /
   playlist removal).
 - [x] Shift+Delete permanent delete with explicit confirmation dialog (only modal).
@@ -188,15 +190,17 @@ without requiring third-party store accounts.
 Polish and **local-first** distribution so switching costs nothing for people who
 install from source or a simple GitHub-style release artifact.
 
-- Local/CI install paths: `cargo build --release --workspace`, optional simple
-  installers (e.g. cargo-dist shell/PowerShell/MSI *as optional maintainer
-  tooling*), and clear dual-binary layout (`viewr` + `viewr-decode`).
-- Sensible file-association setup that never hijacks defaults silently (docs and
-  desktop entry; no silent store takeover).
-- Documentation, optional static website with no trackers, and a human-written
-  changelog.
-- Accessibility pass: keyboard complete, screen-reader labels, high-contrast check.
-- Performance budget locked in and regression-tested in CI: cold start, first
+- [x] Local/CI install paths: locked source builds, verified dual-binary release
+  archives (`viewr` + `viewr-decode`), native profile build commands, and
+  platform-specific local installation guidance. Optional public installers
+  remain outside the local-first requirement.
+- [x] Sensible file-association setup that never hijacks defaults silently:
+  exact core-format Linux desktop, macOS Launch Services, and Windows MSIX
+  declarations; Flatpak desktop assets; native open delivery; and opt-in docs.
+- [x] Canonical tracked documentation and a human-written changelog, with no
+  analytics, remote scripts, or tracker-bearing website required for 1.0.
+- [ ] Accessibility pass: keyboard complete, screen-reader labels, high-contrast check.
+- [ ] Performance budget locked in and regression-tested in CI: cold start, first
   pixel, and memory all within target.
 
 Definition of done: a careful user can build or download a release artifact, set

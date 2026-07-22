@@ -31,6 +31,11 @@ dependency set lean).
 Golden-file style coverage for many of these lives in `crates/viewr/tests/corpus.rs`
 and unit tests under `decode` / `edit`.
 
+The Linux desktop entry, macOS application bundle, and Windows AppContainer
+manifest advertise exactly this core extension set. They intentionally omit the
+worker formats below because default release artifacts do not enable their C
+backends. Exact-set repository tests fail if those declarations drift.
+
 ## Worker (out-of-process)
 
 Listed in folder navigation so users can step onto them. Decode requires the

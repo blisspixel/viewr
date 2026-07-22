@@ -11,6 +11,10 @@ pub enum Error {
     #[error("gpu initialization failed: {0}")]
     Gpu(String),
 
+    /// Native operating-system integration could not be initialized.
+    #[error("platform integration failed: {0}")]
+    Platform(String),
+
     /// An image file could not be read or decoded.
     #[error("could not open image: {0}")]
     Decode(String),

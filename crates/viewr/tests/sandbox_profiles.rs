@@ -4,7 +4,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use roxmltree::{Document, ParsingOptions};
+use viewr::fs::{CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS};
 
+const UAP_NAMESPACE: &str = "http://schemas.microsoft.com/appx/manifest/uap/windows10";
 const UAP10_NAMESPACE: &str = "http://schemas.microsoft.com/appx/manifest/uap/windows10/10";
 
 fn repository_path(relative: impl AsRef<Path>) -> PathBuf {
@@ -93,6 +95,48 @@ fn true_entitlements(source: &str) -> BTreeSet<String> {
     entitlements
 }
 
+fn expected_core_extensions() -> BTreeSet<String> {
+    CORE_EXTENSIONS
+        .iter()
+        .map(|extension| (*extension).to_owned())
+        .collect()
+}
+
+fn desktop_fields(source: &str) -> std::collections::BTreeMap<&str, &str> {
+    let mut fields = std::collections::BTreeMap::new();
+    for line in source
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with(['#', '[']))
+    {
+        let (key, value) = line
+            .split_once('=')
+            .unwrap_or_else(|| panic!("invalid desktop entry field: {line}"));
+        assert!(
+            fields.insert(key, value).is_none(),
+            "duplicate desktop entry field: {key}"
+        );
+    }
+    fields
+}
+
+fn plist_value_for_key<'a, 'input>(
+    dictionary: roxmltree::Node<'a, 'input>,
+    key: &str,
+) -> roxmltree::Node<'a, 'input> {
+    let elements: Vec<_> = dictionary
+        .children()
+        .filter(roxmltree::Node::is_element)
+        .collect();
+    let key_index = elements
+        .iter()
+        .position(|node| node.has_tag_name("key") && node.text() == Some(key))
+        .unwrap_or_else(|| panic!("plist key missing: {key}"));
+    elements
+        .get(key_index + 1)
+        .copied()
+        .unwrap_or_else(|| panic!("plist value missing: {key}"))
+}
+
 #[test]
 fn flatpak_profile_has_only_reviewed_runtime_grants() {
     let source = read_repository_file("packaging/flatpak/com.github.blisspixel.viewr.yml");
@@ -132,6 +176,8 @@ fn flatpak_profile_has_only_reviewed_runtime_grants() {
         "append-path: /usr/lib/sdk/rust-stable/bin",
         "CARGO_HOME: /run/build/viewr/cargo",
         "cargo --offline build --locked --release --workspace",
+        "install -Dm644 assets/linux/viewr.desktop /app/share/applications/com.github.blisspixel.viewr.desktop",
+        "install -Dm644 assets/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg",
         "- cargo-sources.json",
     ] {
         assert!(
@@ -147,6 +193,34 @@ fn flatpak_profile_has_only_reviewed_runtime_grants() {
     assert!(
         cargo_sources.contains("[source.vendored-sources]"),
         "Flatpak Cargo sources configure offline vendoring"
+    );
+}
+
+#[test]
+fn linux_desktop_entry_advertises_only_core_formats_without_taking_over_defaults() {
+    let source = read_repository_file("assets/linux/viewr.desktop");
+    let fields = desktop_fields(&source);
+    assert_eq!(fields.get("Exec"), Some(&"viewr %f"));
+    assert_eq!(fields.get("Icon"), Some(&"com.github.blisspixel.viewr"));
+    assert_eq!(fields.get("Terminal"), Some(&"false"));
+
+    let mime_types: Vec<_> = fields
+        .get("MimeType")
+        .expect("desktop entry declares MIME types")
+        .split(';')
+        .filter(|value| !value.is_empty())
+        .collect();
+    let actual: BTreeSet<_> = mime_types.iter().copied().collect();
+    let expected = CORE_MIME_ASSOCIATIONS
+        .iter()
+        .map(|(_, mime_type)| *mime_type)
+        .collect();
+    assert_eq!(mime_types.len(), actual.len(), "duplicate MIME type");
+    assert_eq!(actual, expected, "desktop entry must match core formats");
+
+    assert!(
+        !source.contains("xdg-mime default"),
+        "installing a desktop entry must not choose the user's default viewer"
     );
 }
 
@@ -168,6 +242,76 @@ fn macos_profiles_have_exact_minimal_entitlements() {
             "com.apple.security.app-sandbox".to_owned(),
             "com.apple.security.inherit".to_owned(),
         ])
+    );
+}
+
+#[test]
+fn macos_profile_registers_core_formats_as_an_alternate_viewer() {
+    let source = read_repository_file("packaging/macos/Info.plist");
+    let document = Document::parse_with_options(
+        &source,
+        ParsingOptions {
+            allow_dtd: true,
+            ..ParsingOptions::default()
+        },
+    )
+    .expect("parse Info.plist");
+    let root = document
+        .descendants()
+        .find(|node| node.has_tag_name("dict"))
+        .expect("Info.plist has a root dictionary");
+    let document_types = plist_value_for_key(root, "CFBundleDocumentTypes");
+    assert!(document_types.has_tag_name("array"));
+    let document_type_values: Vec<_> = document_types
+        .children()
+        .filter(|node| node.has_tag_name("dict"))
+        .collect();
+    assert_eq!(
+        document_type_values.len(),
+        1,
+        "one exact document type is declared"
+    );
+    let document_type = document_type_values[0];
+
+    let extensions = plist_value_for_key(document_type, "CFBundleTypeExtensions");
+    let extension_values: Vec<_> = extensions
+        .children()
+        .filter(|node| node.has_tag_name("string"))
+        .map(|node| node.text().expect("extension has text"))
+        .collect();
+    let actual: BTreeSet<_> = extension_values
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    assert_eq!(extension_values.len(), actual.len(), "duplicate extension");
+    assert_eq!(actual, expected_core_extensions());
+    assert_eq!(
+        plist_value_for_key(document_type, "CFBundleTypeRole").text(),
+        Some("Viewer")
+    );
+    assert_eq!(
+        plist_value_for_key(document_type, "LSHandlerRank").text(),
+        Some("Alternate")
+    );
+}
+
+#[test]
+fn macos_open_file_integration_preserves_winit_delegate_ownership() {
+    let source = read_repository_file("crates/viewr/src/macos.rs");
+    for required in [
+        "WinitApplicationDelegate",
+        "class_addMethod",
+        "EventLoopProxy",
+        "send_event(UserEvent::OpenFile(path))",
+    ] {
+        assert!(
+            source.contains(required),
+            "macOS open-file integration is missing: {required}"
+        );
+    }
+    assert!(
+        !source.contains("setDelegate("),
+        "viewr must extend, never replace, winit's application delegate"
     );
 }
 
@@ -218,4 +362,28 @@ fn windows_profile_is_appcontainer_with_no_capabilities() {
         0,
         "the AppContainer profile deliberately grants no capabilities"
     );
+
+    let associations: Vec<_> = document
+        .descendants()
+        .filter(|node| node.has_tag_name((UAP_NAMESPACE, "FileTypeAssociation")))
+        .collect();
+    assert_eq!(associations.len(), 1, "one image association is declared");
+    assert_eq!(associations[0].attribute("Name"), Some("core-images"));
+
+    let extension_values: Vec<_> = associations[0]
+        .descendants()
+        .filter(|node| node.has_tag_name((UAP_NAMESPACE, "FileType")))
+        .map(|node| node.text().expect("file type has text"))
+        .collect();
+    let actual: BTreeSet<_> = extension_values
+        .iter()
+        .map(|extension| {
+            extension
+                .strip_prefix('.')
+                .expect("Windows file type begins with a dot")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(extension_values.len(), actual.len(), "duplicate file type");
+    assert_eq!(actual, expected_core_extensions());
 }

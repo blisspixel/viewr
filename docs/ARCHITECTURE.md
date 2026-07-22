@@ -16,11 +16,11 @@ target design; code lands per `ROADMAP.md`.
 
 ## The message loop (our own, on winit + wgpu)
 
-viewr runs a message-driven loop of our own on winit's event loop. We borrow the
-shape of the Elm architecture without depending on a framework: there is exactly
-one application state value, everything that happens is a `Message`, an `update`
-function folds messages into the state, and a `render` pass draws the state through
-our wgpu pipeline. No callbacks, no shared mutable UI state.
+viewr runs a message-driven application on winit's event loop. One `App` value
+owns all mutable UI state. Winit callbacks update that state directly, background
+results arrive through bounded channels or user events, and each requested render
+pass draws the current state through the wgpu pipeline. There is no second store
+or independently mutable UI model.
 
 ```
             ┌────────────┐   Message    ┌────────────┐
@@ -36,11 +36,11 @@ our wgpu pipeline. No callbacks, no shared mutable UI state.
             └────────────┘
 ```
 
-Long-running work (decode a file, scan a folder, move to trash) runs on a worker
-thread pool. When it finishes it posts a `Message` (e.g.
-`ImageDecoded { index, texture }`) back to the loop, which `update` applies on the
-next frame. The UI thread itself does no blocking work: it only handles input,
-folds messages, and renders.
+Image decoding and folder scanning run off the event thread. Their results return
+through channels, request a redraw, and are applied only if they still match the
+current path or generation. Native dialogs and trash operations are short,
+user-triggered platform calls; the performance gate measures them rather than
+assuming they are free.
 
 ## Core state (sketch)
 
@@ -51,7 +51,7 @@ struct Viewr {
     current: usize,
 
     // What's on screen and nearby, decoded and ready.
-    cache: LruTextureCache,        // decoded frames living in GPU memory
+    cache: PrefetchCache,          // bounded neighboring RGBA frames in RAM
 
     // View transform for the current image.
     zoom: f32,
@@ -60,7 +60,7 @@ struct Viewr {
 
     // Curation.
     flagged: HashSet<PathBuf>,     // "mark for delete" set (batch cull mode)
-    undo: Vec<UndoAction>,         // e.g. TrashedFile { from, trash_handle }
+    undo: Vec<TrashedFile>,        // latest single or batch trash action
 
     theme: Theme,                  // driven by the OS light/dark setting
     settings: Settings,           // tiny; e.g. confirm-on-permanent-delete
@@ -76,15 +76,23 @@ Shipped:
 
 - **`app`**: the message loop on winit (state, `Message`, `update`, `render`). The
   spine. Opens the image named on the command line.
-- **`gpu`**: the wgpu pipeline. Clears to the theme background and draws the current
-  image as a textured quad scaled to fit. The neighbor texture cache lands in
-  Phase 2.
-- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on background threads via the `image` crate. For complex C-backed formats, the main process opens the selected file and delegates bounded encoded bytes to a persistent daemon pool (`viewr-decode`) using versioned request frames and a length-validated RGBA8 stream. The parent acknowledges each complete pixel stream before the worker accepts another request.
+- **`gpu`**: the wgpu pipeline. Clears to the theme background and draws the
+  current image as a textured quad scaled to fit.
+- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on
+  background threads via the `image` crate. For complex C-backed formats, the
+  main process opens the selected file and delegates bounded encoded bytes to an
+  isolated `viewr-decode` helper using versioned request frames and a
+  length-validated RGBA8 stream. The parent acknowledges each complete pixel
+  stream before the worker returns to the idle pool and accepts another request.
 - **`view`**: pure geometry for placing an image in the viewport (fit math, later
   zoom and pan). Unit-tested without a GPU.
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
   metadata by construction.
-- **`curate`**: move to the OS trash / recycle bin and restore for undo.
+- **`curate`**: move to the OS trash or recycle bin and restore for undo. On
+  macOS, a native receipt retains the exact resulting trash URL so restoration
+  does not depend on an unsupported global trash listing.
+- **`macos`**: the narrow native bridge for Finder and Open With requests plus
+  recoverable `NSFileManager` trash operations. It is absent from other builds.
 - **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; Job Object or
   process-group lifetime controls, one-process policies, and memory limits for
   helpers.
@@ -93,15 +101,9 @@ Shipped:
 - **`theme`**: reads the OS light/dark setting via winit and maps it to our palette,
   live-updating on change.
 - **`error`**: the typed error set for the app.
-
-Planned:
-
-- **`ui`**: the `egui` integration for the main UI overlay (left-aligned floating
-  toolbar with Hand Tool and Crop Tool, toasts), drawn on our wgpu pipeline, with
-  accessibility via `accesskit`.
-- **`curate`**: delete, flag, and undo logic over the `trash` crate.
-- **`input`**: key and mouse bindings mapped to messages; the one place shortcuts
-  live.
+- **`ui`**: the `egui` overlay for the toolbar, status, filmstrip, crop controls,
+  and toasts. Keyboard dispatch remains centralized in `app` rather than adding
+  a second input abstraction.
 
 ## The hot path: opening and flipping through images
 
@@ -114,17 +116,16 @@ treatment.
    the selected file, viewr keeps that file openable as a one-item playlist and asks
    the user to choose **Open Folder** for explicit, session-scoped sibling access.
 2. **Decode is prioritized:** the *current* image is decoded at highest priority.
-   Async image decoding runs on a background thread using `std::sync::mpsc` so
-   left/right navigation and trashing/undoing trash is perfectly snappy and no
-   longer freezes the UI. As soon as it's ready it's uploaded to a GPU texture
-   and drawn. First pixels appear as fast as decode allows.
+   Async image decoding runs on background work using `std::sync::mpsc`, so file
+   reads and decode do not freeze navigation. As soon as a result is ready, it is
+   uploaded to a GPU texture and drawn. First pixels appear as fast as decode
+   allows.
 3. **Neighbors are prefetched.** After the current image, `decode` speculatively
-   decodes `current ± 1` (then `± 2`) in the background via the mpsc channel and parks
-   them in the GPU cache. Pressing → then shows an already-decoded, already-uploaded
-   frame — effectively instant.
-4. **The cache is bounded (LRU).** Only a window of frames lives in GPU memory;
-   far-away images are evicted. Memory stays flat whether the folder has 10 images
-   or 100,000.
+   decodes nearby entries in the background and parks a bounded set of RGBA
+   results in RAM. Navigation can upload an already-decoded frame immediately.
+4. **Caches are bounded.** Full decoded neighbors use a fixed-capacity RAM cache,
+   thumbnail work has an in-flight bound, and the renderer owns only the current
+   full-size GPU texture. Memory does not grow with folder length.
 5. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are just changes to the sampling transform. No re-decode, no CPU work per frame.
 
@@ -135,10 +136,11 @@ The rule: **the UI thread only ever draws things that are already ready.** All
 
 Two modes, because two kinds of users:
 
-- **Instant delete** — `Delete` moves the current file to the OS trash via `trash`,
-  records an `UndoAction`, shows a non-blocking toast ("Moved to Trash · Undo"),
+- **Instant delete:** `Delete` moves the current file to the OS trash through the
+  supported native integration, records an `UndoAction`, and shows a non-blocking
+  toast ("Moved to Trash · Undo"),
   and **advances to the image that took its place** (new `current`, not a jump to
-  the top). No modal — modals destroy culling speed. `Ctrl+Z` restores from trash.
+  the top). Normal trash has no modal. `U` restores the latest trash action.
 - **Flag then batch** — tap a key to *flag* the current image (photographers'
   preferred flow), keep moving, then delete all flagged at the end in one action
   (still to trash, still undoable). Non-destructive until you commit.

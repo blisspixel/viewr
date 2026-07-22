@@ -31,6 +31,8 @@ modules:
       - cargo --offline build --locked --release --workspace
       - install -Dm755 target-flatpak/release/viewr /app/bin/viewr
       - install -Dm755 target-flatpak/release/viewr-decode /app/bin/viewr-decode
+      - install -Dm644 assets/linux/viewr.desktop /app/share/applications/com.github.blisspixel.viewr.desktop
+      - install -Dm644 assets/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg
     sources:
       - cargo-sources.json
       - type: dir

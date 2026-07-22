@@ -40,11 +40,15 @@ pub fn run() -> Result<(), Error> {
 /// # Errors
 /// Returns [`Error`] if the event loop cannot be created or fails while running.
 pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
+    #[cfg(target_os = "macos")]
+    crate::macos::install_open_file_handler(event_loop.create_proxy())
+        .map_err(|message| Error::Platform(message.to_owned()))?;
     let (thumb_result_tx, thumb_rx) = mpsc::channel();
     let (prefetch_result_tx, prefetch_rx) = mpsc::channel();
+    let image_path = image_path.map(|path| crate::fs::canonical_file_path(&path).unwrap_or(path));
     let mut app = App {
         image_path,
         renderer: None,
@@ -52,7 +56,7 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         scanner_rx: None,
         transform: Transform::default(),
         is_fullscreen: false,
-        last_trashed: None,
+        last_trashed: Vec::new(),
         current_image: None,
         loaded_image_path: None,
         show_exif: false,
@@ -93,6 +97,19 @@ struct Playlist {
 enum ScanPurpose {
     SelectedFile(PathBuf),
     OpenFolder,
+}
+
+/// Application-level events delivered from native platform integrations.
+pub(crate) enum UserEvent {
+    /// Finder or Launch Services requested that viewr open this file.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        allow(
+            dead_code,
+            reason = "constructed only by the macOS Launch Services bridge"
+        )
+    )]
+    OpenFile(PathBuf),
 }
 
 struct FolderScan {
@@ -158,7 +175,7 @@ struct App {
     scanner_rx: Option<Receiver<FolderScan>>,
     transform: Transform,
     is_fullscreen: bool,
-    last_trashed: Option<TrashedFile>,
+    last_trashed: Vec<TrashedFile>,
     current_image: Option<DecodedImage>,
     /// Source path corresponding exactly to `current_image` and the GPU texture.
     loaded_image_path: Option<PathBuf>,
@@ -215,7 +232,17 @@ struct App {
 }
 
 impl App {
+    fn open_file_request(&mut self, path: PathBuf) {
+        self.touch_activity();
+        if self.renderer.is_some() {
+            self.load_and_scan(path);
+        } else {
+            self.image_path = Some(path);
+        }
+    }
+
     fn load_and_scan(&mut self, path: PathBuf) {
+        let path = crate::fs::canonical_file_path(&path).unwrap_or(path);
         self.playlist = None;
         self.begin_image_load(path.clone(), true);
         let directory = path
@@ -512,17 +539,20 @@ impl App {
             return;
         };
 
-        if let Err(e) = crate::curate::move_to_trash(&path) {
-            log::error!("failed to move file to trash");
-            self.show_toast(format!("Trash failed: {e}"));
-            return;
-        }
+        let receipt = match crate::curate::move_to_trash(&path) {
+            Ok(receipt) => receipt,
+            Err(e) => {
+                log::error!("failed to move file to trash");
+                self.show_toast(format!("Trash failed: {e}"));
+                return;
+            }
+        };
 
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        self.last_trashed = Some(TrashedFile {
-            original_path: path.clone(),
+        self.last_trashed = vec![TrashedFile {
+            receipt,
             playlist_index,
-        });
+        }];
         self.flags.remove(&path);
         self.show_toast("Moved to trash · Undo with U");
         self.after_paths_removed(&[path], playlist_index);
@@ -534,20 +564,55 @@ impl App {
             return;
         }
         let current_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        let (ok, err) = crate::curate::trash_many(&flagged);
-        if let Some(e) = err {
-            log::error!("batch trash partial failure");
-            self.show_toast(format!("Some files could not be trashed: {e}"));
-        }
-        if let Some(last) = ok.last() {
-            self.last_trashed = Some(TrashedFile {
-                original_path: last.clone(),
-                playlist_index: current_index,
+        let playlist_indices = self
+            .playlist
+            .as_ref()
+            .map_or_else(HashMap::new, |playlist| {
+                playlist
+                    .files
+                    .iter()
+                    .enumerate()
+                    .map(|(index, path)| (path.clone(), index))
+                    .collect()
             });
+        let (ok, failed) = crate::curate::trash_many(&flagged);
+        if !failed.is_empty() {
+            log::error!("batch trash partial failure");
+            for (path, _) in &failed {
+                self.flags.insert(path.clone());
+            }
         }
         if !ok.is_empty() {
-            self.show_toast(format!("Trashed {} file(s) · Undo with U", ok.len()));
-            self.after_paths_removed(&ok, current_index);
+            self.last_trashed = ok
+                .into_iter()
+                .map(|receipt| {
+                    let playlist_index = playlist_indices
+                        .get(receipt.original_path())
+                        .copied()
+                        .unwrap_or(current_index);
+                    TrashedFile {
+                        receipt,
+                        playlist_index,
+                    }
+                })
+                .collect();
+            let removed = self
+                .last_trashed
+                .iter()
+                .map(|record| record.receipt.original_path().to_owned())
+                .collect::<Vec<_>>();
+            if failed.is_empty() {
+                self.show_toast(format!("Trashed {} file(s) · Undo with U", removed.len()));
+            } else {
+                self.show_toast(format!(
+                    "Trashed {}; {} failed · Undo with U",
+                    removed.len(),
+                    failed.len()
+                ));
+            }
+            self.after_paths_removed(&removed, current_index);
+        } else if let Some((_, error)) = failed.first() {
+            self.show_toast(format!("Trash failed: {error}"));
         }
     }
 
@@ -825,7 +890,7 @@ impl App {
         }
         self.flags.remove(&path);
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        self.last_trashed = None; // not restorable
+        self.last_trashed.clear(); // not restorable
         self.after_paths_removed(&[path], playlist_index);
     }
 
@@ -852,26 +917,56 @@ impl App {
     }
 
     fn undo_trash(&mut self) {
-        let Some(trashed) = self.last_trashed.take() else {
-            return;
-        };
-
-        if let Err(e) = crate::curate::restore_from_trash(&trashed.original_path) {
-            log::error!("failed to restore from trash");
-            self.show_toast(format!("Restore failed: {e}"));
-            self.last_trashed = Some(trashed);
+        if self.last_trashed.is_empty() {
             return;
         }
 
+        let records = std::mem::take(&mut self.last_trashed);
+        let mut outcome = crate::curate::restore_trash_batch(records);
+        outcome.restored.sort_by_key(|record| record.playlist_index);
+        let restored_count = outcome.restored.len();
+        let first_restored_path = outcome
+            .restored
+            .first()
+            .map(|record| record.receipt.original_path().to_owned());
         if let Some(playlist) = &mut self.playlist {
-            let index = trashed.playlist_index.min(playlist.files.len());
-            playlist.files.insert(index, trashed.original_path.clone());
-            playlist.index = index;
+            let mut focused_index = None;
+            for record in &outcome.restored {
+                let index =
+                    crate::curate::restored_playlist_index(record.playlist_index, &outcome.failed)
+                        .min(playlist.files.len());
+                focused_index.get_or_insert(index);
+                playlist
+                    .files
+                    .insert(index, record.receipt.original_path().to_owned());
+            }
+            if let Some(index) = focused_index {
+                playlist.index = index.min(playlist.files.len().saturating_sub(1));
+            }
+        }
+        self.last_trashed = outcome.failed;
+
+        if let Some(original_path) = first_restored_path {
+            self.image_path = Some(original_path.clone());
+            self.transform = Transform::default();
+            self.spawn_image_load(original_path);
         }
 
-        self.image_path = Some(trashed.original_path.clone());
-        self.transform = Transform::default();
-        self.spawn_image_load(trashed.original_path);
+        if self.last_trashed.is_empty() {
+            self.show_toast(format!("Restored {restored_count} file(s)"));
+        } else if restored_count == 0 {
+            log::error!("failed to restore from trash");
+            self.show_toast(format!(
+                "Restore failed: {}",
+                outcome.first_error.as_deref().unwrap_or("unknown error")
+            ));
+        } else {
+            log::error!("batch restore partial failure");
+            self.show_toast(format!(
+                "Restored {restored_count}; {} failed",
+                self.last_trashed.len()
+            ));
+        }
     }
 
     fn spawn_image_load(&mut self, path: PathBuf) {
@@ -1044,7 +1139,7 @@ fn load_icon() -> Option<winit::window::Icon> {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
             return;
@@ -1637,6 +1732,12 @@ impl ApplicationHandler for App {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::OpenFile(path) => self.open_file_request(path),
         }
     }
 

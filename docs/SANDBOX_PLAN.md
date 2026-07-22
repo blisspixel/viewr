@@ -36,17 +36,17 @@ HEIC inputs under the policy.
 ## Why this is Exceptional
 Moving optional C decoders out of the UI process materially reduces blast radius, but process isolation is not zero risk and seccomp alone is not a complete sandbox. The defensible design layers bounded IPC, explicit resource limits, request timeouts, a network-denying process policy where implemented, and an enclosing OS package profile. Claims stay limited to controls that can be reproduced locally.
 
-## Implementation status (2026-07-21)
+## Implementation status (2026-07-22)
 
 | Item | Status |
 |------|--------|
 | Multi-binary workspace (`viewr` + `viewr-decode`) | Done (feature-gated C backends) |
 | Versioned encoded-input/response/ack frames + bounded pixel-stream IPC | Done; worker receives no path |
 | Feature-gated C deps (CI pure-Rust) | Done |
-| OS trash for curation | Done (`trash` crate) |
-| Flatpak manifest (no network) | Exact-set tested 25.08 profile; Linux CI performs an offline Cargo build and worker probe |
-| macOS entitlements (no network) | Main/helper profiles; CI builds, ad-hoc signs, and worker-probes a local bundle |
-| Windows AppContainer profile | Empty-capability Appx manifest; Windows SDK validates a local unsigned MSIX |
+| OS trash for curation | Done; `trash` crate on Windows/Linux and exact-result `NSFileManager` receipts on macOS |
+| Flatpak manifest (no network) | Exact-set tested 25.08 profile; installs the desktop entry and icon; Linux CI performs an offline Cargo build and worker probe |
+| macOS entitlements (no network) | Main/helper profiles; exact core-format alternate-viewer declaration; native Launch Services delivery; CI builds, ad-hoc signs, and worker-probes a local bundle |
+| Windows AppContainer profile | Empty-capability Appx manifest with exact core-format association; Windows SDK validates a local unsigned MSIX |
 | Windows Job Object (kill-on-close + one process + 1.5 GiB job memory) | Done, fail-closed and runtime-tested (`worker_limit`) |
 | Unix private session and one-process worker policy | Done; Linux seccomp is runtime-tested (`worker_limit`) |
 | Linux no_new_privs + post-exec dumpable=0 | Done, fail-closed (`worker_limit` + worker startup) |

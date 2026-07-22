@@ -250,7 +250,9 @@ fn apply_chrome_theme(ctx: &egui::Context) {
     visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(247, 168, 69, 48);
     visuals.selection.stroke = Stroke::new(1.0, ACCENT);
     visuals.hyperlink_color = ACCENT;
-    ctx.set_visuals(visuals);
+    if ctx.style_of(ctx.theme()).visuals != visuals {
+        ctx.set_visuals(visuals);
+    }
 }
 
 fn menu_frame() -> Frame {
@@ -663,11 +665,9 @@ fn render_empty_state(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, is_loading
                             ui.add_space(12.0);
                         }
                         ui.label(
-                            RichText::new(
-                                "Local only. No uploads. No background network requests.",
-                            )
-                            .size(12.0)
-                            .color(MUTED),
+                            RichText::new("Maximum privacy. It just works.")
+                                .size(12.0)
+                                .color(MUTED),
                         );
                     });
                 });

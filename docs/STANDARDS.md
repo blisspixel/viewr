@@ -183,9 +183,13 @@ rules keep it honest.
 ## Performance is a tested property, not a hope
 
 - Track cold-start time, first-pixel latency, and memory on a fixed image corpus.
-- Benchmarks (`criterion`) on the hot paths: decode, GPU upload, navigation.
-- CI flags a regression beyond a set threshold. "It got slow" should fail a check,
-  not a user's patience.
+- Exercise the real release GUI through a black-box probe for window readiness,
+  first presentation, navigation, idle redraw behavior, and folder-scaling memory.
+- Keep hot-path microbenchmarks dependency-free when a framework would add more
+  supply-chain surface than measurement value. Decode remains separately measurable.
+- CI flags a regression beyond explicit thresholds. "It got slow" should fail a
+  check, not a user's patience. Thresholds are regression limits, not universal
+  hardware promises.
 
 ## Releases
 

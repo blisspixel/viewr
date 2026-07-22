@@ -189,8 +189,14 @@ pub fn scan_images(directory: &Path) -> io::Result<Vec<PathBuf>> {
     let entries = std::fs::read_dir(directory)?;
     let mut files = entries
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_file() && is_supported_image(path))
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !is_supported_image(&path) {
+                return None;
+            }
+            let file_type = entry.file_type().ok()?;
+            (file_type.is_file() || (file_type.is_symlink() && path.is_file())).then_some(path)
+        })
         .collect::<Vec<_>>();
     files.sort_by(|a, b| {
         let a_name = a.file_name().and_then(|name| name.to_str()).unwrap_or("");

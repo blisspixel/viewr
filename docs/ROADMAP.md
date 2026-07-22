@@ -21,13 +21,13 @@ checksummed local/CI release artifacts, and the feature-gated production
 C-decoder syscall allowlist are complete. Phase 8 local install guidance,
 user-controlled file associations, and canonical documentation are complete;
 keyboard access, Windows/macOS native screen-reader delivery, semantic labels,
-and contrast checks are complete. A privacy-compatible Linux screen-reader bridge,
-cross-platform assistive-technology validation, and enforced performance budgets
-remain.
+contrast checks, and enforced GUI performance budgets are complete. A
+privacy-compatible Linux screen-reader bridge and cross-platform
+assistive-technology validation remain.
 
-**Next focus: lock in enforced performance budgets on the now-stable viewer path.
-Privacy-compatible Linux accessibility delivery and manual target-OS validation
-remain required platform-evidence work.**
+**Next focus: privacy-compatible Linux accessibility delivery and manual
+target-OS assistive-technology validation.**
+
 ## Phase 0: Foundations
 
 Establish the ground truth so quality is enforced from the very first commit.
@@ -214,8 +214,9 @@ install from source or a simple GitHub-style release artifact.
   - [x] Automated WCAG AA checks for the production chrome palette.
   - [x] Native AccessKit delivery on Windows and macOS without adding a network-capable dependency.
   - [ ] Privacy-compatible Linux assistive-technology delivery plus manual screen-reader validation on all three platforms.
-- [ ] Performance budget locked in and regression-tested in CI: cold start, first
-  pixel, and memory all within target.
+- [x] Performance budget locked in and regression-tested in CI: first presented
+  window frame and image, sampled navigation, settled idle redraws,
+  50,000-file memory scaling, and bounded decoded/thumbnail caches.
 
 Definition of done: a careful user can build or download a release artifact, set
 viewr as their image viewer if they choose, and never think about bloat again.

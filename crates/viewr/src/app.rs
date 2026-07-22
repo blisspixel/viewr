@@ -4,7 +4,7 @@
 //! is borrowed without depending on a UI framework.
 #![allow(unsafe_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,16 +40,47 @@ pub fn run() -> Result<(), Error> {
 /// # Errors
 /// Returns [`Error`] if the event loop cannot be created or fails while running.
 pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
+    run_internal(image_path, None).map(|_| ())
+}
+
+/// Run an explicit local-only GUI performance probe and return its measurements.
+///
+/// The probe opens `image_path`, samples a bounded set of folder positions, then
+/// exits automatically. Normal viewer launches never collect these measurements.
+///
+/// # Errors
+/// Returns [`Error`] if the event loop, renderer, image load, or memory sampling
+/// prevents the probe from producing a complete report.
+pub fn run_performance_probe(
+    image_path: PathBuf,
+    application_started: Instant,
+) -> Result<crate::performance::PerformanceReport, Error> {
+    run_internal(
+        Some(image_path),
+        Some(PerformanceProbe::new(application_started)),
+    )?
+    .ok_or_else(|| Error::Platform("performance probe ended without a report".into()))
+}
+
+fn run_internal(
+    image_path: Option<PathBuf>,
+    performance_probe: Option<PerformanceProbe>,
+) -> Result<Option<crate::performance::PerformanceReport>, Error> {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
     let event_proxy = event_loop.create_proxy();
+    if let Some(deadline) = performance_probe.as_ref().map(|probe| probe.deadline) {
+        schedule_performance_wake(event_proxy.clone(), "viewr-performance-deadline", deadline)
+            .map_err(Error::Platform)?;
+    }
     #[cfg(target_os = "macos")]
     crate::macos::install_open_file_handler(event_proxy.clone())
         .map_err(|message| Error::Platform(message.to_owned()))?;
     let (thumb_result_tx, thumb_rx) = mpsc::channel();
     let (prefetch_result_tx, prefetch_rx) = mpsc::channel();
     let image_path = image_path.map(|path| crate::fs::canonical_file_path(&path).unwrap_or(path));
+    let probe_enabled = performance_probe.is_some();
     let mut app = App {
         image_path,
         renderer: None,
@@ -62,7 +93,7 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         loaded_image_path: None,
         show_image_info: false,
         tools_panel_open: false,
-        filmstrip_panel_open: false,
+        filmstrip_panel_open: probe_enabled,
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
         bg_override: None,
@@ -88,12 +119,20 @@ pub fn run_with_image(image_path: Option<PathBuf>) -> Result<(), Error> {
         prefetch_result_tx,
         prefetch_rx,
         event_proxy,
+        performance_probe,
     };
     if let Some(path) = app.image_path.clone() {
         app.load_and_scan(path);
     }
     event_loop.run_app(&mut app)?;
-    Ok(())
+    let Some(probe) = app.performance_probe else {
+        return Ok(None);
+    };
+    probe
+        .outcome
+        .unwrap_or_else(|| Err("performance probe exited before completion".into()))
+        .map(Some)
+        .map_err(Error::Platform)
 }
 
 struct Playlist {
@@ -104,6 +143,75 @@ struct Playlist {
 enum ScanPurpose {
     SelectedFile(PathBuf),
     OpenFolder,
+}
+
+const PERFORMANCE_PROBE_TIMEOUT: Duration = Duration::from_mins(1);
+const PERFORMANCE_IDLE_OBSERVATION: Duration = Duration::from_millis(500);
+
+struct PerformanceProbe {
+    started_at: Instant,
+    deadline: Instant,
+    window_ready: Option<Duration>,
+    first_pixel: Option<Duration>,
+    max_navigation: Duration,
+    navigation_started: Option<Instant>,
+    navigation_target: Option<PathBuf>,
+    navigation_targets: Option<VecDeque<usize>>,
+    last_presented_path: Option<PathBuf>,
+    idle_until: Option<Instant>,
+    idle_redraws: u64,
+    peak_resident_bytes: u64,
+    outcome: Option<Result<crate::performance::PerformanceReport, String>>,
+}
+
+impl PerformanceProbe {
+    fn new(started_at: Instant) -> Self {
+        Self {
+            started_at,
+            deadline: started_at + PERFORMANCE_PROBE_TIMEOUT,
+            window_ready: None,
+            first_pixel: None,
+            max_navigation: Duration::ZERO,
+            navigation_started: None,
+            navigation_target: None,
+            navigation_targets: None,
+            last_presented_path: None,
+            idle_until: None,
+            idle_redraws: 0,
+            peak_resident_bytes: 0,
+            outcome: None,
+        }
+    }
+
+    fn record_window_ready(&mut self, now: Instant) {
+        self.window_ready.get_or_insert(now - self.started_at);
+    }
+
+    fn record_presented_image(&mut self, path: &Path, now: Instant) {
+        self.first_pixel.get_or_insert(now - self.started_at);
+        self.last_presented_path = Some(path.to_owned());
+        if self.navigation_target.as_deref() == Some(path)
+            && let Some(started) = self.navigation_started.take()
+        {
+            self.max_navigation = self.max_navigation.max(now - started);
+            self.navigation_target = None;
+        }
+    }
+}
+
+fn schedule_performance_wake(
+    event_proxy: EventLoopProxy<UserEvent>,
+    thread_name: &str,
+    deadline: Instant,
+) -> Result<(), String> {
+    std::thread::Builder::new()
+        .name(thread_name.into())
+        .spawn(move || {
+            std::thread::park_timeout(deadline.saturating_duration_since(Instant::now()));
+            let _ = event_proxy.send_event(UserEvent::Wake);
+        })
+        .map(|_| ())
+        .map_err(|error| format!("could not start performance timer: {error}"))
 }
 
 /// Application-level events delivered from native platform integrations.
@@ -255,6 +363,8 @@ struct App {
     prefetch_rx: Receiver<(PathBuf, Result<DecodedImage, String>)>,
     /// Wakes the event loop when background work finishes before a window exists.
     event_proxy: EventLoopProxy<UserEvent>,
+    /// Explicit developer/CI performance probe; absent from normal launches.
+    performance_probe: Option<PerformanceProbe>,
 }
 
 fn primary_modifier_pressed(modifiers: ModifiersState) -> bool {
@@ -633,13 +743,11 @@ impl App {
         for path in targets {
             let job_path = path.clone();
             let tx = self.prefetch_result_tx.clone();
-            let window = self.renderer.as_ref().map(|r| r.window.clone());
+            let event_proxy = self.event_proxy.clone();
             let scheduled = crate::decode::schedule_background_decode(move || {
                 let res = DecodedImage::load_background(&job_path).map_err(|e| e.to_string());
                 let _ = tx.send((job_path, res));
-                if let Some(w) = window {
-                    w.request_redraw();
-                }
+                let _ = event_proxy.send_event(UserEvent::Wake);
             });
             if scheduled {
                 self.prefetch_in_flight.insert(path);
@@ -668,6 +776,9 @@ impl App {
         }
         if completed {
             self.kick_prefetch();
+            if self.filmstrip_panel_open {
+                self.request_thumbs_for_filmstrip();
+            }
         }
     }
 
@@ -1079,6 +1190,9 @@ impl App {
         }
         if got {
             self.kick_prefetch();
+            if self.filmstrip_panel_open {
+                self.request_thumbs_for_filmstrip();
+            }
         }
     }
 
@@ -1342,6 +1456,198 @@ impl App {
         if let Some(r) = self.renderer.as_mut() {
             r.window().request_redraw();
         }
+    }
+
+    fn performance_probe_has_presented_current(&self) -> bool {
+        let Some(probe) = self.performance_probe.as_ref() else {
+            return false;
+        };
+        let Some(current_path) = self.current_loaded_path() else {
+            return false;
+        };
+        if probe.last_presented_path.as_deref() != Some(current_path)
+            || probe.navigation_target.is_some()
+            || self.image_loader_rx.is_some()
+            || self.scanner_rx.is_some()
+        {
+            return false;
+        }
+        true
+    }
+
+    fn performance_probe_is_settled(&self) -> bool {
+        if !self.performance_probe_has_presented_current()
+            || !self.prefetch_in_flight.is_empty()
+            || !self.thumbs_in_flight.is_empty()
+        {
+            return false;
+        }
+        self.visible_filmstrip_paths()
+            .iter()
+            .all(|path| self.thumb_textures.contains_key(path))
+    }
+
+    fn fail_performance_probe(&mut self, event_loop: &ActiveEventLoop, message: String) {
+        if let Some(probe) = self.performance_probe.as_mut() {
+            probe.outcome = Some(Err(message));
+        }
+        event_loop.exit();
+    }
+
+    fn performance_probe_timeout_message(&self) -> String {
+        let visible = self.visible_filmstrip_paths();
+        let ready_thumbnails = visible
+            .iter()
+            .filter(|path| self.thumb_textures.contains_key(*path))
+            .count();
+        let remaining_navigation = self
+            .performance_probe
+            .as_ref()
+            .and_then(|probe| probe.navigation_targets.as_ref())
+            .map_or(0, VecDeque::len);
+        let presented_current = self.current_loaded_path().is_some_and(|path| {
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.last_presented_path.as_deref())
+                == Some(path)
+        });
+        format!(
+            concat!(
+                "probe exceeded its {} second deadline ",
+                "(scan={}, image={}, navigation={}, remaining_navigation={}, ",
+                "presented_current={}, idle_started={}, prefetch={}, thumbnails={}, ",
+                "ready_thumbnails={}/{})"
+            ),
+            PERFORMANCE_PROBE_TIMEOUT.as_secs(),
+            self.scanner_rx.is_some(),
+            self.image_loader_rx.is_some(),
+            self.performance_probe
+                .as_ref()
+                .is_some_and(|probe| probe.navigation_target.is_some()),
+            remaining_navigation,
+            presented_current,
+            self.performance_probe
+                .as_ref()
+                .is_some_and(|probe| probe.idle_until.is_some()),
+            self.prefetch_in_flight.len(),
+            self.thumbs_in_flight.len(),
+            ready_thumbnails,
+            visible.len(),
+        )
+    }
+
+    fn begin_performance_probe_idle(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
+        let idle_until = now + PERFORMANCE_IDLE_OBSERVATION;
+        self.performance_probe.as_mut().unwrap().idle_until = Some(idle_until);
+        if let Err(error) = schedule_performance_wake(
+            self.event_proxy.clone(),
+            "viewr-performance-idle",
+            idle_until,
+        ) {
+            self.fail_performance_probe(event_loop, error);
+        }
+    }
+
+    fn advance_performance_probe(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(deadline) = self.performance_probe.as_ref().map(|probe| probe.deadline) else {
+            return;
+        };
+        if Instant::now() >= deadline {
+            let message = self.performance_probe_timeout_message();
+            self.fail_performance_probe(event_loop, message);
+            return;
+        }
+        if !self.performance_probe_has_presented_current() {
+            return;
+        }
+        let (current_index, playlist_len) = self
+            .playlist
+            .as_ref()
+            .map_or((0, 0), |playlist| (playlist.index, playlist.files.len()));
+        let probe = self.performance_probe.as_mut().unwrap();
+        if probe.navigation_targets.is_none() {
+            probe.navigation_targets =
+                Some(performance_navigation_targets(current_index, playlist_len));
+        }
+        let next_index = probe
+            .navigation_targets
+            .as_mut()
+            .and_then(VecDeque::pop_front);
+        if let Some(next_index) = next_index {
+            let next_path = self.playlist.as_ref().unwrap().files[next_index].clone();
+            let probe = self.performance_probe.as_mut().unwrap();
+            probe.navigation_started = Some(Instant::now());
+            probe.navigation_target = Some(next_path);
+            self.go_to_index(next_index);
+            if let Some(renderer) = self.renderer.as_ref() {
+                renderer.window().request_redraw();
+            }
+            return;
+        }
+
+        if !self.performance_probe_is_settled() {
+            return;
+        }
+
+        let resident_bytes = match crate::performance::peak_resident_bytes() {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.fail_performance_probe(
+                    event_loop,
+                    format!("could not measure resident memory: {error}"),
+                );
+                return;
+            }
+        };
+        let probe = self.performance_probe.as_mut().unwrap();
+        probe.peak_resident_bytes = probe.peak_resident_bytes.max(resident_bytes);
+
+        let now = Instant::now();
+        let probe = self.performance_probe.as_mut().unwrap();
+        if let Some(idle_until) = probe.idle_until {
+            if now < idle_until {
+                return;
+            }
+        } else {
+            self.begin_performance_probe_idle(event_loop, now);
+            return;
+        }
+
+        let probe = self.performance_probe.as_ref().unwrap();
+        let Some(window_ready) = probe.window_ready else {
+            self.fail_performance_probe(event_loop, "probe never observed a visible window".into());
+            return;
+        };
+        let Some(first_pixel) = probe.first_pixel else {
+            self.fail_performance_probe(event_loop, "probe never presented an image frame".into());
+            return;
+        };
+        let report = crate::performance::PerformanceReport {
+            window_ready_us: crate::performance::duration_us(window_ready),
+            first_pixel_us: crate::performance::duration_us(first_pixel),
+            max_navigation_us: crate::performance::duration_us(probe.max_navigation),
+            idle_redraws: probe.idle_redraws,
+            peak_resident_bytes: probe.peak_resident_bytes,
+            playlist_entries: playlist_len,
+            decoded_cache_entries: self.prefetch.len(),
+            thumbnail_texture_entries: self.thumb_textures.len(),
+        };
+        let outcome = if report.decoded_cache_entries > prefetch::DEFAULT_CAPACITY {
+            Err(format!(
+                "decoded cache retained {} entries; limit is {}",
+                report.decoded_cache_entries,
+                prefetch::DEFAULT_CAPACITY
+            ))
+        } else if report.thumbnail_texture_entries > 9 {
+            Err(format!(
+                "thumbnail cache retained {} entries; limit is 9",
+                report.thumbnail_texture_entries
+            ))
+        } else {
+            Ok(report)
+        };
+        self.performance_probe.as_mut().unwrap().outcome = Some(outcome);
+        event_loop.exit();
     }
 }
 
@@ -1620,7 +1926,10 @@ impl ApplicationHandler<UserEvent> for App {
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             renderer.process_accessibility_window_event(window.as_ref(), &event);
             let response = renderer.egui_state.on_window_event(window.as_ref(), &event);
-            if response.repaint {
+            // egui reports that RedrawRequested itself wants repainting. The
+            // current event already satisfies that request, so scheduling it
+            // again here would create a permanent redraw loop.
+            if response.repaint && !matches!(event, WindowEvent::RedrawRequested) {
                 window.request_redraw();
             }
             egui_consumed = response.consumed;
@@ -1878,6 +2187,11 @@ impl ApplicationHandler<UserEvent> for App {
                 renderer.window().request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                if let Some(probe) = self.performance_probe.as_mut()
+                    && probe.idle_until.is_some()
+                {
+                    probe.idle_redraws = probe.idle_redraws.saturating_add(1);
+                }
                 let mut ui_actions = Vec::new();
                 if let Some(until) = self.toast_until
                     && Instant::now() > until
@@ -1949,9 +2263,9 @@ impl ApplicationHandler<UserEvent> for App {
                 let logical_image_viewport =
                     image_viewport.and_then(|viewport| viewport.logical_bounds(scale_factor));
                 let is_loading = self.image_loader_rx.is_some();
+                let performance_image_path = self.loaded_image_path.clone();
 
                 let renderer = self.renderer.as_mut().unwrap();
-                renderer.window().set_visible(true);
 
                 if let Some(bg) = bg_override {
                     renderer.set_clear_color(bg);
@@ -2012,6 +2326,7 @@ impl ApplicationHandler<UserEvent> for App {
                     image_viewport: logical_image_viewport,
                 };
 
+                let presents_image = placement.is_some();
                 let frame_output = renderer.render(placement, image_viewport, |ui| {
                     ui_actions = crate::ui::render(ui, &frame);
                 });
@@ -2021,6 +2336,15 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 if let Some(repaint_after) = frame_output.repaint_after {
                     self.egui_repaint_at = repaint_deadline(Instant::now(), repaint_after);
+                }
+                if frame_output.result == FrameResult::Presented
+                    && let Some(probe) = self.performance_probe.as_mut()
+                {
+                    let now = Instant::now();
+                    probe.record_window_ready(now);
+                    if presents_image && let Some(path) = performance_image_path.as_deref() {
+                        probe.record_presented_image(path, now);
+                    }
                 }
 
                 for action in ui_actions {
@@ -2225,7 +2549,18 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        let next_repaint = [self.egui_repaint_at, self.toast_until]
+        self.advance_performance_probe(event_loop);
+        let probe_repaint_at = self
+            .performance_probe
+            .as_ref()
+            .filter(|probe| probe.outcome.is_none())
+            .map(|probe| {
+                probe
+                    .idle_until
+                    .unwrap_or(probe.deadline)
+                    .min(probe.deadline)
+            });
+        let next_repaint = [self.egui_repaint_at, self.toast_until, probe_repaint_at]
             .into_iter()
             .flatten()
             .min();
@@ -2264,6 +2599,20 @@ fn filmstrip_range(index: usize, len: usize) -> std::ops::Range<usize> {
     };
     let current = index.min(last_index);
     current.saturating_sub(4)..current.saturating_add(5).min(len)
+}
+
+fn performance_navigation_targets(current: usize, len: usize) -> VecDeque<usize> {
+    let mut targets = VecDeque::new();
+    if len <= 1 {
+        return targets;
+    }
+    for index in [len / 4, len / 2, len.saturating_mul(3) / 4, len - 1] {
+        let index = index.min(len - 1);
+        if index != current && !targets.contains(&index) {
+            targets.push_back(index);
+        }
+    }
+    targets
 }
 
 fn repaint_deadline(now: Instant, repaint_after: Duration) -> Option<Instant> {
@@ -2347,6 +2696,21 @@ mod test {
         assert_eq!(filmstrip_range(0, 20), 0..5);
         assert_eq!(filmstrip_range(10, 20), 6..15);
         assert_eq!(filmstrip_range(99, 20), 15..20);
+    }
+
+    #[test]
+    fn performance_probe_samples_bounded_distinct_folder_positions() {
+        assert!(performance_navigation_targets(0, 0).is_empty());
+        assert!(performance_navigation_targets(0, 1).is_empty());
+        assert_eq!(
+            performance_navigation_targets(0, 100),
+            VecDeque::from([25, 50, 75, 99])
+        );
+        assert_eq!(
+            performance_navigation_targets(5, 8),
+            VecDeque::from([2, 4, 6, 7])
+        );
+        assert_eq!(performance_navigation_targets(1, 2), VecDeque::from([0]));
     }
 
     #[test]

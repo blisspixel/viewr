@@ -44,6 +44,11 @@ setup does not unnecessarily serialize first-pixel work. Native dialogs and tras
 user-triggered platform calls; the performance gate measures them rather than
 assuming they are free.
 
+An explicit developer/CI probe uses the same application loop, records the first
+successfully presented window frame and image, samples bounded folder positions,
+observes a settled idle interval, reads the process peak resident set, and exits.
+Normal GUI launches do not construct this probe or collect performance data.
+
 ## Core state (sketch)
 
 ```rust
@@ -108,6 +113,8 @@ Shipped:
   ordering (`img2` before `img10`).
 - **`theme`**: reads the OS light/dark setting via winit and maps it to the default
   image background, live-updating on change. Chrome keeps its stable dark palette.
+- **`performance`**: stable, path-free probe output and narrow platform peak-RSS
+  readers used only by the explicit developer/CI performance command.
 - **`error`**: the typed error set for the app.
 - **`ui`**: the `egui` layer for the conventional menu bar, collapsible docked
   tools and folder previews, Image Information, crop controls, and transient

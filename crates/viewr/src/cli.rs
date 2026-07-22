@@ -34,6 +34,11 @@ pub enum Invocation {
         /// Directory of images; if `None`, a small temp corpus is generated.
         dir: Option<PathBuf>,
     },
+    /// Run the explicit local GUI startup/navigation/memory probe, then exit.
+    PerformanceProbe {
+        /// Initial image whose containing folder supplies the probe corpus.
+        image: PathBuf,
+    },
     /// Explain how to update without phoning home.
     Update,
 }
@@ -69,6 +74,15 @@ where
         "benchmark" | "bench" => {
             let dir = args.get(1).cloned();
             Ok(Invocation::Benchmark { dir })
+        }
+        "performance-probe" => {
+            let Some(image) = args.get(1).cloned() else {
+                return Err("usage: viewr performance-probe <path>".into());
+            };
+            if args.len() != 2 {
+                return Err("usage: viewr performance-probe <path>".into());
+            }
+            Ok(Invocation::PerformanceProbe { image })
         }
         "open" => {
             let image = args.get(1).cloned();
@@ -133,6 +147,13 @@ fn run_with_io(
                 Ok(ExitCode::from(1))
             }
         },
+        Invocation::PerformanceProbe { .. } => {
+            writeln!(
+                stderr,
+                "performance probe must be launched by the viewr binary"
+            )?;
+            Ok(ExitCode::from(2))
+        }
         Invocation::Update => {
             print_update(stdout)?;
             Ok(ExitCode::SUCCESS)
@@ -533,6 +554,18 @@ mod tests {
             parse_args(["viewr", "bench"]).unwrap(),
             Invocation::Benchmark { dir: None }
         );
+    }
+
+    #[test]
+    fn parse_performance_probe_requires_exactly_one_path() {
+        assert_eq!(
+            parse_args(["viewr", "performance-probe", "image.png"]).unwrap(),
+            Invocation::PerformanceProbe {
+                image: PathBuf::from("image.png")
+            }
+        );
+        assert!(parse_args(["viewr", "performance-probe"]).is_err());
+        assert!(parse_args(["viewr", "performance-probe", "a.png", "b.png"]).is_err());
     }
 
     #[test]

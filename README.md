@@ -6,8 +6,9 @@ viewr opens an image and gets out of the way. No account. No cloud. No AI-enhanc
 memories. No telemetry. No background service. No update nag. It starts image
 decoding while the window initializes, lets you flip through a folder,
 crop, convert, and delete the junk, and that is the whole product, on purpose. Cold
-start and first-pixel latency are being locked into reproducible Phase 8 budgets;
-until those gates land, the repository does not claim universal launch numbers.
+start, first-pixel, navigation, settled-idle redraw, and folder-scaling budgets are
+regression-tested in CI. Those conservative virtual-runner limits are not presented
+as universal launch numbers.
 
 It is built for people who are tired of watching a simple image viewer turn into an
 advertising surface with a photos app bolted on. It looks simple, and that simplicity
@@ -103,7 +104,7 @@ Full reasoning, including the alternatives we rejected, is in
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 89.16
+viewr targets 85 percent or higher test coverage on its logic (currently 89.06
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and behavior-level contract tests that keep the coverage honest.
 The full set of engineering standards is in
@@ -135,7 +136,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, keyboard-complete docked chrome, native Windows/macOS screen-reader integration, local CLI (`doctor`, `benchmark`, `update`, `help`), and opt-in core-format associations for Linux, macOS, and Windows are in place. A privacy-compatible Linux screen-reader bridge, cross-platform assistive-technology validation, and enforced cold-start, first-pixel, and memory budgets remain before Phase 8 is complete. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
+Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, keyboard-complete docked chrome, native Windows/macOS screen-reader integration, local CLI (`doctor`, `benchmark`, `update`, `help`), opt-in core-format associations, and enforced GUI performance budgets are in place. A privacy-compatible Linux screen-reader bridge and cross-platform assistive-technology validation remain before Phase 8 is complete. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md`, `docs/PERFORMANCE.md`, and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

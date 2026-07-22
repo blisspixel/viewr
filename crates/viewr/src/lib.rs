@@ -17,6 +17,7 @@ pub mod fs;
 pub mod gpu;
 #[cfg(target_os = "macos")]
 mod macos;
+pub mod performance;
 pub mod prefetch;
 pub(crate) mod sandbox;
 pub mod theme;

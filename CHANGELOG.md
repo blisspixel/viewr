@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Fixed
 
+- Egui redraw requests no longer schedule another redraw from inside the current
+  redraw event. The settled viewer now returns to the sleeping event loop instead
+  of continuously presenting frames, and repeated identical chrome styling no
+  longer requests needless visual updates.
+- Bounded prefetch and thumbnail work now refills from completion events instead
+  of depending on incidental paint events. Explicit timer wakes make the
+  performance probe's idle interval and one-minute deadline deterministic, while
+  normal directory scans avoid redundant per-entry metadata lookups.
+- The empty-state privacy line now reads "Maximum privacy. It just works." instead
+  of exposing implementation-detail copy inside the viewer.
 - Initial image decode and sibling-folder discovery now start before GPU
   initialization and wake the event loop when their background work completes.
   The first window stays responsive with an explicit loading state, and small
@@ -40,7 +50,7 @@ All notable changes to this project are documented here. The format is human-wri
 - Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
 - Serialized tests that invoke global stale-debris cleanup so parallel test execution cannot erase another test's scrub-safe fixture.
 - Implemented SVG decode with pure-Rust `resvg` (corpus and unit tests pass). Default features avoid system fonts and text shaping so the trusted core stays free of unmaintained shaping crates.
-- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Measured logic coverage is 89.16% lines under that floor.
+- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Current measured logic coverage is 89.06% lines under that floor.
 - Initial image decode now runs off the winit event thread, invalidates stale displayed pixels, and applies only if its path is still current. A two-slot, foreground-priority decode gate bounds aggregate work, and superseded foreground jobs cancel before file access.
 - Decode resource limits reject zero, oversized, or inconsistent pixel shapes before parent allocation and pixel-stream copy. SVG and worker inputs are capped, while the C-worker address-space ceiling also bounds allocations performed inside third-party decoders.
 - Worker-bound host files are verified as regular files and read with a bounded, fallible allocator before a worker is reserved. The IPC deadline thread now contains only cancellable child-pipe work, and encoded bytes are released immediately after transfer.
@@ -48,6 +58,13 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- Added a dependency-free black-box GUI performance gate for first-window-frame
+  and first-image latency, sampled navigation, settled idle redraws, peak resident
+  memory, 50,000-file folder scaling, and exact decoded/thumbnail cache bounds.
+  The explicit path-free probe is absent from normal launches and CI enforces
+  conservative release-mode limits under a virtual display. Large test corpora
+  shard hard links across bounded source counts and clean their temporary
+  workspace on successful and handled-error exits.
 - Added exact-set, opt-in core-image associations for the Linux desktop entry,
   macOS application bundle, and Windows AppContainer manifest. The Flatpak build
   now installs its desktop entry and scalable icon. Contract tests keep all

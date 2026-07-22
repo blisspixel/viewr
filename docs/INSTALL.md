@@ -35,6 +35,20 @@ viewr path\to\image.jpg   # open GUI
 
 `viewr update` never downloads anything; viewr does not phone home.
 
+### Performance regression gate
+
+The internal GUI probe is intentionally absent from the user-facing help surface.
+Developers and CI run the complete release-binary contract through the wrapper:
+
+```text
+cargo build --release --workspace --locked
+python -B scripts/performance_gate.py --binary target/release/viewr
+```
+
+On Windows, add `--no-xvfb` and use a console-enabled debug binary for local
+output. Budgets, corpus shape, and interpretation are in
+[`PERFORMANCE.md`](PERFORMANCE.md).
+
 Optional C-backed formats (needs system libraries):
 
 ```

@@ -23,6 +23,9 @@ code, and where possible it's enforced in CI so it can't quietly regress.
   fully **in memory**. On launch, viewr also scrubs any leftover `viewr_*` names
   it may have left under temp from older builds or crashes. Unit tests use a
   RAII temp workspace that deletes itself on drop.
+- The developer/CI performance probe runs only when explicitly invoked, emits one
+  path-free measurement record to its caller, and retains no history. Its Python
+  harness owns and removes the temporary deterministic image corpus it creates.
 
 There is no setting to turn any of this off, because none of the corresponding
 machinery exists in the first place.

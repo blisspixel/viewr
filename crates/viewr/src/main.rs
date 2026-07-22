@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use viewr::cli::{self, Invocation};
 
 fn main() -> ExitCode {
+    let application_started = std::time::Instant::now();
     // Maximum privacy default: no log output unless the user explicitly opts in.
     // Set `RUST_LOG` or `VIEWR_LOG` (e.g. `RUST_LOG=viewr=debug`) to enable stderr
     // diagnostics. Nothing is written to a log file.
@@ -38,6 +39,19 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Invocation::PerformanceProbe { image } => {
+            cli::ensure_console();
+            match viewr::app::run_performance_probe(image, application_started) {
+                Ok(report) => {
+                    println!("{}", report.to_json());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("viewr performance probe: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         other => {
             cli::ensure_console();
             cli::run(other)

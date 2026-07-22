@@ -79,7 +79,7 @@ Shipped:
 - **`gpu`**: the wgpu pipeline. Clears to the theme background and draws the current
   image as a textured quad scaled to fit. The neighbor texture cache lands in
   Phase 2.
-- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on background threads via the `image` crate. Complex C-backed formats are delegated to a persistent daemon pool (`viewr-decode`) using versioned native-path frames and a length-validated RGBA8 stream. The parent acknowledges each complete pixel stream before the worker accepts another request.
+- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on background threads via the `image` crate. For complex C-backed formats, the main process opens the selected file and delegates bounded encoded bytes to a persistent daemon pool (`viewr-decode`) using versioned request frames and a length-validated RGBA8 stream. The parent acknowledges each complete pixel stream before the worker accepts another request.
 - **`view`**: pure geometry for placing an image in the viewport (fit math, later
   zoom and pan). Unit-tested without a GPU.
 - **`edit`**: crop and save-as/convert. Export re-encodes from pixels, which strips
@@ -109,8 +109,10 @@ This is the experience that makes or breaks the app, so it gets first-class
 treatment.
 
 1. **On open**, `fs` scans the containing folder once, off-thread, and returns the
-   ordered `entries`. Meanwhile `decode` is already working on the requested file —
-   we do not wait for the scan to show the first image.
+   ordered `entries`. Meanwhile `decode` is already working on the requested file;
+   we do not wait for the scan to show the first image. If an OS sandbox grants only
+   the selected file, viewr keeps that file openable as a one-item playlist and asks
+   the user to choose **Open Folder** for explicit, session-scoped sibling access.
 2. **Decode is prioritized:** the *current* image is decoded at highest priority.
    Async image decoding runs on a background thread using `std::sync::mpsc` so
    left/right navigation and trashing/undoing trash is perfectly snappy and no
@@ -167,7 +169,7 @@ polish.
 - **No application networking stack exists.** No socket/HTTP client crate is
   linked, and CI enforces the dependency policy (see `PRIVACY.md`). Syscall-level
   denial comes from Linux worker seccomp and the enclosing OS package profiles.
-- **C-backed decoding is process-isolated.** The daemon receives one versioned native path request and returns a validated, exact-length RGBA8 stream over its existing pipe. This avoids trusting worker-owned mapping metadata or mutable backing storage. Linux denies classic and io_uring network paths. Windows constrains the Job Object to one process and 1.5 GiB aggregate memory; Linux denies process-creating syscalls while allowing same-process decoder threads; supported non-Linux Unix targets create a private session and apply a one-process resource limit. All workers have containment lifetime controls, typed bounded responses, and a hard request deadline covering both send and receive. The worker currently receives a path and therefore retains the filesystem access granted by its enclosing OS package; Phase 7 packaging profiles are responsible for narrowing that ambient access. Pure-Rust formats remain in the main process but decode off the UI thread under the same dimension, allocation, and aggregate concurrency limits.
+- **C-backed decoding is process-isolated.** The daemon receives one versioned request containing a validated format identifier and bounded encoded bytes, then returns a validated, exact-length RGBA8 stream over its existing pipe. The main process opens user-selected files, so the worker never receives a path or depends on a dynamic file grant. Linux denies classic and io_uring network paths. Windows constrains the Job Object to one process and 1.5 GiB aggregate memory; Linux denies process-creating syscalls while allowing same-process decoder threads; supported non-Linux Unix targets create a private session and apply a one-process resource limit. All workers have containment lifetime controls, typed bounded responses, and a hard request deadline covering both send and receive. Pure-Rust formats remain in the main process but decode off the UI thread under the same dimension, allocation, and aggregate concurrency limits.
 - **Trash, not unlink**, by default — the filesystem is treated as precious.
 
 ## What is intentionally absent

@@ -17,8 +17,10 @@ const MUTED: Color32 = Color32::from_rgb(0xB8, 0xC0, 0xCC);
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub enum UiAction {
-    /// Open a new file dialog.
+    /// Open a new image file dialog.
     Open,
+    /// Open a folder with explicit user consent for sibling navigation.
+    OpenFolder,
     /// Open a save as dialog.
     SaveAs,
     /// Move the current file to the trash.
@@ -197,8 +199,12 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
 
 fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, flag_count: usize, retain_exif: bool) {
     ui.menu_button("File", |ui| {
-        if ui.button("Open…          Ctrl+O").clicked() {
+        if ui.button("Open File…          Ctrl+O").clicked() {
             actions.push(UiAction::Open);
+            ui.close();
+        }
+        if ui.button("Open Folder…  Ctrl+Shift+O").clicked() {
+            actions.push(UiAction::OpenFolder);
             ui.close();
         }
         if ui.button("Save As…       W").clicked() {
@@ -900,6 +906,7 @@ mod tests {
 
     #[test]
     fn ui_action_variants_exist_for_toolbar() {
+        let _ = UiAction::OpenFolder;
         let _ = UiAction::ToggleCrop;
         let _ = UiAction::ApplyCrop;
         let _ = UiAction::CancelCrop;

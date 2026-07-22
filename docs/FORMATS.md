@@ -63,7 +63,9 @@ cleanly without panicking.
 ## Privacy and safety notes
 
 - No format path opens a network connection.
-- Optional C-backed formats use bounded, versioned worker IPC. Linux applies a
-  fail-closed network-denying seccomp filter; AppContainer, App Sandbox, and
-  Flatpak runtime-profile verification remain Phase 7 work. Pure-Rust formats
-  decode in the main process under the same shape and aggregate concurrency caps.
+- The main process opens optional C-backed inputs and sends bounded encoded bytes
+  over versioned worker IPC; the worker receives no filesystem path. Linux applies a
+  fail-closed network-denying seccomp filter. Exact-set tests cover the Flatpak,
+  App Sandbox, and AppContainer profiles, and platform CI builds or validates
+  their native sandbox form. Pure-Rust formats decode in the main
+  process under the same shape and aggregate concurrency caps.

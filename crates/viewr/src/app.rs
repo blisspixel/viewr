@@ -90,6 +90,16 @@ struct Playlist {
     index: usize,
 }
 
+enum ScanPurpose {
+    SelectedFile(PathBuf),
+    OpenFolder,
+}
+
+struct FolderScan {
+    purpose: ScanPurpose,
+    files: std::io::Result<Vec<PathBuf>>,
+}
+
 /// The aspect ratio to enforce when cropping.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CropRatio {
@@ -145,7 +155,7 @@ struct App {
     renderer: Option<Renderer>,
     image_path: Option<PathBuf>,
     playlist: Option<Playlist>,
-    scanner_rx: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
+    scanner_rx: Option<Receiver<FolderScan>>,
     transform: Transform,
     is_fullscreen: bool,
     last_trashed: Option<TrashedFile>,
@@ -206,34 +216,104 @@ struct App {
 
 impl App {
     fn load_and_scan(&mut self, path: PathBuf) {
-        self.image_path = Some(path.clone());
         self.playlist = None;
+        self.begin_image_load(path.clone(), true);
+        let directory = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_owned();
+        self.start_folder_scan(directory, ScanPurpose::SelectedFile(path));
+    }
+
+    fn begin_image_load(&mut self, path: PathBuf, resize_to_image: bool) {
+        self.image_path = Some(path.clone());
         self.transform = Transform::default();
-        self.resize_on_load = Some(path.clone());
-        self.spawn_image_load(path.clone());
+        self.resize_on_load = resize_to_image.then_some(path.clone());
+        self.spawn_image_load(path);
+    }
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.scanner_rx = Some(rx);
+    fn open_image_dialog(&mut self) {
+        let extensions = crate::fs::supported_extensions().collect::<Vec<_>>();
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Images", &extensions)
+            .pick_file()
+        {
+            self.load_and_scan(path);
+        }
+    }
 
-        std::thread::spawn(move || {
-            let mut files = Vec::new();
-            if let Some(parent) = path.parent()
-                && let Ok(entries) = std::fs::read_dir(parent)
-            {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_file() && crate::fs::is_supported_image(&p) {
-                        files.push(p);
-                    }
+    fn open_folder_dialog(&mut self) {
+        if let Some(directory) = rfd::FileDialog::new().pick_folder() {
+            self.start_folder_scan(directory, ScanPurpose::OpenFolder);
+        }
+    }
+
+    fn start_folder_scan(&mut self, directory: PathBuf, purpose: ScanPurpose) {
+        self.scanner_rx = None;
+        let (sender, receiver) = mpsc::channel();
+        let window = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.window.clone());
+        let spawn_result = std::thread::Builder::new()
+            .name("viewr-folder-scan".into())
+            .spawn(move || {
+                let files = crate::fs::scan_images(&directory);
+                let _ = sender.send(FolderScan { purpose, files });
+                if let Some(window) = window {
+                    window.request_redraw();
                 }
-            }
-            files.sort_by(|a, b| {
-                let a_str = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let b_str = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                crate::fs::natural_cmp(a_str, b_str)
             });
-            let _ = tx.send(files);
-        });
+        match spawn_result {
+            Ok(_) => self.scanner_rx = Some(receiver),
+            Err(error) => {
+                log::error!("failed to start folder scan");
+                self.show_toast(format!("Could not scan folder: {error}"));
+            }
+        }
+    }
+
+    fn replace_playlist(&mut self, files: Vec<PathBuf>, index: usize) {
+        self.prefetch.clear();
+        self.prefetch_in_flight.clear();
+        self.playlist = Some(Playlist { files, index });
+    }
+
+    fn finish_folder_scan(&mut self, scan: FolderScan) {
+        if let ScanPurpose::SelectedFile(selected) = &scan.purpose
+            && !selected_scan_is_current(self.image_path.as_deref(), selected)
+        {
+            return;
+        }
+        match (scan.purpose, scan.files) {
+            (ScanPurpose::SelectedFile(selected), Ok(files)) => {
+                if let Some(index) = selected_file_index(&files, &selected) {
+                    self.replace_playlist(files, index);
+                } else {
+                    self.replace_playlist(vec![selected], 0);
+                }
+                self.kick_prefetch();
+            }
+            (ScanPurpose::SelectedFile(selected), Err(error)) => {
+                log::warn!("folder scan unavailable: {error}");
+                self.replace_playlist(vec![selected], 0);
+                self.show_toast("Open Folder to allow next and previous image access");
+            }
+            (ScanPurpose::OpenFolder, Ok(files)) if files.is_empty() => {
+                self.show_toast("The selected folder contains no supported images");
+            }
+            (ScanPurpose::OpenFolder, Ok(files)) => {
+                let first = files[0].clone();
+                self.replace_playlist(files, 0);
+                self.begin_image_load(first, true);
+                self.kick_prefetch();
+            }
+            (ScanPurpose::OpenFolder, Err(error)) => {
+                log::warn!("selected folder scan failed: {error}");
+                self.show_toast("Could not read the selected folder");
+            }
+        }
     }
 
     fn display_loaded_image(&mut self, path: &Path, image: DecodedImage) {
@@ -1191,35 +1271,18 @@ impl ApplicationHandler for App {
                     return;
                 }
                 match logical_key {
+                    Key::Character(c)
+                        if (c == "o" || c == "O")
+                            && self.modifiers.control_key()
+                            && self.modifiers.shift_key() =>
+                    {
+                        self.open_folder_dialog();
+                    }
                     Key::Character(c) if (c == "o" || c == "O") && self.modifiers.control_key() => {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter(
-                                "Images",
-                                &[
-                                    "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff",
-                                    "tga", "hdr", "avif", "heic", "heif", "cr2", "nef", "arw",
-                                    "dng", "jxl", "svg",
-                                ],
-                            )
-                            .pick_file()
-                        {
-                            self.load_and_scan(path);
-                        }
+                        self.open_image_dialog();
                     }
                     Key::Character(c) if c == "o" || c == "O" => {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter(
-                                "Images",
-                                &[
-                                    "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff",
-                                    "tga", "hdr", "avif", "heic", "heif", "cr2", "nef", "arw",
-                                    "dng", "jxl", "svg",
-                                ],
-                            )
-                            .pick_file()
-                        {
-                            self.load_and_scan(path);
-                        }
+                        self.open_image_dialog();
                     }
                     Key::Character(c) if c == "r" || c == "R" => {
                         self.transform.rotation_steps += 1;
@@ -1464,20 +1527,9 @@ impl ApplicationHandler for App {
                 for action in ui_actions {
                     match action {
                         crate::ui::UiAction::Open => {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .add_filter(
-                                    "Images",
-                                    &[
-                                        "jpg", "jpeg", "png", "gif", "webp", "bmp", "ico", "tiff",
-                                        "tga", "hdr", "avif", "heic", "heif", "cr2", "nef", "arw",
-                                        "dng", "jxl", "svg",
-                                    ],
-                                )
-                                .pick_file()
-                            {
-                                self.load_and_scan(path);
-                            }
+                            self.open_image_dialog();
                         }
+                        crate::ui::UiAction::OpenFolder => self.open_folder_dialog(),
                         crate::ui::UiAction::SaveAs => self.save_as(),
                         crate::ui::UiAction::Trash => {
                             self.trash_current();
@@ -1622,20 +1674,28 @@ impl ApplicationHandler for App {
             }
         }
 
-        if let Some(rx) = &self.scanner_rx
-            && let Ok(files) = rx.try_recv()
-        {
+        let completed_scan = self
+            .scanner_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some(scan) = completed_scan {
             self.scanner_rx = None;
-            if let Some(current) = &self.image_path {
-                let index = files.iter().position(|p| p == current).unwrap_or(0);
-                // New folder: drop any RAM cache from the previous folder.
-                self.prefetch.clear();
-                self.prefetch_in_flight.clear();
-                self.playlist = Some(Playlist { files, index });
-                self.kick_prefetch();
-            }
+            self.finish_folder_scan(scan);
         }
     }
+}
+
+fn selected_file_index(files: &[PathBuf], selected: &Path) -> Option<usize> {
+    files.iter().position(|path| path == selected).or_else(|| {
+        let selected_name = selected.file_name()?;
+        files
+            .iter()
+            .position(|path| path.file_name() == Some(selected_name))
+    })
+}
+
+fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
+    current == Some(selected)
 }
 
 #[cfg(test)]
@@ -1645,5 +1705,23 @@ mod test {
     #[test]
     fn test_load_icon() {
         assert!(load_icon().is_some(), "load_icon returned None!");
+    }
+
+    #[test]
+    fn selected_file_matches_relative_scan_results_by_name() {
+        let files = vec![PathBuf::from("./img1.png"), PathBuf::from("./img2.png")];
+        assert_eq!(selected_file_index(&files, Path::new("img2.png")), Some(1));
+        assert_eq!(selected_file_index(&files, Path::new("missing.png")), None);
+    }
+
+    #[test]
+    fn stale_selected_file_scan_is_discarded() {
+        let selected = Path::new("selected.png");
+        assert!(selected_scan_is_current(Some(selected), selected));
+        assert!(!selected_scan_is_current(None, selected));
+        assert!(!selected_scan_is_current(
+            Some(Path::new("replacement.png")),
+            selected
+        ));
     }
 }

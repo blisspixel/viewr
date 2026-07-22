@@ -58,17 +58,26 @@ A promise you can verify beats a promise you have to trust.
    - **Linux** — Flatpak with **no** `--share=network`; the decode worker also
      installs a seccomp filter that returns `EPERM` for classic socket and
      io_uring networking paths.
-   A bare `cargo build` does not automatically apply App Sandbox, AppContainer, or
-   Flatpak confinement. Phase 7 tracks runtime verification of those profiles.
-   Independently, the dependency ban applies to every build, and Linux worker
-   spawn fails if its network-denying seccomp filter cannot be installed.
+   The test suite checks each profile as an exact allowlist. Linux CI performs a
+   clean Flatpak build from checksum-pinned Cargo sources and runs the worker IPC
+   probe in its build sandbox. macOS CI ad-hoc signs an App Sandbox bundle and
+   runs the same main-to-worker probe. Windows CI makes the SDK validate an
+   unsigned AppContainer MSIX containing both binaries. A bare `cargo build`
+   does not apply those package boundaries, and schema/signature checks are not
+   evidence that an unsigned package was installed. Independently, the
+   dependency ban applies to every build, and Linux worker spawn fails if its
+   network-denying seccomp filter cannot be installed.
+   File and folder access remains user-directed: **Open File** grants one selected
+   item, while **Open Folder** is the explicit consent path for sibling navigation.
+   viewr does not request broad photo-library access or persist a folder grant.
 3. **No analytics/telemetry SDKs, ever.** There is no analytics dependency to
    configure. This is also enforced by the dependency audit above.
 4. **Split decode boundary.** Common pure-Rust formats decode in the main process
    under shape, allocation, and concurrency limits, with a pre-parse input cap for
-   SVG. Optional C-backed formats decode from bounded inputs in a worker. Linux
-   denies that worker's classic socket and io_uring network paths; the documented
-   OS packages constrain the whole app.
+   SVG. For optional C-backed formats, the main process opens the selected file
+   and sends bounded encoded bytes to the worker. The worker receives no path and
+   needs no dynamic filesystem grant. Linux denies that worker's classic socket
+   and io_uring network paths; the documented OS packages constrain the whole app.
    Bare Windows and macOS Cargo builds do not claim that package-level boundary.
 
 ## Local data: what viewr does and doesn't write

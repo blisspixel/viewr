@@ -75,3 +75,6 @@ workspace = true
 
 [build-dependencies]
 winres = "0.1.12"
+
+[dev-dependencies]
+roxmltree = "0.21.1"

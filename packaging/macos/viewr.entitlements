@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  macOS App Sandbox entitlements for Phase 7.
+  macOS App Sandbox entitlements for the main application.
   Network client/server entitlements are intentionally ABSENT so the app
-  cannot open sockets even if a dependency regressed.
-  User-selected files (Open/Save) use the standard sandbox file access keys.
+  receives no direct network client or listener grant.
+  User-selected files and folders (Open/Save) use the standard sandbox access key.
 -->
 <plist version="1.0">
 <dict>

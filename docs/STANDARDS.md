@@ -84,7 +84,7 @@ honestly without a window or an external worker binary is excluded and covered b
 end-to-end verification instead:
 
 - `app.rs`, `gpu.rs`, `ui.rs` — windowing, GPU, and egui chrome
-- `sandbox.rs` — `viewr-decode` process pool and bounded pixel-stream IPC
+- `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
 - `worker_limit.rs` — OS Job Object / process-group glue
 - `error.rs`, `main.rs` — thin entry/error surfaces
 
@@ -120,8 +120,17 @@ higher standard than the rest of the app.
   schedule. `fuzz/README.md` is the executable local contract.
 - A regression corpus: every file that ever caused a crash or hang becomes a
   permanent test case.
-- Decode runs in the restricted worker described in ARCHITECTURE.md, so even a
-  decoder bug has nothing to reach.
+- Optional C-backed decode runs in the restricted worker described in
+  ARCHITECTURE.md. The parent sends bytes rather than a path, limiting what a
+  decoder bug can reach beyond its bounded request and response pipes.
+- Whole-app package profiles use exact reviewed permission sets. Tests fail if a
+  Flatpak grant, macOS entitlement, or Windows AppContainer capability appears
+  without an explicit review. Native CI also performs an offline Flatpak build
+  and worker probe, verifies and probes an ad-hoc signed macOS bundle, and
+  schema-validates an unsigned MSIX.
+- Sandboxed navigation must use explicit file or folder picker consent. A denied
+  containing-folder scan degrades to the selected image without broadening the
+  package permission set or silently breaking the open operation.
 
 ## Supply chain
 

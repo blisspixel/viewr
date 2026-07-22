@@ -1,23 +1,28 @@
 //! Versioned IPC and decoded-image invariants shared by `viewr` and its worker.
 //!
-//! Paths are framed as native operating-system bytes rather than newline-delimited
-//! UTF-8. This preserves every valid desktop path and prevents request injection.
+//! Encoded image bytes are framed with a validated format identifier rather than
+//! a filesystem path. The main process opens user-selected files and the worker
+//! therefore needs no dynamic filesystem grant.
 
-use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
 
-const PATH_FRAME_MAGIC: [u8; 4] = *b"VWR1";
+const REQUEST_FRAME_MAGIC: [u8; 4] = *b"VWI1";
 const ACK_FRAME: [u8; 4] = *b"ACK1";
 const RESPONSE_FRAME_MAGIC: [u8; 4] = *b"VRS1";
-const PATH_FRAME_HEADER_BYTES: usize = 8;
+const REQUEST_FRAME_HEADER_BYTES: usize = 16;
 const RESPONSE_FRAME_HEADER_BYTES: usize = 9;
-/// Largest native path payload accepted by the worker protocol.
-pub const MAX_PATH_BYTES: usize = 1024 * 1024;
+/// Reserved format identifier for the package-level protocol handshake.
+pub const PROBE_FORMAT: &str = "probe";
+/// Largest format identifier accepted by the worker protocol.
+pub const MAX_FORMAT_BYTES: usize = 16;
+/// Largest encoded image accepted by the worker protocol.
+pub const MAX_ENCODED_INPUT_BYTES: u64 = 512 * 1024 * 1024;
 /// Largest typed response payload accepted by the worker protocol.
 pub const MAX_RESPONSE_PAYLOAD_BYTES: usize = 4096;
 const RESPONSE_PIXEL_STREAM: u8 = 1;
 const RESPONSE_ERROR: u8 = 2;
+const RESPONSE_PROBE: u8 = 3;
+const PROBE_PAYLOAD: [u8; 4] = *b"VWI1";
 
 /// Longest decoded image edge accepted at either side of the trust boundary.
 pub const MAX_DECODE_DIMENSION: u32 = u16::MAX as u32;
@@ -25,6 +30,15 @@ pub const MAX_DECODE_DIMENSION: u32 = u16::MAX as u32;
 pub const MAX_DECODE_PIXELS: u64 = 128 * 1024 * 1024;
 /// Maximum byte length of a tightly packed decoded RGBA8 image.
 pub const MAX_RGBA_BYTES: u64 = MAX_DECODE_PIXELS * 4;
+
+/// One complete decode request received at the worker boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecodeRequest {
+    /// Lowercase ASCII image format identifier, such as `avif` or `heic`.
+    pub format: String,
+    /// Complete encoded image payload, bounded by [`MAX_ENCODED_INPUT_BYTES`].
+    pub encoded: Vec<u8>,
+}
 
 /// Why a decoded image shape is invalid at the process boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,6 +63,8 @@ pub enum WorkerResponse {
     },
     /// A bounded, user-displayable decoder failure.
     Error(String),
+    /// Exact acknowledgement of the encoded-input protocol handshake.
+    Probe,
 }
 
 impl std::fmt::Display for ShapeError {
@@ -64,6 +80,11 @@ impl std::fmt::Display for ShapeError {
 impl std::error::Error for ShapeError {}
 
 /// Validate decoded dimensions and return the exact tightly packed RGBA8 length.
+///
+/// # Errors
+/// Returns [`ShapeError`] when either dimension is zero, a dimension exceeds
+/// the protocol limit, or the resulting allocation would exceed the pixel or
+/// address-space limit.
 pub fn checked_rgba_len(width: u32, height: u32) -> Result<usize, ShapeError> {
     if width == 0 || height == 0 {
         return Err(ShapeError::ZeroDimension);
@@ -83,63 +104,133 @@ pub fn checked_rgba_len(width: u32, height: u32) -> Result<usize, ShapeError> {
         .ok_or(ShapeError::AllocationLimit)
 }
 
-/// Write one versioned, length-prefixed native path request.
-pub fn write_path_request(writer: &mut impl Write, path: &Path) -> io::Result<()> {
-    let encoded = encode_path(path.as_os_str());
-    if encoded.is_empty() || encoded.len() > MAX_PATH_BYTES {
+/// Write one versioned, length-prefixed encoded-image request.
+///
+/// # Errors
+/// Returns an I/O error when the format or payload violates the protocol
+/// bounds, or when the destination cannot accept the complete frame.
+pub fn write_decode_request(
+    writer: &mut impl Write,
+    format: &str,
+    encoded: &[u8],
+) -> io::Result<()> {
+    if !valid_format(format) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "path length exceeds IPC safety limit",
+            "invalid worker format identifier",
         ));
     }
-    let length = u32::try_from(encoded.len()).map_err(|_| {
+    let format_length = u8::try_from(format.len()).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            "path length exceeds IPC safety limit",
+            "invalid worker format identifier",
         )
     })?;
-    writer.write_all(&PATH_FRAME_MAGIC)?;
-    writer.write_all(&length.to_le_bytes())?;
-    writer.write_all(&encoded)
+    let encoded_length = u64::try_from(encoded.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "encoded input exceeds IPC safety limit",
+        )
+    })?;
+    if encoded_length > MAX_ENCODED_INPUT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "encoded input exceeds IPC safety limit",
+        ));
+    }
+
+    writer.write_all(&REQUEST_FRAME_MAGIC)?;
+    writer.write_all(&[format_length, 0, 0, 0])?;
+    writer.write_all(&encoded_length.to_le_bytes())?;
+    writer.write_all(format.as_bytes())?;
+    writer.write_all(encoded)
 }
 
-/// Read one native path request, returning `None` only for clean stream EOF.
-pub fn read_path_request(reader: &mut impl Read) -> io::Result<Option<PathBuf>> {
-    let mut header = [0_u8; PATH_FRAME_HEADER_BYTES];
+/// Read one encoded-image request, returning `None` only for clean stream EOF.
+///
+/// # Errors
+/// Returns an I/O error for a malformed, truncated, oversized, or unreadable
+/// request. Allocation failure is reported instead of aborting the process.
+pub fn read_decode_request(reader: &mut impl Read) -> io::Result<Option<DecodeRequest>> {
+    let mut header = [0_u8; REQUEST_FRAME_HEADER_BYTES];
     match reader.read_exact(&mut header[..1]) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(error) => return Err(error),
     }
     reader.read_exact(&mut header[1..])?;
-    if header[..4] != PATH_FRAME_MAGIC {
+    if header[..4] != REQUEST_FRAME_MAGIC {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unsupported worker protocol frame",
         ));
     }
-    let length = u32::from_le_bytes(header[4..8].try_into().map_err(|_| {
+    if header[5..8] != [0, 0, 0] {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid worker protocol header",
+        ));
+    }
+    let format_length = usize::from(header[4]);
+    if format_length == 0 || format_length > MAX_FORMAT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid worker format identifier",
+        ));
+    }
+
+    let encoded_length = u64::from_le_bytes(header[8..16].try_into().map_err(|_| {
         io::Error::new(io::ErrorKind::InvalidData, "invalid worker protocol header")
-    })?) as usize;
-    if length == 0 || length > MAX_PATH_BYTES {
+    })?);
+    if encoded_length > MAX_ENCODED_INPUT_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "path length exceeds IPC safety limit",
+            "encoded input exceeds IPC safety limit",
         ));
     }
-    #[cfg(windows)]
-    if !length.is_multiple_of(2) {
+    let encoded_length = usize::try_from(encoded_length).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "encoded input length is not representable",
+        )
+    })?;
+
+    let mut format = vec![0_u8; format_length];
+    reader.read_exact(&mut format)?;
+    let format = String::from_utf8(format)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "worker format is not UTF-8"))?;
+    if !valid_format(&format) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "Windows path frame has an odd byte length",
+            "invalid worker format identifier",
         ));
     }
-    let mut encoded = vec![0_u8; length];
+
+    let mut encoded = Vec::new();
+    encoded.try_reserve_exact(encoded_length).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            "encoded input allocation failed",
+        )
+    })?;
+    encoded.resize(encoded_length, 0);
     reader.read_exact(&mut encoded)?;
-    Ok(Some(decode_path(&encoded)))
+    Ok(Some(DecodeRequest { format, encoded }))
+}
+
+fn valid_format(format: &str) -> bool {
+    !format.is_empty()
+        && format.len() <= MAX_FORMAT_BYTES
+        && format
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
 }
 
 /// Write one typed, length-prefixed worker response.
+///
+/// # Errors
+/// Returns an I/O error when the response violates the protocol bounds or the
+/// destination cannot accept the complete frame.
 pub fn write_worker_response(writer: &mut impl Write, response: &WorkerResponse) -> io::Result<()> {
     let (tag, payload) = match response {
         WorkerResponse::PixelStream { width, height } => {
@@ -159,6 +250,7 @@ pub fn write_worker_response(writer: &mut impl Write, response: &WorkerResponse)
             }
             (RESPONSE_ERROR, message.as_bytes().to_vec())
         }
+        WorkerResponse::Probe => (RESPONSE_PROBE, PROBE_PAYLOAD.to_vec()),
     };
     if payload.len() > MAX_RESPONSE_PAYLOAD_BYTES {
         return Err(io::Error::new(
@@ -179,6 +271,10 @@ pub fn write_worker_response(writer: &mut impl Write, response: &WorkerResponse)
 }
 
 /// Read and validate one typed, length-prefixed worker response.
+///
+/// # Errors
+/// Returns an I/O error for a malformed, truncated, oversized, or unreadable
+/// response.
 pub fn read_worker_response(reader: &mut impl Read) -> io::Result<WorkerResponse> {
     let mut header = [0_u8; RESPONSE_FRAME_HEADER_BYTES];
     reader.read_exact(&mut header)?;
@@ -225,6 +321,7 @@ pub fn read_worker_response(reader: &mut impl Read) -> io::Result<WorkerResponse
             }
             Ok(WorkerResponse::Error(message))
         }
+        RESPONSE_PROBE if payload == PROBE_PAYLOAD => Ok(WorkerResponse::Probe),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unknown worker response type",
@@ -237,11 +334,18 @@ fn valid_worker_error(message: &str) -> bool {
 }
 
 /// Acknowledge that the parent received the complete pixel stream.
+///
+/// # Errors
+/// Returns an I/O error when the acknowledgement cannot be written completely.
 pub fn write_ack(writer: &mut impl Write) -> io::Result<()> {
     writer.write_all(&ACK_FRAME)
 }
 
 /// Read and validate a pixel-stream acknowledgement.
+///
+/// # Errors
+/// Returns an I/O error when the acknowledgement is missing, truncated, or
+/// invalid.
 pub fn read_ack(reader: &mut impl Read) -> io::Result<()> {
     let mut ack = [0_u8; ACK_FRAME.len()];
     reader.read_exact(&mut ack)?;
@@ -254,44 +358,13 @@ pub fn read_ack(reader: &mut impl Read) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn encode_path(path: &OsStr) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    path.as_bytes().to_vec()
-}
-
-#[cfg(windows)]
-fn encode_path(path: &OsStr) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt;
-    path.encode_wide()
-        .flat_map(u16::to_le_bytes)
-        .collect::<Vec<_>>()
-}
-
-#[cfg(unix)]
-fn decode_path(encoded: &[u8]) -> PathBuf {
-    use std::os::unix::ffi::OsStringExt;
-    PathBuf::from(OsString::from_vec(encoded.to_vec()))
-}
-
-#[cfg(windows)]
-fn decode_path(encoded: &[u8]) -> PathBuf {
-    use std::os::windows::ffi::OsStringExt;
-    let wide = encoded
-        .chunks_exact(2)
-        .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
-        .collect::<Vec<_>>();
-    PathBuf::from(OsString::from_wide(&wide))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        WorkerResponse, checked_rgba_len, read_ack, read_path_request, read_worker_response,
-        write_ack, write_path_request, write_worker_response,
+        DecodeRequest, WorkerResponse, checked_rgba_len, read_ack, read_decode_request,
+        read_worker_response, write_ack, write_decode_request, write_worker_response,
     };
     use std::io::{self, Cursor, Read, Write};
-    use std::path::Path;
 
     fn response_frame(tag: u8, payload: &[u8]) -> Vec<u8> {
         let mut frame = b"VRS1".to_vec();
@@ -335,45 +408,68 @@ mod tests {
     }
 
     #[test]
-    fn path_frame_round_trips_newlines_and_unicode() {
-        let expected = Path::new("folder/photo\n雪.avif");
+    fn decode_request_round_trips_format_and_binary_payload() {
+        let expected = DecodeRequest {
+            format: "avif".into(),
+            encoded: vec![0, b'\n', 0xff, 42],
+        };
         let mut frame = Vec::new();
-        write_path_request(&mut frame, expected).unwrap();
-        let decoded = read_path_request(&mut Cursor::new(frame)).unwrap();
-        assert_eq!(decoded.as_deref(), Some(expected));
+        write_decode_request(&mut frame, &expected.format, &expected.encoded).unwrap();
+        assert_eq!(
+            read_decode_request(&mut Cursor::new(frame)).unwrap(),
+            Some(expected)
+        );
     }
 
     #[test]
-    fn path_reader_rejects_bad_or_truncated_frames() {
+    fn request_reader_rejects_bad_or_truncated_frames() {
         assert!(
-            read_path_request(&mut Cursor::new(Vec::new()))
+            read_decode_request(&mut Cursor::new(Vec::new()))
                 .unwrap()
                 .is_none()
         );
-        assert!(read_path_request(&mut Cursor::new(b"BAD!\x01\0\0\0x".to_vec())).is_err());
-        assert!(read_path_request(&mut Cursor::new(b"VWR1\x04\0\0\0x".to_vec())).is_err());
+        assert!(read_decode_request(&mut Cursor::new(b"BAD!\x04\0\0\0".to_vec())).is_err());
+        assert!(read_decode_request(&mut Cursor::new(b"VWI1\x04\0\0\0".to_vec())).is_err());
     }
 
     #[test]
-    fn path_frames_reject_empty_and_oversized_native_paths() {
-        assert!(write_path_request(&mut Vec::new(), Path::new("")).is_err());
-        let oversized = "x".repeat(super::MAX_PATH_BYTES + 1);
-        assert!(write_path_request(&mut Vec::new(), Path::new(&oversized)).is_err());
+    fn requests_reject_invalid_formats_reserved_bytes_and_oversized_input() {
+        for format in ["", "AVIF", "heic!", "abcdefghijklmnopq"] {
+            assert!(write_decode_request(&mut Vec::new(), format, b"image").is_err());
+        }
 
-        for length in [0_u32, u32::try_from(super::MAX_PATH_BYTES + 1).unwrap()] {
-            let mut frame = b"VWR1".to_vec();
-            frame.extend_from_slice(&length.to_le_bytes());
-            assert!(read_path_request(&mut Cursor::new(frame)).is_err());
+        let mut reserved = b"VWI1\x04\x01\0\0".to_vec();
+        reserved.extend_from_slice(&0_u64.to_le_bytes());
+        assert!(read_decode_request(&mut Cursor::new(reserved)).is_err());
+
+        let mut oversized = b"VWI1\x04\0\0\0".to_vec();
+        oversized.extend_from_slice(&(super::MAX_ENCODED_INPUT_BYTES + 1).to_le_bytes());
+        oversized.extend_from_slice(b"avif");
+        assert!(read_decode_request(&mut Cursor::new(oversized)).is_err());
+
+        let mut invalid_format = b"VWI1\x04\0\0\0".to_vec();
+        invalid_format.extend_from_slice(&0_u64.to_le_bytes());
+        invalid_format.extend_from_slice(b"AVIF");
+        assert!(read_decode_request(&mut Cursor::new(invalid_format)).is_err());
+    }
+
+    #[test]
+    fn request_reader_rejects_truncated_format_and_payload() {
+        for (format, payload) in [(b"avi".as_slice(), b"".as_slice()), (b"avif", b"xy")] {
+            let mut frame = b"VWI1\x04\0\0\0".to_vec();
+            frame.extend_from_slice(&3_u64.to_le_bytes());
+            frame.extend_from_slice(format);
+            frame.extend_from_slice(payload);
+            assert!(read_decode_request(&mut Cursor::new(frame)).is_err());
         }
     }
 
     #[test]
     fn protocol_io_failures_propagate_without_partial_success() {
-        assert!(read_path_request(&mut FailingIo { writable_bytes: 0 }).is_err());
-        for writable_bytes in [0, 4, 8] {
+        assert!(read_decode_request(&mut FailingIo { writable_bytes: 0 }).is_err());
+        for writable_bytes in [0, 4, 8, 16, 20] {
             assert!(
-                write_path_request(&mut FailingIo { writable_bytes }, Path::new("photo.avif"))
-                    .is_err()
+                write_decode_request(&mut FailingIo { writable_bytes }, "avif", b"image").is_err()
             );
         }
 
@@ -401,6 +497,7 @@ mod tests {
                 height: 3,
             },
             WorkerResponse::Error("decoder failed without desynchronizing".into()),
+            WorkerResponse::Probe,
         ] {
             let mut frame = Vec::new();
             write_worker_response(&mut frame, &expected).unwrap();
@@ -446,6 +543,7 @@ mod tests {
             response_frame(super::RESPONSE_PIXEL_STREAM, &invalid_shape),
             response_frame(super::RESPONSE_ERROR, &[0xff]),
             response_frame(super::RESPONSE_ERROR, b"forged\nsecond line"),
+            response_frame(super::RESPONSE_PROBE, b"wrong"),
             response_frame(99, b"unknown"),
         ] {
             assert!(read_worker_response(&mut Cursor::new(frame)).is_err());

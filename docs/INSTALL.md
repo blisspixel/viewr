@@ -46,8 +46,11 @@ Or the portable installer:
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/blisspixel/viewr/releases/latest/download/viewr-installer.sh | sh
 ```
 
-The Flatpak ships with no network permission at all (see `docs/PRIVACY.md`), so it
-is structurally unable to reach the internet.
+The Flatpak grants no direct network access (see `docs/PRIVACY.md`). Desktop
+portals may still delegate explicit host actions, so the independent dependency
+ban remains part of the privacy proof. Use **File > Open Folder** when you want
+next/previous navigation in a sandboxed package; that picker supplies the
+session-scoped directory consent without a broad filesystem grant.
 
 ### From source (any OS)
 
@@ -80,6 +83,20 @@ cargo build --release -p viewr-decode --features avif,heic
 
 On Linux, building needs the usual windowing dev packages
 (`libwayland-dev libxkbcommon-dev libx11-dev`).
+
+### Inspect the network-denied package profiles
+
+The repository keeps platform package boundaries independently verifiable before
+public installers exist. Run the cross-platform exact-set test with:
+
+```
+cargo test -p viewr --test sandbox_profiles
+```
+
+Platform-native verification commands and their limits are documented in
+[`SANDBOX_PLAN.md`](SANDBOX_PLAN.md). They produce only local unsigned or ad-hoc
+signed artifacts under `target/profile-check/`; they do not publish or install
+anything.
 
 ## Desktop integration on Linux
 

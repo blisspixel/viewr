@@ -16,9 +16,10 @@ Two rules hold across every phase:
 ## Current status
 
 Phases 0-6 are complete for the product scope defined in this roadmap (including
-Phase 6 residuals: workspace worker, format table, RAW deferral). System trash
-and operational core fuzzing are complete; OS sandbox packaging and reproducible
-release artifacts remain Phase 7 work.
+Phase 6 residuals: workspace worker, format table, RAW deferral). System trash,
+operational core fuzzing, and locally verifiable OS sandbox profiles are complete;
+the optional production C-decoder syscall allowlist and reproducible release
+artifacts remain Phase 7 work.
 
 **Next focus: Phase 7: Hardening and the privacy proof.**
 ## Phase 0: Foundations
@@ -149,17 +150,18 @@ Turn "we designed it to be private and safe" into something a third party can
 verify **locally** (build, run, inspect). This phase is **not** about app-store
 submission.
 
-- [ ] Sandbox *profiles* on all three platforms with the network denied (local
-  packaging sketches and runtime limits—not store listing):
-  - [x] Flatpak manifest sketch (`packaging/flatpak/…`) with no `--share=network`.
-  - [x] macOS entitlements sketch without network client/server keys.
-  - [x] Windows AppContainer packaging notes (`packaging/windows/APPCONTAINER.md`).
+- [x] Sandbox *profiles* on all three platforms with the network denied (local
+  profiles and runtime limits, not store listing):
+  - [x] Flatpak 25.08 runtime profile (`packaging/flatpak/…`) with an exact tested grant set and no `--share=network`.
+  - [x] macOS main/helper App Sandbox entitlements without network client/server keys, plus an ad-hoc signed local bundle verifier.
+  - [x] Windows packaged-classic AppContainer manifest with an empty capability set and a schema-validating local MSIX builder.
+  - [x] Explicit Open Folder consent for sibling navigation, with a safe one-file fallback when a sandbox grants only the selected file.
 - The isolated decode worker fully in place, with seccomp on Linux and reduced
   privileges elsewhere.
-  - [x] Workspace worker + versioned native-path frames + bounded pixel-stream IPC (process isolation).
+  - [x] Workspace worker + versioned bounded encoded-input frames + bounded pixel-stream IPC; the helper receives no filesystem path.
   - [x] Windows one-process Job Object kill-on-close + Unix private session and one-process policy (`worker_limit`), with fail-closed setup and a 1.5 GiB containment memory ceiling.
   - [x] Linux `no_new_privs` + post-exec `dumpable=0` + default-allow seccomp-bpf that EPERMs classic and io_uring network paths, with startup failure if hardening cannot apply (`worker_limit` + `packaging/linux/SECCOMP.md`).
-  - [x] Shared 512 MiB decoded-output limit, strict dimension validation, typed bounded responses, and a hard 30-second send/receive deadline with bounded cleanup.
+  - [x] Shared 512 MiB decoded-output limit, strict dimension validation, fallible large allocations, typed bounded responses, and a hard 30-second send/receive deadline with bounded cleanup. Host file reads occur before worker reservation and outside the IPC deadline thread.
   - [x] Two-slot foreground-priority file-decode gate, stale load cancellation, and exact source/pixel state matching for path-sensitive actions.
   - [ ] Optional default-deny allowlist for C-decoder builds (when avif/heic features are used in production).
 - Continuous fuzzing of every decoder, with any crash a release blocker.

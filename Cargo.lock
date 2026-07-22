@@ -3987,6 +3987,7 @@ dependencies = [
  "pollster 1.0.1",
  "resvg",
  "rfd",
+ "roxmltree",
  "seccompiler",
  "thiserror 2.0.18",
  "trash",

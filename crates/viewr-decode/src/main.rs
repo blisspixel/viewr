@@ -1,7 +1,7 @@
 //! Isolated decode worker for formats that need C-backed libraries.
 //!
 //! Protocol (versioned framing over stdin and stdout):
-//! 1. Parent writes a length-prefixed native path frame.
+//! 1. Parent opens the selected file and writes a bounded encoded-image frame.
 //! 2. Worker replies with a typed pixel-stream or bounded error frame.
 //! 3. A successful frame is followed by exactly `width * height * 4` RGBA8 bytes.
 //! 4. After receiving the pixel stream, the parent sends an ACK frame.
@@ -11,14 +11,9 @@
 
 #![allow(missing_docs)] // binary entry; module docs live above
 
-#[cfg(any(feature = "avif", feature = "heic", test))]
-use std::io::Read;
 use std::io::{BufReader, Write};
-use std::path::Path;
 use viewr_protocol::WorkerResponse;
 
-#[cfg(any(feature = "avif", feature = "heic"))]
-const MAX_WORKER_INPUT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_WORKER_ERROR_BYTES: usize = 2048;
 
 fn main() {
@@ -35,8 +30,8 @@ fn main() {
     let mut input = BufReader::new(stdin.lock());
 
     loop {
-        let path = match viewr_protocol::read_path_request(&mut input) {
-            Ok(Some(path)) => path,
+        let request = match viewr_protocol::read_decode_request(&mut input) {
+            Ok(Some(request)) => request,
             Ok(None) => break,
             Err(error) => {
                 let _ = send_response(
@@ -47,7 +42,14 @@ fn main() {
             }
         };
 
-        match decode_file(&path)
+        if request.format == viewr_protocol::PROBE_FORMAT && request.encoded.is_empty() {
+            if !send_response(&mut stdout, &WorkerResponse::Probe) {
+                break;
+            }
+            continue;
+        }
+
+        match decode_input(&request.format, &request.encoded)
             .and_then(|(width, height, rgba)| validate_decoded(width, height, rgba))
         {
             Ok((width, height, rgba)) => {
@@ -110,36 +112,6 @@ fn validate_decoded(width: u32, height: u32, rgba: Vec<u8>) -> Result<(u32, u32,
     Ok((width, height, rgba))
 }
 
-#[cfg(any(feature = "avif", feature = "heic"))]
-fn read_bounded_input(path: &Path) -> Result<Vec<u8>, String> {
-    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
-    let initial_capacity = file
-        .metadata()
-        .ok()
-        .and_then(|metadata| usize::try_from(metadata.len()).ok())
-        .map_or(0, |length| {
-            length.min(usize::try_from(MAX_WORKER_INPUT_BYTES).unwrap_or(usize::MAX))
-        });
-    read_bounded(file, initial_capacity, MAX_WORKER_INPUT_BYTES)
-}
-
-#[cfg(any(feature = "avif", feature = "heic", test))]
-fn read_bounded(
-    reader: impl std::io::Read,
-    initial_capacity: usize,
-    max_bytes: u64,
-) -> Result<Vec<u8>, String> {
-    let mut data = Vec::with_capacity(initial_capacity);
-    reader
-        .take(max_bytes + 1)
-        .read_to_end(&mut data)
-        .map_err(|error| error.to_string())?;
-    if data.len() as u64 > max_bytes {
-        return Err("encoded input exceeds worker safety limit".into());
-    }
-    Ok(data)
-}
-
 #[cfg(any(feature = "heic", test))]
 fn copy_strided_rgba(
     data: &[u8],
@@ -165,7 +137,9 @@ fn copy_strided_rgba(
         return Err("decoder returned a truncated RGBA buffer".into());
     }
 
-    let mut rgba = Vec::with_capacity(expected_size);
+    let mut rgba = Vec::new();
+    rgba.try_reserve_exact(expected_size)
+        .map_err(|_| "not enough memory for decoded pixels".to_string())?;
     for row in data.chunks_exact(stride).take(rows) {
         rgba.extend_from_slice(&row[..row_bytes]);
     }
@@ -188,41 +162,33 @@ fn harden_worker_process() -> Result<(), String> {
     Ok(())
 }
 
-fn decode_file(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    match ext.as_str() {
-        "avif" => decode_avif(path),
-        "heic" | "heif" => decode_heic(path),
-        "cr2" | "nef" | "arw" | "dng" | "rw2" | "orf" | "raf" => decode_raw(path),
+fn decode_input(format: &str, encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    match format {
+        "avif" => decode_avif(encoded),
+        "heic" | "heif" => decode_heic(encoded),
+        "cr2" | "nef" | "arw" | "dng" | "rw2" | "orf" | "raf" => decode_raw(encoded),
         _ => Err("unsupported worker format".into()),
     }
 }
 
 #[cfg(feature = "avif")]
-fn decode_avif(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_avif(encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     use image::GenericImageView;
 
-    let data = read_bounded_input(path)?;
-
-    let img = libavif_image::read(&data).map_err(|e| e.to_string())?;
+    let img = libavif_image::read(encoded).map_err(|e| e.to_string())?;
     let (width, height) = img.dimensions();
     viewr_protocol::checked_rgba_len(width, height).map_err(|error| error.to_string())?;
     Ok((width, height, img.into_rgba8().into_raw()))
 }
 
 #[cfg(not(feature = "avif"))]
-fn decode_avif(_path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_avif(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Err("AVIF support requires building viewr-decode with --features avif (and libavif)".into())
 }
 
 #[cfg(feature = "heic")]
-fn decode_heic(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
-    let data = read_bounded_input(path)?;
-    let ctx = libheif_rs::HeifContext::read_from_bytes(&data).map_err(|e| e.to_string())?;
+fn decode_heic(encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    let ctx = libheif_rs::HeifContext::read_from_bytes(encoded).map_err(|e| e.to_string())?;
     let handle = ctx.primary_image_handle().map_err(|e| e.to_string())?;
     viewr_protocol::checked_rgba_len(handle.width(), handle.height())
         .map_err(|error| error.to_string())?;
@@ -249,7 +215,7 @@ fn decode_heic(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
 }
 
 #[cfg(not(feature = "heic"))]
-fn decode_heic(_path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_heic(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Err(
         "HEIC/HEIF support requires building viewr-decode with --features heic (and libheif)"
             .into(),
@@ -260,7 +226,7 @@ fn decode_heic(_path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
 /// Callers get a stable, honest error until a pure-Rust or well-packaged
 /// backend is chosen (tracked in docs/ROADMAP.md Phase 6 residuals).
 #[cfg(feature = "raw")]
-fn decode_raw(_path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_raw(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Err(
         "camera RAW decoding is not implemented yet (feature raw reserved; see docs/FORMATS.md)"
             .into(),
@@ -268,13 +234,13 @@ fn decode_raw(_path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
 }
 
 #[cfg(not(feature = "raw"))]
-fn decode_raw(_path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_raw(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Err("camera RAW is deferred; see docs/FORMATS.md (build with --features raw when ready)".into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_strided_rgba, read_bounded, validate_decoded, worker_error};
+    use super::{copy_strided_rgba, validate_decoded, worker_error};
     use viewr_protocol::WorkerResponse;
     use viewr_protocol::{MAX_DECODE_DIMENSION, MAX_DECODE_PIXELS};
 
@@ -310,11 +276,5 @@ mod tests {
         };
         assert!(!message.contains('\n'));
         assert!(message.len() <= super::MAX_WORKER_ERROR_BYTES);
-    }
-
-    #[test]
-    fn bounded_input_detects_growth_past_the_limit() {
-        assert_eq!(read_bounded(&b"abcd"[..], 0, 4).unwrap(), b"abcd");
-        assert!(read_bounded(&b"abcde"[..], 0, 4).is_err());
     }
 }

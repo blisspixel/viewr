@@ -1,4 +1,4 @@
-# Windows AppContainer plan (Phase 7)
+# Windows AppContainer profile
 
 ## Goal
 
@@ -6,28 +6,42 @@ Ship viewr (and preferably `viewr-decode`) under an AppContainer with **no
 internet capability**, matching Microsoft’s least-privilege AppContainer model
 (file isolation, network isolation, process isolation).
 
-## Capabilities
+## Enforced package contract
 
-- Enable AppContainer for the package (MSIX / Store or packaged desktop).
-- Do **not** grant `internetClient`, `internetClientServer`, or `privateNetworkClientServer`.
-- Grant only what is required for GPU presentation and user-selected files
-  (package identity + optional broadFileSystemAccess is a last resort; prefer
-  picker-based access).
+- `AppxManifest.xml` sets `uap10:TrustLevel="appContainer"` and
+  `uap10:RuntimeBehavior="packagedClassicApp"`.
+- `<Capabilities />` is deliberately empty. In particular, the package has no
+  `internetClient`, `internetClientServer`, `privateNetworkClientServer`,
+  `broadFileSystemAccess`, or `runFullTrust` capability.
+- User-selected files remain the intended access path. Broad library or host
+  filesystem capabilities are outside this profile.
+- The File menu exposes a separate **Open Folder** picker for explicit,
+  session-scoped sibling access. If a file picker grants only one file, viewr
+  keeps that image usable and does not assume access to its parent directory.
 
 ## Child worker
 
-`viewr-decode` should inherit a restricted job or run as a low-integrity child:
+`viewr-decode` is shipped beside the main executable and inherits the parent's
+AppContainer token. Its existing Job Object adds a separate lifetime boundary:
 
 1. Parent creates a Job Object with kill-on-close and active process limit.
-2. Spawn worker with restricted token when packaging allows.
-3. Keep the versioned stdin/stdout protocol as the only IPC.
+2. The AppContainer parent spawns the worker without adding capabilities.
+3. The parent opens selected files and sends bounded encoded bytes over the
+   versioned stdin/stdout protocol; the worker receives no filesystem path.
 
-Implementation lives in `crates/viewr/src/sandbox.rs` over time; this document
-is the packaging contract until the launcher code lands.
+`scripts/build-windows-appcontainer.ps1` packages real workspace binaries and
+uses the Windows SDK's `MakeAppx.exe` schema validator. It creates an unsigned
+local inspection artifact at
+`target/profile-check/windows/viewr-appcontainer.msix` only; signing,
+installation, and publication are not part of Phase 7.
 
 ## Verification
 
 - `cargo deny check` still bans network crates in the dependency tree.
-- Runtime: confirm with Process Explorer / `CheckNetIsolation` that the
-  packaged process has no network capability.
-- Functional: open JPEG/PNG, trash/restore, folder navigation.
+- `cargo test -p viewr --test sandbox_profiles` checks the exact empty
+  capability set and AppContainer trust level.
+- `scripts/build-windows-appcontainer.ps1` must produce a schema-valid MSIX
+  from `viewr.exe` and `viewr-decode.exe`.
+- Installation requires a trusted local signing certificate and is intentionally
+  left as an explicit operator step. Do not claim runtime verification from the
+  unsigned package alone.

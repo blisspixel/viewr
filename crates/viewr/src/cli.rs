@@ -209,6 +209,7 @@ fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Re
     writeln!(stdout, "viewr doctor {VERSION}")?;
     writeln!(stdout, "{}", "-".repeat(48))?;
     let mut ok = true;
+    let mut worker_available = false;
 
     // --- binary layout ---
     match std::env::current_exe() {
@@ -222,6 +223,7 @@ fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Re
             });
             if worker.is_file() {
                 writeln!(stdout, "[ok]   worker beside exe: {}", worker.display())?;
+                worker_available = true;
             } else if let Some(explicit) = explicit_worker {
                 let explicit = Path::new(explicit);
                 if explicit.is_file() {
@@ -230,6 +232,7 @@ fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Re
                         "[ok]   worker via VIEWR_DECODE_BIN: {}",
                         explicit.display()
                     )?;
+                    worker_available = true;
                 } else {
                     writeln!(
                         stdout,
@@ -250,6 +253,16 @@ fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Re
         Err(e) => {
             writeln!(stdout, "[FAIL] cannot resolve current_exe: {e}")?;
             ok = false;
+        }
+    }
+
+    if worker_available {
+        match crate::sandbox::probe_worker() {
+            Ok(()) => writeln!(stdout, "[ok]   worker IPC: bounded in-memory probe passed")?,
+            Err(error) => {
+                writeln!(stdout, "[FAIL] worker IPC: {error}")?;
+                ok = false;
+            }
         }
     }
 

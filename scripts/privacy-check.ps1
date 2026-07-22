@@ -21,32 +21,49 @@ foreach ($line in $flatpakLines) {
         exit 1
     }
 }
-# Real grants look like <key>com.apple.security.network.client</key> outside comments.
-$entsLines = Get-Content "packaging/macos/viewr.entitlements"
-foreach ($line in $entsLines) {
-    $t = $line.Trim()
-    if ($t.StartsWith("<!--") -or $t.StartsWith("-->") -or $t -match "^<!--" -or $t -match "-->") {
-        continue
-    }
-    if ($t -match "<key>com\.apple\.security\.network\.(client|server)</key>") {
-        Write-Error "macOS entitlements must not grant network client/server"
+foreach ($entitlementsPath in @(
+    "packaging/macos/viewr.entitlements",
+    "packaging/macos/viewr-decode.entitlements"
+)) {
+    [xml]$entitlements = Get-Content -LiteralPath $entitlementsPath -Raw
+    $keys = $entitlements.SelectNodes("/*[local-name()='plist']/*[local-name()='dict']/*[local-name()='key']") |
+        ForEach-Object { $_.InnerText }
+    if ($keys -match "^com\.apple\.security\.network\.(client|server)$") {
+        Write-Error "$entitlementsPath must not grant network client/server"
         exit 1
     }
 }
-if (-not (Test-Path "packaging/windows/APPCONTAINER.md")) {
-    Write-Error "Missing Windows AppContainer plan"
+
+$appxPath = "packaging/windows/AppxManifest.xml"
+if (-not (Test-Path -LiteralPath $appxPath -PathType Leaf)) {
+    Write-Error "Missing Windows AppContainer manifest"
+    exit 1
+}
+[xml]$appx = Get-Content -LiteralPath $appxPath -Raw
+$namespaces = [System.Xml.XmlNamespaceManager]::new($appx.NameTable)
+$namespaces.AddNamespace("f", "http://schemas.microsoft.com/appx/manifest/foundation/windows10")
+$namespaces.AddNamespace("uap10", "http://schemas.microsoft.com/appx/manifest/uap/windows10/10")
+$application = $appx.SelectSingleNode("/f:Package/f:Applications/f:Application", $namespaces)
+if ($null -eq $application -or
+    $application.GetAttribute("TrustLevel", $namespaces.LookupNamespace("uap10")) -ne "appContainer" -or
+    $application.GetAttribute("RuntimeBehavior", $namespaces.LookupNamespace("uap10")) -ne "packagedClassicApp") {
+    Write-Error "Windows package must run as a packagedClassicApp AppContainer"
+    exit 1
+}
+$capabilities = $appx.SelectSingleNode("/f:Package/f:Capabilities", $namespaces)
+if ($null -eq $capabilities -or $capabilities.SelectNodes("*").Count -ne 0) {
+    Write-Error "Windows AppContainer must have an explicit empty capability set"
     exit 1
 }
 
 Write-Host "== dependency tree must not pull reqwest/hyper/rustls =="
+$tree = cargo tree --quiet -p viewr --prefix none --edges normal | Out-String
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 foreach ($crate in @("reqwest", "hyper", "rustls", "native-tls")) {
-    $out = cargo tree -p viewr -i $crate 2>&1 | Out-String
-    if ($out -notmatch "did not match any packages" -and $out -notmatch "package ID specification") {
-        # cargo tree succeeds only if the package is present
-        if ($LASTEXITCODE -eq 0 -and $out -match [regex]::Escape($crate)) {
-            Write-Error "Forbidden network-related crate in tree: $crate"
-            exit 1
-        }
+    $packageLine = "(?m)^$([regex]::Escape($crate)) v"
+    if ($tree -match $packageLine) {
+        Write-Error "Forbidden network-related crate in tree: $crate"
+        exit 1
     }
 }
 

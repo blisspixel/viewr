@@ -14,12 +14,25 @@ if grep -v '^\s*#' packaging/flatpak/com.github.blisspixel.viewr.yml | grep -q -
   echo "Flatpak manifest must not grant --share=network" >&2
   exit 1
 fi
-# Real grants are <key>…network.client|server</key> outside HTML comments.
-if grep -v '<!--' packaging/macos/viewr.entitlements | grep -Eq '<key>com\.apple\.security\.network\.(client|server)</key>'; then
-  echo "macOS entitlements must not grant network client/server" >&2
+# Real grants are <key>...network.client|server</key> outside XML comments.
+for entitlements in \
+  packaging/macos/viewr.entitlements \
+  packaging/macos/viewr-decode.entitlements; do
+  if sed '/<!--/,/-->/d' "$entitlements" | grep -Eq '<key>com\.apple\.security\.network\.(client|server)</key>'; then
+    echo "$entitlements must not grant network client/server" >&2
+    exit 1
+  fi
+done
+
+appx=packaging/windows/AppxManifest.xml
+test -f "$appx"
+grep -q 'uap10:TrustLevel="appContainer"' "$appx"
+grep -q 'uap10:RuntimeBehavior="packagedClassicApp"' "$appx"
+grep -Eq '<Capabilities[[:space:]]*/>' "$appx"
+if grep -Eq 'Name="(internetClient|internetClientServer|privateNetworkClientServer|broadFileSystemAccess|runFullTrust)"' "$appx"; then
+  echo "Windows AppContainer must not grant network, broad filesystem, or full-trust capabilities" >&2
   exit 1
 fi
-test -f packaging/windows/APPCONTAINER.md
 
 echo "== dependency tree must not pull reqwest/hyper/rustls =="
 for crate in reqwest hyper rustls native-tls; do

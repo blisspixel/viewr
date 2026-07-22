@@ -35,6 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            flatpak-builder \
             libwayland-dev libxkbcommon-dev libx11-dev \
             libxrandr-dev libxi-dev libgl1-mesa-dev
 
@@ -56,8 +57,43 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      - name: Build decode worker (default features)
-        run: cargo build -p viewr-decode
+      - name: Build workspace binaries
+        run: cargo build --workspace --locked
+
+      - name: Verify generated Flatpak Cargo sources
+        if: runner.os == 'Linux'
+        run: |
+          python3 scripts/generate-flatpak-cargo-sources.py
+          git diff --exit-code -- packaging/flatpak/cargo-sources.json
+
+      - name: Install pinned Flatpak SDK
+        if: runner.os == 'Linux'
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --assumeyes --noninteractive flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+      - name: Build and probe Flatpak sandbox
+        if: runner.os == 'Linux'
+        run: |
+          flatpak-builder --force-clean --disable-rofiles-fuse \
+            target/profile-check/flatpak \
+            packaging/flatpak/com.github.blisspixel.viewr.yml
+          flatpak-builder --run \
+            target/profile-check/flatpak \
+            packaging/flatpak/com.github.blisspixel.viewr.yml \
+            viewr doctor
+
+      - name: Build and validate macOS App Sandbox bundle
+        if: runner.os == 'macOS'
+        run: bash scripts/build-macos-sandboxed-app.sh target/debug
+
+      - name: Build and validate Windows AppContainer package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/build-windows-appcontainer.ps1 -BinaryDirectory target/debug
 
   coverage:
     if: github.event_name != 'schedule'

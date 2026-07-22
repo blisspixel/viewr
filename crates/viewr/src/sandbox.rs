@@ -7,8 +7,8 @@
 //! Workers are lifetime-hardened via [`crate::worker_limit`]: Windows Job Object
 //! (kill-on-close) and a private Unix session.
 
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::io::{BufReader, Read};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -23,37 +23,127 @@ const MAX_IDLE_WORKERS: usize = 2;
 
 /// Decode via the isolated `viewr-decode` worker (AVIF / HEIC / RAW paths).
 pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
+    // Resolve and read the user-selected file before reserving a worker. Host
+    // filesystem I/O is bounded by the decode executor rather than the IPC
+    // timeout thread, whose cancellation can only terminate the child process.
+    let format = worker_format(path)?;
+    let encoded = read_bounded_input(path)?;
     let worker = get_worker()?;
     run_worker_request_with_timeout(
         worker,
-        path.to_owned(),
+        format,
+        encoded,
         WORKER_REQUEST_TIMEOUT,
         WORKER_TERMINATION_GRACE,
     )
 }
 
-struct WorkerTransaction {
-    result: Result<DecodedImage, Error>,
+/// Verify that the packaged worker can start and complete one bounded IPC request.
+pub(crate) fn probe_worker() -> Result<(), Error> {
+    let worker = get_worker()?;
+    run_worker_operation_with_timeout(
+        worker,
+        WORKER_REQUEST_TIMEOUT,
+        WORKER_TERMINATION_GRACE,
+        probe_worker_exchange,
+    )
+}
+
+struct WorkerTransaction<T> {
+    result: Result<T, Error>,
     reusable_worker: Option<DaemonWorker>,
 }
 
 fn run_worker_request_with_timeout(
     worker: DaemonWorker,
-    path: PathBuf,
+    format: String,
+    encoded: Vec<u8>,
     timeout: Duration,
     termination_grace: Duration,
 ) -> Result<DecodedImage, Error> {
     run_worker_operation_with_timeout(worker, timeout, termination_grace, move |worker| {
-        exchange_with_worker(worker, &path)
+        exchange_with_worker(worker, &format, encoded)
     })
 }
 
-fn run_worker_operation_with_timeout(
+fn worker_format(path: &Path) -> Result<String, Error> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|format| !format.is_empty())
+        .ok_or_else(|| Error::Decode("worker input has no valid format extension".into()))
+}
+
+fn read_bounded_input(path: &Path) -> Result<Vec<u8>, Error> {
+    let path_metadata = std::fs::metadata(path)
+        .map_err(|error| Error::Decode(format!("failed to inspect worker input: {error}")))?;
+    if !path_metadata.is_file() {
+        return Err(Error::Decode("worker input must be a regular file".into()));
+    }
+
+    let file = std::fs::File::open(path)
+        .map_err(|error| Error::Decode(format!("failed to open worker input: {error}")))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| Error::Decode(format!("failed to inspect open worker input: {error}")))?;
+    if !metadata.is_file() {
+        return Err(Error::Decode("worker input must be a regular file".into()));
+    }
+    let declared_length = metadata.len();
+    if declared_length > viewr_protocol::MAX_ENCODED_INPUT_BYTES {
+        return Err(Error::Decode(
+            "encoded input exceeds worker safety limit".into(),
+        ));
+    }
+    let initial_capacity = usize::try_from(declared_length).unwrap_or(0);
+    read_bounded(
+        file,
+        initial_capacity,
+        viewr_protocol::MAX_ENCODED_INPUT_BYTES,
+    )
+}
+
+fn read_bounded(
+    mut reader: impl Read,
+    initial_capacity: usize,
+    max_bytes: u64,
+) -> Result<Vec<u8>, Error> {
+    let max_bytes = usize::try_from(max_bytes)
+        .map_err(|_| Error::Decode("worker input limit is not representable".into()))?;
+    let mut encoded = Vec::new();
+    encoded
+        .try_reserve_exact(initial_capacity.min(max_bytes))
+        .map_err(|_| Error::Decode("not enough memory to read worker input".into()))?;
+
+    let mut chunk = [0_u8; 16 * 1024];
+    loop {
+        let remaining = max_bytes.saturating_sub(encoded.len());
+        let read_limit = chunk.len().min(remaining.saturating_add(1));
+        let count = reader
+            .read(&mut chunk[..read_limit])
+            .map_err(|error| Error::Decode(format!("failed to read worker input: {error}")))?;
+        if count == 0 {
+            break;
+        }
+        if count > remaining {
+            return Err(Error::Decode(
+                "encoded input exceeds worker safety limit".into(),
+            ));
+        }
+        encoded
+            .try_reserve_exact(count)
+            .map_err(|_| Error::Decode("not enough memory to read worker input".into()))?;
+        encoded.extend_from_slice(&chunk[..count]);
+    }
+    Ok(encoded)
+}
+
+fn run_worker_operation_with_timeout<T: Send + 'static>(
     worker: DaemonWorker,
     timeout: Duration,
     termination_grace: Duration,
-    operation: impl FnOnce(&mut DaemonWorker) -> Result<DecodedImage, Error> + Send + 'static,
-) -> Result<DecodedImage, Error> {
+    operation: impl FnOnce(&mut DaemonWorker) -> Result<T, Error> + Send + 'static,
+) -> Result<T, Error> {
     let killer = worker.guard.killer();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let request_thread = std::thread::Builder::new()
@@ -111,17 +201,40 @@ fn run_worker_operation_with_timeout(
     }
 }
 
-fn exchange_with_worker(worker: &mut DaemonWorker, path: &Path) -> Result<DecodedImage, Error> {
+fn exchange_with_worker(
+    worker: &mut DaemonWorker,
+    format: &str,
+    encoded: Vec<u8>,
+) -> Result<DecodedImage, Error> {
+    send_worker_input(worker, format, &encoded)?;
+    drop(encoded);
+    receive_worker_output(worker)
+}
+
+fn send_worker_input(worker: &mut DaemonWorker, format: &str, encoded: &[u8]) -> Result<(), Error> {
     use std::io::Write;
 
-    if let Err(e) = viewr_protocol::write_path_request(&mut worker.stdin, path) {
-        return Err(Error::Decode(format!("failed to send path: {e}")));
-    }
-    if let Err(e) = worker.stdin.flush() {
-        return Err(Error::Decode(format!("failed to flush: {e}")));
-    }
+    viewr_protocol::write_decode_request(&mut worker.stdin, format, encoded)
+        .map_err(|error| Error::Decode(format!("failed to send worker input: {error}")))?;
+    worker
+        .stdin
+        .flush()
+        .map_err(|error| Error::Decode(format!("failed to flush worker input: {error}")))
+}
 
-    receive_worker_output(worker)
+fn probe_worker_exchange(worker: &mut DaemonWorker) -> Result<(), Error> {
+    send_worker_input(worker, viewr_protocol::PROBE_FORMAT, &[])?;
+    match viewr_protocol::read_worker_response(&mut worker.stdout)
+        .map_err(|error| Error::Decode(format!("failed to read worker probe: {error}")))?
+    {
+        viewr_protocol::WorkerResponse::Probe => Ok(()),
+        viewr_protocol::WorkerResponse::Error(_) => Err(Error::Decode(
+            "worker rejected the encoded-input protocol probe".into(),
+        )),
+        viewr_protocol::WorkerResponse::PixelStream { .. } => Err(Error::Decode(
+            "worker returned pixels for the encoded-input protocol probe".into(),
+        )),
+    }
 }
 
 fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Error> {
@@ -134,7 +247,10 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Erro
         viewr_protocol::WorkerResponse::PixelStream { width, height } => {
             let expected_size = viewr_protocol::checked_rgba_len(width, height)
                 .map_err(|error| Error::Decode(error.to_string()))?;
-            let mut rgba = vec![0_u8; expected_size];
+            let mut rgba = Vec::new();
+            rgba.try_reserve_exact(expected_size)
+                .map_err(|_| Error::Decode("not enough memory for worker pixels".into()))?;
+            rgba.resize(expected_size, 0);
             worker
                 .stdout
                 .read_exact(&mut rgba)
@@ -153,6 +269,9 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Erro
         viewr_protocol::WorkerResponse::Error(message) => {
             Err(Error::Decode(format!("worker error: {message}")))
         }
+        viewr_protocol::WorkerResponse::Probe => Err(Error::Decode(
+            "worker sent an unexpected protocol-probe response".into(),
+        )),
     }
 }
 
@@ -292,12 +411,12 @@ fn return_worker(worker: DaemonWorker) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonWorker, exchange_with_worker, receive_worker_output,
-        run_worker_operation_with_timeout, run_worker_request_with_timeout,
+        DaemonWorker, exchange_with_worker, read_bounded, read_bounded_input,
+        receive_worker_output, run_worker_operation_with_timeout,
     };
+    use crate::ephemeral::TempWorkspace;
     use crate::worker_limit;
     use std::io::{BufRead, BufReader, Write};
-    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
@@ -328,9 +447,9 @@ mod tests {
         }
 
         signal_ready();
-        viewr_protocol::read_path_request(&mut std::io::stdin().lock())
+        viewr_protocol::read_decode_request(&mut std::io::stdin().lock())
             .unwrap()
-            .expect("missing path request");
+            .expect("missing decode request");
         let mut stdout = std::io::stdout().lock();
         viewr_protocol::write_worker_response(
             &mut stdout,
@@ -355,11 +474,13 @@ mod tests {
         }
 
         signal_ready();
-        let Some(path) = viewr_protocol::read_path_request(&mut std::io::stdin().lock()).unwrap()
+        let Some(request) =
+            viewr_protocol::read_decode_request(&mut std::io::stdin().lock()).unwrap()
         else {
-            panic!("missing path request");
+            panic!("missing decode request");
         };
-        assert_eq!(path, PathBuf::from("photo\n雪.avif"));
+        assert_eq!(request.format, "avif");
+        assert_eq!(request.encoded, b"selected image bytes");
         let pixels = [1_u8, 2, 3, 4, 5, 6, 7, 8];
         let mut stdout = std::io::stdout().lock();
         viewr_protocol::write_worker_response(
@@ -418,12 +539,12 @@ mod tests {
         let started = Instant::now();
         // This frame is larger than an OS pipe buffer, so the assertion covers
         // a worker that stops reading while the parent is still writing.
-        let pipe_saturating_path = PathBuf::from("x".repeat(500_000));
-        let error = run_worker_request_with_timeout(
+        let encoded = vec![0_u8; 500_000];
+        let error = run_worker_operation_with_timeout(
             spawn_test_worker("sandbox::tests::hung_worker_child", HUNG_CHILD_FLAG).0,
-            pipe_saturating_path,
             Duration::from_millis(100),
             Duration::from_secs(1),
+            move |worker| exchange_with_worker(worker, "avif", encoded),
         )
         .err()
         .unwrap();
@@ -438,8 +559,7 @@ mod tests {
             "sandbox::tests::partial_pixel_worker_child",
             PARTIAL_PIXEL_CHILD_FLAG,
         );
-        viewr_protocol::write_path_request(&mut worker.stdin, &PathBuf::from("partial.avif"))
-            .unwrap();
+        viewr_protocol::write_decode_request(&mut worker.stdin, "avif", b"partial").unwrap();
         worker.stdin.flush().unwrap();
 
         let (progress_sender, progress_receiver) = std::sync::mpsc::sync_channel(1);
@@ -474,8 +594,23 @@ mod tests {
             "sandbox::tests::successful_worker_child",
             SUCCESS_CHILD_FLAG,
         );
-        let image = exchange_with_worker(&mut worker, &PathBuf::from("photo\n雪.avif")).unwrap();
+        let image =
+            exchange_with_worker(&mut worker, "avif", b"selected image bytes".to_vec()).unwrap();
         assert_eq!((image.width, image.height), (2, 1));
         assert_eq!(image.rgba, [1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn bounded_parent_read_rejects_input_growth() {
+        assert_eq!(read_bounded(&b"abcd"[..], 4, 4).unwrap(), b"abcd");
+        let error = read_bounded(&b"abcde"[..], 0, 4).unwrap_err();
+        assert!(error.to_string().contains("exceeds worker safety limit"));
+    }
+
+    #[test]
+    fn parent_rejects_non_regular_worker_input() {
+        let workspace = TempWorkspace::new("worker_non_regular_input").unwrap();
+        let error = read_bounded_input(workspace.path()).unwrap_err();
+        assert!(error.to_string().contains("must be a regular file"));
     }
 }

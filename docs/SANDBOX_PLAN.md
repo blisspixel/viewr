@@ -19,7 +19,7 @@ The main `viewr` process remains pure-Rust, memory-safe, and dependency-light. W
    - Worker decodes it, sends an exact-length bounded `RGBA8` stream, and waits for a versioned acknowledgement.
    - Package smoke tests require an exact typed handshake response from the worker; an arbitrary decoder error does not count as protocol compatibility.
 3. **Hardened Sandbox (Phase 7):**
-   - On Linux: fail-closed `no_new_privs`, a one-process seccomp policy, and denial of classic plus io_uring network paths; Flatpak supplies the filesystem and whole-app boundary.
+   - On Linux: fail-closed `no_new_privs`, a one-process seccomp policy, and denial of classic plus io_uring network paths. AVIF/HEIC builds add a default-deny syscall allowlist with read-only plugin discovery and thread-only clone; Flatpak supplies the filesystem and whole-app boundary.
    - On macOS: a private session and one-process resource limit protect worker lifetime; the verified App Sandbox bundle omits network client/server grants and probes main-to-worker IPC.
    - On Windows: a fail-closed, one-process Job Object supplies lifetime and aggregate memory limits; the packaged-classic AppContainer manifest grants no capabilities.
    - The main UI offers separate file and folder pickers. A file-only grant remains a one-image playlist when sibling enumeration is denied; **Open Folder** obtains explicit session-scoped consent for navigation without a broad library capability.
@@ -27,11 +27,11 @@ The main `viewr` process remains pure-Rust, memory-safe, and dependency-light. W
 ### Implemented boundary
 
 The workspace worker, versioned IPC, routing, process lifetime controls, and
-optional AVIF/HEIC backends are implemented. Profile artifacts now cover the
-whole application on all three desktop platforms. The remaining worker-specific
-hardening item is a default-deny Linux syscall allowlist suitable for enabled C
-decoders; the current Linux filter deliberately denies network and process
-creation while allowing the decoder's broader syscall surface.
+optional AVIF/HEIC backends are implemented. Profile artifacts cover the whole
+application on all three desktop platforms. Linux C-decoder builds install a
+fail-closed default-deny policy before reading IPC. Shared runtime tests prove
+its denial semantics, while release-mode Ubuntu tests decode generated AVIF and
+HEIC inputs under the policy.
 
 ## Why this is Exceptional
 Moving optional C decoders out of the UI process materially reduces blast radius, but process isolation is not zero risk and seccomp alone is not a complete sandbox. The defensible design layers bounded IPC, explicit resource limits, request timeouts, a network-denying process policy where implemented, and an enclosing OS package profile. Claims stay limited to controls that can be reproduced locally.
@@ -50,10 +50,10 @@ Moving optional C decoders out of the UI process materially reduces blast radius
 | Windows Job Object (kill-on-close + one process + 1.5 GiB job memory) | Done, fail-closed and runtime-tested (`worker_limit`) |
 | Unix private session and one-process worker policy | Done; Linux seccomp is runtime-tested (`worker_limit`) |
 | Linux no_new_privs + post-exec dumpable=0 | Done, fail-closed (`worker_limit` + worker startup) |
-| seccomp-bpf network deny (default-allow + EPERM list) | Done, fail-closed (`seccompiler` in `worker_limit`) |
+| seccomp-bpf network deny (default-allow + EPERM list) | Done, fail-closed (`viewr-seccomp`, installed by `worker_limit`) |
 | Shared decode shape limit + hard 30-second send/receive deadline | Done and pipe-saturation tested (`viewr-protocol` + `sandbox`); bounded host reads occur before worker reservation and the IPC deadline thread |
 | Explicit directory-consent navigation | Done; file-only denial degrades to one image and Open Folder enables sibling scanning |
-| Optional default-deny allowlist for C decoders | Open |
+| Feature-gated default-deny allowlist for C decoders | Done; shared policy semantics and release-mode AVIF/HEIC decodes run on Ubuntu 24.04 CI |
 | Filmstrip real thumbnails (async) | Done (`thumbs` + egui textures) |
 | Continuous fuzz CI | Done (`fuzz/` targets, deterministic seeds, change and weekly runs) |
 
@@ -91,7 +91,16 @@ flatpak-builder --force-clean --disable-rofiles-fuse \
 flatpak-builder --run \
   target/profile-check/flatpak \
   packaging/flatpak/com.github.blisspixel.viewr.yml \
-  viewr doctor
+viewr doctor
+```
+
+For the production C-decoder policy, install the native dependencies listed in
+the CI job, then run:
+
+```bash
+cargo test -p viewr-seccomp --locked
+cargo test --release -p viewr-decode \
+  --features avif,heic --test c_decoder_sandbox --locked -- --test-threads=1
 ```
 
 These are local profile proofs, not store publication, notarization, or a claim

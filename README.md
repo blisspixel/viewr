@@ -82,7 +82,7 @@ Full reasoning, including the alternatives we rejected, is in
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 87.25
+viewr targets 85 percent or higher test coverage on its logic (currently 87.29
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and mutation testing to keep the coverage honest. The full set of
 engineering standards is in [`docs/STANDARDS.md`](docs/STANDARDS.md), including how
@@ -113,7 +113,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 6 residuals closed; Phase 7 hardening in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, three locally verifiable OS sandbox profiles, checksummed release archives, cull UI, and local CLI (`doctor`, `benchmark`, `update`, `help`) are in place. The optional production C-decoder syscall allowlist remains. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
+Status: **Phase 7 hardening and privacy proof complete; Phase 8 polish is next**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, cull UI, and local CLI (`doctor`, `benchmark`, `update`, `help`) are in place. No public installer or store release exists yet. See `docs/FORMATS.md` and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

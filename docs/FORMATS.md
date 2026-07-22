@@ -64,8 +64,9 @@ cleanly without panicking.
 
 - No format path opens a network connection.
 - The main process opens optional C-backed inputs and sends bounded encoded bytes
-  over versioned worker IPC; the worker receives no filesystem path. Linux applies a
-  fail-closed network-denying seccomp filter. Exact-set tests cover the Flatpak,
-  App Sandbox, and AppContainer profiles, and platform CI builds or validates
-  their native sandbox form. Pure-Rust formats decode in the main
-  process under the same shape and aggregate concurrency caps.
+  over versioned worker IPC; the worker receives no filesystem path. Linux
+  applies a fail-closed network-denying policy to every worker and a tested
+  default-deny syscall allowlist when AVIF or HEIC is enabled. Exact-set tests
+  cover the Flatpak, App Sandbox, and AppContainer profiles, and platform CI
+  builds or validates their native sandbox form. Pure-Rust formats decode in the
+  main process under the same shape and aggregate concurrency caps.

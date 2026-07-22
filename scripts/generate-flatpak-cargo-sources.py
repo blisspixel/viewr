@@ -44,14 +44,18 @@ def main() -> None:
         if source is None:
             continue
         if source != CRATES_IO_SOURCE:
-            raise ValueError(f"unsupported Cargo source for {package['name']}: {source}")
+            raise ValueError(
+                f"unsupported Cargo source for {package['name']}: {source}"
+            )
         key = (package["name"], package["version"])
         if key in seen:
             continue
         seen.add(key)
         checksum = package.get("checksum")
         if not checksum:
-            raise ValueError(f"missing checksum for {package['name']} {package['version']}")
+            raise ValueError(
+                f"missing checksum for {package['name']} {package['version']}"
+            )
         packages.append((*key, checksum))
 
     sources: list[dict[str, str]] = []

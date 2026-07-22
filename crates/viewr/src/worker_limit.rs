@@ -180,17 +180,10 @@ pub(crate) fn terminate(child: &mut Child, guard: &WorkerGuard) {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use seccompiler::{
-        SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
-        SeccompRule, TargetArch,
-    };
-    use std::collections::BTreeMap;
-    use std::convert::TryInto;
-
     /// Install process-wide worker restrictions, aborting spawn on any failure.
     pub(super) fn apply_worker_sandbox(
-        network_filter: &seccompiler::BpfProgram,
-        clone3_filter: &seccompiler::BpfProgram,
+        network_filter: &viewr_seccomp::CompiledFilter,
+        clone3_filter: &viewr_seccomp::CompiledFilter,
     ) -> std::io::Result<()> {
         // Prevent privilege regain after exec.
         if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
@@ -199,9 +192,7 @@ mod linux {
 
         // Returning ENOSYS for clone3 lets libc fall back to clone, whose flags
         // the policy filter restricts to same-process thread creation.
-        if seccompiler::apply_filter(clone3_filter).is_err()
-            || seccompiler::apply_filter(network_filter).is_err()
-        {
+        if clone3_filter.apply().is_err() || network_filter.apply().is_err() {
             // Avoid formatting or heap allocation in the post-fork child.
             return Err(std::io::Error::from_raw_os_error(libc::EPERM));
         }
@@ -209,86 +200,13 @@ mod linux {
     }
 
     /// Default-allow filter that fails closed on network-related syscalls.
-    pub(super) fn network_deny_filter() -> std::io::Result<seccompiler::BpfProgram> {
-        // Empty rule vec = match syscall regardless of args.
-        let deny_syscalls: &[i64] = &[
-            libc::SYS_socket,
-            libc::SYS_connect,
-            libc::SYS_accept,
-            libc::SYS_accept4,
-            libc::SYS_bind,
-            libc::SYS_listen,
-            libc::SYS_getsockopt,
-            libc::SYS_setsockopt,
-            libc::SYS_sendto,
-            libc::SYS_recvfrom,
-            libc::SYS_sendmsg,
-            libc::SYS_recvmsg,
-            libc::SYS_sendmmsg,
-            libc::SYS_recvmmsg,
-            libc::SYS_shutdown,
-            // The worker may create threads, but never child processes.
-            libc::SYS_fork,
-            libc::SYS_vfork,
-            // io_uring supports socket/connect/send operations without their
-            // classic syscall counterparts, so deny the entire interface.
-            libc::SYS_io_uring_setup,
-            libc::SYS_io_uring_enter,
-            libc::SYS_io_uring_register,
-            // Descendants must remain in the private process group so the
-            // deadline supervisor can terminate the whole worker tree.
-            libc::SYS_setpgid,
-            libc::SYS_setsid,
-            // socketpair can be used for IPC but also networking patterns; deny
-            // keeps the worker honest (the parent uses only framed pipes).
-            libc::SYS_socketpair,
-        ];
-
-        let mut map: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
-        for &nr in deny_syscalls {
-            map.insert(nr, Vec::new());
-        }
-        let process_clone = SeccompCondition::new(
-            0,
-            SeccompCmpArgLen::Qword,
-            SeccompCmpOp::MaskedEq(libc::CLONE_THREAD as u64),
-            0,
-        )
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let process_clone = SeccompRule::new(vec![process_clone])
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        map.insert(libc::SYS_clone, vec![process_clone]);
-
-        // mismatch_action = Allow (everything else)
-        // match_action = EPERM on listed network syscalls
-        let arch = TargetArch::try_from(std::env::consts::ARCH)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let filter = SeccompFilter::new(
-            map,
-            SeccompAction::Allow,
-            SeccompAction::Errno(libc::EPERM as u32),
-            arch,
-        )
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-        filter
-            .try_into()
-            .map_err(|error: seccompiler::BackendError| std::io::Error::other(error.to_string()))
+    pub(super) fn network_deny_filter() -> std::io::Result<viewr_seccomp::CompiledFilter> {
+        viewr_seccomp::network_deny_filter()
     }
 
     /// Make libc treat clone3 as unavailable so thread creation uses filtered clone.
-    pub(super) fn clone3_compat_filter() -> std::io::Result<seccompiler::BpfProgram> {
-        let arch = TargetArch::try_from(std::env::consts::ARCH)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let filter = SeccompFilter::new(
-            BTreeMap::from([(libc::SYS_clone3, Vec::new())]),
-            SeccompAction::Allow,
-            SeccompAction::Errno(libc::ENOSYS as u32),
-            arch,
-        )
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-        filter
-            .try_into()
-            .map_err(|error: seccompiler::BackendError| std::io::Error::other(error.to_string()))
+    pub(super) fn clone3_compat_filter() -> std::io::Result<viewr_seccomp::CompiledFilter> {
+        viewr_seccomp::clone3_compat_filter()
     }
 }
 

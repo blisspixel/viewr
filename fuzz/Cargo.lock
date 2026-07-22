@@ -3457,10 +3457,10 @@ dependencies = [
  "pollster 1.0.1",
  "resvg",
  "rfd",
- "seccompiler",
  "thiserror 2.0.19",
  "trash",
  "viewr-protocol",
+ "viewr-seccomp",
  "wgpu",
  "windows-sys 0.59.0",
  "winit",
@@ -3480,6 +3480,14 @@ dependencies = [
 [[package]]
 name = "viewr-protocol"
 version = "0.0.0"
+
+[[package]]
+name = "viewr-seccomp"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "seccompiler",
+]
 
 [[package]]
 name = "walkdir"

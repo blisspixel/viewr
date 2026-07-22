@@ -66,7 +66,10 @@ A promise you can verify beats a promise you have to trust.
    does not apply those package boundaries, and schema/signature checks are not
    evidence that an unsigned package was installed. Independently, the
    dependency ban applies to every build, and Linux worker spawn fails if its
-   network-denying seccomp filter cannot be installed.
+   network-denying seccomp filter cannot be installed. AVIF/HEIC Linux workers
+   additionally install a default-deny syscall allowlist before reading IPC;
+   Ubuntu 24.04 CI decodes generated AVIF and HEIC inputs through the release-mode
+   worker and fails if that policy blocks required decoder behavior.
    File and folder access remains user-directed: **Open File** grants one selected
    item, while **Open Folder** is the explicit consent path for sibling navigation.
    viewr does not request broad photo-library access or persist a folder grant.
@@ -77,7 +80,10 @@ A promise you can verify beats a promise you have to trust.
    SVG. For optional C-backed formats, the main process opens the selected file
    and sends bounded encoded bytes to the worker. The worker receives no path and
    needs no dynamic filesystem grant. Linux denies that worker's classic socket
-   and io_uring network paths; the documented OS packages constrain the whole app.
+   and io_uring network paths. Feature-gated C workers further deny every syscall
+   outside a reviewed runtime allowlist, while permitting libheif plugin discovery
+   only through argument-filtered read-only opens. The documented OS packages
+   constrain the whole app.
    Bare Windows and macOS Cargo builds do not claim that package-level boundary.
 
 ## Local data: what viewr does and doesn't write

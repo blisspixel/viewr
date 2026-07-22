@@ -17,11 +17,11 @@ Two rules hold across every phase:
 
 Phases 0-6 are complete for the product scope defined in this roadmap (including
 Phase 6 residuals: workspace worker, format table, RAW deferral). System trash,
-operational core fuzzing, locally verifiable OS sandbox profiles, and checksummed
-local/CI release artifacts are complete. The optional production C-decoder
-syscall allowlist remains Phase 7 work.
+operational core fuzzing, locally verifiable OS sandbox profiles, checksummed
+local/CI release artifacts, and the feature-gated production C-decoder syscall
+allowlist are complete.
 
-**Next focus: Phase 7: Hardening and the privacy proof.**
+**Next focus: Phase 8: 1.0, the viewer people recommend.**
 ## Phase 0: Foundations
 
 Establish the ground truth so quality is enforced from the very first commit.
@@ -163,7 +163,7 @@ submission.
   - [x] Linux `no_new_privs` + post-exec `dumpable=0` + default-allow seccomp-bpf that EPERMs classic and io_uring network paths, with startup failure if hardening cannot apply (`worker_limit` + `packaging/linux/SECCOMP.md`).
   - [x] Shared 512 MiB decoded-output limit, strict dimension validation, fallible large allocations, typed bounded responses, and a hard 30-second send/receive deadline with bounded cleanup. Host file reads occur before worker reservation and outside the IPC deadline thread.
   - [x] Two-slot foreground-priority file-decode gate, stale load cancellation, and exact source/pixel state matching for path-sensitive actions.
-  - [ ] Optional default-deny allowlist for C-decoder builds (when avif/heic features are used in production).
+  - [x] Feature-gated default-deny allowlist for AVIF/HEIC production builds, with argument-filtered read-only plugin discovery, thread-only clone, fail-closed activation proof, and release-mode runtime decodes on Ubuntu 24.04 (`viewr-seccomp` + C-decoder CI).
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
   - [x] Buildable cargo-fuzz targets and seed corpora for every core decoder and the worker protocol (`fuzz/`).

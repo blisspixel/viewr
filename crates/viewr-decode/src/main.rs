@@ -159,6 +159,9 @@ fn harden_worker_process() -> Result<(), String> {
             return Err(format!("{label}: {}", std::io::Error::last_os_error()));
         }
     }
+    #[cfg(any(feature = "avif", feature = "heic"))]
+    viewr_seccomp::apply_production_c_decoder_policy()
+        .map_err(|error| format!("C-decoder seccomp allowlist: {error}"))?;
     Ok(())
 }
 
@@ -194,10 +197,11 @@ fn decode_heic(encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
         .map_err(|error| error.to_string())?;
     let options = libheif_rs::DecodingOptions::new()
         .ok_or_else(|| "failed to create HEIF decoding options".to_string())?;
-    let image = handle
+    let image = libheif_rs::LibHeif::new()
         .decode(
+            &handle,
             libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgba),
-            options,
+            Some(options),
         )
         .map_err(|e| e.to_string())?;
     let planes = image.planes();

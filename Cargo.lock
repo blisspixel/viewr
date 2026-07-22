@@ -3988,10 +3988,10 @@ dependencies = [
  "resvg",
  "rfd",
  "roxmltree",
- "seccompiler",
  "thiserror 2.0.18",
  "trash",
  "viewr-protocol",
+ "viewr-seccomp",
  "wgpu",
  "windows-sys 0.59.0",
  "winit",
@@ -4008,11 +4008,20 @@ dependencies = [
  "libheif-rs",
  "libraw-rs",
  "viewr-protocol",
+ "viewr-seccomp",
 ]
 
 [[package]]
 name = "viewr-protocol"
 version = "0.0.0"
+
+[[package]]
+name = "viewr-seccomp"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "seccompiler",
+]
 
 [[package]]
 name = "walkdir"

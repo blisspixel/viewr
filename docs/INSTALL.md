@@ -103,9 +103,10 @@ For an explicit target build, Cargo writes binaries beneath
 archive name; do not copy the example version blindly after it changes.
 
 Phase 7 CI archives use the workspace's default pure-Rust feature set. They do
-not claim AVIF, HEIC, or RAW support from optional C backends; those builds still
-require platform libraries and the production allowlist work tracked in the
-roadmap.
+not claim AVIF, HEIC, or RAW support from optional C backends. AVIF/HEIC builds
+still require their native toolchain and libheif dependencies; on Linux, those
+features activate the tested default-deny policy documented in
+`packaging/linux/SECCOMP.md`.
 
 The tag-triggered `.github/workflows/release.yml` repeats this contract for all
 four targets. A tag must equal `v<workspace-version>` or packaging fails closed.

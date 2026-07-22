@@ -160,7 +160,7 @@ polish.
 │            │                               │                         │
 │   ┌────────┴───────────────────────────────┴─────────┐              │
 │   │  C decode worker: bounded IPC, memory, and time  │  ◀ untrusted │
-│   │  Linux additionally denies network syscalls     │     bytes    │
+│   │  Linux C builds use a default-deny syscall set  │     bytes    │
 │   └─────────────────────────────────────────────────┘              │
 └──────────────────────────────────────────────────────────────────────┘
         OS packaging profiles add a second network-denial boundary when used.
@@ -169,7 +169,7 @@ polish.
 - **No application networking stack exists.** No socket/HTTP client crate is
   linked, and CI enforces the dependency policy (see `PRIVACY.md`). Syscall-level
   denial comes from Linux worker seccomp and the enclosing OS package profiles.
-- **C-backed decoding is process-isolated.** The daemon receives one versioned request containing a validated format identifier and bounded encoded bytes, then returns a validated, exact-length RGBA8 stream over its existing pipe. The main process opens user-selected files, so the worker never receives a path or depends on a dynamic file grant. Linux denies classic and io_uring network paths. Windows constrains the Job Object to one process and 1.5 GiB aggregate memory; Linux denies process-creating syscalls while allowing same-process decoder threads; supported non-Linux Unix targets create a private session and apply a one-process resource limit. All workers have containment lifetime controls, typed bounded responses, and a hard request deadline covering both send and receive. Pure-Rust formats remain in the main process but decode off the UI thread under the same dimension, allocation, and aggregate concurrency limits.
+- **C-backed decoding is process-isolated.** The daemon receives one versioned request containing a validated format identifier and bounded encoded bytes, then returns a validated, exact-length RGBA8 stream over its existing pipe. The main process opens user-selected files, so the worker never receives a path or depends on a dynamic file grant. Linux denies classic and io_uring network paths; AVIF/HEIC builds additionally allow only reviewed runtime syscalls, read-only plugin discovery, and same-process threads. Windows constrains the Job Object to one process and 1.5 GiB aggregate memory; supported non-Linux Unix targets create a private session and apply a one-process resource limit. All workers have containment lifetime controls, typed bounded responses, and a hard request deadline covering both send and receive. Pure-Rust formats remain in the main process but decode off the UI thread under the same dimension, allocation, and aggregate concurrency limits.
 - **Trash, not unlink**, by default — the filesystem is treated as precious.
 
 ## What is intentionally absent

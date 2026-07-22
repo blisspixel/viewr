@@ -119,6 +119,40 @@ jobs:
         shell: pwsh
         run: scripts/build-windows-appcontainer.ps1 -BinaryDirectory target/debug
 
+  c-decoder-policy:
+    if: github.event_name != 'schedule'
+    name: C decoders under default-deny seccomp
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install native decoder build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev \
+            libheif-dev libheif-plugin-libde265 libheif-plugin-x265
+
+      - name: Set up pinned Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: c-decoder-policy
+
+      - name: Lint feature-gated Linux policies and decoders
+        run: |
+          cargo clippy -p viewr-seccomp --all-targets --locked -- -D warnings
+          cargo clippy -p viewr-decode --features avif,heic --all-targets --locked -- -D warnings
+
+      - name: Prove default-deny policy and production decoder compatibility
+        run: |
+          cargo test -p viewr-seccomp --locked
+          cargo test --release -p viewr-decode \
+            --features avif,heic --test c_decoder_sandbox --locked \
+            -- --test-threads=1
+
   coverage:
     if: github.event_name != 'schedule'
     name: coverage (>= 85% on logic)

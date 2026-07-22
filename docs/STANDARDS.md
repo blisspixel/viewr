@@ -125,7 +125,10 @@ higher standard than the rest of the app.
   permanent test case.
 - Optional C-backed decode runs in the restricted worker described in
   ARCHITECTURE.md. The parent sends bytes rather than a path, limiting what a
-  decoder bug can reach beyond its bounded request and response pipes.
+  decoder bug can reach beyond its bounded request and response pipes. Linux C
+  builds must pass release-mode AVIF and HEIC protocol decodes under the shared
+  default-deny syscall policy; adding an allowed syscall requires code, runtime
+  evidence, and documentation in `packaging/linux/SECCOMP.md`.
 - Whole-app package profiles use exact reviewed permission sets. Tests fail if a
   Flatpak grant, macOS entitlement, or Windows AppContainer capability appears
   without an explicit review. Native CI also performs an offline Flatpak build

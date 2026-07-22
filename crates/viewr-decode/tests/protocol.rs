@@ -28,7 +28,10 @@ fn worker_accepts_protocol_probe_then_framed_encoded_input() {
     let viewr_protocol::WorkerResponse::Error(message) = response else {
         panic!("expected worker error response");
     };
+    #[cfg(not(feature = "avif"))]
     assert!(message.starts_with("AVIF support requires"));
+    #[cfg(feature = "avif")]
+    assert!(!message.is_empty());
     assert!(message.len() < 512);
     assert!(!message.contains("malformed image"));
 

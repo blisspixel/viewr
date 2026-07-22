@@ -41,6 +41,8 @@ allow = [
     "MIT-0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    # LLVM libFuzzer runtime, used only by the separate fuzz workspace.
+    "NCSA",
     "ISC",
     "Zlib",
     "MPL-2.0",

@@ -12,8 +12,10 @@ const ACK_FRAME: [u8; 4] = *b"ACK1";
 const RESPONSE_FRAME_MAGIC: [u8; 4] = *b"VRS1";
 const PATH_FRAME_HEADER_BYTES: usize = 8;
 const RESPONSE_FRAME_HEADER_BYTES: usize = 9;
-const MAX_PATH_BYTES: usize = 1024 * 1024;
-const MAX_RESPONSE_PAYLOAD_BYTES: usize = 4096;
+/// Largest native path payload accepted by the worker protocol.
+pub const MAX_PATH_BYTES: usize = 1024 * 1024;
+/// Largest typed response payload accepted by the worker protocol.
+pub const MAX_RESPONSE_PAYLOAD_BYTES: usize = 4096;
 const RESPONSE_PIXEL_STREAM: u8 = 1;
 const RESPONSE_ERROR: u8 = 2;
 

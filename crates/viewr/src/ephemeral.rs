@@ -189,7 +189,16 @@ mod tests {
         TempWorkspace, embedded_pid, is_safe_to_scrub, is_viewr_temp_name, scrub_stale_viewr_temps,
     };
     use std::fs::{self, OpenOptions};
+    use std::sync::{Mutex, MutexGuard, PoisonError};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static SCRUB_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn serial_scrub_test() -> MutexGuard<'static, ()> {
+        SCRUB_TEST_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
 
     #[test]
     fn drop_removes_directory() {
@@ -224,6 +233,7 @@ mod tests {
 
     #[test]
     fn scrub_skips_current_process_workspaces() {
+        let _guard = serial_scrub_test();
         let ws = TempWorkspace::new("live_scrub_guard").unwrap();
         let name = ws
             .path()
@@ -244,6 +254,7 @@ mod tests {
 
     #[test]
     fn scrub_skips_locked_workspace_from_another_process() {
+        let _guard = serial_scrub_test();
         let other_pid = std::process::id().checked_add(1).unwrap_or(1);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -272,6 +283,7 @@ mod tests {
 
     #[test]
     fn scrub_removes_legacy_orphans_without_pid() {
+        let _guard = serial_scrub_test();
         let root = std::env::temp_dir();
         // No numeric tail → no embedded PID → always safe to scrub.
         let orphan = root.join(format!(

@@ -5,6 +5,8 @@
 .DS_Store
 *.log
 /lcov.info
+/fuzz/artifacts/
+/fuzz/coverage/
 
 /corpus
 

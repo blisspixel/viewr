@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  schedule:
+    - cron: "43 5 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,6 +20,7 @@ env:
 
 jobs:
   quality:
+    if: github.event_name != 'schedule'
     name: fmt / clippy / test (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -24,7 +28,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux GUI build dependencies
         if: runner.os == 'Linux'
@@ -38,7 +42,7 @@ jobs:
       - name: Set up Rust
         run: rustup show
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Format
         run: cargo fmt --all --check
@@ -56,10 +60,11 @@ jobs:
         run: cargo build -p viewr-decode
 
   coverage:
+    if: github.event_name != 'schedule'
     name: coverage (>= 85% on logic)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux GUI build dependencies
         run: |
@@ -71,8 +76,10 @@ jobs:
       - name: Set up Rust
         run: rustup show
 
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-llvm-cov
 
       # Coverage is enforced on testable logic. Display/IPC glue (app, gpu, ui,
       # sandbox) and trivial entry points (error, main) need a display or the
@@ -89,18 +96,29 @@ jobs:
     name: deny + audit (privacy invariant)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
         with:
           tool: cargo-deny,cargo-audit
+
+      - name: Verify committed lockfiles
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 > /dev/null
+          cargo metadata --manifest-path fuzz/Cargo.toml --locked --no-deps --format-version 1 > /dev/null
 
       # cargo-deny enforces the network-crate ban that makes "viewr cannot phone
       # home" a checked fact, plus licenses and advisories.
       - name: cargo-deny
         run: cargo deny check
 
+      - name: cargo-deny (fuzz workspace)
+        run: cargo deny --manifest-path fuzz/Cargo.toml check
+
       - name: cargo-audit
         run: cargo audit
+
+      - name: cargo-audit (fuzz workspace)
+        run: cargo audit --file fuzz/Cargo.lock
 
       - name: privacy-check (packaging + tree)
         run: bash scripts/privacy-check.sh

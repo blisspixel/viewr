@@ -114,6 +114,10 @@ higher standard than the rest of the app.
 - Continuous fuzzing (`cargo-fuzz` with the `arbitrary` crate) against every
   decoder, seeded with malformed and adversarial samples. A crash found by the
   fuzzer is a release blocker.
+- The operational pure-Rust decoder and worker-protocol targets live in `fuzz/`.
+  They compile with a pinned nightly and cargo-fuzz release, run briefly on
+  relevant changes, and run for at least 600 seconds per target on the weekly
+  schedule. `fuzz/README.md` is the executable local contract.
 - A regression corpus: every file that ever caused a crash or hang becomes a
   permanent test case.
 - Decode runs in the restricted worker described in ARCHITECTURE.md, so even a

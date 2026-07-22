@@ -15,12 +15,12 @@ Two rules hold across every phase:
 
 ## Current status
 
-Phases 0–6 are complete for the product scope defined in this roadmap (including
+Phases 0-6 are complete for the product scope defined in this roadmap (including
 Phase 6 residuals: workspace worker, format table, RAW deferral). System trash
-polish and continuous fuzz remain quality follow-ups; OS sandbox packaging is
-Phase 7.
+and operational core fuzzing are complete; OS sandbox packaging and reproducible
+release artifacts remain Phase 7 work.
 
-**Next focus: Phase 7 — Hardening and the privacy proof.**
+**Next focus: Phase 7: Hardening and the privacy proof.**
 ## Phase 0: Foundations
 
 Establish the ground truth so quality is enforced from the very first commit.
@@ -164,8 +164,8 @@ submission.
   - [ ] Optional default-deny allowlist for C-decoder builds (when avif/heic features are used in production).
 - Continuous fuzzing of every decoder, with any crash a release blocker.
   - [x] Adversarial non-panic corpus tests for truncated/garbage inputs (stable CI).
-  - [x] Fuzz notes / local cargo-fuzz entrypoint sketch (`fuzz/README.md`).
-  - [ ] Optional CI job for cargo-fuzz (nightly host) still open.
+  - [x] Buildable cargo-fuzz targets and seed corpora for every core decoder and the worker protocol (`fuzz/`).
+  - [x] Pinned nightly cargo-fuzz smoke runs on changes plus 600-second scheduled runs (`.github/workflows/fuzz.yml`).
 - [x] Neighbor full-decode prefetch into a bounded in-memory LRU (no disk cache).
 - Reproducible local/CI release binaries (checksums, pinned toolchain). **Not**
   notarization or store signing (see out-of-scope below).

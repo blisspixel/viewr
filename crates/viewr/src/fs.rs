@@ -7,8 +7,11 @@ use std::iter::Peekable;
 use std::path::Path;
 use std::str::Chars;
 
-/// Pure-Rust formats always decoded in the main process.
-const CORE_EXTENSIONS: &[&str] = &[
+/// File extensions decoded by the always-on pure-Rust core.
+///
+/// This is public so decode fuzzing and capability reporting consume the same
+/// source of truth as folder navigation.
+pub const CORE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "ico", "qoi", "tga", "ppm", "pgm",
     "pbm", "pnm", "hdr", "exr", "ff", "dds", "jxl", "svg",
 ];

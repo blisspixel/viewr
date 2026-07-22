@@ -77,7 +77,7 @@ Full reasoning, including the alternatives we rejected, is in
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 87.23
+viewr targets 85 percent or higher test coverage on its logic (currently 87.94
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and mutation testing to keep the coverage honest. The full set of
 engineering standards is in [`docs/STANDARDS.md`](docs/STANDARDS.md), including how

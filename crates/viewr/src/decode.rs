@@ -12,6 +12,8 @@ use crate::error::Error;
 
 pub(crate) use viewr_protocol::MAX_DECODE_DIMENSION;
 const MAX_SVG_BYTES: u64 = 64 * 1024 * 1024;
+const JXL_CODESTREAM_SIGNATURE: &[u8] = b"\xff\x0a";
+const JXL_CONTAINER_SIGNATURE: &[u8] = b"\0\0\0\x0cJXL \r\n\x87\n";
 const MAX_CONCURRENT_FILE_DECODES: usize = 2;
 const BACKGROUND_DECODE_QUEUE_CAPACITY: usize = 8;
 
@@ -278,6 +280,11 @@ impl DecodedImage {
     /// # Errors
     /// Returns [`Error::Decode`] if the bytes are not a supported, well-formed image.
     pub fn load_from_memory(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.starts_with(JXL_CODESTREAM_SIGNATURE) || bytes.starts_with(JXL_CONTAINER_SIGNATURE)
+        {
+            return Self::decode_jxl(std::io::Cursor::new(bytes));
+        }
+
         // SVG is not handled by `image::load_from_memory`; sniff the payload.
         let trimmed = bytes
             .iter()
@@ -294,6 +301,36 @@ impl DecodedImage {
             .with_guessed_format()
             .map_err(|e| Error::Decode(format!("decode failed: {e}")))?;
         Self::decode_image_reader(reader)
+    }
+
+    /// Decode bytes using the decoder associated with a core file extension.
+    ///
+    /// Unlike [`Self::load_from_memory`], this does not depend on a recognizable
+    /// file signature. It is useful for non-seekable callers that receive the
+    /// original filename separately and for exercising every decoder with
+    /// malformed fuzz input.
+    ///
+    /// # Errors
+    /// Returns [`Error::Decode`] when `extension` is not an enabled core format,
+    /// or when the bytes are not a well-formed image of that format.
+    pub fn load_from_memory_with_extension(bytes: &[u8], extension: &str) -> Result<Self, Error> {
+        let extension = extension
+            .strip_prefix('.')
+            .unwrap_or(extension)
+            .to_ascii_lowercase();
+        if !crate::fs::CORE_EXTENSIONS.contains(&extension.as_str()) {
+            return Err(Error::Decode("unsupported core image format".into()));
+        }
+        match extension.as_str() {
+            "jxl" => Self::decode_jxl(std::io::Cursor::new(bytes)),
+            "svg" => Self::load_svg_bytes(bytes),
+            _ => {
+                let format = image::ImageFormat::from_extension(&extension)
+                    .ok_or_else(|| Error::Decode("unsupported core image format".into()))?;
+                let reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
+                Self::decode_image_reader(reader)
+            }
+        }
     }
 
     fn decode_image_reader<R>(mut reader: image::ImageReader<R>) -> Result<Self, Error>
@@ -331,7 +368,11 @@ impl DecodedImage {
 
     fn load_jxl(path: &Path) -> Result<Self, Error> {
         let file = std::fs::File::open(path).map_err(|e| Error::Decode(e.to_string()))?;
-        let jxl = jxl_oxide::integration::JxlDecoder::new(file)
+        Self::decode_jxl(file)
+    }
+
+    fn decode_jxl(reader: impl Read) -> Result<Self, Error> {
+        let jxl = jxl_oxide::integration::JxlDecoder::new(reader)
             .map_err(|e| Error::Decode(format!("failed to init JXL decoder: {e}")))?;
         let (width, height) = image::ImageDecoder::dimensions(&jxl);
         validate_dimensions(width, height)?;
@@ -485,6 +526,43 @@ mod tests {
         </svg>"##;
         let s = DecodedImage::load_from_memory(svg).expect("svg mem");
         assert_eq!((s.width, s.height), (12, 8));
+    }
+
+    #[test]
+    fn load_from_memory_routes_jxl_signatures_to_bounded_decoder() {
+        for bytes in [
+            super::JXL_CODESTREAM_SIGNATURE,
+            super::JXL_CONTAINER_SIGNATURE,
+        ] {
+            let error = DecodedImage::load_from_memory(bytes).err().unwrap();
+            assert!(error.to_string().contains("JXL decoder"));
+        }
+    }
+
+    #[test]
+    fn memory_extension_dispatch_reaches_every_declared_core_decoder() {
+        for extension in crate::fs::CORE_EXTENSIONS {
+            let error = DecodedImage::load_from_memory_with_extension(b"malformed", extension)
+                .err()
+                .unwrap();
+            let crate::Error::Decode(message) = error else {
+                panic!("memory decode returned a non-decode error")
+            };
+            assert_ne!(message, "unsupported core image format", "{extension}");
+        }
+        assert!(DecodedImage::load_from_memory_with_extension(b"data", "unknown").is_err());
+    }
+
+    #[test]
+    fn memory_extension_dispatch_decodes_extension_only_format() {
+        use std::io::Cursor;
+        let rgb = image::RgbImage::from_pixel(3, 2, image::Rgb([4, 5, 6]));
+        let mut tga = Cursor::new(Vec::new());
+        rgb.write_to(&mut tga, image::ImageFormat::Tga).unwrap();
+
+        let decoded = DecodedImage::load_from_memory_with_extension(tga.get_ref(), ".TGA")
+            .expect("TGA decode selected by extension");
+        assert_eq!((decoded.width, decoded.height), (3, 2));
     }
 
     #[test]

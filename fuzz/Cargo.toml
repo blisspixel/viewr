@@ -1,0 +1,41 @@
+[package]
+name = "viewr-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = "=1.4.2"
+libfuzzer-sys = "=0.4.13"
+viewr = { path = "../crates/viewr" }
+viewr-protocol = { path = "../crates/viewr-protocol" }
+
+[[bin]]
+name = "decode_memory"
+path = "fuzz_targets/decode_memory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "protocol_frames"
+path = "fuzz_targets/protocol_frames.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
+resolver = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_panics_doc = "allow"

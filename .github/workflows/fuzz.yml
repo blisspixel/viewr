@@ -1,0 +1,98 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/fuzz.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/viewr/**"
+      - "crates/viewr-protocol/**"
+      - "fuzz/**"
+  pull_request:
+    paths:
+      - ".github/workflows/fuzz.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/viewr/**"
+      - "crates/viewr-protocol/**"
+      - "fuzz/**"
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_TOOLCHAIN: nightly-2026-07-20
+  FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '600' || '60' }}
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: decode_memory
+            max_len: 1048576
+          - target: protocol_frames
+            max_len: 1048592
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux GUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-dev libx11-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - name: Install pinned fuzz toolchain
+        run: |
+          rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+          cargo install cargo-fuzz --locked --version 0.13.2
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: fuzz -> target
+
+      - name: Verify committed fuzz lockfile
+        run: cargo metadata --manifest-path fuzz/Cargo.toml --locked --no-deps --format-version 1 > /dev/null
+
+      - name: Format fuzz workspace
+        run: cargo +$FUZZ_TOOLCHAIN fmt --manifest-path fuzz/Cargo.toml --all -- --check
+
+      - name: Lint fuzz workspace
+        run: cargo +$FUZZ_TOOLCHAIN clippy --manifest-path fuzz/Cargo.toml --bins -- -D warnings
+
+      - name: Build fuzz target
+        run: cargo +$FUZZ_TOOLCHAIN fuzz build "${{ matrix.target }}"
+
+      - name: Fuzz
+        run: >
+          cargo +$FUZZ_TOOLCHAIN fuzz run "${{ matrix.target }}"
+          "fuzz/corpus/${{ matrix.target }}" --
+          -max_total_time=$FUZZ_SECONDS
+          -timeout=30
+          -rss_limit_mb=2048
+          -max_len=${{ matrix.max_len }}
+          -print_final_stats=1
+
+      - name: Retain crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 14

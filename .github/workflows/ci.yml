@@ -234,8 +234,8 @@ jobs:
           cargo metadata --locked --no-deps --format-version 1 > /dev/null
           cargo metadata --manifest-path fuzz/Cargo.toml --locked --no-deps --format-version 1 > /dev/null
 
-      # cargo-deny enforces the network-crate ban that makes "viewr cannot phone
-      # home" a checked fact, plus licenses and advisories.
+      # cargo-deny bans remote-service clients and confines generic Linux D-Bus
+      # code to AccessKit, in addition to enforcing licenses and advisories.
       - name: cargo-deny
         run: cargo deny check
 

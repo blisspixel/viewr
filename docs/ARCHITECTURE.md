@@ -66,9 +66,13 @@ struct Viewr {
     transform: Transform,
 
     // Docked chrome and the session-only export-privacy choice.
+    show_tools_panel: bool,
     tools_panel_open: bool,
+    tools_panel_side: DockSide,
+    show_filmstrip_panel: bool,
     filmstrip_panel_open: bool,
     show_image_info: bool,
+    image_info_side: DockSide,
     retain_exif: bool,
 
     // Curation.
@@ -116,14 +120,18 @@ Shipped:
 - **`performance`**: stable, path-free probe output and narrow platform peak-RSS
   readers used only by the explicit developer/CI performance command.
 - **`error`**: the typed error set for the app.
-- **`ui`**: the `egui` layer for the conventional menu bar, collapsible docked
-  tools and folder previews, Image Information, crop controls, and transient
-  toasts. Persistent chrome never covers the image; its exact insets feed the
-  same `view` geometry used by hit testing and rendering. Keyboard dispatch
-  remains centralized in `app` rather than adding a second input abstraction.
-  Custom controls publish AccessKit semantics. A native adapter is initialized
-  before the hidden window becomes visible on Windows and macOS; Linux native
-  delivery remains pending to preserve the dependency-level network ban.
+- **`ui`**: the `egui` layer for the conventional menu bar, fully hideable and
+  collapsible docked tools and folder previews, left/right Image Information,
+  crop controls, and transient toasts. Visible chrome never covers the image; its
+  exact edge-aware insets feed the same `view` geometry used by hit testing and
+  rendering. Keyboard dispatch remains centralized in `app` rather than adding a
+  second input abstraction. Custom controls publish AccessKit semantics. Native
+  adapters are initialized before the hidden window becomes visible on all three
+  targets; Linux startup first confines their D-Bus transport to local Unix IPC.
+- **`privacy`**: the earliest process-start boundary. On Linux it validates local
+  D-Bus environment transports, applies `no_new_privs`, installs the application
+  Internet-socket policy, and verifies enforcement before logging, workers, GUI
+  initialization, or application threads.
 
 ## The hot path: opening and flipping through images
 
@@ -189,9 +197,11 @@ polish.
         OS packaging profiles add a second network-denial boundary when used.
 ```
 
-- **No application networking stack exists.** No socket/HTTP client crate is
-  linked, and CI enforces the dependency policy (see `PRIVACY.md`). Syscall-level
-  denial comes from Linux worker seccomp and the enclosing OS package profiles.
+- **No remote-service client exists.** No HTTP, TLS, telemetry, or update client is
+  linked, and CI enforces the dependency policy (see `PRIVACY.md`). Linux's generic
+  D-Bus code is restricted to the AccessKit/AT-SPI path; startup permits Unix-domain
+  socket creation only and denies io_uring before application threads. Worker
+  seccomp and enclosing OS package profiles add stricter boundaries.
 - **C-backed decoding is process-isolated.** The daemon receives one versioned request containing a validated format identifier and bounded encoded bytes, then returns a validated, exact-length RGBA8 stream over its existing pipe. The main process opens user-selected files, so the worker never receives a path or depends on a dynamic file grant. Linux denies classic and io_uring network paths; AVIF/HEIC builds additionally allow only reviewed runtime syscalls, read-only plugin discovery, and same-process threads. Windows constrains the Job Object to one process and 1.5 GiB aggregate memory; supported non-Linux Unix targets create a private session and apply a one-process resource limit. All workers have containment lifetime controls, typed bounded responses, and a hard request deadline covering both send and receive. Pure-Rust formats remain in the main process but decode off the UI thread under the same dimension, allocation, and aggregate concurrency limits.
 - **Trash, not unlink**, by default — the filesystem is treated as precious.
 

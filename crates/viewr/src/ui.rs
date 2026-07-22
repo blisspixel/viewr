@@ -37,6 +37,15 @@ pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
 /// Logical width of the Image Info panel.
 pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
 
+/// Horizontal edge used by a docked side panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DockSide {
+    /// Dock against the left edge of the available window.
+    Left,
+    /// Dock against the right edge of the available window.
+    Right,
+}
+
 /// Space reservation state for a docked panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DockState {
@@ -53,10 +62,12 @@ pub enum DockState {
 pub struct ChromeLayout {
     /// Tools rail or expanded tools panel.
     pub tools: DockState,
+    /// Edge used by the tools rail or panel.
+    pub tools_side: DockSide,
     /// Folder-preview rail or expanded preview panel.
     pub filmstrip: DockState,
-    /// Whether Image Info is visible.
-    pub image_info_visible: bool,
+    /// Edge used by Image Information when the panel is visible.
+    pub image_info: Option<DockSide>,
     /// Physical pixels per logical UI point.
     pub scale_factor: f64,
 }
@@ -65,17 +76,32 @@ pub struct ChromeLayout {
 #[must_use]
 pub fn viewport_insets(layout: ChromeLayout) -> crate::view::ViewportInsets {
     let scale = layout.scale_factor.max(0.0) as f32;
+    let tools_width = match layout.tools {
+        DockState::Hidden => 0.0,
+        DockState::Collapsed => TOOLS_RAIL_WIDTH,
+        DockState::Expanded => TOOLS_PANEL_WIDTH,
+    };
+    let left = if layout.tools_side == DockSide::Left {
+        tools_width
+    } else {
+        0.0
+    } + if layout.image_info == Some(DockSide::Left) {
+        IMAGE_INFO_PANEL_WIDTH
+    } else {
+        0.0
+    };
+    let right = if layout.tools_side == DockSide::Right {
+        tools_width
+    } else {
+        0.0
+    } + if layout.image_info == Some(DockSide::Right) {
+        IMAGE_INFO_PANEL_WIDTH
+    } else {
+        0.0
+    };
     crate::view::ViewportInsets {
-        left: match layout.tools {
-            DockState::Hidden => 0.0,
-            DockState::Collapsed => TOOLS_RAIL_WIDTH,
-            DockState::Expanded => TOOLS_PANEL_WIDTH,
-        } * scale,
-        right: if layout.image_info_visible {
-            IMAGE_INFO_PANEL_WIDTH * scale
-        } else {
-            0.0
-        },
+        left: left * scale,
+        right: right * scale,
         top: TOP_BAR_HEIGHT * scale,
         bottom: match layout.filmstrip {
             DockState::Hidden => 0.0,
@@ -101,10 +127,18 @@ pub enum UiAction {
     SetBackground(Option<[f64; 4]>),
     /// Toggle the Image Info panel.
     ToggleImageInfo,
-    /// Expand or collapse the docked tools panel.
-    ToggleToolsPanel,
-    /// Expand or collapse the docked folder-preview panel.
-    ToggleFilmstripPanel,
+    /// Show or fully hide the docked tools panel.
+    ToggleToolsPanelVisibility,
+    /// Expand or collapse the visible tools panel.
+    ToggleToolsPanelExpansion,
+    /// Show or fully hide the docked folder-preview panel.
+    ToggleFilmstripPanelVisibility,
+    /// Expand or collapse the visible folder-preview panel.
+    ToggleFilmstripPanelExpansion,
+    /// Move the tools panel to a horizontal edge.
+    SetToolsPanelSide(DockSide),
+    /// Move Image Information to a horizontal edge.
+    SetImageInfoSide(DockSide),
     /// Toggle whether Save As retains EXIF (default off = strip).
     ToggleRetainExif,
     /// Rotate the image clockwise.
@@ -154,10 +188,18 @@ pub struct UiFrameOwned {
     pub retain_exif: bool,
     /// Current image-background override; `None` follows the operating-system theme.
     pub background_override: Option<[f64; 4]>,
-    /// Whether the docked tools panel is expanded.
+    /// Whether the docked tools panel is visible at all.
+    pub show_tools_panel: bool,
+    /// Whether the visible tools panel is expanded.
     pub tools_panel_open: bool,
-    /// Whether the docked folder-preview panel is expanded.
+    /// Horizontal edge used by the tools panel.
+    pub tools_panel_side: DockSide,
+    /// Whether the docked folder-preview panel is visible at all.
+    pub show_filmstrip_panel: bool,
+    /// Whether the visible folder-preview panel is expanded.
     pub filmstrip_panel_open: bool,
+    /// Horizontal edge used by Image Information.
+    pub image_info_side: DockSide,
     /// Path of the current image (display only).
     pub file_path: Option<String>,
     /// Pixel dimensions of the current image, if any.
@@ -224,11 +266,13 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
         render_image_info_panel(ui, &mut actions, frame);
     }
 
-    if frame.filmstrip.len() > 1 {
+    if frame.show_filmstrip_panel && frame.filmstrip.len() > 1 {
         render_filmstrip(ui, &mut actions, frame);
     }
 
-    render_left_toolbar(ui, &mut actions, frame);
+    if frame.show_tools_panel {
+        render_tools_panel(ui, &mut actions, frame);
+    }
 
     if let Some(msg) = &frame.toast {
         render_toast(ui, msg, frame);
@@ -533,47 +577,87 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.close();
         }
         ui.separator();
-        if ui
-            .add_enabled(
-                frame.has_image,
-                egui::Button::new("Image Information")
-                    .selected(frame.show_image_info)
-                    .shortcut_text("I"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ToggleImageInfo);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                frame.has_image,
-                egui::Button::new("Tools Panel")
-                    .selected(frame.tools_panel_open)
-                    .shortcut_text("T"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ToggleToolsPanel);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                frame.filmstrip.len() > 1,
-                egui::Button::new("Folder Previews")
-                    .selected(frame.filmstrip_panel_open)
-                    .shortcut_text("G"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ToggleFilmstripPanel);
-            ui.close();
-        }
+        ui.menu_button("Panels", |ui| panels_menu(ui, actions, frame));
+        ui.menu_button("Panel Position", |ui| {
+            panel_position_menu(ui, actions, frame);
+        });
         ui.separator();
         ui.menu_button("Image Background", |ui| {
             background_menu(ui, actions, frame.background_override);
         });
     });
+}
+
+fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    ui.set_min_width(224.0);
+    let choices = [
+        (
+            "Tools",
+            "T",
+            frame.has_image,
+            frame.show_tools_panel,
+            UiAction::ToggleToolsPanelVisibility,
+        ),
+        (
+            "Folder Previews",
+            "G",
+            frame.filmstrip.len() > 1,
+            frame.show_filmstrip_panel,
+            UiAction::ToggleFilmstripPanelVisibility,
+        ),
+        (
+            "Image Information",
+            "I",
+            frame.has_image,
+            frame.show_image_info,
+            UiAction::ToggleImageInfo,
+        ),
+    ];
+    for (label, shortcut, enabled, selected, action) in choices {
+        let mut checked = selected;
+        let response = ui
+            .add_enabled(enabled, egui::Checkbox::new(&mut checked, label))
+            .on_hover_text(format!("{label} ({shortcut})"));
+        if response.changed() {
+            actions.push(action);
+            ui.close();
+        }
+    }
+}
+
+fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    ui.set_min_width(224.0);
+    dock_side_choices(
+        ui,
+        actions,
+        "TOOLS",
+        frame.tools_panel_side,
+        UiAction::SetToolsPanelSide,
+    );
+    ui.separator();
+    dock_side_choices(
+        ui,
+        actions,
+        "IMAGE INFORMATION",
+        frame.image_info_side,
+        UiAction::SetImageInfoSide,
+    );
+}
+
+fn dock_side_choices(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    heading: &str,
+    current: DockSide,
+    action: fn(DockSide) -> UiAction,
+) {
+    ui.label(RichText::new(heading).size(10.0).color(MUTED).strong());
+    for (side, label) in [(DockSide::Left, "Left"), (DockSide::Right, "Right")] {
+        if ui.radio(current == side, label).clicked() {
+            actions.push(action(side));
+            ui.close();
+        }
+    }
 }
 
 fn background_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, current: Option<[f64; 4]>) {
@@ -695,7 +779,11 @@ fn paint_empty_image_icon(painter: &egui::Painter, rect: Rect) {
 }
 
 fn render_image_info_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
-    Panel::right("image_info_panel")
+    let panel = match frame.image_info_side {
+        DockSide::Left => Panel::left("image_info_panel"),
+        DockSide::Right => Panel::right("image_info_panel"),
+    };
+    panel
         .exact_size(IMAGE_INFO_PANEL_WIDTH)
         .resizable(false)
         .frame(docked_frame().inner_margin(16.0))
@@ -834,25 +922,30 @@ fn disclosure_button(
     response
 }
 
-fn render_left_toolbar(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let width = if frame.tools_panel_open {
         TOOLS_PANEL_WIDTH
     } else {
         TOOLS_RAIL_WIDTH
     };
-    Panel::left("tools_panel")
+    let panel = match frame.tools_panel_side {
+        DockSide::Left => Panel::left("tools_panel"),
+        DockSide::Right => Panel::right("tools_panel"),
+    };
+    panel
         .exact_size(width)
         .resizable(false)
         .frame(docked_frame())
         .show(ui, |ui| {
             ui.vertical_centered(|ui| {
-                let (direction, label) = if frame.tools_panel_open {
-                    (ChevronDirection::Left, "Collapse tools panel (T)")
-                } else {
-                    (ChevronDirection::Right, "Expand tools panel (T)")
+                let (direction, label) = match (frame.tools_panel_side, frame.tools_panel_open) {
+                    (DockSide::Left, true) => (ChevronDirection::Left, "Collapse tools panel"),
+                    (DockSide::Left, false) => (ChevronDirection::Right, "Expand tools panel"),
+                    (DockSide::Right, true) => (ChevronDirection::Right, "Collapse tools panel"),
+                    (DockSide::Right, false) => (ChevronDirection::Left, "Expand tools panel"),
                 };
                 if disclosure_button(ui, direction, label, frame.tools_panel_open).clicked() {
-                    actions.push(UiAction::ToggleToolsPanel);
+                    actions.push(UiAction::ToggleToolsPanelExpansion);
                 }
 
                 if frame.tools_panel_open {
@@ -1039,12 +1132,12 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                             if disclosure_button(
                                 ui,
                                 ChevronDirection::Down,
-                                "Collapse folder previews (G)",
+                                "Collapse folder previews",
                                 true,
                             )
                             .clicked()
                             {
-                                actions.push(UiAction::ToggleFilmstripPanel);
+                                actions.push(UiAction::ToggleFilmstripPanelExpansion);
                             }
                             ui.label(
                                 RichText::new("FOLDER PREVIEWS")
@@ -1077,15 +1170,10 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                 });
             } else {
                 ui.horizontal_centered(|ui| {
-                    if disclosure_button(
-                        ui,
-                        ChevronDirection::Up,
-                        "Expand folder previews (G)",
-                        false,
-                    )
-                    .clicked()
+                    if disclosure_button(ui, ChevronDirection::Up, "Expand folder previews", false)
+                        .clicked()
                     {
-                        actions.push(UiAction::ToggleFilmstripPanel);
+                        actions.push(UiAction::ToggleFilmstripPanelExpansion);
                     }
                     let label = frame.playlist_pos.map_or_else(
                         || "Folder previews".to_owned(),
@@ -1374,7 +1462,7 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ACCENT, ChromeLayout, DockState, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
+        ACCENT, ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
         FilmstripItem, IMAGE_INFO_PANEL_WIDTH, INK, MUTED, PANEL, TEXT, TOOLS_PANEL_WIDTH,
         TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, UiAction, UiFrameOwned, render, viewport_insets,
     };
@@ -1409,8 +1497,12 @@ mod tests {
             show_image_info: true,
             retain_exif: false,
             background_override: None,
+            show_tools_panel: true,
             tools_panel_open: true,
+            tools_panel_side: DockSide::Left,
+            show_filmstrip_panel: true,
             filmstrip_panel_open: true,
+            image_info_side: DockSide::Right,
             file_path: Some("C:/photos/current.png".to_owned()),
             img_size: Some((1920, 1080)),
             is_cropping: false,
@@ -1466,8 +1558,12 @@ mod tests {
         let _ = UiAction::TrashFlagged;
         let _ = UiAction::PermanentDelete;
         let _ = UiAction::ToggleImageInfo;
-        let _ = UiAction::ToggleToolsPanel;
-        let _ = UiAction::ToggleFilmstripPanel;
+        let _ = UiAction::ToggleToolsPanelVisibility;
+        let _ = UiAction::ToggleToolsPanelExpansion;
+        let _ = UiAction::ToggleFilmstripPanelVisibility;
+        let _ = UiAction::ToggleFilmstripPanelExpansion;
+        let _ = UiAction::SetToolsPanelSide(DockSide::Right);
+        let _ = UiAction::SetImageInfoSide(DockSide::Left);
         let _ = UiAction::FitToView;
         let _ = UiAction::ActualSize;
         let _ = UiAction::ZoomIn;
@@ -1478,8 +1574,9 @@ mod tests {
     fn expanded_panels_reserve_scaled_physical_pixels() {
         let insets = viewport_insets(ChromeLayout {
             tools: DockState::Expanded,
+            tools_side: DockSide::Left,
             filmstrip: DockState::Expanded,
-            image_info_visible: true,
+            image_info: Some(DockSide::Right),
             scale_factor: 1.5,
         });
         assert!((insets.left - TOOLS_PANEL_WIDTH * 1.5).abs() < f32::EPSILON);
@@ -1492,13 +1589,44 @@ mod tests {
     fn collapsed_disclosure_rails_reserve_their_exact_size() {
         let insets = viewport_insets(ChromeLayout {
             tools: DockState::Collapsed,
+            tools_side: DockSide::Left,
             filmstrip: DockState::Collapsed,
-            image_info_visible: false,
+            image_info: None,
             scale_factor: 1.0,
         });
         assert!((insets.left - TOOLS_RAIL_WIDTH).abs() < f32::EPSILON);
         assert!((insets.bottom - FILMSTRIP_RAIL_HEIGHT).abs() < f32::EPSILON);
         assert!(insets.right.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn side_panels_reserve_their_selected_edges_and_accumulate() {
+        let insets = viewport_insets(ChromeLayout {
+            tools: DockState::Expanded,
+            tools_side: DockSide::Right,
+            filmstrip: DockState::Hidden,
+            image_info: Some(DockSide::Right),
+            scale_factor: 1.0,
+        });
+        assert!(insets.left.abs() < f32::EPSILON);
+        assert!((insets.right - TOOLS_PANEL_WIDTH - IMAGE_INFO_PANEL_WIDTH).abs() < f32::EPSILON);
+        assert!((insets.top - TOP_BAR_HEIGHT).abs() < f32::EPSILON);
+        assert!(insets.bottom.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn fully_hidden_panels_reserve_no_image_space_beyond_the_menu() {
+        let insets = viewport_insets(ChromeLayout {
+            tools: DockState::Hidden,
+            tools_side: DockSide::Right,
+            filmstrip: DockState::Hidden,
+            image_info: None,
+            scale_factor: 1.0,
+        });
+        assert!(insets.left.abs() < f32::EPSILON);
+        assert!(insets.right.abs() < f32::EPSILON);
+        assert!((insets.top - TOP_BAR_HEIGHT).abs() < f32::EPSILON);
+        assert!(insets.bottom.abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1528,9 +1656,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         for expected in [
-            "Collapse tools panel (T)",
+            "Collapse tools panel",
             "Rotate clockwise (R)",
-            "Collapse folder previews (G)",
+            "Collapse folder previews",
             "image 1: current.png",
             "Flagged image 2: flagged.png",
             "Keep camera metadata when saving",

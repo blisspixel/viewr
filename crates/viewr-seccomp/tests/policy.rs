@@ -6,6 +6,11 @@
 use std::process::{Command, Stdio};
 
 const POLICY_CHILD: &str = "VIEWR_TEST_C_DECODER_POLICY_CHILD";
+const APPLICATION_POLICY_CHILD: &str = "VIEWR_TEST_APPLICATION_POLICY_CHILD";
+const NETWORK_POLICY_CHILD: &str = "VIEWR_TEST_NETWORK_POLICY_CHILD";
+
+#[cfg(target_arch = "x86_64")]
+const X32_SYSCALL_BIT: libc::c_long = 0x4000_0000;
 
 fn assert_errno(result: libc::c_long, expected: i32) {
     assert_eq!(result, -1);
@@ -89,6 +94,102 @@ fn production_policy_is_default_deny_at_runtime() {
         .arg("policy_child_observes_default_deny_and_thread_only_clone")
         .arg("--exact")
         .env(POLICY_CHILD, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn application_policy_child_allows_unix_ipc_and_denies_internet_sockets() {
+    if std::env::var_os(APPLICATION_POLICY_CHILD).is_none() {
+        return;
+    }
+
+    viewr_seccomp::apply_application_internet_policy().unwrap();
+    let (left, right) = std::os::unix::net::UnixStream::pair().unwrap();
+    drop((left, right));
+    assert_eq!(std::thread::spawn(|| 42).join().unwrap(), 42);
+
+    for family in [libc::AF_INET, libc::AF_INET6] {
+        assert_errno(
+            unsafe { libc::syscall(libc::SYS_socket, family, libc::SOCK_STREAM, 0) },
+            libc::EPERM,
+        );
+    }
+    assert_errno(
+        unsafe { libc::syscall(libc::SYS_io_uring_setup, 1, std::ptr::null::<u8>()) },
+        libc::EPERM,
+    );
+    #[cfg(target_arch = "x86_64")]
+    assert_errno(
+        unsafe {
+            libc::syscall(
+                libc::SYS_socket | X32_SYSCALL_BIT,
+                libc::AF_INET,
+                libc::SOCK_STREAM,
+                0,
+            )
+        },
+        libc::EPERM,
+    );
+}
+
+#[test]
+fn application_policy_is_inherited_by_threads_at_runtime() {
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .arg("application_policy_child_allows_unix_ipc_and_denies_internet_sockets")
+        .arg("--exact")
+        .env(APPLICATION_POLICY_CHILD, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn network_policy_child_denies_native_and_x32_network_syscalls() {
+    if std::env::var_os(NETWORK_POLICY_CHILD).is_none() {
+        return;
+    }
+
+    assert_eq!(
+        unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+        0
+    );
+    viewr_seccomp::network_deny_filter()
+        .unwrap()
+        .apply()
+        .unwrap();
+    assert_eq!(std::thread::spawn(|| 42).join().unwrap(), 42);
+    assert_errno(
+        unsafe { libc::syscall(libc::SYS_socket, libc::AF_INET, libc::SOCK_STREAM, 0) },
+        libc::EPERM,
+    );
+    #[cfg(target_arch = "x86_64")]
+    assert_errno(
+        unsafe {
+            libc::syscall(
+                libc::SYS_socket | X32_SYSCALL_BIT,
+                libc::AF_INET,
+                libc::SOCK_STREAM,
+                0,
+            )
+        },
+        libc::EPERM,
+    );
+}
+
+#[test]
+fn network_policy_rejects_x32_aliases_at_runtime() {
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .arg("network_policy_child_denies_native_and_x32_network_syscalls")
+        .arg("--exact")
+        .env(NETWORK_POLICY_CHILD, "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

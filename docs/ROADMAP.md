@@ -20,13 +20,12 @@ trash, operational core fuzzing, locally verifiable OS sandbox profiles,
 checksummed local/CI release artifacts, and the feature-gated production
 C-decoder syscall allowlist are complete. Phase 8 local install guidance,
 user-controlled file associations, and canonical documentation are complete;
-keyboard access, Windows/macOS native screen-reader delivery, semantic labels,
-contrast checks, and enforced GUI performance budgets are complete. A
-privacy-compatible Linux screen-reader bridge and cross-platform
-assistive-technology validation remain.
+keyboard access, native Windows/macOS/Linux screen-reader delivery, semantic
+labels, configurable panel-safe chrome, contrast checks, and enforced GUI
+performance budgets are complete. Manual cross-platform assistive-technology
+validation remains.
 
-**Next focus: privacy-compatible Linux accessibility delivery and manual
-target-OS assistive-technology validation.**
+**Next focus: manual target-OS assistive-technology validation.**
 
 ## Phase 0: Foundations
 
@@ -37,8 +36,9 @@ Establish the ground truth so quality is enforced from the very first commit.
 - Pinned toolchain (rust-toolchain.toml), committed Cargo.lock, declared MSRV.
 - CI on Linux, macOS, and Windows running: fmt check, clippy at pedantic with
   warnings as errors, nextest, and coverage via cargo-llvm-cov.
-- The privacy invariant as a CI gate: cargo-deny bans any network-capable crate, so
-  the build fails if one ever enters the tree. This lands before any features.
+- The privacy invariant as CI and runtime gates: cargo-deny bans remote-service
+  client stacks and constrains Linux D-Bus to AccessKit, while Linux startup denies
+  Internet socket creation before application threads. This lands before features.
 - cargo-audit and cargo-deny wired for supply-chain and license checks.
 
 Definition of done: an empty window builds and runs on all three platforms in CI,
@@ -212,8 +212,11 @@ install from source or a simple GitHub-style release artifact.
   - [x] Keyboard-complete menus, docked controls, navigation, zoom, and crop.
   - [x] Screen-reader labels and state for custom controls and exact crop bounds.
   - [x] Automated WCAG AA checks for the production chrome palette.
-  - [x] Native AccessKit delivery on Windows and macOS without adding a network-capable dependency.
-  - [ ] Privacy-compatible Linux assistive-technology delivery plus manual screen-reader validation on all three platforms.
+  - [x] Native AccessKit delivery on Windows and macOS without adding a remote-service client dependency.
+  - [x] Privacy-compatible Linux AccessKit/AT-SPI delivery with local-only D-Bus
+    validation, dependency-path enforcement, and an early fail-closed Internet
+    socket policy.
+  - [ ] Manual screen-reader validation on Windows, macOS, and Linux.
 - [x] Performance budget locked in and regression-tested in CI: first presented
   window frame and image, sampled navigation, settled idle redraws,
   50,000-file memory scaling, and bounded decoded/thumbnail caches.

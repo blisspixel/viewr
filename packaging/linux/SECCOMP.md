@@ -1,6 +1,29 @@
-# Linux seccomp for `viewr-decode`
+# Linux seccomp for viewr and `viewr-decode`
 
-## Applied at runtime
+## Application startup policy
+
+`crates/viewr/src/privacy.rs` applies the shared
+`viewr_seccomp::apply_application_internet_policy` before logging, worker setup,
+GUI initialization, or application threads. The policy:
+
+1. requires every configured `DBUS_SESSION_BUS_ADDRESS` and `AT_SPI_BUS_ADDRESS`
+   entry to use a `unix:` transport;
+2. sets `PR_SET_NO_NEW_PRIVS` and aborts startup on failure;
+3. allows `socket` and `socketpair` only when their family is `AF_UNIX`, preserving
+   local Wayland/X11, portal, D-Bus, and AT-SPI IPC;
+4. returns `EPERM` for every other socket family and for `io_uring_setup`,
+   `io_uring_enter`, and `io_uring_register`; and
+5. mirrors every blocked rule onto its bit-30 x32 syscall alias on x86-64, where
+   x32 shares the native audit architecture; and
+6. probes an `AF_INET` socket and aborts unless the kernel returns `EPERM`.
+
+`connect` remains available because classic seccomp cannot dereference the target
+address pointer. Only Unix-domain descriptors can be created after the policy is
+installed, and it runs before application-owned threads so every descendant thread
+inherits it. The network-denied Flatpak profile remains an independent package
+boundary.
+
+## Decode-worker baseline policy
 
 Implemented in the shared `viewr-seccomp` crate and applied by
 `crates/viewr/src/worker_limit.rs`:
@@ -19,6 +42,8 @@ Implemented in the shared `viewr-seccomp` crate and applied by
    - `fork`, `vfork`, and `clone` unless `CLONE_THREAD` is present (decoder
      threads remain available, child processes do not)
    - `setsid`, `setpgid` (preserves the private session and process group)
+   On x86-64, every listed denial is also installed for the corresponding x32
+   syscall number so the shared audit architecture cannot bypass the filter.
 
 Decode and pipe IPC continue to work because the filter is
 **mismatch = Allow**. Only the listed network syscalls match. Filter compilation
@@ -67,10 +92,13 @@ immediately before it executes the worker. Invoking `viewr-decode` directly does
 not exercise that baseline boundary. On Linux,
 `cargo test -p viewr worker_limit::tests` checks it. Feature-enabled workers
 install the production default-deny policy themselves, including when invoked
-directly. `cargo test -p viewr-seccomp` proves that policy allows a real thread
-and read-only open while denying write-open, asynchronous-signal configuration,
-socket, fork, and direct cross-process signal calls, and that `clone3` reports
-`ENOSYS`.
+directly. `cargo test -p viewr-seccomp` proves that the application policy
+preserves Unix IPC and threads while denying IPv4, IPv6, io_uring, and the x32
+socket alias on x86-64. A dedicated baseline-worker child proves both native and
+x32 socket denials independently of the default-deny C filter. The C-worker test
+also proves that the policy allows a real thread and read-only open while denying
+write-open, asynchronous-signal configuration, socket, fork, and direct
+cross-process signal calls, and that `clone3` reports `ENOSYS`.
 
 The `c-decoder-policy` CI job runs on Ubuntu 24.04 with the pinned Rust toolchain,
 libheif 1.17, and native AV1/HEVC codecs. It generates small AVIF and HEIC images

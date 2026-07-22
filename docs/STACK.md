@@ -64,13 +64,15 @@ pipeline instead of inheriting one.
 - **wgpu** gives us the GPU, and we write our own pipeline for the image, so
   texture upload, mipmaps, resampling quality, and color are decisions we make.
 - **egui** provides immediate-mode desktop chrome for the docked menu, tools,
-  folder previews, Image Information panel, crop controls, and dialogs. Persistent
-  panels reserve image-viewport space instead of floating over the photo.
+  folder previews, Image Information panel, crop controls, and dialogs. Optional
+  panels are fully hideable; tools and information independently dock left or
+  right; every visible panel reserves image-viewport space instead of floating.
 - **AccessKit** nodes describe custom controls and crop state. A direct,
   default-feature-disabled `accesskit_winit` adapter delivers them to native
-  assistive technology on Windows and macOS without pulling the network-capable
-  Unix D-Bus stack into the dependency graph. Linux native delivery remains an
-  explicit Phase 8 gap rather than weakening the privacy invariant.
+  assistive technology on all three targets. On Linux, cargo-deny confines the
+  generic D-Bus implementation to the AccessKit/AT-SPI path, environment validation
+  accepts only Unix transports, and startup seccomp denies Internet socket creation
+  before the adapter or application threads begin.
 
 This yields the smallest, most auditable dependency tree, which directly serves the
 trust and privacy goals, and total control over the details that separate
@@ -155,10 +157,11 @@ users who explicitly want it.
 
 ## Decision 7 — Security posture: sandboxed, no network
 
-- **No networking client crate is linked.** The application implements no HTTP
-  or socket client. This dependency-level invariant is verifiable from Cargo
-  metadata and enforced in CI (see `PRIVACY.md`); syscall denial is a separate
-  runtime/package control.
+- **No remote-service client is linked.** The application implements no HTTP,
+  TLS, telemetry, or update client. Linux local accessibility IPC uses the generic
+  D-Bus code supplied upstream, restricted to the AccessKit dependency path and
+  protected by a verified Internet-socket deny policy before threads start. This
+  layered invariant is enforced in CI and at runtime (see `PRIVACY.md`).
 - **Ship sandboxed with network denied:** repository profiles target macOS App
   Sandbox, Windows AppContainer, and Linux Flatpak without `--share=network`.
   Runtime package verification remains a Phase 7 gate, and bare Cargo builds do
@@ -175,7 +178,7 @@ users who explicitly want it.
 | Windowing + input | `winit` | de-facto standard, minimal |
 | GPU rendering | `wgpu` | our own pipeline on top |
 | Text rendering | `egui` | immediate mode GUI overlay |
-| Accessibility | `accesskit` / `accesskit_winit` | semantic tree everywhere; native Windows/macOS bridge; Linux bridge pending |
+| Accessibility | `accesskit` / `accesskit_winit` | semantic tree and native delivery on Windows/macOS/Linux; Linux local IPC is runtime confined |
 | Decode (common formats) | `image` | pure-Rust |
 | Decode JPEG XL | `jxl-oxide` | pure-Rust |
 | Trash / recycle | `trash` | recoverable deletes |

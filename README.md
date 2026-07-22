@@ -23,9 +23,12 @@ held to, and most are enforced in CI.
    renderer or sibling-folder scan. Arrow keys flip through the folder. Nothing
    needs configuration for the obvious behavior.
 2. Maximum privacy, by construction. The shipped dependency graph contains no
-   networking client, and CI fails if a network-capable dependency enters it.
-   Network-denied OS packaging profiles add a syscall boundary when those packages
-   are used; the Linux C-decoder worker also denies classic and io_uring networking.
+   HTTP, TLS, or remote-service client, and CI fails if one enters it. Linux uses
+   local D-Bus only for native accessibility: startup rejects non-Unix transports
+   and installs a fail-closed kernel policy that denies Internet socket creation
+   and io_uring before GUI threads start, including x32 syscall aliases on x86-64.
+   Network-denied OS packaging profiles add another boundary when those packages
+   are used.
 3. Zero logs, zero insights. No telemetry, no analytics, no crash reporting, no
    usage improvement toggle. There is no opt-out because there is nothing to opt out
    of. Your filenames, folders, and photos never leave your machine.
@@ -59,15 +62,17 @@ strong signal we do not want it.
 
 ## Interaction
 
-The image always owns a dedicated viewport. The menu bar, Tools rail, optional
-Folder Previews rail, and Image Information panel are docked around that viewport;
-expanding a panel refits the image instead of covering it. Tools and folder previews
-start collapsed and can be expanded with their chevrons or with `T` and `G`.
-`I` opens Image Information, where the explicit session-only export-metadata choice
-lives. The View menu exposes Fit Image to View (`0`), Actual Size (`1`), Zoom In
-(`+`), and Zoom Out (`-`) so zoom never depends on a mouse or trackpad. The empty,
-loading, and load-error states use an opaque high-contrast surface, so they remain
-readable even when the image background is white.
+The image always owns a dedicated viewport. Tools, Folder Previews, and Image
+Information are optional docked panels that reserve their own space and never cover
+the photo. `T`, `G`, and `I` show or fully hide them; Tools and Folder Previews can
+also collapse to quiet disclosure rails. View > Panel Position independently docks
+Tools and Image Information on the left or right. Every visibility, collapse, or
+position change refits and recenters the image. Image Information contains the
+explicit session-only export-metadata choice. View also exposes Fit Image to View
+(`0`), Actual Size (`1`), Zoom In (`+`), and Zoom Out (`-`) so zoom never depends on
+a mouse or trackpad. The empty, loading, and load-error states use an opaque
+high-contrast surface, so they remain readable even when the image background is
+white.
 
 ## Formats
 
@@ -84,7 +89,8 @@ worker (feature-gated C backends; RAW deferred). Full table:
   one compact desktop binary plus an isolated decode helper, no runtime, no GC pauses.
 - UI foundation: [winit](https://lib.rs/crates/winit) plus [wgpu](https://wgpu.rs/)
   and an `egui` UI layer. We still own the render pipeline; persistent controls use
-  compact, collapsible docked panels that never cover the image.
+  compact, fully hideable docked panels that never cover the image. Tools and Image
+  Information can independently dock on either horizontal edge.
 - Rendering: our own wgpu pipeline, for GPU-accelerated pan, zoom, and scaling with
   control over resampling quality and color.
 - Decoding: [image-rs](https://github.com/image-rs/image) plus jxl-oxide and
@@ -104,7 +110,7 @@ Full reasoning, including the alternatives we rejected, is in
 
 ## Quality bar
 
-viewr targets 85 percent or higher test coverage on its logic (currently 89.06
+viewr targets 85 percent or higher test coverage on its logic (currently 89.04
 percent), clippy at pedantic with warnings as errors, continuous fuzzing of the
 decode path, and behavior-level contract tests that keep the coverage honest.
 The full set of engineering standards is in
@@ -136,7 +142,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, a feature-gated Linux default-deny C-decoder policy, three locally verifiable OS sandbox profiles, checksummed release archives, keyboard-complete docked chrome, native Windows/macOS screen-reader integration, local CLI (`doctor`, `benchmark`, `update`, `help`), opt-in core-format associations, and enforced GUI performance budgets are in place. A privacy-compatible Linux screen-reader bridge and cross-platform assistive-technology validation remain before Phase 8 is complete. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md`, `docs/PERFORMANCE.md`, and `docs/INSTALL.md`.
+Status: **Phase 7 hardening and privacy proof is complete; Phase 8 polish is in progress**. Pure-Rust core decode (including SVG), the path-free `viewr-decode` boundary, Linux fail-closed process policies, three locally verifiable OS sandbox profiles, checksummed release archives, configurable panel-safe chrome, native AccessKit delivery on Windows, macOS, and Linux, local CLI (`doctor`, `benchmark`, `update`, `help`), opt-in core-format associations, and enforced GUI performance budgets are in place. Manual target-OS screen-reader validation remains before Phase 8 is complete. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/FORMATS.md`, `docs/PERFORMANCE.md`, and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

@@ -1,6 +1,7 @@
 # cargo-deny configuration. See docs/STANDARDS.md.
-# The headline rule is in [bans]: no networking-capable crate may enter the tree.
-# This is what turns "viewr cannot phone home" into a checked fact.
+# The headline rules are in [bans]: remote-service client stacks are forbidden,
+# and Linux's generic D-Bus transport is confined to the AccessKit dependency path.
+# Runtime and package boundaries independently deny Internet access.
 
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
@@ -60,9 +61,11 @@ confidence-threshold = 0.9
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
-# The privacy invariant. If any of these (HTTP clients/servers, websocket, QUIC,
-# or TLS stacks) appears in the dependency tree, the build fails. viewr has no
-# business opening a network connection, so nothing that can should be present.
+# The dependency half of the privacy invariant. HTTP clients/servers, websocket,
+# QUIC, and TLS stacks fail the build. Linux accessibility requires upstream's
+# generic D-Bus implementation, so zbus and its process helper may occur only
+# behind the reviewed AccessKit/AT-SPI path; startup seccomp then permits only
+# Unix-domain socket creation and denies io_uring before that adapter starts.
 deny = [
     { crate = "reqwest" },
     { crate = "hyper" },
@@ -85,6 +88,8 @@ deny = [
     { crate = "native-tls" },
     { crate = "openssl" },
     { crate = "openssl-sys" },
+    { crate = "zbus", wrappers = ["accesskit_unix", "atspi-common", "atspi-proxies"], reason = "generic D-Bus transport is allowed only for Linux AccessKit/AT-SPI" },
+    { crate = "async-process", wrappers = ["zbus"], reason = "process helper is allowed only inside the confined D-Bus transport" },
 ]
 
 [sources]

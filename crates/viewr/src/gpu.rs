@@ -31,12 +31,11 @@ pub struct Renderer {
     pub egui_ctx: egui::Context,
     /// The winit state integration for egui.
     pub egui_state: egui_winit::State,
-    /// Native accessibility bridge on platforms whose adapters do not require
-    /// a network-capable IPC dependency.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    /// Native accessibility bridge through the target platform's local IPC.
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     accesskit: Option<accesskit_winit::Adapter>,
     /// Accessibility actions queued by the native bridge for the next frame.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pending_accesskit_actions: Vec<egui::accesskit::ActionRequest>,
     /// The wgpu renderer integration for egui.
     pub egui_renderer: egui_wgpu::Renderer,
@@ -159,9 +158,9 @@ impl Renderer {
             placement,
             egui_ctx,
             egui_state,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             accesskit: None,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             pending_accesskit_actions: Vec::new(),
             egui_renderer,
         })
@@ -174,7 +173,7 @@ impl Renderer {
     }
 
     /// Initialize native accessibility before the initially hidden window is shown.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub fn init_accessibility<T>(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
@@ -190,7 +189,7 @@ impl Renderer {
     }
 
     /// Forward a native window event to the accessibility adapter.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub fn process_accessibility_window_event(
         &mut self,
         window: &Window,
@@ -202,19 +201,19 @@ impl Renderer {
     }
 
     /// Queue an assistive-technology action for egui's next input frame.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub fn queue_accessibility_action(&mut self, request: egui::accesskit::ActionRequest) {
         self.pending_accesskit_actions.push(request);
     }
 
     fn append_accessibility_actions(&mut self, input: &mut egui::RawInput) {
-        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         input.events.extend(
             self.pending_accesskit_actions
                 .drain(..)
                 .map(egui::Event::AccessKitActionRequest),
         );
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
         {
             let _ = self;
             let _ = input;
@@ -222,13 +221,13 @@ impl Renderer {
     }
 
     fn publish_accessibility_update(&mut self, output: &mut egui::PlatformOutput) {
-        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         if let (Some(adapter), Some(update)) =
             (self.accesskit.as_mut(), output.accesskit_update.take())
         {
             adapter.update_if_active(|| update);
         }
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
         {
             let _ = self;
             let _ = output;

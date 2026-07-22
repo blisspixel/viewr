@@ -144,9 +144,14 @@ higher standard than the rest of the app.
   duplicate or yanked crates, and the security advisory database.
 - `cargo-audit` against the RUSTSEC advisory database on every build and on a
   schedule, so a newly disclosed vulnerability in a dependency is noticed quickly.
-- The privacy invariant is a `cargo-deny` ban list: no crate capable of opening a
-  network connection may enter the dependency tree. The build fails if one does.
-  This is what makes "it cannot phone home" a checked fact rather than a claim.
+- The privacy invariant is layered and deterministic. `cargo-deny` rejects HTTP,
+  TLS, websocket, QUIC, and remote-service clients, and permits Linux's generic
+  D-Bus implementation only behind AccessKit/AT-SPI. Linux startup accepts only
+  Unix D-Bus environment transports, installs `no_new_privs`, denies non-Unix
+  socket creation and io_uring before application threads, covers x32 syscall
+  aliases on x86-64, verifies `EPERM`, and fails closed. Package profiles add an
+  independent whole-application boundary.
+  Together these controls make "it cannot phone home" checked rather than claimed.
 - Every new dependency is a deliberate decision. Fewer, well-chosen crates over
   many convenient ones. Each crate is code we ship, audit, and are responsible for.
 

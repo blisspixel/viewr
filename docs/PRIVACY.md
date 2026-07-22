@@ -6,7 +6,10 @@ code, and where possible it's enforced in CI so it can't quietly regress.
 
 ## The guarantee, plainly
 
-- viewr **never connects to the internet.** It has no networking code.
+- viewr **never connects to the internet.** It has no HTTP, TLS, remote-service,
+  telemetry, or update client. Linux permits local Unix-domain IPC for desktop and
+  accessibility integration, while an early kernel policy denies Internet socket
+  creation and io_uring.
 - viewr **collects nothing.** No telemetry, no analytics, no usage metrics, no
   "help us improve" data, no crash reports sent anywhere.
 - viewr **keeps no logs of your activity.** Which files you open, which folders you
@@ -50,21 +53,24 @@ lines. Nothing is ever sent off-machine.
 
 A promise you can verify beats a promise you have to trust.
 
-1. **No network dependency, checked in CI.** viewr links no HTTP/socket crate. A CI
-   job audits the full dependency tree (e.g. `cargo-deny` / a dependency check) and
-   **fails the build** if a networking-capable crate appears. The absence of
-   networking is a tested invariant, not a habit.
-   Native accessibility preserves this rule: Windows and macOS use AccessKit's
-   platform adapters with default features disabled. Linux native screen-reader
-   delivery remains pending because the current upstream Unix adapter introduces
-   a general D-Bus transport stack that can parse network addresses.
+1. **Remote clients are absent and local Linux IPC is confined.** A CI dependency
+   audit **fails the build** if an HTTP, TLS, websocket, QUIC, or remote-service
+   client appears. Windows and macOS use AccessKit's platform adapters with default
+   features disabled. Linux's upstream AccessKit/AT-SPI adapter needs a generic
+   D-Bus implementation; cargo-deny permits that implementation and its process
+   helper only behind the reviewed AccessKit dependency path. Before logging,
+   workers, GUI initialization, or application threads, Linux rejects configured
+   D-Bus addresses that are not `unix:` transports, installs `no_new_privs`, denies
+   non-Unix socket families and io_uring with seccomp, mirrors those denials onto
+   x32 syscall aliases on x86-64, and verifies that an Internet socket fails with
+   `EPERM`. Startup fails closed if any step fails.
 2. **Network-denied packaging profiles.** The repository contains local packaging
    profiles with no network entitlement:
    - **macOS** — App Sandbox, no `com.apple.security.network.*` entitlement.
    - **Windows** — AppContainer without the internet capability.
    - **Linux** — Flatpak with **no** `--share=network`; the decode worker also
      installs a seccomp filter that returns `EPERM` for classic socket and
-     io_uring networking paths.
+     io_uring networking paths, including x32 aliases on x86-64.
    The test suite checks each profile as an exact allowlist. Linux CI performs a
    clean Flatpak build from checksum-pinned Cargo sources and runs the worker IPC
    probe in its build sandbox. macOS CI ad-hoc signs an App Sandbox bundle and
@@ -72,8 +78,9 @@ A promise you can verify beats a promise you have to trust.
    unsigned AppContainer MSIX containing both binaries. A bare `cargo build`
    does not apply those package boundaries, and schema/signature checks are not
    evidence that an unsigned package was installed. Independently, the
-   dependency ban applies to every build, and Linux worker spawn fails if its
-   network-denying seccomp filter cannot be installed. AVIF/HEIC Linux workers
+   dependency ban applies to every build. Bare Linux builds still receive the
+   application startup policy described above, and Linux worker spawn fails if its
+   stricter network-denying seccomp filter cannot be installed. AVIF/HEIC Linux workers
    additionally install a default-deny syscall allowlist before reading IPC;
    Ubuntu 24.04 CI decodes generated AVIF and HEIC inputs through the release-mode
    worker and fails if that policy blocks required decoder behavior.
@@ -97,8 +104,9 @@ A promise you can verify beats a promise you have to trust.
 
 - viewr **does not** write a settings file, history, recently-opened list,
   thumbnail database, or search index of your library. Flags, picks, filmstrip
-  thumbs, and neighbor **prefetch** live **only in RAM for the current session**
-  and disappear when the app closes (never under temp or beside your photos).
+  thumbs, panel visibility/position, and neighbor **prefetch** live **only in RAM
+  for the current session** and disappear when the app closes (never under temp or
+  beside your photos).
 - viewr **does not** create companion files next to your photos (no `_picks.txt`,
   no sidecar caches).
 - **Save As / convert** only writes the file path you choose in the save dialog.

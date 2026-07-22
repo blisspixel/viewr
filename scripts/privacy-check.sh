@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "== cargo deny (network crate ban + licenses) =="
+echo "== cargo deny (remote-client ban + confined Linux D-Bus + licenses) =="
 cargo deny check
 
 echo "== packaging artifacts must omit network grants =="
@@ -34,7 +34,7 @@ if grep -Eq 'Name="(internetClient|internetClientServer|privateNetworkClientServ
   exit 1
 fi
 
-echo "== dependency tree must not pull reqwest/hyper/rustls =="
+echo "== dependency tree must not pull remote-service client stacks =="
 for crate in reqwest hyper rustls native-tls; do
   if cargo tree -p viewr -i "$crate" >/dev/null 2>&1; then
     echo "Forbidden network-related crate in tree: $crate" >&2

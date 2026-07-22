@@ -64,6 +64,11 @@ windows-sys = { version = "0.59", features = [
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+accesskit_winit = { version = "0.32", default-features = false, features = [
+    "accesskit_unix",
+    "async-io",
+    "rwh_06",
+] }
 viewr-seccomp = { path = "../viewr-seccomp" }
 
 # Launch Services delivers Finder/Open With requests through the application

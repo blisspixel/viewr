@@ -19,6 +19,7 @@ pub mod gpu;
 mod macos;
 pub mod performance;
 pub mod prefetch;
+pub mod privacy;
 pub(crate) mod sandbox;
 pub mod theme;
 pub mod thumbs;

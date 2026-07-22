@@ -92,8 +92,12 @@ fn run_internal(
         current_image: None,
         loaded_image_path: None,
         show_image_info: false,
-        tools_panel_open: false,
-        filmstrip_panel_open: probe_enabled,
+        show_tools_panel: false,
+        tools_panel_open: true,
+        tools_panel_side: crate::ui::DockSide::Left,
+        show_filmstrip_panel: probe_enabled,
+        filmstrip_panel_open: true,
+        image_info_side: crate::ui::DockSide::Right,
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
         bg_override: None,
@@ -220,7 +224,7 @@ pub(crate) enum UserEvent {
     Wake,
     /// An operating-system assistive technology requested the accessibility
     /// tree or invoked an accessible control.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     AccessKit(accesskit_winit::Event),
     /// Finder or Launch Services requested that viewr open this file.
     #[cfg_attr(
@@ -233,7 +237,7 @@ pub(crate) enum UserEvent {
     OpenFile(PathBuf),
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 impl From<accesskit_winit::Event> for UserEvent {
     fn from(event: accesskit_winit::Event) -> Self {
         Self::AccessKit(event)
@@ -308,10 +312,18 @@ struct App {
     /// Source path corresponding exactly to `current_image` and the GPU texture.
     loaded_image_path: Option<PathBuf>,
     show_image_info: bool,
+    /// Whether the tools dock reserves any viewport space.
+    show_tools_panel: bool,
     /// Whether the docked tools panel is expanded.
     tools_panel_open: bool,
+    /// Horizontal edge used by the tools dock.
+    tools_panel_side: crate::ui::DockSide,
+    /// Whether folder previews reserve any viewport space.
+    show_filmstrip_panel: bool,
     /// Whether the docked folder-preview panel is expanded.
     filmstrip_panel_open: bool,
+    /// Horizontal edge used by Image Information.
+    image_info_side: crate::ui::DockSide,
     /// When true, Save As copies EXIF from the source. Default **false** (strip).
     retain_exif: bool,
     bg_override: Option<[f64; 4]>,
@@ -560,21 +572,22 @@ impl App {
             .and_then(Renderer::image_size)
             .is_some();
         crate::ui::viewport_insets(crate::ui::ChromeLayout {
-            tools: if !has_image {
+            tools: if !has_image || !self.show_tools_panel {
                 crate::ui::DockState::Hidden
             } else if self.tools_panel_open {
                 crate::ui::DockState::Expanded
             } else {
                 crate::ui::DockState::Collapsed
             },
-            filmstrip: if !has_image || !has_filmstrip {
+            tools_side: self.tools_panel_side,
+            filmstrip: if !has_image || !has_filmstrip || !self.show_filmstrip_panel {
                 crate::ui::DockState::Hidden
             } else if self.filmstrip_panel_open {
                 crate::ui::DockState::Expanded
             } else {
                 crate::ui::DockState::Collapsed
             },
-            image_info_visible: has_image && self.show_image_info,
+            image_info: (has_image && self.show_image_info).then_some(self.image_info_side),
             scale_factor,
         })
     }
@@ -648,7 +661,7 @@ impl App {
         match key {
             "o" | "O" => self.open_image_dialog(),
             "t" | "T" => {
-                self.tools_panel_open = !self.tools_panel_open;
+                self.show_tools_panel = !self.show_tools_panel;
                 self.request_redraw();
             }
             "g" | "G"
@@ -657,7 +670,7 @@ impl App {
                     .as_ref()
                     .is_some_and(|playlist| playlist.files.len() > 1) =>
             {
-                self.filmstrip_panel_open = !self.filmstrip_panel_open;
+                self.show_filmstrip_panel = !self.show_filmstrip_panel;
                 self.request_redraw();
             }
             "i" | "I" => {
@@ -776,7 +789,7 @@ impl App {
         }
         if completed {
             self.kick_prefetch();
-            if self.filmstrip_panel_open {
+            if self.show_filmstrip_panel && self.filmstrip_panel_open {
                 self.request_thumbs_for_filmstrip();
             }
         }
@@ -1150,7 +1163,7 @@ impl App {
     }
 
     fn poll_thumbnails(&mut self) {
-        let visible = if self.filmstrip_panel_open {
+        let visible = if self.show_filmstrip_panel && self.filmstrip_panel_open {
             self.visible_filmstrip_paths()
                 .into_iter()
                 .collect::<HashSet<_>>()
@@ -1190,7 +1203,7 @@ impl App {
         }
         if got {
             self.kick_prefetch();
-            if self.filmstrip_panel_open {
+            if self.show_filmstrip_panel && self.filmstrip_panel_open {
                 self.request_thumbs_for_filmstrip();
             }
         }
@@ -1875,9 +1888,9 @@ impl ApplicationHandler<UserEvent> for App {
         let mode = Mode::from_winit_or_dark(window.theme());
         match pollster::block_on(Renderer::new(window, mode)) {
             Ok(renderer) => {
-                #[cfg(any(target_os = "windows", target_os = "macos"))]
+                #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 let mut renderer = renderer;
-                #[cfg(any(target_os = "windows", target_os = "macos"))]
+                #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 renderer.init_accessibility(event_loop, self.event_proxy.clone());
                 self.renderer = Some(renderer);
                 let should_resize = self
@@ -1923,7 +1936,7 @@ impl ApplicationHandler<UserEvent> for App {
             && renderer.window().id() == window_id
         {
             let window = renderer.window.clone();
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             renderer.process_accessibility_window_event(window.as_ref(), &event);
             let response = renderer.egui_state.on_window_event(window.as_ref(), &event);
             // egui reports that RedrawRequested itself wants repainting. The
@@ -2211,7 +2224,7 @@ impl ApplicationHandler<UserEvent> for App {
                     .playlist
                     .as_ref()
                     .map(|p| (p.index.saturating_add(1), p.files.len().max(1)));
-                if self.filmstrip_panel_open {
+                if self.show_filmstrip_panel && self.filmstrip_panel_open {
                     self.request_thumbs_for_filmstrip();
                 }
                 self.poll_thumbnails();
@@ -2227,8 +2240,12 @@ impl ApplicationHandler<UserEvent> for App {
                     .as_ref()
                     .map(|p| p.to_string_lossy().into_owned());
                 let show_image_info = self.show_image_info;
+                let show_tools_panel = self.show_tools_panel;
                 let tools_panel_open = self.tools_panel_open;
+                let tools_panel_side = self.tools_panel_side;
+                let show_filmstrip_panel = self.show_filmstrip_panel;
                 let filmstrip_panel_open = self.filmstrip_panel_open;
+                let image_info_side = self.image_info_side;
                 let retain_exif = self.retain_exif;
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
@@ -2306,8 +2323,12 @@ impl ApplicationHandler<UserEvent> for App {
                     show_image_info,
                     retain_exif,
                     background_override: bg_override,
+                    show_tools_panel,
                     tools_panel_open,
+                    tools_panel_side,
+                    show_filmstrip_panel,
                     filmstrip_panel_open,
+                    image_info_side,
                     file_path: path_str,
                     img_size,
                     is_cropping,
@@ -2391,14 +2412,44 @@ impl ApplicationHandler<UserEvent> for App {
                                 renderer.window().request_redraw();
                             }
                         }
-                        crate::ui::UiAction::ToggleToolsPanel => {
+                        crate::ui::UiAction::ToggleToolsPanelVisibility => {
+                            self.show_tools_panel = !self.show_tools_panel;
+                            if let Some(renderer) = self.renderer.as_ref() {
+                                renderer.window().request_redraw();
+                            }
+                        }
+                        crate::ui::UiAction::ToggleToolsPanelExpansion => {
                             self.tools_panel_open = !self.tools_panel_open;
                             if let Some(renderer) = self.renderer.as_ref() {
                                 renderer.window().request_redraw();
                             }
                         }
-                        crate::ui::UiAction::ToggleFilmstripPanel => {
+                        crate::ui::UiAction::ToggleFilmstripPanelVisibility => {
+                            self.show_filmstrip_panel = !self.show_filmstrip_panel;
+                            if self.show_filmstrip_panel && self.filmstrip_panel_open {
+                                self.request_thumbs_for_filmstrip();
+                            }
+                            if let Some(renderer) = self.renderer.as_ref() {
+                                renderer.window().request_redraw();
+                            }
+                        }
+                        crate::ui::UiAction::ToggleFilmstripPanelExpansion => {
                             self.filmstrip_panel_open = !self.filmstrip_panel_open;
+                            if self.show_filmstrip_panel && self.filmstrip_panel_open {
+                                self.request_thumbs_for_filmstrip();
+                            }
+                            if let Some(renderer) = self.renderer.as_ref() {
+                                renderer.window().request_redraw();
+                            }
+                        }
+                        crate::ui::UiAction::SetToolsPanelSide(side) => {
+                            self.tools_panel_side = side;
+                            if let Some(renderer) = self.renderer.as_ref() {
+                                renderer.window().request_redraw();
+                            }
+                        }
+                        crate::ui::UiAction::SetImageInfoSide(side) => {
+                            self.image_info_side = side;
                             if let Some(renderer) = self.renderer.as_ref() {
                                 renderer.window().request_redraw();
                             }
@@ -2477,7 +2528,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::OpenFile(path) => self.open_file_request(path),
             UserEvent::Wake => {}
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             UserEvent::AccessKit(event) => {
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;

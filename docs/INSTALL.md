@@ -57,6 +57,10 @@ cargo build --release -p viewr-decode --features avif,heic
 
 On Linux, building needs the usual windowing dev packages
 (`libwayland-dev libxkbcommon-dev libx11-dev`).
+Linux startup also requires standard kernel seccomp support. Before any GUI or
+application thread starts, viewr accepts only local Unix D-Bus environment
+transports and verifies that Internet socket creation is denied. It exits with an
+error instead of running with a weakened boundary.
 
 ### Inspect the network-denied package profiles
 

@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Fixed
 
+- Tools and Folder Previews can now be fully hidden instead of leaving a disclosure
+  rail in the image viewport. View owns explicit visibility controls for all three
+  panels, while disclosure chevrons remain available for compact collapse.
 - Egui redraw requests no longer schedule another redraw from inside the current
   redraw event. The settled viewer now returns to the sleeping event loop instead
   of continuously presenting frames, and repeated identical chrome styling no
@@ -50,7 +53,7 @@ All notable changes to this project are documented here. The format is human-wri
 - Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
 - Serialized tests that invoke global stale-debris cleanup so parallel test execution cannot erase another test's scrub-safe fixture.
 - Implemented SVG decode with pure-Rust `resvg` (corpus and unit tests pass). Default features avoid system fonts and text shaping so the trusted core stays free of unmaintained shaping crates.
-- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Current measured logic coverage is 89.06% lines under that floor.
+- Coverage gate again measures meaningful logic only; CI excludes display/IPC glue (`app`, `gpu`, `ui`, `sandbox`, `worker_limit`, `error`, `main`) per `docs/STANDARDS.md`. Current measured logic coverage is 89.04% lines under that floor.
 - Initial image decode now runs off the winit event thread, invalidates stale displayed pixels, and applies only if its path is still current. A two-slot, foreground-priority decode gate bounds aggregate work, and superseded foreground jobs cancel before file access.
 - Decode resource limits reject zero, oversized, or inconsistent pixel shapes before parent allocation and pixel-stream copy. SVG and worker inputs are capped, while the C-worker address-space ceiling also bounds allocations performed inside third-party decoders.
 - Worker-bound host files are verified as regular files and read with a bounded, fallible allocator before a worker is reserved. The IPC deadline thread now contains only cancellable child-pipe work, and encoded bytes are released immediately after transfer.
@@ -58,6 +61,18 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- Added independent left/right docking for Tools and Image Information through
+  View > Panel Position. Insets accumulate correctly when panels share an edge,
+  every layout refits the image-safe viewport, and hidden panels reserve zero space.
+- Added native Linux AccessKit/AT-SPI delivery behind an early fail-closed privacy
+  boundary. Startup accepts only Unix-domain D-Bus environment addresses, permits
+  local Unix IPC, denies Internet socket families and io_uring before application
+  threads start, mirrors every blocked syscall onto its x86-64 x32 ABI alias, and
+  fails launch if the policy cannot be verified. The worker baseline filter closes
+  the same x32 alias path. Cargo-deny confines the generic D-Bus and process-helper
+  crates to the reviewed AccessKit dependency path. Cross-target builds and policy
+  contracts are automated; manual Orca acceptance remains release evidence rather
+  than an implementation claim.
 - Added a dependency-free black-box GUI performance gate for first-window-frame
   and first-image latency, sampled navigation, settled idle redraws, peak resident
   memory, 50,000-file folder scaling, and exact decoded/thumbnail cache bounds.
@@ -92,8 +107,7 @@ All notable changes to this project are documented here. The format is human-wri
   instead of exposing the internal multiplier relative to Fit.
 - Accessibility semantics for custom-painted tool, disclosure, and thumbnail
   controls and exact crop bounds; visible keyboard focus; automated WCAG AA
-  contrast checks; and a native AccessKit bridge on Windows and macOS. The bridge
-  is integrated without admitting AccessKit's network-capable Unix D-Bus stack.
+  contrast checks; and native AccessKit delivery on Windows, macOS, and Linux.
 - Filmstrip shows async real thumbnails (`thumbs` module); Space-hold temporary pan, tap Space resets view.
 - Linux worker: `no_new_privs`, non-dumpable, and seccomp-bpf that EPERMs classic and io_uring network paths (`seccompiler`).
 - Flag/batch cull (`X` / `B`) and Shift+Delete permanent delete with confirmation.

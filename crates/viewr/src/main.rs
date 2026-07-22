@@ -11,6 +11,11 @@ use viewr::cli::{self, Invocation};
 
 fn main() -> ExitCode {
     let application_started = std::time::Instant::now();
+    if let Err(error) = viewr::privacy::apply_startup_hardening() {
+        cli::ensure_console();
+        eprintln!("viewr: {error}");
+        return ExitCode::FAILURE;
+    }
     // Maximum privacy default: no log output unless the user explicitly opts in.
     // Set `RUST_LOG` or `VIEWR_LOG` (e.g. `RUST_LOG=viewr=debug`) to enable stderr
     // diagnostics. Nothing is written to a log file.

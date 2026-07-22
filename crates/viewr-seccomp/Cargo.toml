@@ -1,6 +1,6 @@
 [package]
 name = "viewr-seccomp"
-description = "Shared Linux seccomp policies for the isolated viewr decoder"
+description = "Shared Linux seccomp policies for viewr and its isolated decoder"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

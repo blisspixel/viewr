@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 
-Write-Host "== cargo deny (network crate ban + licenses) =="
+Write-Host "== cargo deny (remote-client ban + confined Linux D-Bus + licenses) =="
 cargo deny check
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -56,7 +56,7 @@ if ($null -eq $capabilities -or $capabilities.SelectNodes("*").Count -ne 0) {
     exit 1
 }
 
-Write-Host "== dependency tree must not pull reqwest/hyper/rustls =="
+Write-Host "== dependency tree must not pull remote-service client stacks =="
 $tree = cargo tree --quiet -p viewr --prefix none --edges normal | Out-String
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 foreach ($crate in @("reqwest", "hyper", "rustls", "native-tls")) {

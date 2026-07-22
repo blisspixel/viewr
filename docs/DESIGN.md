@@ -11,10 +11,10 @@ disappears. This spec is the converged result of two rounds of design critique
    solid background, with no border radius and no drop shadow. A photo has no
    rounded corners and casts no shadow; anything else reads as "a card on a web
    page," which is the opposite of what we are.
-2. Calm, precise, premium. Nothing moves at rest. Persistent chrome is quiet,
-   docked, and explicitly collapsible. Controls do not disappear on a timer or
-   compete with the photo. The interface should feel like a native instrument,
-   not a web app.
+2. Calm, precise, premium. Nothing moves at rest. Optional chrome is quiet,
+   docked, explicitly collapsible, and fully hideable from View. Controls do not
+   disappear on a timer or compete with the photo. The interface should feel like
+   a native instrument, not a web app.
 3. Simple surface, deep engineering. The restraint on screen sits on top of the
    rigor in `STANDARDS.md`. Minimal is the visible result of the work, not the
    absence of it.
@@ -31,15 +31,18 @@ disappears. This spec is the converged result of two rounds of design critique
   permits, the filename, dimensions, and physical zoom percentage, where 100
   percent means one source pixel per physical display pixel. Long names truncate
   with the full value available as a tooltip.
-- Tools: a 44px collapsed rail on the left with a 36px vector-chevron target. Expanding it
-  produces a 64px docked panel containing only high-frequency image operations:
-  rotate, flip, crop, and flag. Save and destructive actions remain in File so
-  the tool surface stays calm.
-- Folder Previews: when a folder contains multiple images, a 44px collapsed rail
-  appears at the bottom. Its chevron expands a 112px docked thumbnail strip with
-  current and flagged states. Thumbnails decode only while the panel is open.
-- Image Information: an optional 304px right panel contains file facts, review
-  state, and the explicit export-privacy checkbox. It is opened from View or `I`.
+- Tools: hidden by default for a clean image-first surface. View > Panels or `T`
+  shows a 64px docked panel containing only high-frequency image operations:
+  rotate, flip, crop, and flag. Its vector chevron collapses it to a 44px rail.
+  View > Panel Position docks it on either the left or right. Save and destructive
+  actions remain in File so the tool surface stays calm.
+- Folder Previews: hidden by default. When a folder contains multiple images,
+  View > Panels or `G` shows a 112px docked thumbnail strip with current and
+  flagged states. Its chevron collapses it to a 44px bottom rail. Thumbnails decode
+  only while the panel is visible and expanded.
+- Image Information: an optional 304px panel contains file facts, review state,
+  and the explicit export-privacy checkbox. View > Panels or `I` toggles it, and
+  View > Panel Position independently docks it on the left or right.
 - Empty and loading states use an opaque dark card with tested AA text contrast.
   They remain readable on black, gray, white, and system-driven image backgrounds.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws
@@ -116,10 +119,12 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 ### Micro-interactions
 - Buttons use deterministic hover, active, selected, and focus colors. Custom
   controls paint a visible 2px amber focus ring.
-- Panel disclosure is immediate and deterministic. The chevron, `T`, `G`, or `I`
-  performs one state change, reserves the new viewport, and refits the image. No
-  panel slides over the photo, no control hides on pointer movement, and no idle
-  timer changes layout. Never animate backdrop blur or box-shadow.
+- Panel state is immediate and deterministic. `T`, `G`, and `I` control full
+  visibility; chevrons control compact collapse; View controls left/right position.
+  Each action performs one state change, reserves the exact new viewport, and
+  refits the image. No panel slides over the photo, no control hides on pointer
+  movement, and no idle timer changes layout. Never animate backdrop blur or
+  box-shadow.
 
 ### Anti-patterns (do not)
 Crossfade on every navigation; spinners on prefetched images; a black or
@@ -144,9 +149,11 @@ and be validated before the motion can ship.
 - Custom-painted icon buttons, disclosure buttons, and thumbnails publish
   explicit button labels and selected state to egui's accessibility tree.
 - Crop publishes its exact source-pixel origin and dimensions. Windows and macOS
-  connect the egui tree to native assistive technology through a network-free
-  AccessKit adapter. Linux native delivery remains explicitly pending because the
-  current upstream Unix bridge would violate the dependency-level network ban.
+  connect the egui tree directly to native assistive technology through AccessKit.
+  Linux connects through AccessKit/AT-SPI only after startup validates local Unix
+  D-Bus addresses and installs a fail-closed kernel policy denying Internet socket
+  creation and io_uring. Manual screen-reader acceptance remains required on all
+  three targets.
 - Tooltips carry the keyboard shortcut so power users learn the keys. Automated
   tests enforce at least a 4.5:1 contrast ratio for normal text, muted text,
   accent controls, and primary-button text on their actual surfaces.

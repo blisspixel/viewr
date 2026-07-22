@@ -152,8 +152,9 @@ and be validated before the motion can ship.
   connect the egui tree directly to native assistive technology through AccessKit.
   Linux connects through AccessKit/AT-SPI only after startup validates local Unix
   D-Bus addresses and installs a fail-closed kernel policy denying Internet socket
-  creation and io_uring. Manual screen-reader acceptance remains required on all
-  three targets.
+  creation and io_uring. An external Windows UI Automation test exercises the
+  native provider and action path. Manual screen-reader acceptance remains
+  required on all three targets; `ACCESSIBILITY.md` defines the release matrix.
 - Tooltips carry the keyboard shortcut so power users learn the keys. Automated
   tests enforce at least a 4.5:1 contrast ratio for normal text, muted text,
   accent controls, and primary-button text on their actual surfaces.

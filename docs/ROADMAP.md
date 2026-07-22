@@ -21,9 +21,9 @@ checksummed local/CI release artifacts, and the feature-gated production
 C-decoder syscall allowlist are complete. Phase 8 local install guidance,
 user-controlled file associations, and canonical documentation are complete;
 keyboard access, native Windows/macOS/Linux screen-reader delivery, semantic
-labels, configurable panel-safe chrome, contrast checks, and enforced GUI
-performance budgets are complete. Manual cross-platform assistive-technology
-validation remains.
+labels, a native Windows provider/action smoke gate, configurable panel-safe
+chrome, contrast checks, and enforced GUI performance budgets are complete.
+Manual cross-platform assistive-technology validation remains.
 
 **Next focus: manual target-OS assistive-technology validation.**
 
@@ -216,7 +216,10 @@ install from source or a simple GitHub-style release artifact.
   - [x] Privacy-compatible Linux AccessKit/AT-SPI delivery with local-only D-Bus
     validation, dependency-path enforcement, and an early fail-closed Internet
     socket policy.
-  - [ ] Manual screen-reader validation on Windows, macOS, and Linux.
+  - [x] External Windows UI Automation smoke coverage for the native tree, state,
+    focusability, and action path (`scripts/accessibility-smoke.ps1`).
+  - [ ] Manual screen-reader validation on Windows, macOS, and Linux using
+    `docs/ACCESSIBILITY.md`.
 - [x] Performance budget locked in and regression-tested in CI: first presented
   window frame and image, sampled navigation, settled idle redraws,
   50,000-file memory scaling, and bounded decoded/thumbnail caches.

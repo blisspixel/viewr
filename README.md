@@ -72,7 +72,8 @@ explicit session-only export-metadata choice. View also exposes Fit Image to Vie
 (`0`), Actual Size (`1`), Zoom In (`+`), and Zoom Out (`-`) so zoom never depends on
 a mouse or trackpad. The empty, loading, and load-error states use an opaque
 high-contrast surface, so they remain readable even when the image background is
-white.
+white. The automated native bridge check and manual three-platform acceptance
+matrix live in [`docs/ACCESSIBILITY.md`](docs/ACCESSIBILITY.md).
 
 ## Formats
 
@@ -123,6 +124,8 @@ Linux, macOS, and Windows from a single codebase.
 
 ## Documentation
 
+- [`docs/ACCESSIBILITY.md`](docs/ACCESSIBILITY.md), native automation and the
+  manual Narrator, VoiceOver, and Orca release matrix.
 - [`docs/FORMATS.md`](docs/FORMATS.md), which formats are core vs worker-decoded.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), how viewr is structured and how a
   keystroke becomes a pixel.

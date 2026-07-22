@@ -100,6 +100,10 @@ testing.
 - Unit tests next to the code they cover.
 - Integration tests for the real flows: open, navigate, delete-and-undo, crop,
   convert, strip metadata.
+- External native accessibility tests must exercise the platform provider and
+  action path, not only inspect an in-process semantic tree. Windows CI runs the
+  dependency-free UI Automation smoke script. Manual Narrator, VoiceOver, and
+  Orca acceptance remains a distinct release gate in `docs/ACCESSIBILITY.md`.
 - Property tests (`proptest`) on the pure logic: transform math, natural-sort
   ordering, index preservation after delete, cache eviction.
 - Golden-file/snapshot tests (`insta`) for decode output on a corpus of known-good

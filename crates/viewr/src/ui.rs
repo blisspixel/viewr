@@ -631,6 +631,7 @@ fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &U
         ui,
         actions,
         "TOOLS",
+        "Tools",
         frame.tools_panel_side,
         UiAction::SetToolsPanelSide,
     );
@@ -639,6 +640,7 @@ fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &U
         ui,
         actions,
         "IMAGE INFORMATION",
+        "Image Information",
         frame.image_info_side,
         UiAction::SetImageInfoSide,
     );
@@ -648,12 +650,22 @@ fn dock_side_choices(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     heading: &str,
+    accessibility_heading: &str,
     current: DockSide,
     action: fn(DockSide) -> UiAction,
 ) {
     ui.label(RichText::new(heading).size(10.0).color(MUTED).strong());
     for (side, label) in [(DockSide::Left, "Left"), (DockSide::Right, "Right")] {
-        if ui.radio(current == side, label).clicked() {
+        let response = ui.radio(current == side, label);
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                current == side,
+                format!("{accessibility_heading}: {label}"),
+            )
+        });
+        if response.clicked() {
             actions.push(action(side));
             ui.close();
         }

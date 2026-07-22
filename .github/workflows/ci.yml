@@ -90,6 +90,11 @@ jobs:
       - name: Build workspace binaries
         run: cargo build --workspace --locked
 
+      - name: Exercise native Windows accessibility bridge
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/accessibility-smoke.ps1 -Binary target/debug/viewr.exe
+
       - name: Verify generated Flatpak Cargo sources
         if: runner.os == 'Linux'
         run: |

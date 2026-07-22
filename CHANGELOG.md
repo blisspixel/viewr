@@ -61,6 +61,12 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- Added a dependency-free Windows UI Automation smoke gate over the real app and
+  native AccessKit provider. It verifies focusable menus, image context, default
+  panel state, panel and disclosure actions, distinct left/right docking state,
+  metadata checked state, previews, and accessible thumbnail navigation. The
+  canonical manual Narrator, VoiceOver, and Orca matrix remains required and is
+  documented separately.
 - Added independent left/right docking for Tools and Image Information through
   View > Panel Position. Insets accumulate correctly when panels share an edge,
   every layout refits the image-safe viewport, and hidden panels reserve zero space.

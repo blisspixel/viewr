@@ -155,6 +155,23 @@ release. It does not justify importing a signing certificate or weakening local
 Windows policy. A portable source build can be uninstalled by removing its two
 binaries after choosing another default viewer if necessary.
 
+## Validate native Windows accessibility
+
+The Windows smoke test launches the real debug or release app and drives its
+out-of-process UI Automation provider. Build first, then run:
+
+```powershell
+cargo build --workspace --locked
+pwsh -NoProfile -File scripts/accessibility-smoke.ps1 `
+  -Binary target/debug/viewr.exe
+```
+
+A passing result verifies native tree discovery, focusable menus, panel state and
+actions, distinct left/right docking state, metadata state, folder previews, and
+accessible navigation. It does not replace human testing with Narrator,
+VoiceOver, or Orca. The complete release matrix and evidence requirements are in
+`docs/ACCESSIBILITY.md`.
+
 ## Build and verify a release archive
 
 The release archive contains the main executable and `viewr-decode` side by side,

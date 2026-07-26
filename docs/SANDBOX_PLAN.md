@@ -16,7 +16,7 @@ The main `viewr` process remains pure-Rust, memory-safe, and dependency-light. W
 2. **IPC (Inter-Process Communication):**
    - Main process spawns `viewr-decode` and communicates over standard pipes (`stdin`/`stdout`).
    - Main sends a versioned frame containing a validated format identifier and at most 512 MiB of encoded input.
-   - Worker decodes it, sends an exact-length bounded `RGBA8` stream, and waits for a versioned acknowledgement.
+   - Worker decodes it, sends bounded typed color evidence followed by an exact-length bounded `RGBA8` stream, and waits for a versioned acknowledgement.
    - Package smoke tests require an exact typed handshake response from the worker; an arbitrary decoder error does not count as protocol compatibility.
 3. **Hardened Sandbox (Phase 7):**
    - On Linux: fail-closed `no_new_privs`, a one-process seccomp policy, and denial of classic plus io_uring network paths. AVIF/HEIC builds add a default-deny syscall allowlist with read-only plugin discovery and thread-only clone; Flatpak supplies the filesystem and whole-app boundary.
@@ -31,7 +31,12 @@ optional AVIF/HEIC backends are implemented. Profile artifacts cover the whole
 application on all three desktop platforms. Linux C-decoder builds install a
 fail-closed default-deny policy before reading IPC. Shared runtime tests prove
 its denial semantics, while release-mode Ubuntu tests decode generated AVIF and
-HEIC inputs under the policy.
+HEIC inputs under the policy, compare worker pixels with direct decoder output,
+and verify bounded ICC/CICP precedence against both the distro compatibility
+floor and embedded libheif 1.23. The latest lane requires libde265 1.0.7 or newer
+and exercises HEVC-VUI-only color as well as container metadata. Parent tests
+separately prove that received ICC data is normalized only after the cancellable
+IPC transaction has joined.
 
 ## Why this is Exceptional
 Moving optional C decoders out of the UI process materially reduces blast radius, but process isolation is not zero risk and seccomp alone is not a complete sandbox. The defensible design layers bounded IPC, explicit resource limits, request timeouts, a network-denying process policy where implemented, and an enclosing OS package profile. Claims stay limited to controls that can be reproduced locally.
@@ -41,7 +46,7 @@ Moving optional C decoders out of the UI process materially reduces blast radius
 | Item | Status |
 |------|--------|
 | Multi-binary workspace (`viewr` + `viewr-decode`) | Done (feature-gated C backends) |
-| Versioned encoded-input/response/ack frames + bounded pixel-stream IPC | Done; worker receives no path |
+| Versioned encoded-input/response/ack frames + bounded pixel-stream IPC | Done; V2 carries ICC/CICP/unknown color status and the worker receives no path |
 | Feature-gated C deps (CI pure-Rust) | Done |
 | OS trash for curation | Done; `trash` crate on Windows/Linux and exact-result `NSFileManager` receipts on macOS |
 | Flatpak manifest (no network) | Exact-set tested 25.08 profile; installs the desktop entry and icon; Linux CI performs an offline Cargo build and worker probe |

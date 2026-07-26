@@ -362,13 +362,17 @@ pub struct DecodedImage {
 /// Color-management result attached to decoded pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorProfileStatus {
-    /// No usable embedded ICC profile was present, so standard sRGB is assumed.
+    /// No usable embedded color profile was present, so standard sRGB is assumed.
     #[default]
     AssumedSrgb,
+    /// Embedded metadata explicitly identifies standard sRGB component values.
+    TaggedSrgb,
     /// An embedded RGB ICC profile was converted into sRGB.
     ConvertedToSrgb,
     /// Embedded color metadata was present but could not be converted safely.
     EmbeddedProfileFallback,
+    /// An isolated decoder could not establish the pixel stream's color space.
+    UnknownWorkerProfileFallback,
 }
 
 impl ColorProfileStatus {
@@ -377,8 +381,10 @@ impl ColorProfileStatus {
     pub const fn label(self) -> &'static str {
         match self {
             Self::AssumedSrgb => "sRGB",
+            Self::TaggedSrgb => "Embedded color metadata: sRGB",
             Self::ConvertedToSrgb => "Embedded ICC converted to sRGB",
-            Self::EmbeddedProfileFallback => "Embedded ICC unavailable; sRGB fallback",
+            Self::EmbeddedProfileFallback => "Embedded color metadata unavailable; sRGB fallback",
+            Self::UnknownWorkerProfileFallback => "Worker color space unknown; sRGB fallback",
         }
     }
 }
@@ -403,7 +409,7 @@ impl ColorNormalizer {
         }
     }
 
-    fn from_icc_profile(profile: &[u8]) -> Self {
+    pub(crate) fn from_icc_profile(profile: &[u8]) -> Self {
         if profile.len() > MAX_ICC_PROFILE_BYTES {
             return Self::fallback();
         }
@@ -440,34 +446,49 @@ impl ColorNormalizer {
     }
 
     pub(crate) fn apply(&self, image: &mut DecodedImage) {
+        let result = self.apply_if_current(image, DecodeGeneration::unconditional());
+        debug_assert!(
+            result.is_ok(),
+            "an unconditional color transform cannot be cancelled"
+        );
+    }
+
+    pub(crate) fn apply_if_current(
+        &self,
+        image: &mut DecodedImage,
+        generation: DecodeGeneration<'_>,
+    ) -> io::Result<()> {
+        generation.ensure_current()?;
         image.color_profile = self.status;
         let Some(transform) = self.transform.as_ref() else {
-            return;
+            return Ok(());
         };
         let Some(row_bytes) = usize::try_from(image.width)
             .ok()
             .and_then(|width| width.checked_mul(4))
         else {
             image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-            return;
+            return Ok(());
         };
         if row_bytes == 0 || !image.rgba.len().is_multiple_of(row_bytes) {
             image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-            return;
+            return Ok(());
         }
         let mut converted = Vec::new();
         if converted.try_reserve_exact(row_bytes).is_err() {
             image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-            return;
+            return Ok(());
         }
         converted.resize(row_bytes, 0);
         for row in image.rgba.chunks_exact_mut(row_bytes) {
+            generation.ensure_current()?;
             if transform.transform(row, &mut converted).is_err() {
                 image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-                return;
+                return Ok(());
             }
             row.copy_from_slice(&converted);
         }
+        generation.ensure_current()
     }
 }
 
@@ -1036,6 +1057,34 @@ mod tests {
         assert_ne!(image.rgba, original);
         assert_eq!(image.rgba[3], 17);
         assert_eq!(image.rgba[7], 231);
+        assert_eq!(
+            [
+                ColorProfileStatus::AssumedSrgb.label(),
+                ColorProfileStatus::TaggedSrgb.label(),
+                ColorProfileStatus::ConvertedToSrgb.label(),
+                ColorProfileStatus::EmbeddedProfileFallback.label(),
+                ColorProfileStatus::UnknownWorkerProfileFallback.label(),
+            ],
+            [
+                "sRGB",
+                "Embedded color metadata: sRGB",
+                "Embedded ICC converted to sRGB",
+                "Embedded color metadata unavailable; sRGB fallback",
+                "Worker color space unknown; sRGB fallback",
+            ]
+        );
+
+        let mut malformed = DecodedImage {
+            rgba: vec![10, 20, 30, 255],
+            width: 0,
+            height: 1,
+            color_profile: ColorProfileStatus::AssumedSrgb,
+        };
+        normalizer.apply(&mut malformed);
+        assert_eq!(
+            malformed.color_profile,
+            ColorProfileStatus::EmbeddedProfileFallback
+        );
     }
 
     #[test]

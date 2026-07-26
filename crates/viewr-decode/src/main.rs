@@ -12,9 +12,19 @@
 #![allow(missing_docs)] // binary entry; module docs live above
 
 use std::io::{BufReader, Write};
-use viewr_protocol::WorkerResponse;
+use viewr_protocol::{WorkerColorProfile, WorkerResponse};
 
-const MAX_WORKER_ERROR_BYTES: usize = 2048;
+#[cfg(feature = "avif")]
+mod avif;
+#[cfg(feature = "heic")]
+mod heic;
+
+struct DecodedOutput {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    color_profile: WorkerColorProfile,
+}
 
 fn main() {
     #[cfg(target_os = "linux")]
@@ -49,11 +59,22 @@ fn main() {
             continue;
         }
 
-        match decode_input(&request.format, &request.encoded)
-            .and_then(|(width, height, rgba)| validate_decoded(width, height, rgba))
-        {
-            Ok((width, height, rgba)) => {
-                if !send_response(&mut stdout, &WorkerResponse::PixelStream { width, height }) {
+        match decode_input(&request.format, &request.encoded).and_then(validate_decoded) {
+            Ok(decoded) => {
+                let DecodedOutput {
+                    width,
+                    height,
+                    rgba,
+                    color_profile,
+                } = decoded;
+                if !send_response(
+                    &mut stdout,
+                    &WorkerResponse::PixelStream {
+                        width,
+                        height,
+                        color_profile,
+                    },
+                ) {
                     break;
                 }
                 if stdout
@@ -92,7 +113,7 @@ fn worker_error(message: impl AsRef<str>) -> WorkerResponse {
         } else {
             character
         };
-        if bounded.len() + character.len_utf8() > MAX_WORKER_ERROR_BYTES {
+        if bounded.len() + character.len_utf8() > viewr_protocol::MAX_WORKER_ERROR_BYTES {
             break;
         }
         bounded.push(character);
@@ -103,16 +124,16 @@ fn worker_error(message: impl AsRef<str>) -> WorkerResponse {
     WorkerResponse::Error(bounded)
 }
 
-fn validate_decoded(width: u32, height: u32, rgba: Vec<u8>) -> Result<(u32, u32, Vec<u8>), String> {
-    let expected_size =
-        viewr_protocol::checked_rgba_len(width, height).map_err(|error| error.to_string())?;
-    if expected_size != rgba.len() {
+fn validate_decoded(decoded: DecodedOutput) -> Result<DecodedOutput, String> {
+    let expected_size = viewr_protocol::checked_rgba_len(decoded.width, decoded.height)
+        .map_err(|error| error.to_string())?;
+    if expected_size != decoded.rgba.len() {
         return Err("decoder returned an invalid RGBA buffer".into());
     }
-    Ok((width, height, rgba))
+    Ok(decoded)
 }
 
-#[cfg(any(feature = "heic", test))]
+#[cfg(any(feature = "avif", feature = "heic", test))]
 fn copy_strided_rgba(
     data: &[u8],
     width: u32,
@@ -143,7 +164,13 @@ fn copy_strided_rgba(
     for row in data.chunks_exact(stride).take(rows) {
         rgba.extend_from_slice(&row[..row_bytes]);
     }
-    validate_decoded(width, height, rgba).map(|(_, _, rgba)| rgba)
+    let decoded = DecodedOutput {
+        width,
+        height,
+        rgba,
+        color_profile: WorkerColorProfile::Unknown,
+    };
+    validate_decoded(decoded).map(|decoded| decoded.rgba)
 }
 
 #[cfg(target_os = "linux")]
@@ -165,7 +192,7 @@ fn harden_worker_process() -> Result<(), String> {
     Ok(())
 }
 
-fn decode_input(format: &str, encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_input(format: &str, encoded: &[u8]) -> Result<DecodedOutput, String> {
     match format {
         "avif" => decode_avif(encoded),
         "heic" | "heif" => decode_heic(encoded),
@@ -175,51 +202,22 @@ fn decode_input(format: &str, encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), Str
 }
 
 #[cfg(feature = "avif")]
-fn decode_avif(encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
-    use image::GenericImageView;
-
-    let img = libavif_image::read(encoded).map_err(|e| e.to_string())?;
-    let (width, height) = img.dimensions();
-    viewr_protocol::checked_rgba_len(width, height).map_err(|error| error.to_string())?;
-    Ok((width, height, img.into_rgba8().into_raw()))
+fn decode_avif(encoded: &[u8]) -> Result<DecodedOutput, String> {
+    avif::decode(encoded)
 }
 
 #[cfg(not(feature = "avif"))]
-fn decode_avif(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_avif(_encoded: &[u8]) -> Result<DecodedOutput, String> {
     Err("AVIF support requires building viewr-decode with --features avif (and libavif)".into())
 }
 
 #[cfg(feature = "heic")]
-fn decode_heic(encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
-    let ctx = libheif_rs::HeifContext::read_from_bytes(encoded).map_err(|e| e.to_string())?;
-    let handle = ctx.primary_image_handle().map_err(|e| e.to_string())?;
-    viewr_protocol::checked_rgba_len(handle.width(), handle.height())
-        .map_err(|error| error.to_string())?;
-    let options = libheif_rs::DecodingOptions::new()
-        .ok_or_else(|| "failed to create HEIF decoding options".to_string())?;
-    let image = libheif_rs::LibHeif::new()
-        .decode(
-            &handle,
-            libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgba),
-            Some(options),
-        )
-        .map_err(|e| e.to_string())?;
-    let planes = image.planes();
-    let plane = planes
-        .interleaved
-        .ok_or_else(|| "no interleaved plane found".to_string())?;
-
-    let width = image.width();
-    let height = image.height();
-    if plane.width != width || plane.height != height {
-        return Err("decoder returned inconsistent RGBA plane dimensions".into());
-    }
-    let rgba = copy_strided_rgba(plane.data, width, height, plane.stride)?;
-    Ok((width, height, rgba))
+fn decode_heic(encoded: &[u8]) -> Result<DecodedOutput, String> {
+    heic::decode(encoded)
 }
 
 #[cfg(not(feature = "heic"))]
-fn decode_heic(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_heic(_encoded: &[u8]) -> Result<DecodedOutput, String> {
     Err(
         "HEIC/HEIF support requires building viewr-decode with --features heic (and libheif)"
             .into(),
@@ -230,7 +228,7 @@ fn decode_heic(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 /// Callers get a stable, honest error until a pure-Rust or well-packaged
 /// backend is chosen (tracked in docs/ROADMAP.md Phase 6 residuals).
 #[cfg(feature = "raw")]
-fn decode_raw(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
     Err(
         "camera RAW decoding is not implemented yet (feature raw reserved; see docs/FORMATS.md)"
             .into(),
@@ -238,25 +236,31 @@ fn decode_raw(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 }
 
 #[cfg(not(feature = "raw"))]
-fn decode_raw(_encoded: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
     Err("camera RAW is deferred; see docs/FORMATS.md (build with --features raw when ready)".into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_strided_rgba, validate_decoded, worker_error};
-    use viewr_protocol::WorkerResponse;
+    use super::{DecodedOutput, copy_strided_rgba, validate_decoded, worker_error};
     use viewr_protocol::{MAX_DECODE_DIMENSION, MAX_DECODE_PIXELS};
+    use viewr_protocol::{WorkerColorProfile, WorkerResponse};
 
     #[test]
     fn decoded_output_validation_checks_shape_and_limit() {
-        assert!(validate_decoded(2, 3, vec![0; 24]).is_ok());
-        assert!(validate_decoded(0, 3, Vec::new()).is_err());
-        assert!(validate_decoded(2, 3, vec![0; 23]).is_err());
+        let decoded = |width, height, rgba| DecodedOutput {
+            width,
+            height,
+            rgba,
+            color_profile: WorkerColorProfile::Unknown,
+        };
+        assert!(validate_decoded(decoded(2, 3, vec![0; 24])).is_ok());
+        assert!(validate_decoded(decoded(0, 3, Vec::new())).is_err());
+        assert!(validate_decoded(decoded(2, 3, vec![0; 23])).is_err());
 
         let height =
             u32::try_from(MAX_DECODE_PIXELS / u64::from(MAX_DECODE_DIMENSION) + 1).unwrap();
-        assert!(validate_decoded(MAX_DECODE_DIMENSION, height, Vec::new()).is_err());
+        assert!(validate_decoded(decoded(MAX_DECODE_DIMENSION, height, Vec::new())).is_err());
     }
 
     #[test]
@@ -279,6 +283,6 @@ mod tests {
             panic!("expected error response");
         };
         assert!(!message.contains('\n'));
-        assert!(message.len() <= super::MAX_WORKER_ERROR_BYTES);
+        assert!(message.len() <= viewr_protocol::MAX_WORKER_ERROR_BYTES);
     }
 }

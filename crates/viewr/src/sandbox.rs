@@ -39,14 +39,15 @@ pub(crate) fn load_via_worker(
     generation
         .ensure_current()
         .map_err(|error| Error::Decode(error.to_string()))?;
-    run_worker_request_with_timeout(
+    let output = run_worker_request_with_timeout(
         worker,
         format,
         encoded,
         WORKER_REQUEST_TIMEOUT,
         WORKER_TERMINATION_GRACE,
         generation,
-    )
+    )?;
+    finish_worker_output(output, generation)
 }
 
 /// Verify that the packaged worker can start and complete one bounded IPC request.
@@ -72,7 +73,7 @@ fn run_worker_request_with_timeout(
     timeout: Duration,
     termination_grace: Duration,
     generation: DecodeGeneration<'_>,
-) -> Result<DecodedImage, Error> {
+) -> Result<WorkerDecodedOutput, Error> {
     run_worker_operation_with_cancellation(
         worker,
         timeout,
@@ -319,7 +320,7 @@ fn exchange_with_worker(
     worker: &mut DaemonWorker,
     format: &str,
     encoded: Vec<u8>,
-) -> Result<DecodedImage, Error> {
+) -> Result<WorkerDecodedOutput, Error> {
     send_worker_input(worker, format, &encoded)?;
     drop(encoded);
     receive_worker_output(worker)
@@ -351,14 +352,18 @@ fn probe_worker_exchange(worker: &mut DaemonWorker) -> Result<(), Error> {
     }
 }
 
-fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Error> {
+fn receive_worker_output(worker: &mut DaemonWorker) -> Result<WorkerDecodedOutput, Error> {
     use std::io::{Read, Write};
 
     let response = viewr_protocol::read_worker_response(&mut worker.stdout)
         .map_err(|e| Error::Decode(format!("failed to read worker response: {e}")))?;
 
     match response {
-        viewr_protocol::WorkerResponse::PixelStream { width, height } => {
+        viewr_protocol::WorkerResponse::PixelStream {
+            width,
+            height,
+            color_profile,
+        } => {
             let expected_size = viewr_protocol::checked_rgba_len(width, height)
                 .map_err(|error| Error::Decode(error.to_string()))?;
             let mut rgba = Vec::new();
@@ -374,11 +379,14 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Erro
                 .and_then(|()| worker.stdin.flush())
                 .map_err(|e| Error::Decode(format!("failed to acknowledge worker output: {e}")))?;
 
-            Ok(DecodedImage {
-                rgba,
-                width,
-                height,
-                color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            Ok(WorkerDecodedOutput {
+                image: DecodedImage {
+                    rgba,
+                    width,
+                    height,
+                    color_profile: crate::decode::ColorProfileStatus::UnknownWorkerProfileFallback,
+                },
+                color_profile,
             })
         }
         viewr_protocol::WorkerResponse::Error(message) => {
@@ -388,6 +396,49 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Erro
             "worker sent an unexpected protocol-probe response".into(),
         )),
     }
+}
+
+struct WorkerDecodedOutput {
+    image: DecodedImage,
+    color_profile: viewr_protocol::WorkerColorProfile,
+}
+
+fn finish_worker_output(
+    mut output: WorkerDecodedOutput,
+    generation: DecodeGeneration<'_>,
+) -> Result<DecodedImage, Error> {
+    apply_worker_color_profile(&mut output.image, output.color_profile, generation)?;
+    Ok(output.image)
+}
+
+fn apply_worker_color_profile(
+    image: &mut DecodedImage,
+    color_profile: viewr_protocol::WorkerColorProfile,
+    generation: DecodeGeneration<'_>,
+) -> Result<(), Error> {
+    let ensure_current = || {
+        generation
+            .ensure_current()
+            .map_err(|error| Error::Decode(error.to_string()))
+    };
+    ensure_current()?;
+    match color_profile {
+        viewr_protocol::WorkerColorProfile::Unknown => {}
+        viewr_protocol::WorkerColorProfile::Icc(profile) => {
+            let normalizer = crate::decode::ColorNormalizer::from_icc_profile(&profile);
+            ensure_current()?;
+            normalizer
+                .apply_if_current(image, generation)
+                .map_err(|error| Error::Decode(error.to_string()))?;
+        }
+        viewr_protocol::WorkerColorProfile::Cicp(cicp) if cicp.is_srgb() => {
+            image.color_profile = crate::decode::ColorProfileStatus::TaggedSrgb;
+        }
+        viewr_protocol::WorkerColorProfile::Cicp(_) => {
+            image.color_profile = crate::decode::ColorProfileStatus::EmbeddedProfileFallback;
+        }
+    }
+    ensure_current()
 }
 
 struct DaemonWorker {
@@ -526,9 +577,9 @@ fn return_worker(worker: DaemonWorker) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonWorker, exchange_with_worker, read_bounded, read_bounded_if_current,
-        read_bounded_input, receive_worker_output, run_worker_operation_with_cancellation,
-        run_worker_operation_with_timeout,
+        DaemonWorker, apply_worker_color_profile, exchange_with_worker, finish_worker_output,
+        read_bounded, read_bounded_if_current, read_bounded_input, receive_worker_output,
+        run_worker_operation_with_cancellation, run_worker_operation_with_timeout,
     };
     use crate::decode::DecodeGeneration;
     use crate::ephemeral::TempWorkspace;
@@ -543,6 +594,12 @@ mod tests {
     const SUCCESS_CHILD_FLAG: &str = "VIEWR_TEST_SUCCESS_WORKER";
     const PIXELS_FLUSHED_MARKER: &str = "VIEWR_TEST_PIXELS_FLUSHED";
     const READY_MARKER: &str = "VIEWR_TEST_WORKER_READY";
+
+    fn display_p3_profile() -> Vec<u8> {
+        moxcms::ColorProfile::new_display_p3()
+            .encode()
+            .expect("encode Display P3 test profile")
+    }
 
     fn signal_ready() {
         let mut stdout = std::io::stdout().lock();
@@ -574,6 +631,7 @@ mod tests {
             &viewr_protocol::WorkerResponse::PixelStream {
                 width: 2,
                 height: 1,
+                color_profile: viewr_protocol::WorkerColorProfile::Unknown,
             },
         )
         .unwrap();
@@ -599,13 +657,14 @@ mod tests {
         };
         assert_eq!(request.format, "avif");
         assert_eq!(request.encoded, b"selected image bytes");
-        let pixels = [1_u8, 2, 3, 4, 5, 6, 7, 8];
+        let pixels = [210_u8, 120, 35, 17, 40, 180, 210, 231];
         let mut stdout = std::io::stdout().lock();
         viewr_protocol::write_worker_response(
             &mut stdout,
             &viewr_protocol::WorkerResponse::PixelStream {
                 width: 2,
                 height: 1,
+                color_profile: viewr_protocol::WorkerColorProfile::Icc(display_p3_profile()),
             },
         )
         .unwrap();
@@ -741,10 +800,107 @@ mod tests {
             "sandbox::tests::successful_worker_child",
             SUCCESS_CHILD_FLAG,
         );
-        let image =
+        let output =
             exchange_with_worker(&mut worker, "avif", b"selected image bytes".to_vec()).unwrap();
-        assert_eq!((image.width, image.height), (2, 1));
-        assert_eq!(image.rgba, [1, 2, 3, 4, 5, 6, 7, 8]);
+        let original = [210_u8, 120, 35, 17, 40, 180, 210, 231];
+        assert_eq!((output.image.width, output.image.height), (2, 1));
+        assert_eq!(output.image.rgba, original);
+        assert_eq!(
+            output.color_profile,
+            viewr_protocol::WorkerColorProfile::Icc(display_p3_profile())
+        );
+
+        // Normalization deliberately happens only after the timed IPC thread
+        // has joined, while the caller still owns its shared decode permit.
+        let image = finish_worker_output(output, DecodeGeneration::unconditional()).unwrap();
+        assert_eq!(
+            image.color_profile,
+            crate::decode::ColorProfileStatus::ConvertedToSrgb
+        );
+        assert_ne!(image.rgba, original);
+        assert_eq!([image.rgba[3], image.rgba[7]], [17, 231]);
+    }
+
+    #[test]
+    fn worker_color_evidence_is_applied_or_falls_back_explicitly() {
+        let image = || crate::decode::DecodedImage {
+            rgba: vec![20, 40, 60, 255],
+            width: 1,
+            height: 1,
+            color_profile: crate::decode::ColorProfileStatus::UnknownWorkerProfileFallback,
+        };
+
+        let mut unknown = image();
+        apply_worker_color_profile(
+            &mut unknown,
+            viewr_protocol::WorkerColorProfile::Unknown,
+            DecodeGeneration::unconditional(),
+        )
+        .unwrap();
+        assert_eq!(
+            unknown.color_profile,
+            crate::decode::ColorProfileStatus::UnknownWorkerProfileFallback
+        );
+
+        let mut srgb = image();
+        apply_worker_color_profile(
+            &mut srgb,
+            viewr_protocol::WorkerColorProfile::Cicp(viewr_protocol::CicpColor {
+                color_primaries: 1,
+                transfer_characteristics: 13,
+                matrix_coefficients: 0,
+                full_range: true,
+            }),
+            DecodeGeneration::unconditional(),
+        )
+        .unwrap();
+        assert_eq!(
+            srgb.color_profile,
+            crate::decode::ColorProfileStatus::TaggedSrgb
+        );
+
+        let mut hdr = image();
+        apply_worker_color_profile(
+            &mut hdr,
+            viewr_protocol::WorkerColorProfile::Cicp(viewr_protocol::CicpColor {
+                color_primaries: 9,
+                transfer_characteristics: 16,
+                matrix_coefficients: 9,
+                full_range: false,
+            }),
+            DecodeGeneration::unconditional(),
+        )
+        .unwrap();
+        assert_eq!(
+            hdr.color_profile,
+            crate::decode::ColorProfileStatus::EmbeddedProfileFallback
+        );
+
+        let mut icc = image();
+        let original = icc.rgba.clone();
+        apply_worker_color_profile(
+            &mut icc,
+            viewr_protocol::WorkerColorProfile::Icc(display_p3_profile()),
+            DecodeGeneration::unconditional(),
+        )
+        .unwrap();
+        assert_eq!(
+            icc.color_profile,
+            crate::decode::ColorProfileStatus::ConvertedToSrgb
+        );
+        assert_ne!(icc.rgba, original);
+
+        let generation = AtomicU64::new(2);
+        let mut superseded = image();
+        let original = superseded.rgba.clone();
+        let error = apply_worker_color_profile(
+            &mut superseded,
+            viewr_protocol::WorkerColorProfile::Icc(display_p3_profile()),
+            DecodeGeneration::tracked(&generation, 1),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("superseded"));
+        assert_eq!(superseded.rgba, original);
     }
 
     #[test]

@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Fixed
 
+- Optional AVIF and HEIC workers now attach bounded ICC or typed CICP color
+  evidence to protocol V2 pixel streams. AVIF decode preserves libavif metadata;
+  HEIC reads source ICC size before fallible allocation, preserves source NCLX
+  when newer libheif versions would otherwise choose a different output target,
+  enables libheif 1.23 bitstream-profile passthrough when no container NCLX
+  exists, and keeps the source ICC when passthrough performs no extra gamut
+  conversion. Decoded output CICP replaces ICC only when a requested transform
+  demonstrably changes the color encoding.
+  System-libheif and embedded 1.23 release tests cover the compatibility floor,
+  dual-profile precedence, HEVC VUI-only color, matching ICC plus VUI metadata,
+  and a libde265 version that can propagate that VUI. The main process converts
+  worker ICC input after the cancellable IPC transaction has joined, recognizes
+  tagged sRGB, and exposes unsupported or unknown color as an explicit fallback
+  instead of silently assuming tagged sRGB.
 - Crop export now validates source buffers, uses fallible allocation, and
   quantizes locked selections to exact reduced integer ratios even on odd-sized
   images. The same quantizer supplies exact accessible output bounds. Save As

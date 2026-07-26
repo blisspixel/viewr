@@ -171,7 +171,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev \
-            libheif-dev libheif-plugin-libde265 libheif-plugin-x265
+            libde265-dev libx265-dev libnuma-dev libheif-dev \
+            libheif-plugin-libde265 libheif-plugin-x265
 
       - name: Set up pinned Rust
         run: rustup show
@@ -189,7 +190,14 @@ jobs:
         run: |
           cargo test -p viewr-seccomp --locked
           cargo test --release -p viewr-decode \
-            --features avif,heic --test c_decoder_sandbox --locked \
+            --features avif,heic --locked \
+            -- --test-threads=1
+
+      - name: Prove libheif 1.23 profile and HEVC VUI behavior
+        run: |
+          pkg-config --atleast-version=1.0.7 libde265
+          cargo test --release -p viewr-decode \
+            --features heic-latest-ci --locked \
             -- --test-threads=1
 
   coverage:

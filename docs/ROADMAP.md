@@ -79,8 +79,19 @@ and [`Surface`](https://docs.rs/wgpu/latest/wgpu/struct.Surface.html) APIs.
   path, including animated frames, with an explicit fallback status.
 - [x] Generate the full GPU mip chain in the sRGB texture pipeline so minification
   is stable and linear-light filtered.
-- [ ] Carry trustworthy color metadata through the optional worker protocol rather
-  than silently treating AVIF/HEIC output as untagged sRGB.
+- [x] Carry trustworthy color metadata through the optional worker protocol rather
+  than silently treating AVIF/HEIC output as untagged sRGB. Protocol V2 bounds
+  ICC to 10 MiB, types CICP fields, and makes unknown output explicit; optional
+  release tests compare AVIF/HEIC worker pixels with decoder references, exercise
+  both the Ubuntu system-libheif floor and an embedded libheif 1.23 dual-profile
+  path, and pair with parent IPC-normalization tests. HEIC ICC extraction is
+  size-first and fallible; newer libheif output is explicitly held to the source
+  NCLX contract, version-10 bitstream-profile passthrough is enabled, and decoded
+  output evidence supersedes ICC only after a demonstrated encoding change. ICC
+  remains authoritative under no-transform passthrough, including matching
+  bitstream-only NCLX. The latest-codec lane enforces the libde265
+  VUI-propagation floor before exercising both container NCLX and HEVC-VUI-only
+  fixtures.
 - [ ] Separate source pixels, working color space, and output transform so future
   wide-gamut values are not clipped by the current RGBA8 sRGB intermediate.
 - [ ] Upgrade the wgpu/egui-wgpu integration only after a focused compatibility
@@ -345,8 +356,9 @@ of them just works.
   worker.
 - [ ] Add multi-page TIFF and ICO navigation instead of exposing only one decoded
   image.
-- [ ] Carry worker color metadata into the main process and test optional release
-  builds as complete viewing pipelines.
+- [x] Carry worker color metadata into the main process and test both sides of
+  the boundary (`viewr-protocol` V2, release C-worker pixel/profile comparisons,
+  and parent IPC-normalization/cancellation tests).
 - [x] Honest format capability table: `docs/FORMATS.md`.
 
 ## Phase 7: Hardening and the privacy proof
@@ -419,8 +431,9 @@ install from source or a simple GitHub-style release artifact.
 - [x] Performance budget locked in and regression-tested in CI: first presented
   window frame and image, sampled navigation, settled idle redraws,
   50,000-file memory scaling, and bounded decoded/thumbnail caches.
-- [ ] Display-fidelity acceptance from Priority 1: worker color metadata,
-  per-display output, reference-profile fixtures, and honest wide-gamut/HDR gates.
+- [ ] Display-fidelity acceptance from Priority 1: worker color metadata is
+  complete; per-display output, reference-profile fixtures, and honest
+  wide-gamut/HDR gates remain.
 - [ ] Public, checksummed artifacts from a recorded green multi-OS workflow, with
   native install surfaces once external signing credentials are available.
 

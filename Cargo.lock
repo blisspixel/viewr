@@ -2279,6 +2279,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d2593dda939875015d3e1a9deccdb57381d4ef1fc9a96120731b25990579689"
 dependencies = [
  "cfg-if",
+ "cmake",
  "libc",
  "system-deps 7.0.8",
  "vcpkg",
@@ -4540,9 +4541,12 @@ version = "0.0.0"
 dependencies = [
  "image",
  "libavif-image",
+ "libavif-sys",
  "libc",
  "libheif-rs",
+ "libheif-sys",
  "libraw-rs",
+ "moxcms",
  "viewr-protocol",
  "viewr-seccomp",
 ]

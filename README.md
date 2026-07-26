@@ -100,8 +100,10 @@ The goal is the VLC of image viewers, while the current claim remains narrower a
 testable. The always-on pure-Rust core covers
 JPEG, PNG, GIF, WebP, BMP, TIFF, ICO, PNM, TGA, QOI, DDS, HDR, OpenEXR, farbfeld,
 JPEG XL, and SVG. GIF, WebP, and APNG animate. AVIF and HEIC/HEIF go through the
-feature-gated `viewr-decode` worker; camera RAW is still deferred. Multi-page TIFF
-and ICO currently show one decoded image rather than a page navigator. Full table:
+feature-gated `viewr-decode` worker, whose V2 protocol preserves bounded ICC/CICP
+color evidence or reports an explicit fallback; camera RAW is still deferred.
+Multi-page TIFF and ICO currently show one decoded image rather than a page
+navigator. Full table:
 [`docs/FORMATS.md`](docs/FORMATS.md).
 
 ## Stack, short version
@@ -150,7 +152,7 @@ Full reasoning, including the alternatives we rejected, is in
 ## Quality bar
 
 viewr targets 85 percent or higher line coverage on its testable logic (currently
-90.58 percent lines and 81.52 percent functions), clippy at pedantic with warnings
+90.64 percent lines and 81.62 percent functions), clippy at pedantic with warnings
 as errors, continuous fuzzing of the decode path, and behavior-level contract tests
 that keep the coverage honest.
 The full set of engineering standards is in
@@ -186,7 +188,7 @@ Linux, macOS, and Windows from a single codebase.
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
 
-Status: **Phases 0 through 5 and Phase 7 are complete for their local repository scope; format depth and 1.0 release acceptance remain in progress**. Pure-Rust core decode (including SVG), bounded animation, input ICC conversion, the path-free `viewr-decode` boundary, Linux fail-closed process policies, three locally verifiable OS sandbox profiles, checksummed release archives, configurable panel-safe chrome, native AccessKit delivery on Windows, macOS, and Linux, local CLI (`doctor`, `benchmark`, `update`, `help`), opt-in core-format associations, and enforced GUI performance budgets are in place. The named remaining gates are per-display color and HDR work, RAW and multi-page depth, manual target-OS screen-reader validation, hosted multi-OS evidence, and public verifiable distribution. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/ROADMAP.md`, `docs/FORMATS.md`, `docs/PERFORMANCE.md`, and `docs/INSTALL.md`.
+Status: **Phases 0 through 5 and Phase 7 are complete for their local repository scope; format depth and 1.0 release acceptance remain in progress**. Pure-Rust core decode (including SVG), bounded animation, core and worker color-profile evidence, the path-free `viewr-decode` boundary, Linux fail-closed process policies, three locally verifiable OS sandbox profiles, checksummed release archives, configurable panel-safe chrome, native AccessKit delivery on Windows, macOS, and Linux, local CLI (`doctor`, `benchmark`, `update`, `help`), opt-in core-format associations, and enforced GUI performance budgets are in place. The named remaining gates are per-display color and HDR work, RAW and multi-page depth, manual target-OS screen-reader validation, hosted multi-OS evidence, and public verifiable distribution. Packaging only makes viewr available as an Open With choice. It never changes a user's default viewer. No public installer or store release exists yet. See `docs/ROADMAP.md`, `docs/FORMATS.md`, `docs/PERFORMANCE.md`, and `docs/INSTALL.md`.
 
 ```
 cargo run --release -- path/to/image.png

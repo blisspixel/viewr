@@ -118,8 +118,25 @@ Shipped:
   background threads via the `image` crate. For complex C-backed formats, the
   main process opens the selected file and delegates bounded encoded bytes to an
   isolated `viewr-decode` helper using versioned request frames and a
-  length-validated RGBA8 stream. The parent acknowledges each complete pixel
-  stream before the worker returns to the idle pool and accepts another request.
+  length-validated RGBA8 stream. Each V2 response also carries a bounded ICC
+  profile, typed H.273 CICP values, or an explicit unknown color-space state.
+  The parent normalizes supported profiles and never silently promotes unknown
+  worker output to tagged sRGB. ICC normalization runs after the timed IPC thread
+  has joined, remains under the shared decode-concurrency permit, and checks the
+  foreground generation between rows. This prevents cancelled requests from
+  detaching expensive parent transforms. The HEIC adapter performs size-first,
+  fallible ICC extraction and explicitly requests source-NCLX output from
+  libheif runtimes whose append-only options ABI supports it. With the version-10
+  ABI it also enables bitstream-profile passthrough when a file has no container
+  NCLX. Because that contract performs no additional gamut conversion, an ICC
+  remains authoritative when ICC and bitstream NCLX coexist; decoded CICP replaces
+  it only when source and output evidence demonstrate a changed color encoding.
+  Version 8 and 9 runtimes conservatively expose their decoded output CICP, or
+  unknown when none is available, instead of retaining an ICC after their implicit
+  sRGB transform. A separate embedded libheif 1.23 CI lane, gated on libde265
+  1.0.7 or newer, verifies container and HEVC-VUI-only paths, including matching
+  ICC plus VUI metadata. The parent acknowledges each complete pixel stream
+  before the worker returns to the idle pool and accepts another request.
   Core decoders apply all eight EXIF orientations. Bounded embedded RGB ICC
   profiles are converted into the current sRGB working path; unsupported profiles
   carry an explicit fallback status instead of a false color-managed claim.

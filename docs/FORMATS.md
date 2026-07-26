@@ -53,9 +53,24 @@ and unit tests under `decode` / `edit`.
   PNG and WebP containers are preflighted before decoder allocation. JPEG XL's
   locally reviewed `jxl-color` boundary rejects encoded, declared, or amplified
   ICC output beyond the same 10 MiB ceiling.
-- SVG and optional worker output currently enter the sRGB path without a complete
-  source-to-output color description. The worker protocol does not yet carry ICC
-  or equivalent AVIF/HEIC color metadata.
+- SVG currently enters the sRGB path without a complete source-to-output color
+  description. Worker protocol V2 carries either a bounded ICC profile, H.273
+  CICP values, or an explicit unknown status with every RGBA8 stream. AVIF keeps
+  trustworthy ICC or CICP evidence from libavif. HEIC/HEIF checks source ICC size
+  before fallible allocation and explicitly preserves source NCLX when running
+  on libheif 1.21 or newer. Libheif 1.23 additionally passes through HEVC VUI
+  color when no container NCLX exists. Decoded output CICP wins when source and
+  output primaries or transfer demonstrate that a requested transform changed the
+  pixel encoding. ICC remains authoritative when version-10 passthrough performs
+  no extra gamut conversion, including when matching bitstream-only NCLX evidence
+  coexists. Version 8 and 9 runtimes expose decoded output CICP, or unknown if the
+  decoder supplies none, rather than retaining ICC after their implicit sRGB
+  target. The embedded 1.23 CI lane requires libde265 1.0.7 or newer because
+  earlier adapters do not propagate HEVC VUI color. Untagged output follows
+  libheif's deterministic sRGB decode fallback. ICC input is normalized to sRGB,
+  explicit sRGB CICP is accepted as tagged sRGB, and color spaces that the current
+  working path cannot convert remain visible as a fallback status rather than
+  being silently relabeled.
 - Core and worker dimensions and declared RGBA output sizes are validated before
   parent pixel allocation. Superseded worker reads and IPC requests stop and
   terminate their contained helper instead of occupying a decode slot until the

@@ -18,8 +18,17 @@ default = []
 # Opt-in C/C++ decoder backends. Off by default so the workspace builds on CI
 # without system libraries. Enable for local/dev builds that have the deps:
 #   cargo build -p viewr-decode --features avif,heic
-avif = ["dep:libavif-image", "dep:image"]
-heic = ["dep:libheif-rs"]
+avif = ["dep:image", "dep:libavif-image", "dep:libavif-sys"]
+heic = ["dep:libheif-rs", "dep:libheif-sys"]
+# CI-only compatibility proof against the currently vendored libheif release.
+# Shipping builds keep the Ubuntu 24.04-compatible v1.17 API floor.
+heic-latest-ci = [
+    "heic",
+    "libheif-rs/latest",
+    "libheif-rs/embedded-libheif",
+    "libheif-sys/latest",
+    "libheif-sys/embedded-libheif",
+]
 raw = ["dep:libraw-rs"]
 all-c = ["avif", "heic", "raw"]
 
@@ -27,6 +36,7 @@ all-c = ["avif", "heic", "raw"]
 viewr-protocol = { path = "../viewr-protocol" }
 image = { version = "0.25", optional = true, default-features = false }
 libavif-image = { version = "0.14", optional = true }
+libavif-sys = { version = "0.17", optional = true }
 # Ubuntu 24.04, the pinned Linux C-decoder validation host, provides libheif
 # 1.17. Keep the wrapper's declared API floor aligned with the APIs used here
 # instead of its newer default `latest` feature.
@@ -36,7 +46,16 @@ libheif-rs = {
     default-features = false,
     features = ["v1_17"],
 }
+libheif-sys = {
+    version = "5.3",
+    optional = true,
+    default-features = false,
+    features = ["v1_17"],
+}
 libraw-rs = { version = "0.0.4", optional = true }
+
+[dev-dependencies]
+moxcms = "0.8.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

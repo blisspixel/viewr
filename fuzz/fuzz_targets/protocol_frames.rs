@@ -5,8 +5,9 @@ use std::io::Cursor;
 use arbitrary::{Arbitrary, Unstructured};
 use libfuzzer_sys::fuzz_target;
 use viewr_protocol::{
-    MAX_RESPONSE_PAYLOAD_BYTES, WorkerResponse, checked_rgba_len, read_ack, read_decode_request,
-    read_worker_response, write_ack, write_decode_request, write_worker_response,
+    CicpColor, MAX_WORKER_ERROR_BYTES, WorkerColorProfile, WorkerResponse, checked_rgba_len,
+    read_ack, read_decode_request, read_worker_response, write_ack, write_decode_request,
+    write_worker_response,
 };
 
 const MAX_FUZZ_INPUT_BYTES: usize = 1024 * 1024;
@@ -39,7 +40,7 @@ fuzz_target!(|data: &[u8]| {
         6 => round_trip_shape(payload),
         7 => round_trip_probe(),
         _ => {
-            let mut truncated = b"VWI1".to_vec();
+            let mut truncated = b"VWI2".to_vec();
             truncated.extend_from_slice(payload);
             let _ = read_decode_request(&mut Cursor::new(truncated));
         }
@@ -75,7 +76,7 @@ fn round_trip_error(payload: &[u8]) {
         .chars()
         .filter(|character| !character.is_control())
     {
-        if message.len() + character.len_utf8() > MAX_RESPONSE_PAYLOAD_BYTES {
+        if message.len() + character.len_utf8() > MAX_WORKER_ERROR_BYTES {
             break;
         }
         message.push(character);
@@ -102,7 +103,36 @@ fn round_trip_shape(payload: &[u8]) {
     let Some((width, height)) = dimensions(payload) else {
         return;
     };
-    let expected = WorkerResponse::PixelStream { width, height };
+    let color_profile = match payload.get(8).copied().unwrap_or_default() % 3 {
+        0 => WorkerColorProfile::Unknown,
+        1 => {
+            let profile = payload.get(9..).unwrap_or_default();
+            if profile.is_empty() || profile.len() > viewr_protocol::MAX_COLOR_PROFILE_BYTES {
+                return;
+            }
+            WorkerColorProfile::Icc(profile.to_vec())
+        }
+        _ => WorkerColorProfile::Cicp(CicpColor {
+            color_primaries: u16::from_le_bytes([
+                payload.get(9).copied().unwrap_or_default(),
+                payload.get(10).copied().unwrap_or_default(),
+            ]),
+            transfer_characteristics: u16::from_le_bytes([
+                payload.get(11).copied().unwrap_or_default(),
+                payload.get(12).copied().unwrap_or_default(),
+            ]),
+            matrix_coefficients: u16::from_le_bytes([
+                payload.get(13).copied().unwrap_or_default(),
+                payload.get(14).copied().unwrap_or_default(),
+            ]),
+            full_range: payload.get(15).copied().unwrap_or_default() & 1 == 1,
+        }),
+    };
+    let expected = WorkerResponse::PixelStream {
+        width,
+        height,
+        color_profile,
+    };
     let mut frame = Vec::new();
     if write_worker_response(&mut frame, &expected).is_ok() {
         assert_eq!(

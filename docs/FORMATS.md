@@ -53,6 +53,13 @@ and unit tests under `decode` / `edit`.
   PNG and WebP containers are preflighted before decoder allocation. JPEG XL's
   locally reviewed `jxl-color` boundary rejects encoded, declared, or amplified
   ICC output beyond the same 10 MiB ceiling.
+- Source pixels, normalized working pixels, and presentation are separate typed
+  stages. Successful normalization produces only validated RGBA8 sRGB working
+  pixels. Crop and pixel transforms preserve that encoding; preview generation,
+  thumbnails, export, and renderer upload reject an incompatible encoding before
+  applying sRGB math or touching an output destination. The renderer accepts the
+  matching sRGB-to-sRGB output contract and refuses a surface without an sRGB
+  format. This is an explicit SDR limit, not a wide-gamut or HDR claim.
 - SVG currently enters the sRGB path without a complete source-to-output color
   description. Worker protocol V2 carries either a bounded ICC profile, H.273
   CICP values, or an explicit unknown status with every RGBA8 stream. AVIF keeps

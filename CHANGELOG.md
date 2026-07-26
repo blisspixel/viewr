@@ -4,8 +4,27 @@ All notable changes to this project are documented here. The format is human-wri
 
 ## Unreleased
 
+### Changed
+
+- Source pixels now cross one validated, cancellable normalization boundary into
+  an explicit RGBA8 sRGB working encoding. Still, JPEG XL, animated, and isolated
+  worker decodes check supersession between ICC rows. Crop and pixel transforms
+  preserve the encoding; preview generation, thumbnails, export, and renderer
+  upload reject incompatible encodings before applying sRGB math or touching an
+  output destination. The renderer owns a matching output transform and refuses
+  non-sRGB presentation surfaces instead of silently changing the transfer
+  contract. Failed or superseded transforms cannot expose partially converted
+  pixels.
+
 ### Fixed
 
+- GPU patch updates now reject reduced preview textures instead of applying
+  full-resolution Spot Heal coordinates to them. The shared heal, undo, and redo
+  fallback rebuilds the displayed image through the existing asynchronous preview
+  path, so CPU pixels and the visible preview cannot silently diverge.
+- A retained frame can no longer accept Spot Heal input while another image is
+  loading. Heal jobs bind both the selected path and image generation, so a late
+  result cannot mutate a replacement image even when its dimensions match.
 - Optional AVIF and HEIC workers now attach bounded ICC or typed CICP color
   evidence to protocol V2 pixel streams. AVIF decode preserves libavif metadata;
   HEIC reads source ICC size before fallible allocation, preserves source NCLX

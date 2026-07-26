@@ -115,9 +115,11 @@ adapter texture or pixel limit receive a bounded preview prepared on a cancellab
 replace-latest background worker. The preview uses a linear-light, alpha-correct
 area filter and fallible output allocation, while full decoded pixels remain
 available to export. Embedded RGB ICC profiles are normalized into sRGB before
-upload. That is a strong SDR baseline, not a completed wide-gamut or HDR pipeline;
-output-display transforms and higher-precision working pixels remain in
-`ROADMAP.md`.
+upload. Source pixels, the normalized working encoding, and the renderer-owned
+output transform are distinct contracts. The renderer currently accepts only
+RGBA8 sRGB working pixels and an sRGB presentation surface. That is a strong SDR
+baseline, not a completed wide-gamut or HDR pipeline; per-display transforms and
+higher-precision working pixels remain in `ROADMAP.md`.
 
 A note on GPU compute languages (CUDA, Mojo, and similar): they are not used and
 not needed. Displaying an image is drawing one textured rectangle, which a small

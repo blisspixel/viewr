@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use winit::window::Window;
 
+use crate::color::{OutputColorTransform, WorkingColorEncoding};
 use crate::decode::DecodedImage;
 use crate::error::Error;
 use crate::theme::{self, Mode, Palette};
@@ -27,6 +28,7 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     mipmap_blitter: wgpu::util::TextureBlitter,
     pipeline: wgpu::RenderPipeline,
+    output_color_transform: OutputColorTransform,
     image: Option<Image>,
     placement: wgpu::Buffer,
     /// The egui context for immediate mode UI.
@@ -50,6 +52,7 @@ struct Image {
     source_size: (u32, u32),
     texture_size: (u32, u32),
     mip_level_count: u32,
+    working_color: WorkingColorEncoding,
 }
 
 /// Maximum number of RGBA pixels retained in the base GPU image texture.
@@ -75,6 +78,19 @@ pub(crate) struct PreviewSpec {
 pub(crate) struct ImagePreview {
     rgba: Vec<u8>,
     spec: PreviewSpec,
+    working_color: WorkingColorEncoding,
+}
+
+struct ImageUpload<'a> {
+    rgba: &'a [u8],
+    size: (u32, u32),
+    full_resolution: bool,
+}
+
+struct PatchUpload {
+    origin: wgpu::Origin3d,
+    extent: wgpu::Extent3d,
+    bytes_per_row: u32,
 }
 
 /// Largest aspect-preserving dimensions that fit texture and pixel limits.
@@ -134,6 +150,11 @@ pub(crate) fn prepare_image_preview(
     spec: PreviewSpec,
     is_cancelled: impl Fn() -> bool,
 ) -> Result<Option<ImagePreview>, Error> {
+    if image.working_color != WorkingColorEncoding::SRGB_RGBA8 {
+        return Err(Error::Gpu(
+            "image preview does not support this working color encoding".into(),
+        ));
+    }
     if spec.source_size != (image.width, image.height) || spec.width == 0 || spec.height == 0 {
         return Err(Error::Gpu(
             "image preview dimensions are inconsistent".into(),
@@ -215,7 +236,91 @@ pub(crate) fn prepare_image_preview(
         }
     }
 
-    Ok(Some(ImagePreview { rgba, spec }))
+    Ok(Some(ImagePreview {
+        rgba,
+        spec,
+        working_color: image.working_color,
+    }))
+}
+
+fn select_image_upload<'a>(
+    image: &'a DecodedImage,
+    prepared: Option<&'a ImagePreview>,
+    required: Option<PreviewSpec>,
+    output: OutputColorTransform,
+) -> Result<ImageUpload<'a>, Error> {
+    let source_len = viewr_protocol::checked_rgba_len(image.width, image.height)
+        .map_err(|error| Error::Gpu(error.to_string()))?;
+    if image.rgba.len() != source_len {
+        return Err(Error::Gpu(
+            "image pixels do not match their declared dimensions".into(),
+        ));
+    }
+    if !output.accepts(image.working_color) {
+        return Err(Error::Gpu(
+            "image working color does not match the display output transform".into(),
+        ));
+    }
+    match (required, prepared) {
+        (None, None) => Ok(ImageUpload {
+            rgba: &image.rgba,
+            size: (image.width, image.height),
+            full_resolution: true,
+        }),
+        (Some(required), Some(preview)) if preview.spec == required => {
+            let expected = viewr_protocol::checked_rgba_len(required.width, required.height)
+                .map_err(|error| Error::Gpu(error.to_string()))?;
+            if preview.rgba.len() != expected {
+                return Err(Error::Gpu(
+                    "prepared preview does not match its dimensions".into(),
+                ));
+            }
+            if preview.working_color != image.working_color {
+                return Err(Error::Gpu(
+                    "prepared preview color encoding does not match its source".into(),
+                ));
+            }
+            Ok(ImageUpload {
+                rgba: &preview.rgba,
+                size: (required.width, required.height),
+                full_resolution: false,
+            })
+        }
+        (Some(_), None) => Err(Error::Gpu(
+            "image requires a background-prepared GPU preview".into(),
+        )),
+        (None | Some(_), Some(_)) => Err(Error::Gpu("prepared image preview is stale".into())),
+    }
+}
+
+fn validate_patch_upload(
+    source_size: (u32, u32),
+    texture_size: (u32, u32),
+    patch: &crate::heal::ImagePatch,
+) -> Option<PatchUpload> {
+    if source_size != texture_size {
+        return None;
+    }
+    let bounds = patch.bounds;
+    let right = bounds.x.checked_add(bounds.width)?;
+    let bottom = bounds.y.checked_add(bounds.height)?;
+    let expected_bytes = viewr_protocol::checked_rgba_len(bounds.width, bounds.height).ok()?;
+    if right > texture_size.0 || bottom > texture_size.1 || patch.rgba.len() != expected_bytes {
+        return None;
+    }
+    Some(PatchUpload {
+        origin: wgpu::Origin3d {
+            x: bounds.x,
+            y: bounds.y,
+            z: 0,
+        },
+        extent: wgpu::Extent3d {
+            width: bounds.width,
+            height: bounds.height,
+            depth_or_array_layers: 1,
+        },
+        bytes_per_row: bounds.width.checked_mul(4)?,
+    })
 }
 
 fn srgb_decode_table() -> &'static [f32; 256] {
@@ -293,6 +398,17 @@ fn build_mipmap_blitter(device: &wgpu::Device) -> wgpu::util::TextureBlitter {
         .build()
 }
 
+fn select_srgb_surface_format(
+    formats: &[wgpu::TextureFormat],
+) -> Result<(wgpu::TextureFormat, OutputColorTransform), Error> {
+    formats
+        .iter()
+        .copied()
+        .find(wgpu::TextureFormat::is_srgb)
+        .map(|format| (format, OutputColorTransform::SRGB_TO_SRGB))
+        .ok_or_else(|| Error::Gpu("display surface does not support sRGB presentation".into()))
+}
+
 impl Renderer {
     /// Create a renderer for `window`, clearing to the palette for `mode`.
     ///
@@ -343,12 +459,7 @@ impl Renderer {
         let height = size.height.clamp(1, max_dim);
 
         let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(wgpu::TextureFormat::is_srgb)
-            .unwrap_or(caps.formats[0]);
+        let (format, output_color_transform) = select_srgb_surface_format(&caps.formats)?;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -401,6 +512,7 @@ impl Renderer {
             sampler,
             mipmap_blitter,
             pipeline,
+            output_color_transform,
             image: None,
             placement,
             egui_ctx,
@@ -523,40 +635,13 @@ impl Renderer {
         image: &DecodedImage,
         prepared: Option<&ImagePreview>,
     ) -> Result<bool, Error> {
-        let source_len = viewr_protocol::checked_rgba_len(image.width, image.height)
-            .map_err(|error| Error::Gpu(error.to_string()))?;
-        if image.rgba.len() != source_len {
-            return Err(Error::Gpu(
-                "image pixels do not match their declared dimensions".into(),
-            ));
-        }
-        let required = self.required_preview(image);
-        let (width, height, rgba, full_resolution) = match (required, prepared) {
-            (None, None) => (image.width, image.height, image.rgba.as_slice(), true),
-            (Some(required), Some(preview)) if preview.spec == required => {
-                let expected = viewr_protocol::checked_rgba_len(required.width, required.height)
-                    .map_err(|error| Error::Gpu(error.to_string()))?;
-                if preview.rgba.len() != expected {
-                    return Err(Error::Gpu(
-                        "prepared preview does not match its dimensions".into(),
-                    ));
-                }
-                (
-                    required.width,
-                    required.height,
-                    preview.rgba.as_slice(),
-                    false,
-                )
-            }
-            (Some(_), None) => {
-                return Err(Error::Gpu(
-                    "image requires a background-prepared GPU preview".into(),
-                ));
-            }
-            (None | Some(_), Some(_)) => {
-                return Err(Error::Gpu("prepared image preview is stale".into()));
-            }
-        };
+        let upload = select_image_upload(
+            image,
+            prepared,
+            self.required_preview(image),
+            self.output_color_transform,
+        )?;
+        let (width, height) = upload.size;
         let mip_level_count = mip_level_count((width, height));
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -577,7 +662,7 @@ impl Renderer {
         });
         self.queue.write_texture(
             texture.as_image_copy(),
-            rgba,
+            upload.rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
@@ -617,67 +702,42 @@ impl Renderer {
             source_size: (image.width, image.height),
             texture_size: (width, height),
             mip_level_count,
+            working_color: image.working_color,
         });
         self.window.request_redraw();
-        Ok(full_resolution)
+        Ok(upload.full_resolution)
     }
 
     /// Upload one tightly packed RGBA8 patch into the current image texture.
     ///
-    /// Returns `false` without writing when the patch shape does not exactly fit
-    /// inside the displayed texture. Normal Spot Heal operations use this path
-    /// so committing a small edit never reallocates or uploads the full image.
+    /// Returns `false` without writing when the displayed texture is a reduced
+    /// preview or the patch does not exactly fit the full-resolution texture.
+    /// Normal Spot Heal operations use this path so committing a small edit never
+    /// reallocates or uploads the full image.
     #[must_use]
     pub fn update_image_patch(&self, patch: &crate::heal::ImagePatch) -> bool {
         let Some(image) = self.image.as_ref() else {
             return false;
         };
-        let bounds = patch.bounds;
-        let Some(right) = bounds.x.checked_add(bounds.width) else {
+        if !self.output_color_transform.accepts(image.working_color) {
             return false;
-        };
-        let Some(bottom) = bounds.y.checked_add(bounds.height) else {
-            return false;
-        };
-        let Some(expected_bytes) = usize::try_from(bounds.width)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(bounds.height)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height))
-            })
-            .and_then(|pixels| pixels.checked_mul(4))
+        }
+        let Some(upload) = validate_patch_upload(image.source_size, image.texture_size, patch)
         else {
             return false;
         };
-        if bounds.width == 0
-            || bounds.height == 0
-            || right > image.texture_size.0
-            || bottom > image.texture_size.1
-            || patch.rgba.len() != expected_bytes
-        {
-            return false;
-        }
 
         let mut destination = image.texture.as_image_copy();
-        destination.origin = wgpu::Origin3d {
-            x: bounds.x,
-            y: bounds.y,
-            z: 0,
-        };
+        destination.origin = upload.origin;
         self.queue.write_texture(
             destination,
             &patch.rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(bounds.width * 4),
-                rows_per_image: Some(bounds.height),
+                bytes_per_row: Some(upload.bytes_per_row),
+                rows_per_image: Some(upload.extent.height),
             },
-            wgpu::Extent3d {
-                width: bounds.width,
-                height: bounds.height,
-                depth_or_array_layers: 1,
-            },
+            upload.extent,
         );
         self.regenerate_mipmaps(&image.texture, image.mip_level_count);
         self.window.request_redraw();
@@ -1031,9 +1091,11 @@ fn palette_to_color(palette: Palette) -> wgpu::Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_GPU_BASE_PIXELS, mip_level_count, pack_placement, prepare_image_preview, preview_spec,
-        texture_dimensions,
+        MAX_GPU_BASE_PIXELS, PreviewSpec, mip_level_count, pack_placement, prepare_image_preview,
+        preview_spec, select_image_upload, select_srgb_surface_format, texture_dimensions,
+        validate_patch_upload,
     };
+    use crate::color::{OutputColorSpace, OutputColorTransform, WorkingColorEncoding};
     use crate::decode::{ColorProfileStatus, DecodedImage};
     use crate::view::Placement;
 
@@ -1053,6 +1115,121 @@ mod tests {
         assert!((unpack(12) - 0.2).abs() < f32::EPSILON);
         assert!((unpack(16) - 1.0).abs() < f32::EPSILON);
         assert!((unpack(28) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn surface_selection_requires_an_explicit_srgb_output_contract() {
+        let (format, transform) = select_srgb_surface_format(&[
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ])
+        .unwrap();
+
+        assert_eq!(format, wgpu::TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(transform.source(), WorkingColorEncoding::SRGB_RGBA8);
+        assert_eq!(transform.destination(), OutputColorSpace::Srgb);
+        assert!(select_srgb_surface_format(&[wgpu::TextureFormat::Bgra8Unorm]).is_err());
+        assert!(select_srgb_surface_format(&[]).is_err());
+    }
+
+    #[test]
+    fn image_upload_selection_enforces_source_and_preview_contracts() {
+        let image = DecodedImage {
+            rgba: vec![7; 16],
+            width: 2,
+            height: 2,
+            color_profile: ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        };
+        let direct =
+            select_image_upload(&image, None, None, OutputColorTransform::SRGB_TO_SRGB).unwrap();
+        assert_eq!(direct.size, (2, 2));
+        assert!(direct.full_resolution);
+        assert_eq!(direct.rgba, image.rgba);
+
+        let required = PreviewSpec {
+            width: 1,
+            height: 1,
+            source_size: (2, 2),
+        };
+        assert!(
+            select_image_upload(
+                &image,
+                None,
+                Some(required),
+                OutputColorTransform::SRGB_TO_SRGB,
+            )
+            .is_err()
+        );
+
+        let preview = super::ImagePreview {
+            rgba: vec![9; 4],
+            spec: required,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        };
+        let reduced = select_image_upload(
+            &image,
+            Some(&preview),
+            Some(required),
+            OutputColorTransform::SRGB_TO_SRGB,
+        )
+        .unwrap();
+        assert_eq!(reduced.size, (1, 1));
+        assert!(!reduced.full_resolution);
+        assert_eq!(reduced.rgba, preview.rgba);
+        assert!(
+            select_image_upload(
+                &image,
+                Some(&preview),
+                None,
+                OutputColorTransform::SRGB_TO_SRGB,
+            )
+            .is_err()
+        );
+
+        let malformed_preview = super::ImagePreview {
+            rgba: vec![0; 3],
+            spec: required,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        };
+        assert!(
+            select_image_upload(
+                &image,
+                Some(&malformed_preview),
+                Some(required),
+                OutputColorTransform::SRGB_TO_SRGB,
+            )
+            .is_err()
+        );
+
+        let unsupported = DecodedImage {
+            rgba: vec![7; 16],
+            width: 2,
+            height: 2,
+            color_profile: ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::DISPLAY_P3_RGBA8,
+        };
+        assert!(
+            select_image_upload(&unsupported, None, None, OutputColorTransform::SRGB_TO_SRGB,)
+                .is_err()
+        );
+        assert!(prepare_image_preview(&unsupported, required, || false).is_err());
+    }
+
+    #[test]
+    fn patch_upload_requires_a_full_resolution_texture() {
+        let patch = crate::heal::ImagePatch {
+            bounds: crate::edit::Rect {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            },
+            rgba: vec![3; 16],
+        };
+
+        assert!(validate_patch_upload((4, 4), (4, 4), &patch).is_some());
+        assert!(validate_patch_upload((4, 4), (2, 2), &patch).is_none());
     }
 
     #[test]
@@ -1091,18 +1268,21 @@ mod tests {
             width: 2,
             height: 2,
             color_profile: ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         let spec = preview_spec((2, 2), 2, 1).unwrap();
         let preview = prepare_image_preview(&image, spec, || false)
             .unwrap()
             .unwrap();
         assert_eq!(preview.rgba, [188, 188, 188, 255]);
+        assert_eq!(preview.working_color, WorkingColorEncoding::SRGB_RGBA8);
 
         let alpha = DecodedImage {
             rgba: vec![255, 0, 0, 0, 0, 0, 255, 255],
             width: 2,
             height: 1,
             color_profile: ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         let spec = preview_spec((2, 1), 2, 1).unwrap();
         let preview = prepare_image_preview(&alpha, spec, || false)
@@ -1118,6 +1298,7 @@ mod tests {
             width: 4,
             height: 4,
             color_profile: ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         let spec = preview_spec((4, 4), 4, 4).unwrap();
         assert!(
@@ -1131,6 +1312,7 @@ mod tests {
             width: 4,
             height: 4,
             color_profile: ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         assert!(prepare_image_preview(&malformed, spec, || false).is_err());
     }

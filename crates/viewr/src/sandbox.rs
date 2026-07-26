@@ -380,12 +380,7 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<WorkerDecodedOutpu
                 .map_err(|e| Error::Decode(format!("failed to acknowledge worker output: {e}")))?;
 
             Ok(WorkerDecodedOutput {
-                image: DecodedImage {
-                    rgba,
-                    width,
-                    height,
-                    color_profile: crate::decode::ColorProfileStatus::UnknownWorkerProfileFallback,
-                },
+                source: crate::decode::SourceImage::new(rgba, width, height)?,
                 color_profile,
             })
         }
@@ -399,46 +394,47 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<WorkerDecodedOutpu
 }
 
 struct WorkerDecodedOutput {
-    image: DecodedImage,
+    source: crate::decode::SourceImage,
     color_profile: viewr_protocol::WorkerColorProfile,
 }
 
 fn finish_worker_output(
-    mut output: WorkerDecodedOutput,
+    output: WorkerDecodedOutput,
     generation: DecodeGeneration<'_>,
 ) -> Result<DecodedImage, Error> {
-    apply_worker_color_profile(&mut output.image, output.color_profile, generation)?;
-    Ok(output.image)
+    normalize_worker_color_profile(output.source, output.color_profile, generation)
 }
 
-fn apply_worker_color_profile(
-    image: &mut DecodedImage,
+fn normalize_worker_color_profile(
+    source: crate::decode::SourceImage,
     color_profile: viewr_protocol::WorkerColorProfile,
     generation: DecodeGeneration<'_>,
-) -> Result<(), Error> {
+) -> Result<DecodedImage, Error> {
     let ensure_current = || {
         generation
             .ensure_current()
             .map_err(|error| Error::Decode(error.to_string()))
     };
     ensure_current()?;
-    match color_profile {
-        viewr_protocol::WorkerColorProfile::Unknown => {}
+    let normalizer = match color_profile {
+        viewr_protocol::WorkerColorProfile::Unknown => {
+            crate::decode::ColorNormalizer::unknown_worker_profile()
+        }
         viewr_protocol::WorkerColorProfile::Icc(profile) => {
             let normalizer = crate::decode::ColorNormalizer::from_icc_profile(&profile);
             ensure_current()?;
             normalizer
-                .apply_if_current(image, generation)
-                .map_err(|error| Error::Decode(error.to_string()))?;
         }
         viewr_protocol::WorkerColorProfile::Cicp(cicp) if cicp.is_srgb() => {
-            image.color_profile = crate::decode::ColorProfileStatus::TaggedSrgb;
+            crate::decode::ColorNormalizer::tagged_srgb()
         }
         viewr_protocol::WorkerColorProfile::Cicp(_) => {
-            image.color_profile = crate::decode::ColorProfileStatus::EmbeddedProfileFallback;
+            crate::decode::ColorNormalizer::unsupported_profile()
         }
-    }
-    ensure_current()
+    };
+    normalizer
+        .normalize_if_current(source, generation)
+        .map_err(|error| Error::Decode(error.to_string()))
 }
 
 struct DaemonWorker {
@@ -577,7 +573,7 @@ fn return_worker(worker: DaemonWorker) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonWorker, apply_worker_color_profile, exchange_with_worker, finish_worker_output,
+        DaemonWorker, exchange_with_worker, finish_worker_output, normalize_worker_color_profile,
         read_bounded, read_bounded_if_current, read_bounded_input, receive_worker_output,
         run_worker_operation_with_cancellation, run_worker_operation_with_timeout,
     };
@@ -803,8 +799,6 @@ mod tests {
         let output =
             exchange_with_worker(&mut worker, "avif", b"selected image bytes".to_vec()).unwrap();
         let original = [210_u8, 120, 35, 17, 40, 180, 210, 231];
-        assert_eq!((output.image.width, output.image.height), (2, 1));
-        assert_eq!(output.image.rgba, original);
         assert_eq!(
             output.color_profile,
             viewr_protocol::WorkerColorProfile::Icc(display_p3_profile())
@@ -813,9 +807,14 @@ mod tests {
         // Normalization deliberately happens only after the timed IPC thread
         // has joined, while the caller still owns its shared decode permit.
         let image = finish_worker_output(output, DecodeGeneration::unconditional()).unwrap();
+        assert_eq!((image.width, image.height), (2, 1));
         assert_eq!(
             image.color_profile,
             crate::decode::ColorProfileStatus::ConvertedToSrgb
+        );
+        assert_eq!(
+            image.working_color,
+            crate::color::WorkingColorEncoding::SRGB_RGBA8
         );
         assert_ne!(image.rgba, original);
         assert_eq!([image.rgba[3], image.rgba[7]], [17, 231]);
@@ -823,16 +822,10 @@ mod tests {
 
     #[test]
     fn worker_color_evidence_is_applied_or_falls_back_explicitly() {
-        let image = || crate::decode::DecodedImage {
-            rgba: vec![20, 40, 60, 255],
-            width: 1,
-            height: 1,
-            color_profile: crate::decode::ColorProfileStatus::UnknownWorkerProfileFallback,
-        };
+        let source = || crate::decode::SourceImage::new(vec![20, 40, 60, 255], 1, 1).unwrap();
 
-        let mut unknown = image();
-        apply_worker_color_profile(
-            &mut unknown,
+        let unknown = normalize_worker_color_profile(
+            source(),
             viewr_protocol::WorkerColorProfile::Unknown,
             DecodeGeneration::unconditional(),
         )
@@ -842,9 +835,8 @@ mod tests {
             crate::decode::ColorProfileStatus::UnknownWorkerProfileFallback
         );
 
-        let mut srgb = image();
-        apply_worker_color_profile(
-            &mut srgb,
+        let srgb = normalize_worker_color_profile(
+            source(),
             viewr_protocol::WorkerColorProfile::Cicp(viewr_protocol::CicpColor {
                 color_primaries: 1,
                 transfer_characteristics: 13,
@@ -859,9 +851,8 @@ mod tests {
             crate::decode::ColorProfileStatus::TaggedSrgb
         );
 
-        let mut hdr = image();
-        apply_worker_color_profile(
-            &mut hdr,
+        let hdr = normalize_worker_color_profile(
+            source(),
             viewr_protocol::WorkerColorProfile::Cicp(viewr_protocol::CicpColor {
                 color_primaries: 9,
                 transfer_characteristics: 16,
@@ -876,10 +867,9 @@ mod tests {
             crate::decode::ColorProfileStatus::EmbeddedProfileFallback
         );
 
-        let mut icc = image();
-        let original = icc.rgba.clone();
-        apply_worker_color_profile(
-            &mut icc,
+        let original = vec![20, 40, 60, 255];
+        let icc = normalize_worker_color_profile(
+            source(),
             viewr_protocol::WorkerColorProfile::Icc(display_p3_profile()),
             DecodeGeneration::unconditional(),
         )
@@ -889,18 +879,20 @@ mod tests {
             crate::decode::ColorProfileStatus::ConvertedToSrgb
         );
         assert_ne!(icc.rgba, original);
+        assert_eq!(
+            icc.working_color,
+            crate::color::WorkingColorEncoding::SRGB_RGBA8
+        );
 
         let generation = AtomicU64::new(2);
-        let mut superseded = image();
-        let original = superseded.rgba.clone();
-        let error = apply_worker_color_profile(
-            &mut superseded,
+        let error = normalize_worker_color_profile(
+            source(),
             viewr_protocol::WorkerColorProfile::Icc(display_p3_profile()),
             DecodeGeneration::tracked(&generation, 1),
         )
-        .unwrap_err();
+        .err()
+        .expect("a superseded color conversion must fail");
         assert!(error.to_string().contains("superseded"));
-        assert_eq!(superseded.rgba, original);
     }
 
     #[test]

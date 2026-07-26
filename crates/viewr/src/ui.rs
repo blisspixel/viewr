@@ -219,7 +219,7 @@ pub enum UiAction {
     /// Cancel crop without applying.
     CancelCrop,
     /// Set the aspect ratio for the crop tool.
-    SetCropRatio(crate::app::CropRatio),
+    SetCropRatio(crate::crop::CropRatio),
     /// Update the session-local numeric custom crop ratio.
     SetCustomCropRatio(u16, u16),
     /// Swap the active crop ratio between landscape and portrait.
@@ -300,7 +300,7 @@ pub struct UiFrameOwned {
     /// Crop tool active.
     pub is_cropping: bool,
     /// Active crop aspect lock.
-    pub crop_ratio: crate::app::CropRatio,
+    pub crop_ratio: crate::crop::CropRatio,
     /// Session-local custom ratio fields shown by the crop picker.
     pub custom_crop_ratio: (u16, u16),
     /// Focused spot-heal mode is active.
@@ -2198,7 +2198,7 @@ fn render_crop_toolbar(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Ve
                             crop_ratio_picker(ui, frame, actions);
                             if ui
                                 .add_enabled(
-                                    frame.crop_ratio != crate::app::CropRatio::Free,
+                                    frame.crop_ratio != crate::crop::CropRatio::Free,
                                     egui::Button::new("Swap").shortcut_text("X"),
                                 )
                                 .on_hover_text("Swap the crop between landscape and portrait")
@@ -2250,9 +2250,9 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         let mut current = frame.crop_ratio;
 
         for (ratio, label) in [
-            (crate::app::CropRatio::Free, "Free"),
-            (crate::app::CropRatio::Original, "Original"),
-            (crate::app::CropRatio::SQUARE, "1:1  Square"),
+            (crate::crop::CropRatio::Free, "Free"),
+            (crate::crop::CropRatio::Original, "Original"),
+            (crate::crop::CropRatio::SQUARE, "1:1  Square"),
         ] {
             if ui.selectable_value(&mut current, ratio, label).clicked() {
                 actions.push(UiAction::SetCropRatio(current));
@@ -2264,11 +2264,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         ui.label(RichText::new("Landscape").size(11.0).color(colors.muted));
         ui.horizontal(|ui| {
             for (ratio, label) in [
-                (crate::app::CropRatio::THREE_TWO, "3:2"),
-                (crate::app::CropRatio::FOUR_THREE, "4:3"),
-                (crate::app::CropRatio::FIVE_FOUR, "5:4"),
-                (crate::app::CropRatio::FIVE_THREE, "5:3"),
-                (crate::app::CropRatio::SIXTEEN_NINE, "16:9"),
+                (crate::crop::CropRatio::THREE_TWO, "3:2"),
+                (crate::crop::CropRatio::FOUR_THREE, "4:3"),
+                (crate::crop::CropRatio::FIVE_FOUR, "5:4"),
+                (crate::crop::CropRatio::FIVE_THREE, "5:3"),
+                (crate::crop::CropRatio::SIXTEEN_NINE, "16:9"),
             ] {
                 if ui.selectable_value(&mut current, ratio, label).clicked() {
                     actions.push(UiAction::SetCropRatio(current));
@@ -2280,11 +2280,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         ui.label(RichText::new("Portrait").size(11.0).color(colors.muted));
         ui.horizontal(|ui| {
             for (ratio, label) in [
-                (crate::app::CropRatio::TWO_THREE, "2:3"),
-                (crate::app::CropRatio::THREE_FOUR, "3:4"),
-                (crate::app::CropRatio::FOUR_FIVE, "4:5"),
-                (crate::app::CropRatio::THREE_FIVE, "3:5"),
-                (crate::app::CropRatio::NINE_SIXTEEN, "9:16"),
+                (crate::crop::CropRatio::TWO_THREE, "2:3"),
+                (crate::crop::CropRatio::THREE_FOUR, "3:4"),
+                (crate::crop::CropRatio::FOUR_FIVE, "4:5"),
+                (crate::crop::CropRatio::THREE_FIVE, "3:5"),
+                (crate::crop::CropRatio::NINE_SIXTEEN, "9:16"),
             ] {
                 if ui.selectable_value(&mut current, ratio, label).clicked() {
                     actions.push(UiAction::SetCropRatio(current));
@@ -2320,7 +2320,7 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
             }
             if ui.button("Use").clicked() {
                 actions.push(UiAction::SetCustomCropRatio(custom_width, custom_height));
-                actions.push(UiAction::SetCropRatio(crate::app::CropRatio::fixed(
+                actions.push(UiAction::SetCropRatio(crate::crop::CropRatio::fixed(
                     custom_width,
                     custom_height,
                 )));
@@ -2398,7 +2398,7 @@ struct CropMoveOverlay {
     image_size: (u32, u32),
     crop_uv: [f32; 4],
     swap_axes: bool,
-    crop_ratio: crate::app::CropRatio,
+    crop_ratio: crate::crop::CropRatio,
 }
 
 fn render_crop_dimensions_and_move(
@@ -2496,11 +2496,11 @@ fn crop_pixel_bounds(
     image_size: (u32, u32),
     crop_uv: [f32; 4],
     swap_axes: bool,
-    crop_ratio: crate::app::CropRatio,
+    crop_ratio: crate::crop::CropRatio,
 ) -> Option<(u32, u32, u32, u32)> {
-    let source_ratio = crate::app::crop_ratio_for_source(crop_ratio, i32::from(swap_axes));
+    let source_ratio = crate::crop::crop_ratio_for_source(crop_ratio, i32::from(swap_axes));
     let pixel =
-        crate::app::quantized_crop_pixel_rect(crop_uv, image_size.0, image_size.1, source_ratio)?;
+        crate::crop::quantized_crop_pixel_rect(crop_uv, image_size.0, image_size.1, source_ratio)?;
     let (output_width, output_height) = if swap_axes {
         (pixel.height, pixel.width)
     } else {
@@ -2628,7 +2628,7 @@ mod tests {
             details: None,
             color_profile: Some(crate::decode::ColorProfileStatus::AssumedSrgb),
             is_cropping: false,
-            crop_ratio: crate::app::CropRatio::Free,
+            crop_ratio: crate::crop::CropRatio::Free,
             custom_crop_ratio: (3, 5),
             is_healing: false,
             can_heal: true,
@@ -2691,7 +2691,7 @@ mod tests {
         let _ = UiAction::ToggleCrop;
         let _ = UiAction::ApplyCrop;
         let _ = UiAction::CancelCrop;
-        let _ = UiAction::SetCropRatio(crate::app::CropRatio::SQUARE);
+        let _ = UiAction::SetCropRatio(crate::crop::CropRatio::SQUARE);
         let _ = UiAction::SetCustomCropRatio(3, 5);
         let _ = UiAction::SwapCropRatio;
         let _ = UiAction::MoveCrop {
@@ -2968,7 +2968,7 @@ mod tests {
                 (1_920, 1_080),
                 [0.1, 0.2, 0.7, 0.8],
                 false,
-                crate::app::CropRatio::Free,
+                crate::crop::CropRatio::Free,
             ),
             Some((192, 216, 1_152, 649))
         );
@@ -2977,7 +2977,7 @@ mod tests {
                 (1_920, 1_080),
                 [0.1, 0.2, 0.7, 0.8],
                 true,
-                crate::app::CropRatio::Free,
+                crate::crop::CropRatio::Free,
             ),
             Some((192, 216, 649, 1_152))
         );
@@ -2986,7 +2986,7 @@ mod tests {
                 (101, 101),
                 [0.8, 0.8, 1.0, 1.0],
                 false,
-                crate::app::CropRatio::Free,
+                crate::crop::CropRatio::Free,
             ),
             Some((80, 80, 21, 21))
         );
@@ -2995,7 +2995,7 @@ mod tests {
                 (101, 101),
                 [0.0, 0.0, 1.0, 1.0],
                 false,
-                crate::app::CropRatio::SIXTEEN_NINE,
+                crate::crop::CropRatio::SIXTEEN_NINE,
             ),
             Some((3, 24, 96, 54))
         );

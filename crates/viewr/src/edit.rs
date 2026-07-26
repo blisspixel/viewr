@@ -11,6 +11,7 @@ use image::{ColorType, ImageFormat};
 use little_exif::exif_tag::ExifTag;
 use little_exif::metadata::Metadata;
 
+use crate::color::WorkingColorEncoding;
 use crate::decode::DecodedImage;
 use crate::error::Error;
 
@@ -115,6 +116,7 @@ impl PixelTransform {
             width: output_size.0,
             height: output_size.1,
             color_profile: source.color_profile,
+            working_color: source.working_color,
         })
     }
 }
@@ -226,6 +228,7 @@ pub fn crop(src: &DecodedImage, rect: Rect) -> Result<DecodedImage, Error> {
         width: r.width,
         height: r.height,
         color_profile: src.color_profile,
+        working_color: src.working_color,
     })
 }
 
@@ -325,6 +328,11 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
 }
 
 fn validate_export(image: &DecodedImage, path: &Path) -> Result<(ImageFormat, usize), Error> {
+    if image.working_color != WorkingColorEncoding::SRGB_RGBA8 {
+        return Err(Error::Encode(
+            "export does not support this working color encoding".into(),
+        ));
+    }
     let expected_len = rgba_len(image.width, image.height)?;
     if image.rgba.len() != expected_len {
         return Err(Error::Encode(
@@ -432,6 +440,7 @@ mod tests {
         MetadataDisposition, PixelTransform, Rect, SaveOptions, crop, path_supports_exif, save,
         save_with_options,
     };
+    use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
     use crate::ephemeral::TempWorkspace;
     use little_exif::exif_tag::ExifTag;
@@ -450,6 +459,7 @@ mod tests {
             width: 4,
             height: 4,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         }
     }
 
@@ -463,6 +473,7 @@ mod tests {
             width: 3,
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         }
     }
 
@@ -480,6 +491,7 @@ mod tests {
             width: w,
             height: h,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         }
     }
 
@@ -531,6 +543,7 @@ mod tests {
         .unwrap();
         assert_eq!(out.width, 2);
         assert_eq!(out.height, 2);
+        assert_eq!(out.working_color, WorkingColorEncoding::SRGB_RGBA8);
         let reds: Vec<u8> = out.rgba.chunks_exact(4).map(|p| p[0]).collect();
         assert_eq!(reds, vec![5, 6, 9, 10]);
     }
@@ -558,6 +571,7 @@ mod tests {
             width: 2,
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         assert!(
             crop(
@@ -578,6 +592,7 @@ mod tests {
         let source = indexed_3x2();
         let clockwise = PixelTransform::new(1, false, false).apply(&source).unwrap();
         assert_eq!((clockwise.width, clockwise.height), (2, 3));
+        assert_eq!(clockwise.working_color, source.working_color);
         assert_eq!(red_channels(&clockwise), vec![4, 1, 5, 2, 6, 3]);
 
         let counterclockwise = PixelTransform::new(-1, false, false)
@@ -620,6 +635,7 @@ mod tests {
             width: 2,
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         assert!(PixelTransform::default().apply(&malformed).is_err());
     }
@@ -631,10 +647,24 @@ mod tests {
             width: 4,
             height: 4,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         let ws = TempWorkspace::new("edit_bad").unwrap();
         let path = ws.path().join("viewr_bad.png");
         assert!(save(&bad, &path).is_err());
+    }
+
+    #[test]
+    fn save_rejects_an_unsupported_working_encoding_before_touching_destination() {
+        let mut image = solid_rgba(1, 1);
+        image.working_color = WorkingColorEncoding::DISPLAY_P3_RGBA8;
+        let workspace = TempWorkspace::new("edit_working_color").unwrap();
+        let destination = workspace.path().join("unsupported.png");
+
+        let error = save(&image, &destination).unwrap_err();
+
+        assert!(error.to_string().contains("working color"));
+        assert!(!destination.exists());
     }
 
     #[test]
@@ -644,6 +674,7 @@ mod tests {
             width: 2,
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         let ws = TempWorkspace::new("edit_jpeg").unwrap();
         let path = ws.path().join("viewr_jpeg.jpg");

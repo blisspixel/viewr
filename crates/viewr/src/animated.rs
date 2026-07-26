@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use image::{AnimationDecoder, ImageDecoder};
 
-use crate::decode::{ColorNormalizer, ColorProfileStatus, DecodedImage};
+use crate::decode::{ColorNormalizer, DecodedImage, SourceImage};
 use crate::error::Error;
 
 const MAX_ANIMATION_BYTES: usize = 256 * 1024 * 1024;
@@ -220,13 +220,11 @@ fn collect_frames<'a>(
                 "animation frame returned an invalid RGBA buffer".into(),
             ));
         }
-        let mut image = DecodedImage {
-            rgba,
-            width,
-            height,
-            color_profile: ColorProfileStatus::AssumedSrgb,
+        let Some(image) = color_normalizer
+            .normalize_while_current(SourceImage::new(rgba, width, height)?, is_current)?
+        else {
+            return Ok(None);
         };
-        color_normalizer.apply(&mut image);
         frames.push(AnimationFrame {
             image: Arc::new(image),
             delay,
@@ -369,6 +367,7 @@ impl AnimationPlayback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode::ColorProfileStatus;
     use crate::ephemeral::TempWorkspace;
 
     fn frame(id: u8, delay_ms: u64) -> AnimationFrame {
@@ -378,6 +377,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 color_profile: ColorProfileStatus::AssumedSrgb,
+                working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
             }),
             delay: Duration::from_millis(delay_ms),
         }

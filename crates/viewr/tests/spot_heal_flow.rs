@@ -1,5 +1,6 @@
 //! Integration coverage for the complete model-free spot-heal edit flow.
 
+use viewr::color::WorkingColorEncoding;
 use viewr::decode::DecodedImage;
 use viewr::edit;
 use viewr::ephemeral::TempWorkspace;
@@ -22,6 +23,7 @@ fn patterned_image(width: u32, height: u32) -> DecodedImage {
         width,
         height,
         color_profile: viewr::decode::ColorProfileStatus::AssumedSrgb,
+        working_color: WorkingColorEncoding::SRGB_RGBA8,
     }
 }
 

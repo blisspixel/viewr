@@ -1530,6 +1530,7 @@ mod tests {
         boundary_tone_adjustment, directional_boundary_fill, feather_coverage, patch_match_score,
         ranked_patch_offsets, rasterize_stroke,
     };
+    use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
     use crate::edit::Rect;
     use std::sync::atomic::AtomicBool;
@@ -1551,6 +1552,7 @@ mod tests {
             width,
             height,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         }
     }
 
@@ -1566,6 +1568,7 @@ mod tests {
             width: 2,
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         assert!(matches!(
             SpotHealJob::prepare(&malformed, &[StrokePoint { x: 1.0, y: 1.0 }], 4),
@@ -1576,6 +1579,7 @@ mod tests {
             width: u32::MAX,
             height: u32::MAX,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         assert!(matches!(
             SpotHealJob::prepare(
@@ -1627,6 +1631,7 @@ mod tests {
             width: 2_100,
             height: 2_100,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         };
         let result = SpotHealJob::prepare(
             &image,

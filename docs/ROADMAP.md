@@ -92,8 +92,15 @@ and [`Surface`](https://docs.rs/wgpu/latest/wgpu/struct.Surface.html) APIs.
   bitstream-only NCLX. The latest-codec lane enforces the libde265
   VUI-propagation floor before exercising both container NCLX and HEVC-VUI-only
   fixtures.
-- [ ] Separate source pixels, working color space, and output transform so future
+- [x] Separate source pixels, working color space, and output transform so future
   wide-gamut values are not clipped by the current RGBA8 sRGB intermediate.
+  Decoder-owned pixels now cross one consuming normalization boundary into a
+  typed RGBA8 sRGB working encoding. Edits preserve that encoding; preview
+  generation, thumbnails, export, and the renderer explicitly reject an
+  incompatible working encoding instead of clipping or relabeling it. The
+  renderer owns the matching output transform and requires an sRGB surface. Unit
+  and integration tests cover core, animation, worker, edit, preview, thumbnail,
+  export, upload, and surface-selection paths.
 - [ ] Upgrade the wgpu/egui-wgpu integration only after a focused compatibility
   spike proves surface color-space and HDR behavior on all three backends.
 - [ ] Resolve and refresh the profile for the display that currently contains the

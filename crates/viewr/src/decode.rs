@@ -2,13 +2,15 @@
 //!
 //! Pure-Rust formats decode in-process (`image`, `jxl-oxide`, `resvg`). Formats
 //! that need C-backed decoders (AVIF, HEIC, RAW) are delegated to
-//! [`crate::sandbox`]. The shape of [`DecodedImage`] (owned RGBA8 plus
-//! dimensions) is what the GPU wants either way.
+//! [`crate::sandbox`]. Decoder-owned source pixels cross one explicit color
+//! normalization boundary before becoming a [`DecodedImage`] in the renderer's
+//! typed working encoding.
 
 use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::color::WorkingColorEncoding;
 use crate::error::Error;
 
 pub(crate) use viewr_protocol::MAX_DECODE_DIMENSION;
@@ -346,7 +348,46 @@ fn acquire_decode_permit_from(
     DecodePermit(gate)
 }
 
-/// A decoded image in the form the renderer uploads: tightly packed RGBA8,
+/// Decoder-owned RGBA8 pixels that have not entered the working color space.
+pub(crate) struct SourceImage {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+impl SourceImage {
+    pub(crate) fn new(rgba: Vec<u8>, width: u32, height: u32) -> Result<Self, Error> {
+        let expected_size = validate_dimensions(width, height)?;
+        if rgba.len() != expected_size {
+            return Err(Error::Decode(
+                "decoder returned an invalid RGBA buffer".into(),
+            ));
+        }
+        Ok(Self {
+            rgba,
+            width,
+            height,
+        })
+    }
+
+    fn from_dynamic_image(decoded: image::DynamicImage) -> Result<Self, Error> {
+        let width = decoded.width();
+        let height = decoded.height();
+        Self::new(decoded.into_rgba8().into_raw(), width, height)
+    }
+
+    fn into_working(self, color_profile: ColorProfileStatus) -> DecodedImage {
+        DecodedImage {
+            rgba: self.rgba,
+            width: self.width,
+            height: self.height,
+            color_profile,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        }
+    }
+}
+
+/// A decoded image in the form the renderer uploads: tightly packed RGBA8 sRGB,
 /// eight bits per channel, `width * height * 4` bytes, top row first.
 pub struct DecodedImage {
     /// Row-major RGBA8 pixels, no padding.
@@ -357,6 +398,8 @@ pub struct DecodedImage {
     pub height: u32,
     /// How embedded color metadata was handled before the pixels reached the GPU.
     pub color_profile: ColorProfileStatus,
+    /// Complete color-space and storage interpretation for `rgba`.
+    pub working_color: WorkingColorEncoding,
 }
 
 /// Color-management result attached to decoded pixels.
@@ -395,17 +438,34 @@ pub(crate) struct ColorNormalizer {
 }
 
 impl ColorNormalizer {
+    pub(crate) fn assumed_srgb() -> Self {
+        Self::without_transform(ColorProfileStatus::AssumedSrgb)
+    }
+
+    pub(crate) fn tagged_srgb() -> Self {
+        Self::without_transform(ColorProfileStatus::TaggedSrgb)
+    }
+
+    pub(crate) fn unsupported_profile() -> Self {
+        Self::without_transform(ColorProfileStatus::EmbeddedProfileFallback)
+    }
+
+    pub(crate) fn unknown_worker_profile() -> Self {
+        Self::without_transform(ColorProfileStatus::UnknownWorkerProfileFallback)
+    }
+
+    fn without_transform(status: ColorProfileStatus) -> Self {
+        Self {
+            transform: None,
+            status,
+        }
+    }
+
     pub(crate) fn from_decoder(decoder: &mut impl image::ImageDecoder) -> Self {
         match decoder.icc_profile() {
             Ok(Some(profile)) => Self::from_icc_profile(&profile),
-            Ok(None) => Self {
-                transform: None,
-                status: ColorProfileStatus::AssumedSrgb,
-            },
-            Err(_) => Self {
-                transform: None,
-                status: ColorProfileStatus::EmbeddedProfileFallback,
-            },
+            Ok(None) => Self::assumed_srgb(),
+            Err(_) => Self::unsupported_profile(),
         }
     }
 
@@ -439,56 +499,81 @@ impl ColorNormalizer {
     }
 
     fn fallback() -> Self {
-        Self {
-            transform: None,
-            status: ColorProfileStatus::EmbeddedProfileFallback,
+        Self::unsupported_profile()
+    }
+
+    pub(crate) fn normalize(&self, source: SourceImage) -> Result<DecodedImage, Error> {
+        self.normalize_if_current(source, DecodeGeneration::unconditional())
+            .map_err(|error| Error::Decode(error.to_string()))
+    }
+
+    pub(crate) fn normalize_if_current(
+        &self,
+        source: SourceImage,
+        generation: DecodeGeneration<'_>,
+    ) -> io::Result<DecodedImage> {
+        self.normalize_with_check(source, || generation.ensure_current())
+    }
+
+    pub(crate) fn normalize_while_current(
+        &self,
+        source: SourceImage,
+        is_current: &impl Fn() -> bool,
+    ) -> Result<Option<DecodedImage>, Error> {
+        match self.normalize_with_check(source, || {
+            if is_current() {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "image decode request was superseded",
+                ))
+            }
+        }) {
+            Ok(image) => Ok(Some(image)),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(None),
+            Err(error) => Err(Error::Decode(error.to_string())),
         }
     }
 
-    pub(crate) fn apply(&self, image: &mut DecodedImage) {
-        let result = self.apply_if_current(image, DecodeGeneration::unconditional());
-        debug_assert!(
-            result.is_ok(),
-            "an unconditional color transform cannot be cancelled"
-        );
-    }
-
-    pub(crate) fn apply_if_current(
+    fn normalize_with_check(
         &self,
-        image: &mut DecodedImage,
-        generation: DecodeGeneration<'_>,
-    ) -> io::Result<()> {
-        generation.ensure_current()?;
-        image.color_profile = self.status;
+        mut source: SourceImage,
+        ensure_current: impl Fn() -> io::Result<()>,
+    ) -> io::Result<DecodedImage> {
+        ensure_current()?;
         let Some(transform) = self.transform.as_ref() else {
-            return Ok(());
+            return Ok(source.into_working(self.status));
         };
-        let Some(row_bytes) = usize::try_from(image.width)
+        let Some(row_bytes) = usize::try_from(source.width)
             .ok()
             .and_then(|width| width.checked_mul(4))
         else {
-            image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-            return Ok(());
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "source row size exceeds this platform",
+            ));
         };
-        if row_bytes == 0 || !image.rgba.len().is_multiple_of(row_bytes) {
-            image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-            return Ok(());
+        if row_bytes == 0 || !source.rgba.len().is_multiple_of(row_bytes) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "source pixels do not match their dimensions",
+            ));
         }
         let mut converted = Vec::new();
-        if converted.try_reserve_exact(row_bytes).is_err() {
-            image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-            return Ok(());
-        }
+        converted
+            .try_reserve_exact(row_bytes)
+            .map_err(|_| io::Error::other("not enough memory for one converted image row"))?;
         converted.resize(row_bytes, 0);
-        for row in image.rgba.chunks_exact_mut(row_bytes) {
-            generation.ensure_current()?;
-            if transform.transform(row, &mut converted).is_err() {
-                image.color_profile = ColorProfileStatus::EmbeddedProfileFallback;
-                return Ok(());
-            }
+        for row in source.rgba.chunks_exact_mut(row_bytes) {
+            ensure_current()?;
+            transform.transform(row, &mut converted).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "embedded ICC transform failed")
+            })?;
             row.copy_from_slice(&converted);
         }
-        generation.ensure_current()
+        ensure_current()?;
+        Ok(source.into_working(self.status))
     }
 }
 
@@ -573,7 +658,7 @@ impl DecodedImage {
         let reader = reader
             .with_guessed_format()
             .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
-        Self::decode_image_reader(reader)
+        Self::decode_image_reader(reader, generation)
     }
 
     /// Decode image bytes already in memory (no temp file, no path on disk).
@@ -586,7 +671,10 @@ impl DecodedImage {
     pub fn load_from_memory(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.starts_with(JXL_CODESTREAM_SIGNATURE) || bytes.starts_with(JXL_CONTAINER_SIGNATURE)
         {
-            return Self::decode_jxl(std::io::Cursor::new(bytes));
+            return Self::decode_jxl(
+                std::io::Cursor::new(bytes),
+                DecodeGeneration::unconditional(),
+            );
         }
 
         // SVG is not handled by `image::load_from_memory`; sniff the payload.
@@ -606,7 +694,7 @@ impl DecodedImage {
         let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
             .map_err(|e| Error::Decode(format!("decode failed: {e}")))?;
-        Self::decode_image_reader(reader)
+        Self::decode_image_reader(reader, DecodeGeneration::unconditional())
     }
 
     /// Decode bytes using the decoder associated with a core file extension.
@@ -628,19 +716,25 @@ impl DecodedImage {
             return Err(Error::Decode("unsupported core image format".into()));
         }
         match extension.as_str() {
-            "jxl" => Self::decode_jxl(std::io::Cursor::new(bytes)),
+            "jxl" => Self::decode_jxl(
+                std::io::Cursor::new(bytes),
+                DecodeGeneration::unconditional(),
+            ),
             "svg" => Self::load_svg_bytes(bytes),
             _ => {
                 enforce_embedded_metadata_limits(std::io::Cursor::new(bytes))?;
                 let format = image::ImageFormat::from_extension(&extension)
                     .ok_or_else(|| Error::Decode("unsupported core image format".into()))?;
                 let reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
-                Self::decode_image_reader(reader)
+                Self::decode_image_reader(reader, DecodeGeneration::unconditional())
             }
         }
     }
 
-    fn decode_image_reader<R>(mut reader: image::ImageReader<R>) -> Result<Self, Error>
+    fn decode_image_reader<R>(
+        mut reader: image::ImageReader<R>,
+        generation: DecodeGeneration<'_>,
+    ) -> Result<Self, Error>
     where
         R: BufRead + Seek,
     {
@@ -660,44 +754,29 @@ impl DecodedImage {
         let mut dynamic_image = image::DynamicImage::from_decoder(decoder)
             .map_err(|e| Error::Decode(format!("decode failed: {e}")))?;
         dynamic_image.apply_orientation(orientation);
-        let mut image = Self::from_dynamic_image(dynamic_image)?;
-        color_normalizer.apply(&mut image);
-        Ok(image)
-    }
-
-    fn from_dynamic_image(decoded: image::DynamicImage) -> Result<Self, Error> {
-        let width = decoded.width();
-        let height = decoded.height();
-        let expected_size = validate_dimensions(width, height)?;
-        let rgba = decoded.into_rgba8().into_raw();
-        if rgba.len() != expected_size {
-            return Err(Error::Decode(
-                "decoder returned an invalid RGBA buffer".into(),
-            ));
-        }
-        Ok(Self {
-            rgba,
-            width,
-            height,
-            color_profile: ColorProfileStatus::AssumedSrgb,
-        })
+        color_normalizer
+            .normalize_if_current(SourceImage::from_dynamic_image(dynamic_image)?, generation)
+            .map_err(|error| Error::Decode(error.to_string()))
     }
 
     fn load_jxl(path: &Path, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
         let file = std::fs::File::open(path).map_err(|e| Error::Decode(e.to_string()))?;
-        Self::decode_jxl(GenerationReader::new(BufReader::new(file), generation))
+        Self::decode_jxl(
+            GenerationReader::new(BufReader::new(file), generation),
+            generation,
+        )
     }
 
-    fn decode_jxl(reader: impl Read) -> Result<Self, Error> {
+    fn decode_jxl(reader: impl Read, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
         let mut jxl = jxl_oxide::integration::JxlDecoder::new(reader)
             .map_err(|e| Error::Decode(format!("failed to init JXL decoder: {e}")))?;
         validate_decoder_allocation(&jxl)?;
         let color_normalizer = ColorNormalizer::from_decoder(&mut jxl);
         let decoded = image::DynamicImage::from_decoder(jxl)
             .map_err(|e| Error::Decode(format!("failed to decode JXL: {e}")))?;
-        let mut image = Self::from_dynamic_image(decoded)?;
-        color_normalizer.apply(&mut image);
-        Ok(image)
+        color_normalizer
+            .normalize_if_current(SourceImage::from_dynamic_image(decoded)?, generation)
+            .map_err(|error| Error::Decode(error.to_string()))
     }
 
     /// Render an SVG to RGBA8 with pure-Rust `resvg` / `usvg`.
@@ -746,12 +825,7 @@ impl DecodedImage {
                 "SVG renderer returned an invalid RGBA buffer".into(),
             ));
         }
-        Ok(Self {
-            rgba,
-            width,
-            height,
-            color_profile: ColorProfileStatus::AssumedSrgb,
-        })
+        ColorNormalizer::assumed_srgb().normalize(SourceImage::new(rgba, width, height)?)
     }
 }
 
@@ -983,9 +1057,10 @@ mod tests {
         ColorNormalizer, ColorProfileStatus, DecodeGate, DecodeGateState, DecodeGeneration,
         DecodePriority, DecodedImage, GenerationReader, LatestJobQueue,
         MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES, PNG_SIGNATURE,
-        acquire_decode_permit_from, positive_f32_to_px, try_schedule_background,
+        SourceImage, acquire_decode_permit_from, positive_f32_to_px, try_schedule_background,
         validate_dimensions,
     };
+    use crate::color::WorkingColorEncoding;
     use crate::ephemeral::TempWorkspace;
     use little_exif::exif_tag::ExifTag;
     use little_exif::metadata::Metadata;
@@ -1037,6 +1112,7 @@ mod tests {
         assert_eq!((decoded.width, decoded.height), (8, 6));
         assert_eq!(decoded.rgba.len(), 8 * 6 * 4);
         assert_eq!(decoded.color_profile, ColorProfileStatus::AssumedSrgb);
+        assert_eq!(decoded.working_color, WorkingColorEncoding::SRGB_RGBA8);
     }
 
     #[test]
@@ -1044,16 +1120,11 @@ mod tests {
         let normalizer =
             ColorNormalizer::from_color_profile(&moxcms::ColorProfile::new_display_p3());
         let original = vec![210, 120, 35, 17, 40, 180, 210, 231];
-        let mut image = DecodedImage {
-            rgba: original.clone(),
-            width: 1,
-            height: 2,
-            color_profile: ColorProfileStatus::AssumedSrgb,
-        };
-
-        normalizer.apply(&mut image);
+        let source = SourceImage::new(original.clone(), 1, 2).unwrap();
+        let image = normalizer.normalize(source).unwrap();
 
         assert_eq!(image.color_profile, ColorProfileStatus::ConvertedToSrgb);
+        assert_eq!(image.working_color, WorkingColorEncoding::SRGB_RGBA8);
         assert_ne!(image.rgba, original);
         assert_eq!(image.rgba[3], 17);
         assert_eq!(image.rgba[7], 231);
@@ -1074,17 +1145,31 @@ mod tests {
             ]
         );
 
-        let mut malformed = DecodedImage {
-            rgba: vec![10, 20, 30, 255],
-            width: 0,
-            height: 1,
-            color_profile: ColorProfileStatus::AssumedSrgb,
-        };
-        normalizer.apply(&mut malformed);
-        assert_eq!(
-            malformed.color_profile,
-            ColorProfileStatus::EmbeddedProfileFallback
-        );
+        assert!(SourceImage::new(vec![10, 20, 30, 255], 0, 1).is_err());
+    }
+
+    #[test]
+    fn color_normalization_checks_cancellation_between_rows() {
+        let normalizer =
+            ColorNormalizer::from_color_profile(&moxcms::ColorProfile::new_display_p3());
+        let source = SourceImage::new(vec![120; 4 * 4], 1, 4).unwrap();
+        let current = AtomicU64::new(7);
+        let checks = std::cell::Cell::new(0_u8);
+
+        let error = normalizer
+            .normalize_with_check(source, || {
+                let next = checks.get() + 1;
+                checks.set(next);
+                if next == 3 {
+                    current.store(8, std::sync::atomic::Ordering::Release);
+                }
+                DecodeGeneration::tracked(&current, 7).ensure_current()
+            })
+            .err()
+            .expect("superseding a multi-row transform must cancel it");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(checks.get(), 3);
     }
 
     #[test]
@@ -1093,19 +1178,25 @@ mod tests {
             ColorNormalizer::from_icc_profile(b"not an ICC profile"),
             ColorNormalizer::from_color_profile(&moxcms::ColorProfile::new_gray_with_gamma(2.2)),
         ] {
-            let mut image = DecodedImage {
-                rgba: vec![10, 20, 30, 40],
-                width: 1,
-                height: 1,
-                color_profile: ColorProfileStatus::AssumedSrgb,
-            };
-            normalizer.apply(&mut image);
+            let image = normalizer
+                .normalize(SourceImage::new(vec![10, 20, 30, 40], 1, 1).unwrap())
+                .unwrap();
             assert_eq!(
                 image.color_profile,
                 ColorProfileStatus::EmbeddedProfileFallback
             );
             assert_eq!(image.rgba, vec![10, 20, 30, 40]);
         }
+
+        let oversized_profile = vec![0; MAX_ICC_PROFILE_BYTES + 1];
+        let image = ColorNormalizer::from_icc_profile(&oversized_profile)
+            .normalize(SourceImage::new(vec![10, 20, 30, 40], 1, 1).unwrap())
+            .unwrap();
+        assert_eq!(
+            image.color_profile,
+            ColorProfileStatus::EmbeddedProfileFallback
+        );
+        assert_eq!(image.rgba, vec![10, 20, 30, 40]);
     }
 
     #[test]

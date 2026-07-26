@@ -112,8 +112,17 @@ Shipped:
   fallible area resampler works in linear light and premultiplied alpha; the winit
   thread performs only the validated texture upload. Superseded rows cancel by
   image generation, while the full decoded image remains available for export. A
-  Spot Heal patch updates the base level and regenerates dependent mips. No scene
-  graph.
+  typed output contract admits only matching RGBA8 sRGB working pixels and an
+  sRGB presentation surface; unsupported surface formats fail explicitly instead
+  of changing the transfer function. A Spot Heal patch updates the base level and
+  regenerates dependent mips. No scene graph.
+- **`color`**: the narrow color contract shared by decode, edits, previews, and
+  presentation. It names the working color space and pixel format separately from
+  the renderer-owned output transform. The only shipping contract is RGBA8 sRGB
+  to sRGB. This deliberately prevents a future higher-precision or wide-gamut
+  decoder result from entering the old upload path until a compatible output
+  transform exists. Preview generation, thumbnail upload, and export enforce the
+  same boundary rather than silently reinterpreting unfamiliar pixels.
 - **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on
   background threads via the `image` crate. For complex C-backed formats, the
   main process opens the selected file and delegates bounded encoded bytes to an
@@ -140,6 +149,13 @@ Shipped:
   Core decoders apply all eight EXIF orientations. Bounded embedded RGB ICC
   profiles are converted into the current sRGB working path; unsupported profiles
   carry an explicit fallback status instead of a false color-managed claim.
+  Decoder-owned `SourceImage` pixels cannot enter the renderer directly. The one
+  consuming normalization boundary validates their shape, applies any supported
+  source transform, checks cancellation between rows, and produces a
+  `DecodedImage` tagged with its complete working encoding. A failed or cancelled
+  transform drops the source instead of exposing partially converted pixels.
+  Foreground core and JPEG XL decodes plus animated frames check their generation
+  between ICC rows, matching the worker path's cancellation contract.
   Foreground file readers observe the current image generation at read and seek
   boundaries. Worker-bound file reads do the same, and a superseded request
   terminates its contained worker instead of holding a decode permit until the

@@ -19,6 +19,8 @@ pub struct ThumbRgba {
     pub height: u32,
     /// Tightly packed RGBA8 rows.
     pub rgba: Vec<u8>,
+    /// Color-space and storage interpretation for `rgba`.
+    pub working_color: crate::color::WorkingColorEncoding,
 }
 
 /// Decode `path` and downscale to fit inside a `THUMB_EDGE` box.
@@ -30,6 +32,13 @@ pub struct ThumbRgba {
 /// Returns a human-readable reason when decode or resize fails.
 pub fn generate_thumb(path: &Path) -> Result<ThumbRgba, String> {
     let decoded = crate::decode::DecodedImage::load_background(path).map_err(|e| e.to_string())?;
+    resize_decoded(path, decoded)
+}
+
+fn resize_decoded(path: &Path, decoded: crate::decode::DecodedImage) -> Result<ThumbRgba, String> {
+    if decoded.working_color != crate::color::WorkingColorEncoding::SRGB_RGBA8 {
+        return Err("thumbnail does not support this working color encoding".into());
+    }
     if decoded.width == 0 || decoded.height == 0 {
         return Err("empty image".into());
     }
@@ -43,6 +52,7 @@ pub fn generate_thumb(path: &Path) -> Result<ThumbRgba, String> {
         width: resized.width(),
         height: resized.height(),
         rgba: resized.into_raw(),
+        working_color: decoded.working_color,
     })
 }
 
@@ -72,7 +82,8 @@ fn f64_to_px(v: f64) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{THUMB_EDGE, fit_size, generate_thumb};
+    use super::{THUMB_EDGE, fit_size, generate_thumb, resize_decoded};
+    use std::path::Path;
 
     #[test]
     fn fit_size_preserves_aspect_and_caps_edge() {
@@ -80,6 +91,7 @@ mod tests {
         assert_eq!(fit_size(100, 200, 50), (25, 50));
         // Already small: do not upscale.
         assert_eq!(fit_size(20, 10, 50), (20, 10));
+        assert_eq!(fit_size(0, 50, THUMB_EDGE), (1, 1));
     }
 
     #[test]
@@ -95,5 +107,39 @@ mod tests {
         assert!(thumb.width <= THUMB_EDGE);
         assert!(thumb.height <= THUMB_EDGE);
         assert_eq!(thumb.rgba.len(), (thumb.width * thumb.height * 4) as usize);
+        assert_eq!(
+            thumb.working_color,
+            crate::color::WorkingColorEncoding::SRGB_RGBA8
+        );
+    }
+
+    #[test]
+    fn thumbnail_rejects_an_unsupported_working_encoding() {
+        let decoded = crate::decode::DecodedImage {
+            rgba: vec![0; 16],
+            width: 2,
+            height: 2,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::DISPLAY_P3_RGBA8,
+        };
+
+        let error = resize_decoded(Path::new("unsupported.png"), decoded).unwrap_err();
+
+        assert!(error.contains("working color"));
+    }
+
+    #[test]
+    fn thumbnail_rejects_empty_dimensions_before_resizing() {
+        let decoded = crate::decode::DecodedImage {
+            rgba: Vec::new(),
+            width: 0,
+            height: 1,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        };
+
+        let error = resize_decoded(Path::new("empty.png"), decoded).unwrap_err();
+
+        assert_eq!(error, "empty image");
     }
 }

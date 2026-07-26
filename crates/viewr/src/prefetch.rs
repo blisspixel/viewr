@@ -143,6 +143,7 @@ pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize>
 #[cfg(test)]
 mod tests {
     use super::{PrefetchCache, neighbor_indices};
+    use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
     use std::path::PathBuf;
 
@@ -152,6 +153,7 @@ mod tests {
             width: 1,
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         }
     }
 
@@ -161,6 +163,7 @@ mod tests {
             width: 1,
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
         }
     }
 

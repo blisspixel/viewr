@@ -119,9 +119,11 @@ navigator. Full table:
   chain, and over-limit sources get a bounded aspect-preserving preview while
   export retains the full decoded pixels. Preview preparation is cancellable and
   runs away from the window thread with a linear-light, alpha-correct area filter.
-  Embedded RGB ICC profiles are converted into the sRGB working pipeline.
-  Per-display output profiles, wide-gamut surfaces, and HDR presentation remain
-  explicit roadmap work.
+  Decoder-owned source pixels cross one normalization boundary; embedded RGB ICC
+  profiles become pixels explicitly tagged with the RGBA8 sRGB working contract.
+  The renderer accepts only that contract and requires an sRGB presentation
+  surface instead of silently selecting an untyped fallback. Per-display output
+  profiles, wide-gamut surfaces, and HDR presentation remain explicit roadmap work.
 - Decoding: [image-rs](https://github.com/image-rs/image) plus jxl-oxide and
   friends, safe decoders across a wide format set. Async image decoding uses
   bounded replace-latest queues and generation-aware readers, so obsolete work

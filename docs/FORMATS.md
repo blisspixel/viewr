@@ -13,12 +13,12 @@ dependency set lean).
 | Family | Extensions |
 |--------|------------|
 | JPEG | `.jpg`, `.jpeg` |
-| PNG | `.png` |
+| PNG / APNG | `.png` (APNG plays when multiple frames are present) |
 | GIF | `.gif` (including animation frames when present) |
-| WebP | `.webp` |
+| WebP | `.webp` (including animation frames when present) |
 | BMP | `.bmp` |
-| TIFF | `.tif`, `.tiff` |
-| ICO | `.ico` |
+| TIFF | `.tif`, `.tiff` (one decoded image; no page navigator yet) |
+| ICO | `.ico` (one decoded image; no frame navigator yet) |
 | QOI | `.qoi` |
 | TGA | `.tga` |
 | PNM | `.ppm`, `.pgm`, `.pbm`, `.pnm` |
@@ -30,6 +30,50 @@ dependency set lean).
 
 Golden-file style coverage for many of these lives in `crates/viewr/tests/corpus.rs`
 and unit tests under `decode` / `edit`.
+
+## Container behavior
+
+- GIF, animated WebP, and APNG decode off the UI thread and play with bounded
+  frame count, bounded decoded bytes, container delay, pause/resume, and loop
+  behavior. Detection follows file content rather than the extension, and
+  superseded animation work stops between frames. A still container remains a
+  still image.
+- TIFF and ICO currently expose one decoded image. Listing the container as
+  supported does not claim multi-page or icon-frame navigation.
+- All eight EXIF orientation values are normalized into displayed pixels when the
+  decoder exposes orientation metadata. Rotation, flips, and crop are exported in
+  their visible orientation rather than copied as a stale orientation tag.
+
+## Color behavior
+
+- A bounded, valid embedded RGB ICC profile is converted to the current sRGB
+  working path before GPU upload. The same conversion applies to supported
+  animated frames. Missing profiles are treated as sRGB; invalid, oversized, or
+  unsupported profiles produce an explicit fallback status in Image Information.
+  PNG and WebP containers are preflighted before decoder allocation. JPEG XL's
+  locally reviewed `jxl-color` boundary rejects encoded, declared, or amplified
+  ICC output beyond the same 10 MiB ceiling.
+- SVG and optional worker output currently enter the sRGB path without a complete
+  source-to-output color description. The worker protocol does not yet carry ICC
+  or equivalent AVIF/HEIC color metadata.
+- Core and worker dimensions and declared RGBA output sizes are validated before
+  parent pixel allocation. Superseded worker reads and IPC requests stop and
+  terminate their contained helper instead of occupying a decode slot until the
+  hard deadline.
+- CMYK profile conversion, per-display output transforms, wide-gamut preservation,
+  and HDR presentation are not yet claimed. `ROADMAP.md` defines the acceptance
+  work required before those claims can be made.
+
+## Metadata export behavior
+
+- Save As strips metadata by default. Optional session-only EXIF retention is
+  available for JPEG, PNG, and WebP destinations.
+- Source metadata is detected from file content, not its extension. The bounded
+  reader supports JPEG, PNG text/eXIf variants, WebP, and TIFF metadata whose IFD
+  is located beyond the image prefix.
+- Export validates every option before touching the destination, assembles pixels
+  and metadata in a sibling temporary file, and replaces the selected destination
+  only after the complete output succeeds.
 
 The Linux desktop entry, macOS application bundle, and Windows AppContainer
 manifest advertise exactly this core extension set. They intentionally omit the

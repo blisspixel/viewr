@@ -21,6 +21,8 @@ const UNREACHABLE_DISTANCE: i32 = i32::MAX / 4;
 const MAX_WORKING_PIXELS: u64 = 4 * 1024 * 1024;
 const MAX_RASTER_WORK: u64 = 16 * 1024 * 1024;
 const MAX_BOUNDARY_SAMPLES: usize = 2_048;
+const MAX_PATCH_CANDIDATES: usize = 8;
+const MAX_TONE_ADJUSTMENT: i16 = 64;
 
 /// Maximum number of sparse input points retained for one repair gesture.
 pub const MAX_STROKE_POINTS: usize = 16_384;
@@ -29,6 +31,10 @@ pub const MAX_STROKE_POINTS: usize = 16_384;
 pub const MIN_BRUSH_RADIUS: u32 = 2;
 /// Largest supported brush radius, in source-image pixels.
 pub const MAX_BRUSH_RADIUS: u32 = 256;
+/// Default feather amount as a percentage of brush radius.
+pub const DEFAULT_FEATHER_PERCENT: u8 = 35;
+/// Largest accepted feather amount as a percentage of brush radius.
+pub const MAX_FEATHER_PERCENT: u8 = 100;
 
 /// One image-space point in a spot-heal stroke.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,6 +52,21 @@ pub struct ImagePatch {
     pub bounds: Rect,
     /// Tightly packed RGBA8 pixels for `bounds`.
     pub rgba: Vec<u8>,
+}
+
+/// Result of a ranked spot-heal repair.
+///
+/// `candidate_count` is zero when the bounded inpainting fallback was needed.
+/// Otherwise `candidate_index` identifies the selected source patch and can be
+/// advanced to offer a deterministic alternate source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpotHealResult {
+    /// Exact pixels to apply to the source image.
+    pub patch: ImagePatch,
+    /// Zero-based selected source-patch rank.
+    pub candidate_index: usize,
+    /// Number of distinct source patches retained by the bounded search.
+    pub candidate_count: usize,
 }
 
 /// Bounded in-memory undo and redo history for pixel patches.
@@ -215,6 +236,7 @@ fn push_bounded(
 /// Preparation copies a bounded working region. The worker drops its shared
 /// source image immediately afterward, so running the job does not retain or
 /// access the full image.
+#[derive(Clone)]
 pub struct SpotHealJob {
     origin: (u32, u32),
     width: u32,
@@ -338,8 +360,26 @@ impl SpotHealJob {
         points: &[StrokePoint],
         brush_radius: u32,
     ) -> Result<Option<Self>, HealError> {
+        Self::prepare_with_feather(image, points, brush_radius, DEFAULT_FEATHER_PERCENT)
+    }
+
+    /// Prepare a bounded repair with an explicit feather percentage.
+    ///
+    /// A value of zero limits blending to the painted mask. A value of 100
+    /// feathers outward by one brush radius.
+    ///
+    /// # Errors
+    /// Returns [`HealError`] for the same malformed inputs as [`Self::prepare`]
+    /// or when `feather_percent` is greater than [`MAX_FEATHER_PERCENT`].
+    pub fn prepare_with_feather(
+        image: &DecodedImage,
+        points: &[StrokePoint],
+        brush_radius: u32,
+        feather_percent: u8,
+    ) -> Result<Option<Self>, HealError> {
         validate_image(image)?;
         if !(MIN_BRUSH_RADIUS..=MAX_BRUSH_RADIUS).contains(&brush_radius)
+            || feather_percent > MAX_FEATHER_PERCENT
             || points.is_empty()
             || points.len() > MAX_STROKE_POINTS
             || points.iter().any(|point| {
@@ -356,7 +396,10 @@ impl SpotHealJob {
         else {
             return Ok(None);
         };
-        let feather_radius = (brush_radius / 3).clamp(2, 24);
+        let feather_radius = brush_radius
+            .saturating_mul(u32::from(feather_percent))
+            .saturating_add(50)
+            / 100;
         let search_radius = brush_radius.saturating_mul(5).clamp(32, 256);
         let working_padding = feather_radius.saturating_add(search_radius);
         let global_working = global_damage.expanded(working_padding, image.width, image.height);
@@ -400,7 +443,7 @@ impl SpotHealJob {
     /// Returns [`HealError::NoSourcePixels`] if the stroke leaves no clean
     /// pixels from which the bounded fallback can reconstruct the area.
     pub fn run(self) -> Result<ImagePatch, HealError> {
-        self.run_inner(None)
+        self.run_inner(0, None).map(|result| result.patch)
     }
 
     /// Run a repair that can be canceled when its image or tool mode changes.
@@ -409,10 +452,41 @@ impl SpotHealJob {
     /// Returns [`HealError::Cancelled`] after `cancel` becomes true, or the same
     /// reconstruction errors as [`Self::run`].
     pub fn run_cancellable(self, cancel: &AtomicBool) -> Result<ImagePatch, HealError> {
-        self.run_inner(Some(cancel))
+        self.run_inner(0, Some(cancel)).map(|result| result.patch)
     }
 
-    fn run_inner(self, cancel: Option<&AtomicBool>) -> Result<ImagePatch, HealError> {
+    /// Run a repair using one of the ranked, spatially distinct source patches.
+    ///
+    /// The requested rank wraps within the available candidates. This makes a
+    /// repeated Refresh Source action deterministic. When no source patch fits,
+    /// the result reports zero candidates and uses bounded directional
+    /// inpainting instead.
+    ///
+    /// # Errors
+    /// Returns the same reconstruction and cancellation errors as [`Self::run`].
+    pub fn run_ranked(&self, candidate_index: usize) -> Result<SpotHealResult, HealError> {
+        self.run_inner(candidate_index, None)
+    }
+
+    /// Run a ranked repair that can be canceled when its image or tool mode
+    /// changes.
+    ///
+    /// # Errors
+    /// Returns [`HealError::Cancelled`] after `cancel` becomes true, or the same
+    /// reconstruction errors as [`Self::run_ranked`].
+    pub fn run_ranked_cancellable(
+        &self,
+        candidate_index: usize,
+        cancel: &AtomicBool,
+    ) -> Result<SpotHealResult, HealError> {
+        self.run_inner(candidate_index, Some(cancel))
+    }
+
+    fn run_inner(
+        &self,
+        candidate_index: usize,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<SpotHealResult, HealError> {
         check_cancelled(cancel)?;
         let mut mask = vec![0_u8; (u64::from(self.width) * u64::from(self.height)) as usize];
         rasterize_stroke(
@@ -428,7 +502,7 @@ impl SpotHealJob {
         let affected = self
             .damage_bounds
             .expanded(self.feather_radius, self.width, self.height);
-        let patch_rgba = if let Some((dx, dy)) = best_patch_offset(
+        let candidates = ranked_patch_offsets(
             &self.rgba,
             &mask,
             &coverage,
@@ -438,23 +512,39 @@ impl SpotHealJob {
             self.brush_radius,
             self.search_radius,
             cancel,
-        )? {
-            composite_shifted_region(&self.rgba, &coverage, self.width, affected, dx, dy, cancel)?
+        )?;
+        let (patch_rgba, selected_index) = if candidates.is_empty() {
+            let repaired =
+                directional_boundary_fill(&self.rgba, &coverage, self.width, self.height, cancel)?;
+            (
+                composite_region(
+                    &self.rgba, &repaired, &coverage, self.width, affected, cancel,
+                )?,
+                0,
+            )
         } else {
-            let repaired = boundary_fill(&self.rgba, &coverage, self.width, self.height, cancel)?;
-            composite_region(
-                &self.rgba, &repaired, &coverage, self.width, affected, cancel,
-            )?
+            let selected_index = candidate_index % candidates.len();
+            let candidate = candidates[selected_index];
+            (
+                composite_shifted_region(
+                    &self.rgba, &coverage, self.width, affected, candidate, cancel,
+                )?,
+                selected_index,
+            )
         };
         check_cancelled(cancel)?;
-        Ok(ImagePatch {
-            bounds: Rect {
-                x: self.origin.0 + affected.x,
-                y: self.origin.1 + affected.y,
-                width: affected.width,
-                height: affected.height,
+        Ok(SpotHealResult {
+            patch: ImagePatch {
+                bounds: Rect {
+                    x: self.origin.0 + affected.x,
+                    y: self.origin.1 + affected.y,
+                    width: affected.width,
+                    height: affected.height,
+                },
+                rgba: patch_rgba,
             },
-            rgba: patch_rgba,
+            candidate_index: selected_index,
+            candidate_count: candidates.len(),
         })
     }
 }
@@ -687,6 +777,10 @@ fn feather_coverage(
     feather: u32,
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<u8>, HealError> {
+    if feather == 0 {
+        check_cancelled(cancel)?;
+        return Ok(mask.to_vec());
+    }
     let width = width as usize;
     let height = height as usize;
     let mut distance: Vec<i32> = mask
@@ -766,6 +860,15 @@ fn feather_coverage(
     Ok(coverage)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PatchCandidate {
+    score: u64,
+    dx: i32,
+    dy: i32,
+    adjustment: [i16; 3],
+}
+
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn best_patch_offset(
     rgba: &[u8],
@@ -778,9 +881,36 @@ fn best_patch_offset(
     search_radius: u32,
     cancel: Option<&AtomicBool>,
 ) -> Result<Option<(i32, i32)>, HealError> {
+    Ok(ranked_patch_offsets(
+        rgba,
+        mask,
+        coverage,
+        width,
+        height,
+        affected,
+        brush_radius,
+        search_radius,
+        cancel,
+    )?
+    .first()
+    .map(|candidate| (candidate.dx, candidate.dy)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ranked_patch_offsets(
+    rgba: &[u8],
+    mask: &[u8],
+    coverage: &[u8],
+    width: u32,
+    height: u32,
+    affected: LocalRect,
+    brush_radius: u32,
+    search_radius: u32,
+    cancel: Option<&AtomicBool>,
+) -> Result<Vec<PatchCandidate>, HealError> {
     let boundary = boundary_samples(mask, coverage, width);
     if boundary.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let step =
         i32::try_from((brush_radius / 8).clamp(2, 8)).map_err(|_| HealError::InvalidStroke)?;
@@ -797,7 +927,7 @@ fn best_patch_offset(
         values.sort_unstable();
     }
 
-    let mut best: Option<(u64, i32, i32)> = None;
+    let mut candidates = Vec::new();
     for &dy in &values {
         for &dx in &values {
             check_cancelled(cancel)?;
@@ -807,74 +937,254 @@ fn best_patch_offset(
             let Some(source) = affected.translated(dx, dy) else {
                 continue;
             };
-            if !source.is_inside(width, height) || source.overlaps(affected) {
+            if !source.is_inside(width, height) {
                 continue;
             }
-            let cutoff = best.map_or(u64::MAX, |entry| entry.0);
-            let mut score = 0_u64;
-            let mut valid = true;
-            for &(x, y) in &boundary {
-                let Some(source_x) = x.checked_add_signed(dx) else {
-                    valid = false;
-                    break;
-                };
-                let Some(source_y) = y.checked_add_signed(dy) else {
-                    valid = false;
-                    break;
-                };
-                if source_x >= width || source_y >= height {
-                    valid = false;
-                    break;
-                }
-                let destination_index = (y * width + x) as usize;
-                let source_index = (source_y * width + source_x) as usize;
-                if mask[source_index] != 0 {
-                    valid = false;
-                    break;
-                }
-                let destination_byte = destination_index * CHANNELS;
-                let source_byte = source_index * CHANNELS;
-                for channel in 0..3 {
-                    let difference = i32::from(rgba[destination_byte + channel])
-                        - i32::from(rgba[source_byte + channel]);
-                    let magnitude = u64::from(difference.unsigned_abs());
-                    score = score.saturating_add(magnitude * magnitude);
-                }
-                if score >= cutoff {
-                    valid = false;
-                    break;
-                }
-            }
-            if !valid {
+            if !translated_boundary_is_clean(&boundary, mask, width, height, dx, dy) {
                 continue;
             }
+
+            if source.overlaps(affected)
+                && !shifted_covered_source_is_clean(mask, coverage, width, affected, dx, dy)
+            {
+                continue;
+            }
+
+            let adjustment = boundary_tone_adjustment(rgba, &boundary, width, dx, dy);
+            let mut score =
+                patch_match_score(rgba, mask, &boundary, width, height, dx, dy, adjustment);
             let distance_x = u64::from(dx.unsigned_abs());
             let distance_y = u64::from(dy.unsigned_abs());
-            score = score.saturating_add(distance_x * distance_x + distance_y * distance_y);
-            let candidate = (score, dx, dy);
-            if best.is_none_or(|current| candidate < current) {
-                best = Some(candidate);
+            let distance = distance_x * distance_x + distance_y * distance_y;
+            score = score.saturating_add(
+                distance.saturating_mul(u64::try_from(boundary.len()).unwrap_or(u64::MAX)) / 16,
+            );
+            candidates.push(PatchCandidate {
+                score,
+                dx,
+                dy,
+                adjustment,
+            });
+        }
+    }
+
+    candidates.sort_unstable_by_key(|candidate| {
+        let distance = i64::from(candidate.dx) * i64::from(candidate.dx)
+            + i64::from(candidate.dy) * i64::from(candidate.dy);
+        (candidate.score, distance, candidate.dy, candidate.dx)
+    });
+    let minimum_separation =
+        i64::from((brush_radius / 2).max(u32::try_from(step * 2).unwrap_or(0)));
+    let minimum_separation_squared = minimum_separation * minimum_separation;
+    let mut distinct = Vec::with_capacity(MAX_PATCH_CANDIDATES);
+    for candidate in candidates {
+        let is_distinct = distinct.iter().all(|selected: &PatchCandidate| {
+            let dx = i64::from(candidate.dx - selected.dx);
+            let dy = i64::from(candidate.dy - selected.dy);
+            dx * dx + dy * dy >= minimum_separation_squared
+        });
+        if is_distinct {
+            distinct.push(candidate);
+            if distinct.len() == MAX_PATCH_CANDIDATES {
+                break;
             }
         }
     }
-    Ok(best.map(|(_, dx, dy)| (dx, dy)))
+    Ok(distinct)
+}
+
+fn translated_boundary_is_clean(
+    boundary: &[(u32, u32)],
+    mask: &[u8],
+    width: u32,
+    height: u32,
+    dx: i32,
+    dy: i32,
+) -> bool {
+    boundary.iter().all(|&(x, y)| {
+        let Some(source_x) = x.checked_add_signed(dx) else {
+            return false;
+        };
+        let Some(source_y) = y.checked_add_signed(dy) else {
+            return false;
+        };
+        source_x < width && source_y < height && mask[(source_y * width + source_x) as usize] == 0
+    })
+}
+
+fn boundary_tone_adjustment(
+    rgba: &[u8],
+    boundary: &[(u32, u32)],
+    width: u32,
+    dx: i32,
+    dy: i32,
+) -> [i16; 3] {
+    let mut histograms = [[0_u16; 511]; 3];
+    for &(x, y) in boundary {
+        let source_x = x.checked_add_signed(dx).unwrap_or(x);
+        let source_y = y.checked_add_signed(dy).unwrap_or(y);
+        let destination_byte = (y * width + x) as usize * CHANNELS;
+        let source_byte = (source_y * width + source_x) as usize * CHANNELS;
+        for channel in 0..3 {
+            let difference = i16::from(rgba[destination_byte + channel])
+                - i16::from(rgba[source_byte + channel]);
+            histograms[channel][usize::try_from(difference + 255).unwrap_or(0)] += 1;
+        }
+    }
+    let middle = boundary.len() / 2;
+    histograms.map(|histogram| {
+        let mut cumulative = 0_usize;
+        let median = histogram
+            .iter()
+            .position(|count| {
+                cumulative += usize::from(*count);
+                cumulative > middle
+            })
+            .map_or(0, |index| i16::try_from(index).unwrap_or(255) - 255);
+        median.clamp(-MAX_TONE_ADJUSTMENT, MAX_TONE_ADJUSTMENT)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn patch_match_score(
+    rgba: &[u8],
+    mask: &[u8],
+    boundary: &[(u32, u32)],
+    width: u32,
+    height: u32,
+    dx: i32,
+    dy: i32,
+    adjustment: [i16; 3],
+) -> u64 {
+    let mut score = 0_u64;
+    for &(x, y) in boundary {
+        let source_x = x.checked_add_signed(dx).unwrap_or(x);
+        let source_y = y.checked_add_signed(dy).unwrap_or(y);
+        let destination_byte = (y * width + x) as usize * CHANNELS;
+        let source_byte = (source_y * width + source_x) as usize * CHANNELS;
+        for channel in 0..3 {
+            let adapted =
+                (i16::from(rgba[source_byte + channel]) + adjustment[channel]).clamp(0, 255);
+            let difference = i32::from(rgba[destination_byte + channel]) - i32::from(adapted);
+            score = score.saturating_add(robust_squared(difference, 64));
+        }
+
+        if let (Some(destination_gradient), Some(source_gradient)) = (
+            clean_luma_gradient(rgba, mask, width, height, x, y),
+            clean_luma_gradient(rgba, mask, width, height, source_x, source_y),
+        ) {
+            let difference_x = destination_gradient.0 - source_gradient.0;
+            let difference_y = destination_gradient.1 - source_gradient.1;
+            score = score
+                .saturating_add(robust_squared(difference_x, 96).saturating_mul(2))
+                .saturating_add(robust_squared(difference_y, 96).saturating_mul(2));
+        }
+    }
+    score
+}
+
+fn robust_squared(value: i32, limit: i32) -> u64 {
+    let magnitude = value.unsigned_abs().min(limit.unsigned_abs());
+    u64::from(magnitude) * u64::from(magnitude)
+}
+
+fn clean_luma_gradient(
+    rgba: &[u8],
+    mask: &[u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+) -> Option<(i32, i32)> {
+    let center_index = (y * width + x) as usize;
+    if mask[center_index] != 0 {
+        return None;
+    }
+    let center = luma(rgba, width, x, y);
+    let sample =
+        |x: u32, y: u32| (mask[(y * width + x) as usize] == 0).then(|| luma(rgba, width, x, y));
+    let left = x.checked_sub(1).and_then(|x| sample(x, y));
+    let right = (x + 1 < width).then(|| sample(x + 1, y)).flatten();
+    let top = y.checked_sub(1).and_then(|y| sample(x, y));
+    let bottom = (y + 1 < height).then(|| sample(x, y + 1)).flatten();
+    let gradient_x = axis_gradient(left, Some(center), right);
+    let gradient_y = axis_gradient(top, Some(center), bottom);
+    (left.is_some() || right.is_some() || top.is_some() || bottom.is_some())
+        .then_some((gradient_x, gradient_y))
+}
+
+fn luma(rgba: &[u8], width: u32, x: u32, y: u32) -> i32 {
+    let byte = (y * width + x) as usize * CHANNELS;
+    (54 * i32::from(rgba[byte])
+        + 183 * i32::from(rgba[byte + 1])
+        + 19 * i32::from(rgba[byte + 2])
+        + 128)
+        / 256
+}
+
+fn shifted_covered_source_is_clean(
+    mask: &[u8],
+    coverage: &[u8],
+    width: u32,
+    affected: LocalRect,
+    dx: i32,
+    dy: i32,
+) -> bool {
+    for y in affected.y..affected.bottom() {
+        for x in affected.x..affected.right() {
+            let destination = (y * width + x) as usize;
+            if coverage[destination] == 0 {
+                continue;
+            }
+            let Some(source_x) = x.checked_add_signed(dx) else {
+                return false;
+            };
+            let Some(source_y) = y.checked_add_signed(dy) else {
+                return false;
+            };
+            let source = (source_y * width + source_x) as usize;
+            if mask[source] != 0 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn boundary_samples(mask: &[u8], coverage: &[u8], width: u32) -> Vec<(u32, u32)> {
+    let height = u32::try_from(mask.len())
+        .unwrap_or(u32::MAX)
+        .checked_div(width)
+        .unwrap_or(0);
     let sample_count = mask
         .iter()
         .zip(coverage)
-        .filter(|(mask, coverage)| **mask == 0 && **coverage > 0)
+        .enumerate()
+        .filter(|(index, (mask_value, coverage_value))| {
+            **mask_value == 0
+                && (**coverage_value > 0 || touches_mask(mask, width, height, *index as u32))
+        })
         .count();
     let stride = sample_count.div_ceil(MAX_BOUNDARY_SAMPLES).max(1);
     mask.iter()
         .zip(coverage)
         .enumerate()
-        .filter(|(_, (mask, coverage))| **mask == 0 && **coverage > 0)
+        .filter(|(index, (mask_value, coverage_value))| {
+            **mask_value == 0
+                && (**coverage_value > 0 || touches_mask(mask, width, height, *index as u32))
+        })
         .step_by(stride)
         .take(MAX_BOUNDARY_SAMPLES)
         .map(|(index, _)| (index as u32 % width, index as u32 / width))
         .collect()
+}
+
+fn touches_mask(mask: &[u8], width: u32, height: u32, index: u32) -> bool {
+    let x = index % width;
+    let y = index / width;
+    neighbors(width, height, x, y)
+        .iter()
+        .any(|(x, y)| mask[(*y * width + *x) as usize] != 0)
 }
 
 fn composite_shifted_region(
@@ -882,8 +1192,7 @@ fn composite_shifted_region(
     coverage: &[u8],
     width: u32,
     bounds: LocalRect,
-    dx: i32,
-    dy: i32,
+    candidate: PatchCandidate,
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<u8>, HealError> {
     let mut output = Vec::with_capacity(bounds.width as usize * bounds.height as usize * CHANNELS);
@@ -894,14 +1203,27 @@ fn composite_shifted_region(
                 check_cancelled(cancel)?;
             }
             pixels = pixels.saturating_add(1);
-            let source_x = x.checked_add_signed(dx).ok_or(HealError::NoSourcePixels)?;
-            let source_y = y.checked_add_signed(dy).ok_or(HealError::NoSourcePixels)?;
+            let source_x = x
+                .checked_add_signed(candidate.dx)
+                .ok_or(HealError::NoSourcePixels)?;
+            let source_y = y
+                .checked_add_signed(candidate.dy)
+                .ok_or(HealError::NoSourcePixels)?;
             let destination = (y * width + x) as usize;
             let source = (source_y * width + source_x) as usize;
+            let mut adapted = [0_u8; CHANNELS];
+            for channel in 0..3 {
+                adapted[channel] = (i16::from(rgba[source * CHANNELS + channel])
+                    + candidate.adjustment[channel])
+                    .clamp(0, 255)
+                    .try_into()
+                    .unwrap_or(0);
+            }
+            adapted[3] = rgba[source * CHANNELS + 3];
             append_blended_pixel(
                 &mut output,
                 &rgba[destination * CHANNELS..destination * CHANNELS + CHANNELS],
-                &rgba[source * CHANNELS..source * CHANNELS + CHANNELS],
+                &adapted,
                 coverage[destination],
             );
         }
@@ -909,7 +1231,7 @@ fn composite_shifted_region(
     Ok(output)
 }
 
-fn boundary_fill(
+fn directional_boundary_fill(
     rgba: &[u8],
     coverage: &[u8],
     width: u32,
@@ -921,69 +1243,207 @@ fn boundary_fill(
     if !known.iter().any(|value| *value) {
         return Err(HealError::NoSourcePixels);
     }
-    let mut queued = vec![false; known.len()];
-    let mut queue = VecDeque::new();
-    for y in 0..height {
-        for x in 0..width {
-            let index = (y * width + x) as usize;
+    let distance = distance_from_known(&known, width, height, cancel)?;
+    let mut unknown: Vec<(i32, usize)> = known
+        .iter()
+        .enumerate()
+        .filter(|(_, value)| !**value)
+        .map(|(index, _)| (distance[index], index))
+        .collect();
+    unknown.sort_unstable();
+
+    let mut cursor = 0;
+    while cursor < unknown.len() {
+        let band_distance = unknown[cursor].0;
+        let band_end = unknown[cursor..]
+            .iter()
+            .position(|entry| entry.0 != band_distance)
+            .map_or(unknown.len(), |offset| cursor + offset);
+        let mut band_values = Vec::with_capacity(band_end - cursor);
+        for &(_, index) in &unknown[cursor..band_end] {
             if index.is_multiple_of(0x1000) {
                 check_cancelled(cancel)?;
             }
-            if !known[index] && has_known_neighbor(&known, width, height, x, y) {
-                queued[index] = true;
-                queue.push_back((x, y));
-            }
+            let x = index as u32 % width;
+            let y = index as u32 / width;
+            let Some(pixel) =
+                directional_pixel_estimate(&output, &known, &distance, width, height, x, y)
+            else {
+                return Err(HealError::NoSourcePixels);
+            };
+            band_values.push((index, pixel));
         }
+        for (index, pixel) in band_values {
+            output[index * CHANNELS..index * CHANNELS + CHANNELS].copy_from_slice(&pixel);
+            known[index] = true;
+        }
+        cursor = band_end;
     }
-
-    let mut iterations = 0_usize;
-    while let Some((x, y)) = queue.pop_front() {
-        if iterations.is_multiple_of(0x1000) {
-            check_cancelled(cancel)?;
-        }
-        iterations = iterations.saturating_add(1);
-        let index = (y * width + x) as usize;
-        if known[index] {
-            continue;
-        }
-        let adjacent = neighbors(width, height, x, y);
-        let known_count = adjacent
-            .iter()
-            .filter(|(x, y)| known[(*y * width + *x) as usize])
-            .count();
-        if known_count == 0 {
-            queued[index] = false;
-            continue;
-        }
-        let byte = index * CHANNELS;
-        for channel in 0..CHANNELS {
-            let sum: u32 = adjacent
-                .iter()
-                .map(|(x, y)| (*y * width + *x) as usize)
-                .filter(|neighbor| known[*neighbor])
-                .map(|neighbor| u32::from(output[neighbor * CHANNELS + channel]))
-                .sum();
-            output[byte + channel] = ((sum + known_count as u32 / 2) / known_count as u32) as u8;
-        }
-        known[index] = true;
-        for &(neighbor_x, neighbor_y) in adjacent.iter() {
-            let neighbor = (neighbor_y * width + neighbor_x) as usize;
-            if !known[neighbor] && !queued[neighbor] {
-                queued[neighbor] = true;
-                queue.push_back((neighbor_x, neighbor_y));
-            }
-        }
-    }
-    if known.iter().any(|value| !*value) {
-        return Err(HealError::NoSourcePixels);
-    }
+    check_cancelled(cancel)?;
     Ok(output)
 }
 
-fn has_known_neighbor(known: &[bool], width: u32, height: u32, x: u32, y: u32) -> bool {
-    neighbors(width, height, x, y)
+fn distance_from_known(
+    known: &[bool],
+    width: u32,
+    height: u32,
+    cancel: Option<&AtomicBool>,
+) -> Result<Vec<i32>, HealError> {
+    let width_usize = width as usize;
+    let height_usize = height as usize;
+    let mut distance: Vec<i32> = known
         .iter()
-        .any(|(x, y)| known[(*y * width + *x) as usize])
+        .map(|value| if *value { 0 } else { UNREACHABLE_DISTANCE })
+        .collect();
+    for y in 0..height_usize {
+        for x in 0..width_usize {
+            let index = y * width_usize + x;
+            if index.is_multiple_of(0x1000) {
+                check_cancelled(cancel)?;
+            }
+            let mut best = distance[index];
+            if x > 0 {
+                best = best.min(distance[index - 1].saturating_add(ORTHOGONAL_COST));
+            }
+            if y > 0 {
+                best = best.min(distance[index - width_usize].saturating_add(ORTHOGONAL_COST));
+                if x > 0 {
+                    best =
+                        best.min(distance[index - width_usize - 1].saturating_add(DIAGONAL_COST));
+                }
+                if x + 1 < width_usize {
+                    best =
+                        best.min(distance[index - width_usize + 1].saturating_add(DIAGONAL_COST));
+                }
+            }
+            distance[index] = best;
+        }
+    }
+    for y in (0..height_usize).rev() {
+        for x in (0..width_usize).rev() {
+            let index = y * width_usize + x;
+            let mut best = distance[index];
+            if x + 1 < width_usize {
+                best = best.min(distance[index + 1].saturating_add(ORTHOGONAL_COST));
+            }
+            if y + 1 < height_usize {
+                best = best.min(distance[index + width_usize].saturating_add(ORTHOGONAL_COST));
+                if x + 1 < width_usize {
+                    best =
+                        best.min(distance[index + width_usize + 1].saturating_add(DIAGONAL_COST));
+                }
+                if x > 0 {
+                    best =
+                        best.min(distance[index + width_usize - 1].saturating_add(DIAGONAL_COST));
+                }
+            }
+            distance[index] = best;
+        }
+    }
+    if distance.contains(&UNREACHABLE_DISTANCE) {
+        return Err(HealError::NoSourcePixels);
+    }
+    Ok(distance)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn directional_pixel_estimate(
+    rgba: &[u8],
+    known: &[bool],
+    distance: &[i32],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+) -> Option<[u8; CHANNELS]> {
+    let adjacent = neighbors(width, height, x, y);
+    let mut weighted = [0_i64; CHANNELS];
+    let mut total_weight = 0_i64;
+    for &(neighbor_x, neighbor_y) in adjacent.iter() {
+        let neighbor = (neighbor_y * width + neighbor_x) as usize;
+        if !known[neighbor] {
+            continue;
+        }
+        let dx = i32::try_from(x).ok()? - i32::try_from(neighbor_x).ok()?;
+        let dy = i32::try_from(y).ok()? - i32::try_from(neighbor_y).ok()?;
+        let spatial_weight = if dx == 0 || dy == 0 { 12 } else { 8 };
+        let level_weight =
+            1 + i64::from(distance[neighbor].abs_diff(distance[(y * width + x) as usize]));
+        let weight = spatial_weight / level_weight.max(1);
+        if weight == 0 {
+            continue;
+        }
+        for channel in 0..CHANNELS {
+            let value = i32::from(rgba[neighbor * CHANNELS + channel]);
+            let (gradient_x, gradient_y) =
+                known_channel_gradient(rgba, known, width, height, neighbor_x, neighbor_y, channel);
+            let estimate = value
+                .saturating_add(gradient_x.saturating_mul(dx))
+                .saturating_add(gradient_y.saturating_mul(dy))
+                .clamp(0, 255);
+            weighted[channel] = weighted[channel].saturating_add(i64::from(estimate) * weight);
+        }
+        total_weight += weight;
+    }
+    if total_weight == 0 {
+        return None;
+    }
+    Some(weighted.map(|value| {
+        ((value + total_weight / 2) / total_weight)
+            .clamp(0, 255)
+            .try_into()
+            .unwrap_or(0)
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn known_channel_gradient(
+    rgba: &[u8],
+    known: &[bool],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    channel: usize,
+) -> (i32, i32) {
+    let center = sample_known_channel(rgba, known, width, x, y, channel);
+    let left = x
+        .checked_sub(1)
+        .and_then(|x| sample_known_channel(rgba, known, width, x, y, channel));
+    let right = (x + 1 < width)
+        .then(|| sample_known_channel(rgba, known, width, x + 1, y, channel))
+        .flatten();
+    let top = y
+        .checked_sub(1)
+        .and_then(|y| sample_known_channel(rgba, known, width, x, y, channel));
+    let bottom = (y + 1 < height)
+        .then(|| sample_known_channel(rgba, known, width, x, y + 1, channel))
+        .flatten();
+    (
+        axis_gradient(left, center, right),
+        axis_gradient(top, center, bottom),
+    )
+}
+
+fn sample_known_channel(
+    rgba: &[u8],
+    known: &[bool],
+    width: u32,
+    x: u32,
+    y: u32,
+    channel: usize,
+) -> Option<i32> {
+    let pixel = (y * width + x) as usize;
+    known[pixel].then(|| i32::from(rgba[pixel * CHANNELS + channel]))
+}
+
+fn axis_gradient(before: Option<i32>, center: Option<i32>, after: Option<i32>) -> i32 {
+    match (before, center, after) {
+        (Some(before), _, Some(after)) => (after - before) / 2,
+        (Some(before), Some(center), None) => center - before,
+        (None, Some(center), Some(after)) => after - center,
+        _ => 0,
+    }
 }
 
 struct Neighbors {
@@ -1066,8 +1526,9 @@ fn append_blended_pixel(output: &mut Vec<u8>, original: &[u8], repaired: &[u8], 
 mod tests {
     use super::{
         CHANNELS, HealError, ImagePatch, LocalRect, MAX_STROKE_POINTS, MIN_BRUSH_RADIUS,
-        PatchHistory, SpotHealJob, StrokePoint, apply_patch, best_patch_offset, feather_coverage,
-        rasterize_stroke,
+        PatchHistory, SpotHealJob, StrokePoint, apply_patch, best_patch_offset,
+        boundary_tone_adjustment, directional_boundary_fill, feather_coverage, patch_match_score,
+        ranked_patch_offsets, rasterize_stroke,
     };
     use crate::decode::DecodedImage;
     use crate::edit::Rect;
@@ -1089,6 +1550,7 @@ mod tests {
             rgba,
             width,
             height,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
         }
     }
 
@@ -1103,6 +1565,7 @@ mod tests {
             rgba: vec![0; 3],
             width: 2,
             height: 2,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
         };
         assert!(matches!(
             SpotHealJob::prepare(&malformed, &[StrokePoint { x: 1.0, y: 1.0 }], 4),
@@ -1112,6 +1575,7 @@ mod tests {
             rgba: Vec::new(),
             width: u32::MAX,
             height: u32::MAX,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
         };
         assert!(matches!(
             SpotHealJob::prepare(
@@ -1162,6 +1626,7 @@ mod tests {
             rgba: vec![0; 2_100 * 2_100 * 4],
             width: 2_100,
             height: 2_100,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
         };
         let result = SpotHealJob::prepare(
             &image,
@@ -1241,6 +1706,160 @@ mod tests {
     }
 
     #[test]
+    fn zero_feather_is_exactly_the_painted_mask() {
+        let mask = vec![0, 255, 0, 255, 0];
+        assert_eq!(feather_coverage(&mask, 5, 1, 0, None).unwrap(), mask);
+    }
+
+    #[test]
+    fn zero_feather_still_uses_ranked_patch_matching() {
+        let image = patterned_image(96, 96);
+        let result =
+            SpotHealJob::prepare_with_feather(&image, &[StrokePoint { x: 48.0, y: 48.0 }], 8, 0)
+                .unwrap()
+                .unwrap()
+                .run_ranked(0)
+                .unwrap();
+        assert!(result.candidate_count > 0);
+    }
+
+    #[test]
+    fn candidate_scoring_rewards_matching_edges_after_tone_adaptation() {
+        let width = 15;
+        let height = 7;
+        let mut rgba = vec![100_u8; width * height * CHANNELS];
+        for pixel in rgba.chunks_exact_mut(CHANNELS) {
+            pixel[3] = 255;
+        }
+        let set_gray = |rgba: &mut [u8], x: usize, y: usize, value: u8| {
+            let byte = (y * width + x) * CHANNELS;
+            rgba[byte..byte + 3].fill(value);
+        };
+        for (x, value) in [(2, 20), (3, 100), (4, 180), (6, 20), (7, 100), (8, 180)] {
+            set_gray(&mut rgba, x, 3, value);
+        }
+        let mask = vec![0_u8; width * height];
+        let boundary = [(7_u32, 3_u32)];
+        let matching_adjustment = boundary_tone_adjustment(&rgba, &boundary, width as u32, -4, 0);
+        let matching = patch_match_score(
+            &rgba,
+            &mask,
+            &boundary,
+            width as u32,
+            height as u32,
+            -4,
+            0,
+            matching_adjustment,
+        );
+        let flat_adjustment = boundary_tone_adjustment(&rgba, &boundary, width as u32, 4, 0);
+        let flat = patch_match_score(
+            &rgba,
+            &mask,
+            &boundary,
+            width as u32,
+            height as u32,
+            4,
+            0,
+            flat_adjustment,
+        );
+        assert!(matching < flat);
+    }
+
+    #[test]
+    fn tone_adjustment_uses_a_robust_bounded_median() {
+        let width = 8;
+        let mut rgba = vec![0_u8; width * CHANNELS];
+        for x in 0..width {
+            let byte = x * CHANNELS;
+            rgba[byte..byte + CHANNELS].copy_from_slice(&[50, 60, 70, 255]);
+        }
+        for x in 4..8 {
+            let byte = x * CHANNELS;
+            rgba[byte..byte + CHANNELS].copy_from_slice(&[100, 120, 140, 255]);
+        }
+        let boundary = [(4, 0), (5, 0), (6, 0), (7, 0)];
+        assert_eq!(
+            boundary_tone_adjustment(&rgba, &boundary, width as u32, -4, 0),
+            [50, 60, 64]
+        );
+    }
+
+    #[test]
+    fn ranked_sources_are_distinct_and_repeatable() {
+        let width = 80;
+        let height = 48;
+        let affected = LocalRect {
+            x: 34,
+            y: 18,
+            width: 12,
+            height: 12,
+        };
+        let rgba = vec![128; width * height * CHANNELS];
+        let mut mask = vec![0_u8; width * height];
+        for y in affected.y..affected.bottom() {
+            for x in affected.x..affected.right() {
+                mask[(y * width as u32 + x) as usize] = 255;
+            }
+        }
+        let coverage = feather_coverage(&mask, width as u32, height as u32, 3, None).unwrap();
+        let first = ranked_patch_offsets(
+            &rgba,
+            &mask,
+            &coverage,
+            width as u32,
+            height as u32,
+            affected,
+            6,
+            24,
+            None,
+        )
+        .unwrap();
+        let second = ranked_patch_offsets(
+            &rgba,
+            &mask,
+            &coverage,
+            width as u32,
+            height as u32,
+            affected,
+            6,
+            24,
+            None,
+        )
+        .unwrap();
+        assert!(first.len() > 1);
+        assert_eq!(first, second);
+        assert!(
+            first
+                .windows(2)
+                .all(|pair| (pair[0].dx, pair[0].dy) != (pair[1].dx, pair[1].dy))
+        );
+    }
+
+    #[test]
+    fn directional_fallback_continues_a_linear_ramp() {
+        let width = 6;
+        let height = 3;
+        let mut rgba = Vec::with_capacity(width * height * CHANNELS);
+        for _y in 0..height {
+            for x in 0..width {
+                let value = (x * 40) as u8;
+                rgba.extend_from_slice(&[value, value, value, 255]);
+            }
+        }
+        let mut coverage = vec![0_u8; width * height];
+        for y in 0..height {
+            coverage[y * width + 2] = 255;
+            coverage[y * width + 3] = 255;
+        }
+        let repaired =
+            directional_boundary_fill(&rgba, &coverage, width as u32, height as u32, None).unwrap();
+        for y in 0..height {
+            assert!(repaired[(y * width + 2) * CHANNELS].abs_diff(80) <= 2);
+            assert!(repaired[(y * width + 3) * CHANNELS].abs_diff(120) <= 2);
+        }
+    }
+
+    #[test]
     fn spot_heal_replaces_a_defect_and_changes_only_its_patch() {
         let mut image = patterned_image(128, 128);
         let original_rgba = image.rgba.clone();
@@ -1307,6 +1926,28 @@ mod tests {
             .run()
             .unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn ranked_repair_refreshes_to_an_alternate_and_wraps() {
+        let mut image = patterned_image(128, 96);
+        for y in 42..54 {
+            for x in 58..70 {
+                let byte = ((y * image.width + x) * 4) as usize;
+                image.rgba[byte..byte + 4].copy_from_slice(&[255, 0, 255, 255]);
+            }
+        }
+        let job = SpotHealJob::prepare(&image, &[StrokePoint { x: 64.0, y: 48.0 }], 9)
+            .unwrap()
+            .unwrap();
+        let first = job.run_ranked(0).unwrap();
+        assert!(first.candidate_count > 1);
+        let second = job.run_ranked(1).unwrap();
+        let wrapped = job.run_ranked(first.candidate_count).unwrap();
+        assert_eq!(first.candidate_index, 0);
+        assert_eq!(second.candidate_index, 1);
+        assert_ne!(first.patch, second.patch);
+        assert_eq!(first, wrapped);
     }
 
     #[test]

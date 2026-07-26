@@ -113,7 +113,8 @@ fn crop_then_save_as_roundtrips_across_formats() {
             width: 100,
             height: 60,
         },
-    );
+    )
+    .unwrap();
     assert_eq!((cropped.width, cropped.height), (100, 60));
 
     // Save the crop into several formats, reload each, confirm dimensions hold.
@@ -136,6 +137,7 @@ fn lossless_save_preserves_pixels_exactly() {
             .collect(),
         width: 64,
         height: 48,
+        color_profile: viewr::decode::ColorProfileStatus::AssumedSrgb,
     };
     let out = ws.path().join("roundtrip.png");
     edit::save(&original, &out).unwrap();

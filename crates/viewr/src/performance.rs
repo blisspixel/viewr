@@ -26,6 +26,8 @@ pub struct PerformanceReport {
     pub playlist_entries: usize,
     /// Number of full decoded neighbor images retained by the LRU.
     pub decoded_cache_entries: usize,
+    /// Total decoded RGBA bytes retained by the neighbor LRU.
+    pub decoded_cache_bytes: u64,
     /// Number of uploaded folder-preview textures retained at completion.
     pub thumbnail_texture_entries: usize,
 }
@@ -43,6 +45,7 @@ impl PerformanceReport {
                 "\"peak_resident_bytes\":{},",
                 "\"playlist_entries\":{},",
                 "\"decoded_cache_entries\":{},",
+                "\"decoded_cache_bytes\":{},",
                 "\"thumbnail_texture_entries\":{}}}"
             ),
             self.window_ready_us,
@@ -52,6 +55,7 @@ impl PerformanceReport {
             self.peak_resident_bytes,
             self.playlist_entries,
             self.decoded_cache_entries,
+            self.decoded_cache_bytes,
             self.thumbnail_texture_entries,
         )
     }
@@ -130,11 +134,12 @@ mod tests {
             peak_resident_bytes: 5,
             playlist_entries: 6,
             decoded_cache_entries: 7,
+            decoded_cache_bytes: 9,
             thumbnail_texture_entries: 8,
         };
         assert_eq!(
             report.to_json(),
-            "{\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"idle_redraws\":4,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"thumbnail_texture_entries\":8}"
+            "{\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"idle_redraws\":4,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
         );
     }
 

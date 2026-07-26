@@ -6,6 +6,7 @@
 //! coverage bar in `docs/STANDARDS.md` reachable. The GPU and windowing glue is
 //! deliberately thin.
 
+pub(crate) mod animated;
 pub mod app;
 pub mod cli;
 pub mod curate;
@@ -16,6 +17,7 @@ pub mod error;
 pub mod fs;
 pub mod gpu;
 pub mod heal;
+pub mod image_info;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod performance;

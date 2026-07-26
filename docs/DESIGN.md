@@ -26,8 +26,8 @@ disappears. This spec is the converged result of two rounds of design critique
 - Persistent chrome never overlaps the image. The image fit rectangle is computed
   from the window minus every visible docked panel. Opening, closing, or resizing
   chrome refits and recenters the photo inside the remaining viewport.
-- Top bar: a fixed 40px neutral surface with three conventional menus: File,
-  Edit, and View. The right side shows a stable folder counter and, when space
+- Top bar: a fixed 40px neutral surface with five conventional menus: File,
+  Edit, View, Tools, and Help. The right side shows a stable folder counter and, when space
   permits, the filename, dimensions, and physical zoom percentage, where 100
   percent means one source pixel per physical display pixel. Long names truncate
   with the full value available as a tooltip.
@@ -43,12 +43,14 @@ disappears. This spec is the converged result of two rounds of design critique
 - Image Information: an optional 304px panel contains file facts, review state,
   and the explicit export-privacy checkbox. View > Panels or `I` toggles it, and
   View > Panel Position independently docks it on the left or right.
-- Empty and loading states use an opaque dark card with tested AA text contrast.
-  They remain readable on black, gray, white, and system-driven image backgrounds.
+- Empty and loading states use an opaque themed card with tested AA text contrast.
+  They remain readable on black, gray, white, and theme-driven image backgrounds.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws
-  a precise border, exact pixel dimensions, a top ratio strip
-  (Free/1:1/4:3/16:9), and Apply/Cancel. It does not draw resize handles because
-  pointer-handle dragging is not implemented. Esc cancels; Enter applies.
+  a precise border, rule-of-thirds guides, eight visible pointer handles, exact
+  output dimensions, a compact aspect popover, and Apply/Cancel. The popover
+  groups Free, Original, 1:1, landscape and portrait photo/video ratios, plus
+  numeric custom width and height. A swap control reverses the active ratio.
+  Esc cancels; Enter applies.
 - Zoom is focal-point anchored (pixel under cursor stays put). Trackpad pixel
   deltas and wheel detents both supported.
 - Space held + drag = temporary pan (classic hand tool); Space tap without drag
@@ -56,19 +58,27 @@ disappears. This spec is the converged result of two rounds of design critique
 
 ## Color
 
-- The image background follows the operating-system theme by default. Dark uses
-  deep ink `#0B0E14`; light uses `#F4F5F7` rather than pure white so bright photos
-  retain an edge. View also offers explicit black, neutral-gray, and white
-  backgrounds for inspection.
-- Persistent chrome remains neutral dark on every image background: panel
-  `#0F131A`, raised surface `#1A202A`, text `#E8EDF3`, and muted text `#B8C0CC`.
-  This prevents the readability of controls or guidance from depending on the
-  selected image background.
-- Accent amber `#F7A845`. The accent rule is strict: amber marks the active or
-  affirmative state
-  only. It appears on the focus ring, the current tool when armed (for example
-  Crop), the live zoom value when zoom is not 100 percent, and the Undo action.
-  It never appears as decoration and never on the logo.
+- View > Appearance offers System, Light, Dark, and Console. System follows live
+  operating-system changes. Explicit Light and Dark also update native window
+  decoration. Console uses a near-black canvas, green phosphor-inspired chrome,
+  and monospaced interface type. One validated appearance word is remembered in
+  the platform configuration directory.
+- Every appearance owns a complete token set for panel, raised and pressed
+  surfaces, borders, primary and secondary text, active state, and text on the
+  active state. Standard widgets and custom-painted controls use the same tokens.
+  Contrast tests enforce WCAG AA for all three resolved palettes.
+- The default image background follows the resolved appearance. Dark uses deep
+  ink `#0B0E14`; light uses `#F4F5F7` rather than pure white so bright photos
+  retain an edge; Console uses `#010502`. View also offers explicit black,
+  neutral-gray, and white inspection backgrounds independently of chrome.
+- Dark mode retains accent amber `#F7A845`. Light uses a darker amber that remains
+  legible on a bright panel. Console uses phosphor green. In every theme, the
+  accent marks active or affirmative state only, never decoration.
+- Decoded image pixels use an sRGB GPU texture and mip chain. A bounded embedded
+  RGB ICC profile is converted to sRGB before upload; Image Information reports
+  conversion or fallback status. This is correct for the current SDR working path,
+  not a claim of per-monitor output conversion, preserved wide-gamut values, CMYK
+  profile handling, or HDR presentation. Those are release roadmap items.
 
 ## Typography and icons
 
@@ -85,9 +95,13 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 ### Navigation (the most-touched interaction)
 - Default is an instant texture swap, no crossfade. Held arrows during culling
   must never fight an animation.
-- A prefetched cache hit replaces the texture immediately. A cache miss shows the
-  same high-contrast loading surface used at startup until the requested image is
-  ready. There is no unimplemented shimmer, slide, crossfade, or edge bounce.
+- A prefetched cache hit replaces the texture immediately. On a cache miss,
+  reload, or failed replacement, the last good image remains visible while a clear
+  loading or error status names the selected path. There is no black/background
+  flash, shimmer, slide, crossfade, or edge bounce.
+- File > Reload File (`F5`) bypasses the decoded-neighbor cache and reads the
+  current path again. It resets in-memory view edits only when the action is safe,
+  retains the last good frame during decode, and exposes Retry on failure.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the
@@ -105,28 +119,48 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Crop
 - Enter crop mode with `C` or select Crop from the Tools panel. Crop immediately
-  dims outside a centered default rectangle. The crop ratio strip provides Free,
-  1:1, 4:3, 16:9, Apply, and Cancel.
+  dims outside a centered default rectangle. The aspect popover provides Free,
+  Original, 1:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 5:3, 3:5, 16:9, 9:16, and a
+  numeric custom ratio. Landscape and portrait choices are grouped, and the swap
+  control reverses any fixed choice without reopening the popover.
 - Crop begins with a usable centered selection, so it never requires a pointer.
   Arrow keys move the selection; Shift plus an arrow resizes it; holding Ctrl uses
   a fine adjustment step; Enter applies; Esc cancels. Locked aspect ratios remain
   locked during keyboard resizing.
-- Pointer drag redraws the selection; keyboard movement and resizing edit the
-  existing selection. Exact source-pixel bounds are visible and published to the
-  accessibility tree. Confirming applies the crop directly. Esc cancels crop
-  before it can affect fullscreen state.
+- Pointer drag on the interior moves the selection, the eight handles resize it,
+  and a drag outside redraws it. Exact source origin and output-pixel dimensions
+  are visible and published to the accessibility tree. Fixed ratios describe the
+  visible exported orientation, so selecting 16:9 after a 90-degree rotation still
+  produces a 16:9 output. Confirming applies the crop at full decoded resolution
+  off the UI thread. Esc cancels crop before it can affect fullscreen state.
+
+### Source animation
+
+- GIF, WebP, and APNG timing is content, not decorative interface motion. Frames
+  are bounded in count and bytes, honor container delay and loop behavior, and can
+  be paused or resumed from Image Information.
+- Navigation and crop deterministically stop or discard playback state tied to
+  the old source. Rotation, flips, and pixel edits are applied consistently to
+  each displayed frame. A late animation decode cannot replace a newer image.
 
 ### Spot Heal
 
 - Enter with `J`, Edit > Spot Heal, or the Tools icon. The temporary inspector
   docks beside Tools on the selected left or right edge and reserves viewport
   space. It never floats over the photo.
-- The inspector exposes only brush radius, Undo, Redo, and Done. A translucent
-  brush mask and cursor ring are the only elements drawn over the image.
+- The inspector exposes brush radius, feather, Refresh Source, Undo, Redo, and
+  Done. A translucent brush mask and dual-contrast cursor ring are the only
+  elements drawn over the image. `/` advances to the next ranked source.
 - Drag over one small blemish and release to repair it off the UI thread. The
-  source file remains untouched; Save As is the only persistence path.
-- Repair, undo, and redo update only the bounded changed texture region. If the
-  GPU cannot display the complete decoded image in one texture, Spot Heal is
+  solver ranks up to eight spatially distinct clean sources using robust boundary
+  color, local tone, and edge-gradient agreement. The selected patch receives a
+  bounded per-channel tone adjustment before feathered compositing. If no clean
+  translated source fits, a distance-ordered directional fill continues local
+  gradients instead of repeatedly averaging a flat blur. The source file remains
+  untouched; Save As is the only edit-persistence path.
+- Repair, undo, and redo update only the bounded changed base-texture region and
+  regenerate its dependent mip chain. If the GPU cannot display the complete
+  decoded image in one texture, Spot Heal is
   unavailable instead of risking an edit at the wrong source coordinate.
 - `Ctrl+Z` or `Command+Z` undoes an in-memory pixel patch, the shifted equivalent
   redoes it, and Esc leaves the tool. A submitted repair finishes and applies
@@ -134,6 +168,23 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   result.
 - Spot Heal is deliberately scoped to small repairs. It does not expose prompts,
   model settings, generative fill choices, or an automatic enhancement mode.
+
+These controls follow the practical Heal contract documented by
+[Adobe Lightroom](https://helpx.adobe.com/lightroom/desktop/using/heal-tool.html):
+size, feather, and a way to refresh automatically chosen source content. The
+ranking design takes the bounded, deterministic part of the nearest-neighbor
+patch approach described by
+[PatchMatch](https://gfx.cs.princeton.edu/pubs/Barnes_2009_PAR/index.php), while
+the fallback follows the structure-propagation direction of exemplar and fast
+marching inpainting rather than adding a model runtime. Full global PatchMatch,
+generative fill, and an unbounded Poisson solve are outside this focused tool.
+
+### About and product identity
+
+- Help > About viewr opens a centered modal that blocks background input and
+  closes with its Close button, backdrop click, or Escape.
+- It exposes version, platform, license, core shortcuts, and the local-only
+  privacy contract. Its modal container has an explicit accessible window name.
 
 ### Micro-interactions
 - Buttons use deterministic hover, active, selected, and focus colors. Custom
@@ -150,7 +201,7 @@ Crossfade on every navigation; spinners on prefetched images; a black or
 background flash between images; easing on directly-dragged values; staggered or
 bouncy chrome entrances; a confirmation modal for delete; any idle motion on the
 photo (parallax, Ken Burns, bounce); floating tool or thumbnail panels that cover
-the image; disappearing controls that are difficult to summon; ASCII arrows used
+the image; disappearing controls that are difficult to summon; unprompted AI suggestions, "smart" tooltips, or any proactive UI popups; ASCII arrows used
 as disclosure icons.
 
 ### Reduced motion
@@ -178,12 +229,16 @@ and be validated before the motion can ship.
   tests enforce at least a 4.5:1 contrast ratio for normal text, muted text,
   accent controls, and primary-button text on their actual surfaces.
 
-## The two invariants that define "exceptional"
+## The invariants that define "exceptional"
 
 1. Focal-point-anchored wheel zoom: the pixel under the cursor stays locked under
    the cursor.
 2. Instant navigation that holds the old texture until the new one is ready, so
    there is never a black frame between images.
+3. Color fidelity from the source profile to the display that owns the window,
+   with explicit fallback instead of silent guessing. Input RGB profile conversion
+   is implemented; per-display output, wide-gamut preservation, and HDR remain the
+   largest unfinished fidelity milestone.
 
-Every other item here is refinement. These two are what make the viewer feel
-correct in a way users trust without being able to name.
+Every other item here is refinement. These are what make the viewer feel correct
+in a way users trust without needing to name the implementation.

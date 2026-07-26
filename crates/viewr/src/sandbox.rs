@@ -11,30 +11,41 @@ use std::io::{BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::decode::DecodedImage;
+use crate::decode::{DecodeGeneration, DecodedImage};
 use crate::error::Error;
 use crate::worker_limit;
 
 const WORKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(2);
+const WORKER_CANCELLATION_POLL: Duration = Duration::from_millis(25);
 const MAX_IDLE_WORKERS: usize = 2;
 
 /// Decode via the isolated `viewr-decode` worker (AVIF / HEIC / RAW paths).
-pub(crate) fn load_via_worker(path: &Path) -> Result<DecodedImage, Error> {
+pub(crate) fn load_via_worker(
+    path: &Path,
+    generation: DecodeGeneration<'_>,
+) -> Result<DecodedImage, Error> {
     // Resolve and read the user-selected file before reserving a worker. Host
     // filesystem I/O is bounded by the decode executor rather than the IPC
     // timeout thread, whose cancellation can only terminate the child process.
     let format = worker_format(path)?;
-    let encoded = read_bounded_input(path)?;
+    let encoded = read_bounded_input_if_current(path, generation)?;
+    generation
+        .ensure_current()
+        .map_err(|error| Error::Decode(error.to_string()))?;
     let worker = get_worker()?;
+    generation
+        .ensure_current()
+        .map_err(|error| Error::Decode(error.to_string()))?;
     run_worker_request_with_timeout(
         worker,
         format,
         encoded,
         WORKER_REQUEST_TIMEOUT,
         WORKER_TERMINATION_GRACE,
+        generation,
     )
 }
 
@@ -60,10 +71,15 @@ fn run_worker_request_with_timeout(
     encoded: Vec<u8>,
     timeout: Duration,
     termination_grace: Duration,
+    generation: DecodeGeneration<'_>,
 ) -> Result<DecodedImage, Error> {
-    run_worker_operation_with_timeout(worker, timeout, termination_grace, move |worker| {
-        exchange_with_worker(worker, &format, encoded)
-    })
+    run_worker_operation_with_cancellation(
+        worker,
+        timeout,
+        termination_grace,
+        generation,
+        move |worker| exchange_with_worker(worker, &format, encoded),
+    )
 }
 
 fn worker_format(path: &Path) -> Result<String, Error> {
@@ -74,7 +90,15 @@ fn worker_format(path: &Path) -> Result<String, Error> {
         .ok_or_else(|| Error::Decode("worker input has no valid format extension".into()))
 }
 
+#[cfg(test)]
 fn read_bounded_input(path: &Path) -> Result<Vec<u8>, Error> {
+    read_bounded_input_if_current(path, DecodeGeneration::unconditional())
+}
+
+fn read_bounded_input_if_current(
+    path: &Path,
+    generation: DecodeGeneration<'_>,
+) -> Result<Vec<u8>, Error> {
     let path_metadata = std::fs::metadata(path)
         .map_err(|error| Error::Decode(format!("failed to inspect worker input: {error}")))?;
     if !path_metadata.is_file() {
@@ -96,20 +120,39 @@ fn read_bounded_input(path: &Path) -> Result<Vec<u8>, Error> {
         ));
     }
     let initial_capacity = usize::try_from(declared_length).unwrap_or(0);
-    read_bounded(
+    read_bounded_if_current(
         file,
         initial_capacity,
         viewr_protocol::MAX_ENCODED_INPUT_BYTES,
+        generation,
     )
 }
 
+#[cfg(test)]
 fn read_bounded(
-    mut reader: impl Read,
+    reader: impl Read,
     initial_capacity: usize,
     max_bytes: u64,
 ) -> Result<Vec<u8>, Error> {
+    read_bounded_if_current(
+        reader,
+        initial_capacity,
+        max_bytes,
+        DecodeGeneration::unconditional(),
+    )
+}
+
+fn read_bounded_if_current(
+    mut reader: impl Read,
+    initial_capacity: usize,
+    max_bytes: u64,
+    generation: DecodeGeneration<'_>,
+) -> Result<Vec<u8>, Error> {
     let max_bytes = usize::try_from(max_bytes)
         .map_err(|_| Error::Decode("worker input limit is not representable".into()))?;
+    generation
+        .ensure_current()
+        .map_err(|error| Error::Decode(error.to_string()))?;
     let mut encoded = Vec::new();
     encoded
         .try_reserve_exact(initial_capacity.min(max_bytes))
@@ -117,11 +160,17 @@ fn read_bounded(
 
     let mut chunk = [0_u8; 16 * 1024];
     loop {
+        generation
+            .ensure_current()
+            .map_err(|error| Error::Decode(error.to_string()))?;
         let remaining = max_bytes.saturating_sub(encoded.len());
         let read_limit = chunk.len().min(remaining.saturating_add(1));
         let count = reader
             .read(&mut chunk[..read_limit])
             .map_err(|error| Error::Decode(format!("failed to read worker input: {error}")))?;
+        generation
+            .ensure_current()
+            .map_err(|error| Error::Decode(error.to_string()))?;
         if count == 0 {
             break;
         }
@@ -144,6 +193,22 @@ fn run_worker_operation_with_timeout<T: Send + 'static>(
     termination_grace: Duration,
     operation: impl FnOnce(&mut DaemonWorker) -> Result<T, Error> + Send + 'static,
 ) -> Result<T, Error> {
+    run_worker_operation_with_cancellation(
+        worker,
+        timeout,
+        termination_grace,
+        DecodeGeneration::unconditional(),
+        operation,
+    )
+}
+
+fn run_worker_operation_with_cancellation<T: Send + 'static>(
+    worker: DaemonWorker,
+    timeout: Duration,
+    termination_grace: Duration,
+    generation: DecodeGeneration<'_>,
+    operation: impl FnOnce(&mut DaemonWorker) -> Result<T, Error> + Send + 'static,
+) -> Result<T, Error> {
     let killer = worker.guard.killer();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let request_thread = std::thread::Builder::new()
@@ -159,46 +224,95 @@ fn run_worker_operation_with_timeout<T: Send + 'static>(
         })
         .map_err(|error| Error::Decode(format!("failed to start worker request: {error}")))?;
 
-    match receiver.recv_timeout(timeout) {
-        Ok(mut transaction) => {
-            request_thread
-                .join()
-                .map_err(|_| Error::Decode("worker request thread failed".into()))?;
-            if let Some(worker) = transaction.reusable_worker.take() {
-                return_worker(worker);
-            }
-            transaction.result
+    let started = Instant::now();
+    loop {
+        if !generation.is_current() {
+            return stop_worker_operation(
+                &killer,
+                &receiver,
+                request_thread,
+                termination_grace,
+                WorkerStopReason::Superseded,
+            );
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            let termination = killer.terminate();
-            let stopped = receiver.recv_timeout(termination_grace).is_ok();
-            if stopped {
-                request_thread.join().map_err(|_| {
-                    Error::Decode("worker request thread failed during cleanup".into())
-                })?;
+
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return stop_worker_operation(
+                &killer,
+                &receiver,
+                request_thread,
+                termination_grace,
+                WorkerStopReason::TimedOut,
+            );
+        };
+        let wait = remaining.min(WORKER_CANCELLATION_POLL);
+        match receiver.recv_timeout(wait) {
+            Ok(mut transaction) => {
+                request_thread
+                    .join()
+                    .map_err(|_| Error::Decode("worker request thread failed".into()))?;
+                if let Some(worker) = transaction.reusable_worker.take() {
+                    return_worker(worker);
+                }
+                return transaction.result;
             }
-            if let Err(error) = termination {
-                return Err(Error::Decode(format!(
-                    "worker request timed out and containment termination failed: {error}"
-                )));
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) if wait < remaining => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                return stop_worker_operation(
+                    &killer,
+                    &receiver,
+                    request_thread,
+                    termination_grace,
+                    WorkerStopReason::TimedOut,
+                );
             }
-            if !stopped {
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                request_thread
+                    .join()
+                    .map_err(|_| Error::Decode("worker request thread failed".into()))?;
                 return Err(Error::Decode(
-                    "worker request timed out; cleanup did not finish within the safety grace period"
-                        .into(),
+                    "worker request ended without a response".into(),
                 ));
             }
-            Err(Error::Decode("worker request timed out".into()))
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            request_thread
-                .join()
-                .map_err(|_| Error::Decode("worker request thread failed".into()))?;
-            Err(Error::Decode(
-                "worker request ended without a response".into(),
-            ))
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum WorkerStopReason {
+    TimedOut,
+    Superseded,
+}
+
+fn stop_worker_operation<T>(
+    killer: &worker_limit::WorkerKiller,
+    receiver: &std::sync::mpsc::Receiver<WorkerTransaction<T>>,
+    request_thread: std::thread::JoinHandle<()>,
+    termination_grace: Duration,
+    reason: WorkerStopReason,
+) -> Result<T, Error> {
+    let label = match reason {
+        WorkerStopReason::TimedOut => "timed out",
+        WorkerStopReason::Superseded => "was superseded",
+    };
+    let termination = killer.terminate();
+    let stopped = receiver.recv_timeout(termination_grace).is_ok();
+    if stopped {
+        request_thread
+            .join()
+            .map_err(|_| Error::Decode("worker request thread failed during cleanup".into()))?;
+    }
+    if let Err(error) = termination {
+        return Err(Error::Decode(format!(
+            "worker request {label} and containment termination failed: {error}"
+        )));
+    }
+    if !stopped {
+        return Err(Error::Decode(format!(
+            "worker request {label}; cleanup did not finish within the safety grace period"
+        )));
+    }
+    Err(Error::Decode(format!("worker request {label}")))
 }
 
 fn exchange_with_worker(
@@ -264,6 +378,7 @@ fn receive_worker_output(worker: &mut DaemonWorker) -> Result<DecodedImage, Erro
                 rgba,
                 width,
                 height,
+                color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             })
         }
         viewr_protocol::WorkerResponse::Error(message) => {
@@ -411,13 +526,16 @@ fn return_worker(worker: DaemonWorker) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonWorker, exchange_with_worker, read_bounded, read_bounded_input,
-        receive_worker_output, run_worker_operation_with_timeout,
+        DaemonWorker, exchange_with_worker, read_bounded, read_bounded_if_current,
+        read_bounded_input, receive_worker_output, run_worker_operation_with_cancellation,
+        run_worker_operation_with_timeout,
     };
+    use crate::decode::DecodeGeneration;
     use crate::ephemeral::TempWorkspace;
     use crate::worker_limit;
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
     const HUNG_CHILD_FLAG: &str = "VIEWR_TEST_HUNG_WORKER";
@@ -536,12 +654,13 @@ mod tests {
 
     #[test]
     fn request_deadline_covers_a_worker_that_never_responds() {
-        let started = Instant::now();
         // This frame is larger than an OS pipe buffer, so the assertion covers
         // a worker that stops reading while the parent is still writing.
         let encoded = vec![0_u8; 500_000];
+        let worker = spawn_test_worker("sandbox::tests::hung_worker_child", HUNG_CHILD_FLAG).0;
+        let started = Instant::now();
         let error = run_worker_operation_with_timeout(
-            spawn_test_worker("sandbox::tests::hung_worker_child", HUNG_CHILD_FLAG).0,
+            worker,
             Duration::from_millis(100),
             Duration::from_secs(1),
             move |worker| exchange_with_worker(worker, "avif", encoded),
@@ -550,7 +669,35 @@ mod tests {
         .unwrap();
 
         assert!(error.to_string().contains("timed out"));
-        assert!(started.elapsed() < Duration::from_secs(2));
+        // Instrumented builds can make process termination substantially slower
+        // than the configured one-second cleanup grace. Keep a generous outer
+        // bound while still proving that a blocked pipe cannot hang the request.
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn superseded_generation_terminates_a_blocked_worker_request() {
+        let worker = spawn_test_worker("sandbox::tests::hung_worker_child", HUNG_CHILD_FLAG).0;
+        let generation = AtomicU64::new(7);
+        let started = Instant::now();
+        let error = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(100));
+                generation.store(8, Ordering::Release);
+            });
+            run_worker_operation_with_cancellation(
+                worker,
+                Duration::from_secs(30),
+                Duration::from_secs(1),
+                DecodeGeneration::tracked(&generation, 7),
+                move |worker| exchange_with_worker(worker, "avif", vec![0_u8; 500_000]),
+            )
+            .err()
+            .expect("superseded worker request unexpectedly completed")
+        });
+
+        assert!(error.to_string().contains("superseded"));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
@@ -605,6 +752,35 @@ mod tests {
         assert_eq!(read_bounded(&b"abcd"[..], 4, 4).unwrap(), b"abcd");
         let error = read_bounded(&b"abcde"[..], 0, 4).unwrap_err();
         assert!(error.to_string().contains("exceeds worker safety limit"));
+    }
+
+    #[test]
+    fn bounded_parent_read_stops_after_generation_supersession() {
+        struct SupersedingReader<'a> {
+            inner: &'a [u8],
+            generation: &'a AtomicU64,
+        }
+
+        impl Read for SupersedingReader<'_> {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let count = self.inner.read(buffer)?;
+                self.generation.store(2, Ordering::Release);
+                Ok(count)
+            }
+        }
+
+        let generation = AtomicU64::new(1);
+        let error = read_bounded_if_current(
+            SupersedingReader {
+                inner: b"encoded image bytes",
+                generation: &generation,
+            },
+            0,
+            1024,
+            DecodeGeneration::tracked(&generation, 1),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("superseded"));
     }
 
     #[test]

@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Fixed
 
+- Crop export now validates source buffers, uses fallible allocation, and
+  quantizes locked selections to exact reduced integer ratios even on odd-sized
+  images. The same quantizer supplies exact accessible output bounds. Save As
+  validates aliases, formats, pixels, and retention support before touching its
+  destination, then persists a completed sibling temporary output. EXIF detection
+  follows content rather than extensions; retention supports JPEG, PNG, and WebP.
+- Current-image animation, image-information, and GPU-preview work now use
+  independent replace-latest queues. Rapid navigation cannot strand the final
+  selection behind a full speculative queue. Still-image readers stop at I/O
+  boundaries after supersession, animation stops between frames, and worker
+  input reads and blocked IPC requests terminate cooperatively. Renamed animated
+  containers are detected by content.
+- Over-limit GPU previews are now prepared off the window thread with a
+  cancellable linear-light, alpha-correct area filter and fallible bounded
+  allocation. The release performance gate exercises that path and a high-resolution
+  corpus where entry-only cache eviction would exceed the 256 MiB byte budget.
+- Image Information now reports detected file content before a misleading filename
+  extension. Bounded TIFF metadata is sought anywhere in a large source and
+  compacted without pixel strips. PNG text, EXIF, and ICC plus WebP EXIF and ICC
+  payloads are bounded before decoder materialization, including post-IDAT APNG
+  metadata. JPEG XL initialization now enforces the same 10 MiB ICC ceiling and
+  rejects command-stream output amplification. Decoder dimensions and declared
+  output bytes, including animation canvases, are validated before pixel-buffer
+  allocation.
+- The native Windows accessibility gate now verifies the exact Console preference,
+  relaunches the process to prove restoration, and enforces one absolute suite
+  deadline in addition to per-operation deadlines.
 - Tools and Folder Previews can now be fully hidden instead of leaving a disclosure
   rail in the image viewport. View owns explicit visibility controls for all three
   panels, while disclosure chevrons remain available for compact collapse.
@@ -67,6 +94,19 @@ All notable changes to this project are documented here. The format is human-wri
 
 ### Added
 
+- Added bounded GIF, WebP, and APNG playback with deterministic timing,
+  pause/resume state, finite and infinite loop handling, and current-image-only
+  memory limits.
+- Added Free, Original, 1:1, ten standard landscape and portrait crop ratios,
+  orientation swap, exact numeric custom ratios, eight pointer handles, and full
+  keyboard movement, resizing, apply, and cancel behavior.
+- Added Image Information, a functional accessible About modal, and complete
+  System, Light, Dark, and phosphor-green Console appearances. The selected
+  appearance is stored as one validated local word and survives restart.
+- Added bounded embedded RGB ICC conversion into the current sRGB pipeline, an
+  explicit fallback status, and a complete GPU-generated mip chain for stable
+  minification. Per-display output transforms and higher-precision wide-gamut or
+  HDR presentation remain roadmap work.
 - Added focused Spot Heal for small blemishes. `J` opens a temporary docked
   inspector that reserves image space; sparse image-space strokes run through a
   bounded pure-Rust patch-matching worker with feathered compositing and
@@ -153,7 +193,7 @@ All notable changes to this project are documented here. The format is human-wri
 - Removed the unused `muda` dependency and its GTK3 dependency chain, reducing the lockfile by 41 packages and eliminating eight obsolete advisory exceptions.
 - CI now runs on pushes to both `main` and the repository's current `master` branch.
 - ROADMAP: store/notarized publish (Mac App Store, Microsoft Store, Flathub
-  listing, notarized DMG as a store path) is **out of scope for now**—maybe later.
+  listing, notarized DMG as a store path) is **out of scope for now**, maybe later.
   Phase 7/8 stay local-first (build, sandbox profiles, simple release artifacts).
 - Extracted `sandbox.rs` for the `viewr-decode` worker client so process/IPC glue is separate from pure decode logic.
 - Phase 6 residuals closed in ROADMAP; next milestone is Phase 7 OS sandbox packaging.

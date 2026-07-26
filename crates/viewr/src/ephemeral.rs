@@ -112,7 +112,7 @@ pub fn is_viewr_temp_name(name: &str) -> bool {
 ///
 /// Only the current form is recognized: `viewr_{prefix}_{pid}_{nanos}` where
 /// **both** trailing components are decimal integers. A single trailing number
-/// (e.g. `viewr_avif_smoke_orphan_42`) is **not** treated as a live PID — those
+/// (e.g. `viewr_avif_smoke_orphan_42`) is **not** treated as a live PID. Those
 /// are always safe to scrub.
 fn embedded_pid(name: &str) -> Option<u32> {
     // Strip optional extension (e.g. viewr_job_smoke.avif).

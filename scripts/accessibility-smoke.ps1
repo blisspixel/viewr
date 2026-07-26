@@ -4,11 +4,14 @@
 param(
     [string]$Binary = "target/debug/viewr.exe",
     [ValidateRange(5, 120)]
-    [int]$TimeoutSeconds = 60
+    [int]$TimeoutSeconds = 60,
+    [ValidateRange(30, 600)]
+    [int]$SuiteTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+$script:SuiteDeadline = [DateTime]::UtcNow.AddSeconds($SuiteTimeoutSeconds)
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw "the native UI Automation smoke test requires Windows"
@@ -88,7 +91,14 @@ function Wait-ForResult {
         [string]$Description
     )
 
-    while ([DateTime]::UtcNow -lt $script:Deadline) {
+    $operationDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $deadline = if ($operationDeadline -lt $script:SuiteDeadline) {
+        $operationDeadline
+    }
+    else {
+        $script:SuiteDeadline
+    }
+    while ([DateTime]::UtcNow -lt $deadline) {
         if ($script:Process.HasExited) {
             throw "viewr exited before $Description (exit $($script:Process.ExitCode))"
         }
@@ -103,6 +113,9 @@ function Wait-ForResult {
             # the current root rather than treating a valid update as a failure.
         }
         Start-Sleep -Milliseconds 100
+    }
+    if ([DateTime]::UtcNow -ge $script:SuiteDeadline) {
+        throw "accessibility smoke suite exceeded its $SuiteTimeoutSeconds second deadline"
     }
     $treeSummary = Get-TreeSummary
     throw "timed out waiting for $Description; accessible tree: $treeSummary"
@@ -322,33 +335,71 @@ function Open-ViewSubmenu {
     Activate-Element -Element $submenu
 }
 
+function Stop-TestApplication {
+    if ($null -eq $script:Process -or $script:Process.HasExited) {
+        $script:Process = $null
+        $script:Window = [IntPtr]::Zero
+        return
+    }
+    if (
+        $script:Window -ne [IntPtr]::Zero -and
+        [ViewrAccessibilityNativeMethods]::WindowBelongsToProcess(
+            $script:Window,
+            [uint32]$script:Process.Id
+        )
+    ) {
+        [void][ViewrAccessibilityNativeMethods]::PostMessage(
+            $script:Window,
+            0x0010,
+            [IntPtr]::Zero,
+            [IntPtr]::Zero
+        )
+    }
+    if (-not $script:Process.WaitForExit(3000)) {
+        $script:Process.Kill($true)
+        $script:Process.WaitForExit()
+    }
+    $script:Process.Dispose()
+    $script:Process = $null
+    $script:Window = [IntPtr]::Zero
+}
+
+function Start-TestApplication {
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $binaryPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.ArgumentList.Add($firstImage)
+    $startInfo.Environment["APPDATA"] = $testDirectory
+    $script:Process = [Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $script:Process) {
+        throw "viewr process did not start"
+    }
+    $script:Window = Wait-ForResult -Description "the visible viewr window" -Probe {
+        Get-ApplicationWindow
+    }
+}
+
 $binaryPath = (Resolve-Path -LiteralPath $Binary).Path
 $testDirectory = Join-Path (
     [IO.Path]::GetFullPath((Join-Path (Get-Location) "target"))
 ) "accessibility-smoke-$PID-$([Guid]::NewGuid().ToString('N'))"
 $firstImage = Join-Path $testDirectory "first.png"
 $secondImage = Join-Path $testDirectory "second.png"
+$appearanceDirectory = Join-Path $testDirectory "viewr"
+$appearanceFile = Join-Path $appearanceDirectory "appearance"
 $png = [Convert]::FromBase64String(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 
 $script:Process = $null
 $script:Window = [IntPtr]::Zero
-$script:Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 
 try {
     [IO.Directory]::CreateDirectory($testDirectory) | Out-Null
     [IO.File]::WriteAllBytes($firstImage, $png)
     [IO.File]::WriteAllBytes($secondImage, $png)
 
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $binaryPath
-    $startInfo.UseShellExecute = $false
-    $startInfo.ArgumentList.Add($firstImage)
-    $script:Process = [Diagnostics.Process]::Start($startInfo)
-    $script:Window = Wait-ForResult -Description "the visible viewr window" -Probe {
-        Get-ApplicationWindow
-    }
+    Start-TestApplication
 
     $root = Wait-ForResult -Description "the native AccessKit tree" -Probe {
         $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($script:Window)
@@ -364,7 +415,7 @@ try {
         throw "the native accessibility root is not keyboard-focusable"
     }
 
-    foreach ($menu in @("File", "Edit", "View")) {
+    foreach ($menu in @("File", "Edit", "Tools", "View", "Help")) {
         $element = Wait-ForElement -Name $menu -ControlType (
             [System.Windows.Automation.ControlType]::Button
         )
@@ -381,6 +432,51 @@ try {
     Wait-ForElement -Name "1 / 2" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
+
+    $help = Wait-ForElement -Name "Help" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $help
+    $about = Wait-ForElement -Name "About viewr" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $about
+    Wait-ForElement -Name "About viewr" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
+    ) | Out-Null
+    $closeAbout = Wait-ForElement -Name "Close" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $closeAbout
+    Wait-ForElementAbsent -Name "Close" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
+
+    Open-ViewSubmenu -Name "Appearance"
+    Wait-ForSelectionState -Name "System" -Selected $true | Out-Null
+    $consoleTheme = Wait-ForSelectionState -Name "Console" -Selected $false
+    Select-Element -Element $consoleTheme
+    Open-ViewSubmenu -Name "Appearance"
+    Wait-ForSelectionState -Name "Console" -Selected $true | Out-Null
+    if (-not [IO.File]::Exists($appearanceFile)) {
+        throw "selecting Console did not persist the isolated appearance preference"
+    }
+    $appearanceValue = [IO.File]::ReadAllText($appearanceFile)
+    if (-not [string]::Equals($appearanceValue, "console`n", [StringComparison]::Ordinal)) {
+        throw "Console preference file did not contain the exact validated value"
+    }
+
+    Stop-TestApplication
+    Start-TestApplication
+    Wait-ForElement -Name "first.png" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Open-ViewSubmenu -Name "Appearance"
+    Wait-ForSelectionState -Name "Console" -Selected $true | Out-Null
+    $view = Wait-ForElement -Name "View" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $view
 
     Open-ViewSubmenu -Name "Panels"
     foreach ($panel in @("Tools", "Folder Previews", "Image Information")) {
@@ -403,6 +499,15 @@ try {
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $spotHeal
+    Wait-ForElement -Name "Brush radius" -ControlType (
+        [System.Windows.Automation.ControlType]::Slider
+    ) | Out-Null
+    Wait-ForElement -Name "Feather" -ControlType (
+        [System.Windows.Automation.ControlType]::Slider
+    ) | Out-Null
+    Wait-ForElement -Name "Refresh source" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
     $finishSpotHeal = Wait-ForElement -Name "Done" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
@@ -477,34 +582,22 @@ try {
 
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
-        "actions, Spot Heal, dock positions, metadata state, previews, and navigation verified"
+        "actions, About, appearance restart, Spot Heal, dock positions, metadata " +
+        "state, previews, and navigation verified"
     )
 }
 finally {
-    if ($null -ne $script:Process -and -not $script:Process.HasExited) {
-        if (
-            $script:Window -ne [IntPtr]::Zero -and
-            [ViewrAccessibilityNativeMethods]::WindowBelongsToProcess(
-                $script:Window,
-                [uint32]$script:Process.Id
-            )
-        ) {
-            [void][ViewrAccessibilityNativeMethods]::PostMessage(
-                $script:Window,
-                0x0010,
-                [IntPtr]::Zero,
-                [IntPtr]::Zero
-            )
-        }
-        if (-not $script:Process.WaitForExit(3000)) {
-            $script:Process.Kill($true)
-            $script:Process.WaitForExit()
-        }
-    }
+    Stop-TestApplication
     foreach ($path in @($firstImage, $secondImage)) {
         if ([IO.File]::Exists($path)) {
             [IO.File]::Delete($path)
         }
+    }
+    if ([IO.File]::Exists($appearanceFile)) {
+        [IO.File]::Delete($appearanceFile)
+    }
+    if ([IO.Directory]::Exists($appearanceDirectory)) {
+        [IO.Directory]::Delete($appearanceDirectory, $false)
     }
     if ([IO.Directory]::Exists($testDirectory)) {
         [IO.Directory]::Delete($testDirectory, $false)

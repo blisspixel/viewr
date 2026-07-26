@@ -1,7 +1,7 @@
 # Privacy
 
 This is both viewr's design contract and the plain-language statement users will
-eventually read. Privacy in viewr is not a policy promise — it's a property of the
+eventually read. Privacy in viewr is not a policy promise. It is a property of the
 code, and where possible it's enforced in CI so it can't quietly regress.
 
 ## The guarantee, plainly
@@ -14,7 +14,7 @@ code, and where possible it's enforced in CI so it can't quietly regress.
   "help us improve" data, no crash reports sent anywhere.
 - viewr **keeps no logs of your activity.** Which files you open, which folders you
   browse, and which images you delete are never recorded to a server, and **not
-  written to any log or side-file on disk**. There is **no log file** — not even
+  written to any log or side-file on disk**. There is **no log file**, not even
   an empty one.
 - viewr **has no account and no cloud.** There is nothing to sign into and nothing
   to sync.
@@ -33,7 +33,7 @@ code, and where possible it's enforced in CI so it can't quietly regress.
 There is no setting to turn any of this off, because none of the corresponding
 machinery exists in the first place.
 
-## Logging is opt-in (stderr only — never a log file)
+## Logging is opt-in (stderr only, never a log file)
 
 By default the process is silent: no `log` output, **no log files on disk**.
 
@@ -66,9 +66,9 @@ A promise you can verify beats a promise you have to trust.
    `EPERM`. Startup fails closed if any step fails.
 2. **Network-denied packaging profiles.** The repository contains local packaging
    profiles with no network entitlement:
-   - **macOS** — App Sandbox, no `com.apple.security.network.*` entitlement.
-   - **Windows** — AppContainer without the internet capability.
-   - **Linux** — Flatpak with **no** `--share=network`; the decode worker also
+   - **macOS**: App Sandbox, no `com.apple.security.network.*` entitlement.
+   - **Windows**: AppContainer without the internet capability.
+   - **Linux**: Flatpak with **no** `--share=network`; the decode worker also
      installs a seccomp filter that returns `EPERM` for classic socket and
      io_uring networking paths, including x32 aliases on x86-64.
    The test suite checks each profile as an exact allowlist. Linux CI performs a
@@ -91,47 +91,61 @@ A promise you can verify beats a promise you have to trust.
    configure. This is also enforced by the dependency audit above.
 4. **Split decode boundary.** Common pure-Rust formats decode in the main process
    under shape, allocation, and concurrency limits, with a pre-parse input cap for
-   SVG. For optional C-backed formats, the main process opens the selected file
+   SVG. PNG text, EXIF, and ICC fields plus WebP EXIF and ICC fields are bounded
+   before their decoders allocate them. JPEG XL initialization rejects encoded,
+   declared, or command-amplified ICC output beyond 10 MiB. For optional C-backed
+   formats, the main process opens the selected file
    and sends bounded encoded bytes to the worker. The worker receives no path and
    needs no dynamic filesystem grant. Linux denies that worker's classic socket
    and io_uring network paths. Feature-gated C workers further deny every syscall
    outside a reviewed runtime allowlist, while permitting libheif plugin discovery
    only through argument-filtered read-only opens. The documented OS packages
-   constrain the whole app.
+   constrain the whole app. Foreground worker-file reads check the current image
+   generation after every bounded chunk. A superseded pipe request is polled at a
+   fixed interval and its containment unit is terminated, so stale work cannot
+   retain a decode slot for the full deadline.
    Bare Windows and macOS Cargo builds do not claim that package-level boundary.
 
 ## Local data: what viewr does and doesn't write
 
-- viewr **does not** write a settings file, history, recently-opened list,
-  thumbnail database, or search index of your library. Flags, picks, filmstrip
-  thumbs, panel visibility/position, and neighbor **prefetch** live **only in RAM
-  for the current session** and disappear when the app closes (never under temp or
-  beside your photos).
+- viewr writes exactly one optional UI preference: the validated word `system`,
+  `light`, `dark`, or `console` in the platform configuration directory under
+  `viewr/appearance`. It contains no path, timestamp, device identifier, or image
+  data. Windows uses `%APPDATA%`, macOS uses `Library/Application Support`, and
+  Linux uses `XDG_CONFIG_HOME` or `.config`. Deleting that file restores System.
+- viewr **does not** write history, a recently-opened list, thumbnail database,
+  photo-library search index, or general settings database. Flags, picks,
+  filmstrip thumbs, panel visibility/position, and neighbor **prefetch** live
+  **only in RAM for the current session** and disappear when the app closes
+  (never under temp or beside your photos).
 - viewr **does not** create companion files next to your photos (no `_picks.txt`,
   no sidecar caches).
 - Spot-heal strokes, repair regions, and undo/redo pixel patches exist only in
   bounded RAM. Navigation clears them. The source file is never edited in place.
 - **Save As / convert** only writes the file path you choose in the save dialog.
+  It validates the source, destination format, pixels, and metadata option first,
+  builds a sibling temporary output, and replaces the destination only after both
+  pixel encoding and optional metadata writing succeed.
 - Deletes go to the **system trash**, so your OS (not viewr) holds the recoverable
   copy under its normal rules. Permanent delete requires an explicit confirmation
   dialog and skips the trash.
 
-If a convenience feature like "remember window size" is ever added, it will be
-**opt-in, local-only, and clearable in one click** — and it will still never be
-transmitted anywhere.
+Any future convenience preference such as remembered window size must be
+local-only, plainly documented, and easy to clear. It will never be transmitted.
 
 ## Optional local models
 
 No model runtime or model weights currently ship with viewr. Any future Describe
 Image or advanced repair model must remain separately installed and explicitly
 invoked. It may not use localhost HTTP, receive a photo path, write a prompt,
-response, history, cache, or log, or run automatically. The process boundary,
-network denial, zero-write contract, model bake-off, and release acceptance gate
-are specified in `docs/LOCAL-INTELLIGENCE.md`.
+response, history, cache, or log, or run automatically. **It must never silently
+write generated tags or descriptions back into the file's EXIF data.** The
+process boundary, network denial, zero-write contract, model bake-off, and release
+acceptance gate are specified in `docs/LOCAL-INTELLIGENCE.md`.
 
 ## Metadata is yours
 
-Images carry EXIF metadata — often including **GPS coordinates**, camera serial
+Images carry EXIF metadata, often including **GPS coordinates**, camera serial
 numbers, and timestamps. Bloated apps silently preserve all of it when you export.
 
 viewr does the opposite by default: on **Save As / convert**, the app re-encodes
@@ -141,6 +155,19 @@ and identifying fields do not ride along inside a photo you share unless you ask
 **Keep camera metadata when saving** is an explicit checkbox in the Image
 Information panel. It defaults to **off**. Turning it on keeps supported EXIF tags
 for the rest of that session only; the choice is never written to a settings file.
+That opt-in can retain descriptive, camera, timestamp, serial-number, and GPS tags,
+so the panel states the privacy consequence directly. Before writing the new copy,
+viewr sets Orientation to 1, updates image dimensions, and removes stale thumbnail
+offset/length tags so retained metadata cannot contradict the exported pixels.
+Automatic inspection and opt-in retention share the same bounded EXIF extractor.
+It limits container chunks, payload bytes, TIFF directories and tags, recursive
+offsets, embedded thumbnails, and allocation-driving component counts before the
+metadata library parses the payload. Malformed or over-limit metadata is ignored;
+it never prevents the pixels from opening or forces an unbounded allocation.
+TIFF inspection seeks to bounded metadata wherever its IFD lives and compacts out
+pixel-strip locators, so large ordinary TIFF pixel data does not need to enter the
+metadata parser. Retention is content-driven and writes only JPEG, PNG, or WebP
+destinations supported by the transactional export path.
 
 ## Updates
 

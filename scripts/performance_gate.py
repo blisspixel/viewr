@@ -34,12 +34,17 @@ REPORT_KEYS = frozenset(
         "peak_resident_bytes",
         "playlist_entries",
         "decoded_cache_entries",
+        "decoded_cache_bytes",
         "thumbnail_texture_entries",
     }
 )
 MAX_LINKED_TARGETS_PER_SOURCE = 512
 MAX_PROBE_RUNS = 9
 MAX_CORPUS_COUNT = 100_000
+DECODED_CACHE_LIMIT_BYTES = 256 * 1024 * 1024
+CACHE_STRESS_WIDTH = 4096
+CACHE_STRESS_HEIGHT = 4096
+CACHE_STRESS_COUNT = 8
 
 
 class PerformanceGateError(RuntimeError):
@@ -75,6 +80,7 @@ class ProbeReport:
     peak_resident_bytes: int
     playlist_entries: int
     decoded_cache_entries: int
+    decoded_cache_bytes: int
     thumbnail_texture_entries: int
 
 
@@ -105,7 +111,10 @@ def deterministic_png(width: int, height: int) -> bytes:
         raise ValueError("PNG dimensions must be positive")
     header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     row = b"\x00" + b"\x35\x71\xa8" * width
-    pixels = zlib.compress(row * height, level=6)
+    compressor = zlib.compressobj(level=6)
+    compressed_rows = [compressor.compress(row) for _ in range(height)]
+    compressed_rows.append(compressor.flush())
+    pixels = b"".join(compressed_rows)
     return b"".join(
         (
             b"\x89PNG\r\n\x1a\n",
@@ -215,6 +224,7 @@ def _median_report(reports: list[ProbeReport]) -> ProbeReport:
         peak_resident_bytes=max(report.peak_resident_bytes for report in reports),
         playlist_entries=max(report.playlist_entries for report in reports),
         decoded_cache_entries=max(report.decoded_cache_entries for report in reports),
+        decoded_cache_bytes=max(report.decoded_cache_bytes for report in reports),
         thumbnail_texture_entries=max(
             report.thumbnail_texture_entries for report in reports
         ),
@@ -282,11 +292,62 @@ def evaluate(
             failures.append(
                 f"{label} decoded cache retained {report.decoded_cache_entries}; limit is 5"
             )
+        if report.decoded_cache_bytes > DECODED_CACHE_LIMIT_BYTES:
+            failures.append(
+                f"{label} decoded cache retained {report.decoded_cache_bytes} bytes; "
+                f"limit is {DECODED_CACHE_LIMIT_BYTES}"
+            )
         if report.thumbnail_texture_entries > 9:
             failures.append(
                 f"{label} thumbnail cache retained "
                 f"{report.thumbnail_texture_entries}; limit is 9"
             )
+    return failures
+
+
+def evaluate_cache_stress(
+    report: ProbeReport,
+    corpus_count: int,
+    decoded_image_bytes: int,
+) -> list[str]:
+    """Validate a corpus where five decoded neighbors exceed the byte budget."""
+
+    if corpus_count < 6 or decoded_image_bytes <= 0:
+        raise PerformanceGateError("cache-stress corpus parameters are invalid")
+    if decoded_image_bytes * 5 <= DECODED_CACHE_LIMIT_BYTES:
+        raise PerformanceGateError(
+            "cache-stress images are too small to exercise byte-based eviction"
+        )
+
+    failures: list[str] = []
+    if report.playlist_entries != corpus_count:
+        failures.append(
+            f"cache-stress probe scanned {report.playlist_entries} entries; "
+            f"expected {corpus_count}"
+        )
+    maximum_entries = DECODED_CACHE_LIMIT_BYTES // decoded_image_bytes
+    if report.decoded_cache_entries != maximum_entries:
+        failures.append(
+            "cache-stress decoded cache retained "
+            f"{report.decoded_cache_entries} entries; expected {maximum_entries} "
+            "to prove byte-budget eviction without under-retention"
+        )
+    expected_bytes = report.decoded_cache_entries * decoded_image_bytes
+    if report.decoded_cache_bytes != expected_bytes:
+        failures.append(
+            "cache-stress decoded cache accounting reported "
+            f"{report.decoded_cache_bytes} bytes; expected {expected_bytes}"
+        )
+    if report.decoded_cache_bytes > DECODED_CACHE_LIMIT_BYTES:
+        failures.append(
+            "cache-stress decoded cache retained "
+            f"{report.decoded_cache_bytes} bytes; limit is {DECODED_CACHE_LIMIT_BYTES}"
+        )
+    if report.thumbnail_texture_entries > 9:
+        failures.append(
+            "cache-stress thumbnail cache retained "
+            f"{report.thumbnail_texture_entries}; limit is 9"
+        )
     return failures
 
 
@@ -341,6 +402,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         source.write_bytes(deterministic_png(1920, 1080))
         small_image = create_linked_corpus(root / "small", source, args.small_count)
         large_image = create_linked_corpus(root / "large", source, args.large_count)
+        cache_source = root / "cache-source.png"
+        cache_source.write_bytes(
+            deterministic_png(CACHE_STRESS_WIDTH, CACHE_STRESS_HEIGHT)
+        )
+        cache_image = create_linked_corpus(
+            root / "cache-stress", cache_source, CACHE_STRESS_COUNT
+        )
         small_reports = [
             run_probe(binary, small_image, args.xvfb) for _ in range(args.runs)
         ]
@@ -349,6 +417,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ]
         small = _median_report(small_reports)
         large = _median_report(large_reports)
+        cache_stress = run_probe(binary, cache_image, args.xvfb)
         small_rss_floor_bytes = min(
             report.peak_resident_bytes for report in small_reports
         )
@@ -361,7 +430,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"idle-redraws={max(small.idle_redraws, large.idle_redraws)}, "
         f"small-rss={small.peak_resident_bytes / (1024 * 1024):.2f} MiB, "
         f"large-rss={large.peak_resident_bytes / (1024 * 1024):.2f} MiB, "
-        f"large-folder={large.playlist_entries} images"
+        f"large-folder={large.playlist_entries} images, "
+        f"cache-stress={cache_stress.decoded_cache_entries} entries/"
+        f"{cache_stress.decoded_cache_bytes / (1024 * 1024):.2f} MiB"
     )
     failures = evaluate(
         small,
@@ -370,6 +441,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.small_count,
         args.large_count,
         small_rss_floor_bytes,
+    )
+    failures.extend(
+        evaluate_cache_stress(
+            cache_stress,
+            CACHE_STRESS_COUNT,
+            CACHE_STRESS_WIDTH * CACHE_STRESS_HEIGHT * 4,
+        )
     )
     if failures:
         for failure in failures:

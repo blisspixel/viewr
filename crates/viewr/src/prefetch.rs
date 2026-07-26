@@ -1,7 +1,7 @@
 //! Bounded in-memory neighbor decode cache (privacy-safe: never on disk).
 //!
 //! When the user arrows through a folder, next/previous images should already
-//! be decoded in RAM. This is an LRU of [`DecodedImage`] keyed by path — no
+//! be decoded in RAM. This is an LRU of [`DecodedImage`] keyed by path, with no
 //! thumbnail database, no history file, cleared when the process exits.
 
 use std::collections::{HashMap, VecDeque};
@@ -11,21 +11,38 @@ use crate::decode::DecodedImage;
 
 /// Default number of decoded full images kept around the current one.
 pub const DEFAULT_CAPACITY: usize = 5;
+/// Default decoded-neighbor RAM budget: 256 MiB.
+pub const DEFAULT_MAX_BYTES: usize = 256 * 1024 * 1024;
 
 /// LRU cache of fully decoded images for instant navigation.
-#[derive(Default)]
 pub struct PrefetchCache {
     capacity: usize,
+    max_bytes: usize,
+    current_bytes: usize,
     order: VecDeque<PathBuf>,
     images: HashMap<PathBuf, DecodedImage>,
 }
 
+impl Default for PrefetchCache {
+    fn default() -> Self {
+        Self::with_limits(DEFAULT_CAPACITY, DEFAULT_MAX_BYTES)
+    }
+}
+
 impl PrefetchCache {
-    /// Create a cache that holds at most `capacity` images (minimum 1).
+    /// Create an entry-bounded cache using the default byte budget.
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_limits(capacity, DEFAULT_MAX_BYTES)
+    }
+
+    /// Create a cache bounded by both entry count and decoded RGBA bytes.
+    #[must_use]
+    pub fn with_limits(capacity: usize, max_bytes: usize) -> Self {
         Self {
             capacity: capacity.max(1),
+            max_bytes,
+            current_bytes: 0,
             order: VecDeque::new(),
             images: HashMap::new(),
         }
@@ -35,6 +52,12 @@ impl PrefetchCache {
     #[must_use]
     pub fn len(&self) -> usize {
         self.images.len()
+    }
+
+    /// Total decoded pixel bytes currently retained.
+    #[must_use]
+    pub const fn bytes(&self) -> usize {
+        self.current_bytes
     }
 
     /// True when empty.
@@ -52,20 +75,30 @@ impl PrefetchCache {
     /// Take ownership of a cached image (removes it from the cache).
     pub fn take(&mut self, path: &Path) -> Option<DecodedImage> {
         let img = self.images.remove(path)?;
+        self.current_bytes = self.current_bytes.saturating_sub(img.rgba.len());
         self.order.retain(|p| p != path);
         Some(img)
     }
 
-    /// Insert or replace; evicts least-recently-used entries past capacity.
+    /// Insert or replace, evicting least-recently-used entries until both
+    /// limits hold. An image larger than the complete byte budget is not cached.
     pub fn insert(&mut self, path: PathBuf, image: DecodedImage) {
-        if self.images.contains_key(&path) {
+        if let Some(replaced) = self.images.remove(&path) {
+            self.current_bytes = self.current_bytes.saturating_sub(replaced.rgba.len());
             self.order.retain(|p| p != &path);
         }
+        let image_bytes = image.rgba.len();
+        if image_bytes > self.max_bytes {
+            return;
+        }
         self.order.push_back(path.clone());
+        self.current_bytes = self.current_bytes.saturating_add(image_bytes);
         self.images.insert(path, image);
-        while self.images.len() > self.capacity {
+        while self.images.len() > self.capacity || self.current_bytes > self.max_bytes {
             if let Some(old) = self.order.pop_front() {
-                self.images.remove(&old);
+                if let Some(evicted) = self.images.remove(&old) {
+                    self.current_bytes = self.current_bytes.saturating_sub(evicted.rgba.len());
+                }
             } else {
                 break;
             }
@@ -82,6 +115,7 @@ impl PrefetchCache {
     pub fn clear(&mut self) {
         self.order.clear();
         self.images.clear();
+        self.current_bytes = 0;
     }
 }
 
@@ -117,6 +151,16 @@ mod tests {
             rgba: vec![id, 0, 0, 255],
             width: 1,
             height: 1,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+        }
+    }
+
+    fn bytes(id: u8, len: usize) -> DecodedImage {
+        DecodedImage {
+            rgba: vec![id; len],
+            width: 1,
+            height: 1,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
         }
     }
 
@@ -147,5 +191,36 @@ mod tests {
         let img = c.take(std::path::Path::new("a")).unwrap();
         assert_eq!(img.rgba[0], 9);
         assert!(c.is_empty());
+        assert_eq!(c.bytes(), 0);
+    }
+
+    #[test]
+    fn byte_budget_evicts_oldest_even_below_entry_capacity() {
+        let mut cache = PrefetchCache::with_limits(5, 10);
+        cache.insert(PathBuf::from("a"), bytes(1, 6));
+        cache.insert(PathBuf::from("b"), bytes(2, 6));
+        assert!(!cache.contains(std::path::Path::new("a")));
+        assert!(cache.contains(std::path::Path::new("b")));
+        assert_eq!(cache.bytes(), 6);
+    }
+
+    #[test]
+    fn single_image_larger_than_budget_is_not_retained() {
+        let mut cache = PrefetchCache::with_limits(5, 4);
+        cache.insert(PathBuf::from("large"), bytes(1, 5));
+        assert!(cache.is_empty());
+        assert_eq!(cache.bytes(), 0);
+    }
+
+    #[test]
+    fn replacement_and_clear_keep_byte_accounting_exact() {
+        let mut cache = PrefetchCache::with_limits(5, 20);
+        cache.insert(PathBuf::from("a"), bytes(1, 4));
+        cache.insert(PathBuf::from("a"), bytes(2, 7));
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.bytes(), 7);
+        cache.clear();
+        assert!(cache.is_empty());
+        assert_eq!(cache.bytes(), 0);
     }
 }

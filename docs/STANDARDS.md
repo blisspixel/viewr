@@ -86,10 +86,10 @@ Target: 85 percent line coverage or higher on the testable logic, measured with
 honestly without a window or an external worker binary is excluded and covered by
 end-to-end verification instead:
 
-- `app.rs`, `gpu.rs`, `ui.rs` — windowing, GPU, and egui chrome
+- `app.rs`, `gpu.rs`, `ui.rs`: windowing, GPU, and egui chrome
 - `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
-- `worker_limit.rs` — OS Job Object / process-group glue
-- `error.rs`, `main.rs` — thin entry/error surfaces
+- `worker_limit.rs`: OS Job Object / process-group glue
+- `error.rs`, `main.rs`: thin entry/error surfaces
 
 Everything else (decode pure paths, edit, heal, fs ordering, view math, theme) is in
 the coverage floor. Coverage is a floor and a signal, not the goal. The real goal

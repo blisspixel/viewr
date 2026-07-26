@@ -22,6 +22,7 @@ from scripts.performance_gate import (
     create_linked_corpus,
     deterministic_png,
     evaluate,
+    evaluate_cache_stress,
     main,
     parse_report,
     run_probe,
@@ -37,6 +38,7 @@ def report(**overrides: int) -> ProbeReport:
         "peak_resident_bytes": 200 * 1024 * 1024,
         "playlist_entries": 16,
         "decoded_cache_entries": 5,
+        "decoded_cache_bytes": 256 * 1024 * 1024,
         "thumbnail_texture_entries": 9,
     }
     values.update(overrides)
@@ -148,14 +150,30 @@ class PerformanceGateTests(unittest.TestCase):
 
     def test_report_aggregation_uses_timing_medians_and_resource_maxima(self) -> None:
         reports = [
-            report(window_ready_us=300, first_pixel_us=900, peak_resident_bytes=1),
-            report(window_ready_us=100, first_pixel_us=500, peak_resident_bytes=3),
-            report(window_ready_us=200, first_pixel_us=700, peak_resident_bytes=2),
+            report(
+                window_ready_us=300,
+                first_pixel_us=900,
+                peak_resident_bytes=1,
+                decoded_cache_bytes=1,
+            ),
+            report(
+                window_ready_us=100,
+                first_pixel_us=500,
+                peak_resident_bytes=3,
+                decoded_cache_bytes=3,
+            ),
+            report(
+                window_ready_us=200,
+                first_pixel_us=700,
+                peak_resident_bytes=2,
+                decoded_cache_bytes=2,
+            ),
         ]
         combined = _median_report(reports)
         self.assertEqual(combined.window_ready_us, 200)
         self.assertEqual(combined.first_pixel_us, 700)
         self.assertEqual(combined.peak_resident_bytes, 3)
+        self.assertEqual(combined.decoded_cache_bytes, 3)
 
     def test_evaluate_reports_every_timing_memory_and_cache_violation(self) -> None:
         budgets = Budgets(3000, 5000, 500, 2, 768, 96)
@@ -165,6 +183,7 @@ class PerformanceGateTests(unittest.TestCase):
             max_navigation_us=500_001,
             idle_redraws=3,
             decoded_cache_entries=6,
+            decoded_cache_bytes=256 * 1024 * 1024 + 1,
             thumbnail_texture_entries=10,
         )
         large = report(
@@ -172,10 +191,11 @@ class PerformanceGateTests(unittest.TestCase):
             playlist_entries=4000,
             idle_redraws=3,
             decoded_cache_entries=6,
+            decoded_cache_bytes=256 * 1024 * 1024 + 1,
             thumbnail_texture_entries=10,
         )
         failures = evaluate(small, large, budgets, 16, 50_000)
-        self.assertEqual(len(failures), 12)
+        self.assertEqual(len(failures), 14)
         self.assertTrue(any("window ready" in failure for failure in failures))
         self.assertTrue(any("first pixel" in failure for failure in failures))
         self.assertTrue(
@@ -197,6 +217,50 @@ class PerformanceGateTests(unittest.TestCase):
             playlist_entries=50_000,
         )
         self.assertEqual(evaluate(small, large, budgets, 16, 50_000), [])
+
+    def test_cache_stress_gate_exercises_byte_eviction_and_accounting(self) -> None:
+        image_bytes = 4096 * 4096 * 4
+        accepted = report(
+            playlist_entries=8,
+            decoded_cache_entries=4,
+            decoded_cache_bytes=4 * image_bytes,
+        )
+        self.assertEqual(evaluate_cache_stress(accepted, 8, image_bytes), [])
+
+        broken_eviction = report(
+            playlist_entries=8,
+            decoded_cache_entries=5,
+            decoded_cache_bytes=5 * image_bytes,
+        )
+        failures = evaluate_cache_stress(broken_eviction, 8, image_bytes)
+        self.assertTrue(any("expected 4" in failure for failure in failures))
+        self.assertTrue(any("limit is 268435456" in failure for failure in failures))
+
+        under_retained = report(
+            playlist_entries=8,
+            decoded_cache_entries=1,
+            decoded_cache_bytes=image_bytes,
+        )
+        self.assertTrue(
+            any(
+                "under-retention" in failure
+                for failure in evaluate_cache_stress(under_retained, 8, image_bytes)
+            )
+        )
+
+        broken_accounting = report(
+            playlist_entries=8,
+            decoded_cache_entries=4,
+            decoded_cache_bytes=0,
+        )
+        self.assertTrue(
+            any(
+                "accounting" in failure
+                for failure in evaluate_cache_stress(broken_accounting, 8, image_bytes)
+            )
+        )
+        with self.assertRaisesRegex(PerformanceGateError, "too small"):
+            evaluate_cache_stress(accepted, 8, 1)
 
     def test_growth_uses_the_lowest_observed_small_folder_baseline(self) -> None:
         budgets = Budgets(3000, 5000, 500, 2, 768, 96)
@@ -234,6 +298,11 @@ class PerformanceGateTests(unittest.TestCase):
             probe_results = [
                 report(playlist_entries=5),
                 report(playlist_entries=6),
+                report(
+                    playlist_entries=8,
+                    decoded_cache_entries=4,
+                    decoded_cache_bytes=4 * 4096 * 4096 * 4,
+                ),
             ]
             output = io.StringIO()
             with mock.patch(
@@ -241,12 +310,17 @@ class PerformanceGateTests(unittest.TestCase):
             ) as probe:
                 with redirect_stdout(output):
                     self.assertEqual(main(base), 0)
-            self.assertEqual(probe.call_count, 2)
+            self.assertEqual(probe.call_count, 3)
             self.assertIn("performance gate: OK", output.getvalue())
 
             failing_results = [
                 report(first_pixel_us=5_000_001, playlist_entries=5),
                 report(playlist_entries=6),
+                report(
+                    playlist_entries=8,
+                    decoded_cache_entries=4,
+                    decoded_cache_bytes=4 * 4096 * 4096 * 4,
+                ),
             ]
             errors = io.StringIO()
             with mock.patch(

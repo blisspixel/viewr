@@ -21,9 +21,9 @@ use winit::window::{Window, WindowId};
 use crate::curate::{FlagSet, TrashedFile};
 use crate::decode::DecodedImage;
 use crate::error::Error;
-use crate::gpu::{FrameResult, Renderer};
+use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::prefetch::{self, PrefetchCache};
-use crate::theme::Mode;
+use crate::theme::Preference;
 use crate::thumbs::{self, ThumbRgba};
 use crate::ui::FilmstripItem;
 
@@ -87,10 +87,18 @@ fn run_internal(
         playlist: None,
         scanner_rx: None,
         transform: Transform::default(),
+        custom_crop_ratio: (3, 5),
         heal: HealTool::default(),
         is_fullscreen: false,
         last_trashed: Vec::new(),
         current_image: None,
+        animation: None,
+        image_details: None,
+        auxiliary_loader_rx: None,
+        load_error: None,
+        save_worker: None,
+        crop_worker: None,
+        preview_worker: None,
         loaded_image_path: None,
         show_image_info: false,
         show_tools_panel: false,
@@ -102,6 +110,8 @@ fn run_internal(
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
         bg_override: None,
+        theme_preference: crate::theme::load_preference(),
+        show_about: false,
         image_loader_rx: None,
         image_load_generation: Arc::new(AtomicU64::new(0)),
         resize_on_load: None,
@@ -115,11 +125,17 @@ fn run_internal(
         space_held: false,
         space_dragged: false,
         mouse_left_down: false,
+        mouse_right_down: false,
+        right_click_start: None,
+        context_menu_pos: None,
         thumb_result_tx,
         thumb_rx,
         thumbs_in_flight: HashSet::new(),
         thumb_textures: HashMap::new(),
-        prefetch: PrefetchCache::with_capacity(prefetch::DEFAULT_CAPACITY),
+        prefetch: PrefetchCache::with_limits(
+            prefetch::DEFAULT_CAPACITY,
+            prefetch::DEFAULT_MAX_BYTES,
+        ),
         prefetch_in_flight: HashSet::new(),
         prefetch_result_tx,
         prefetch_rx,
@@ -255,17 +271,112 @@ struct FolderScan {
     files: std::io::Result<Vec<PathBuf>>,
 }
 
-/// The aspect ratio to enforce when cropping.
-#[derive(Clone, Copy, Debug, PartialEq)]
+struct SaveWorker {
+    result_rx: Receiver<Result<crate::edit::MetadataDisposition, String>>,
+}
+
+struct CropWorker {
+    source_path: PathBuf,
+    result_rx: Receiver<Result<DecodedImage, String>>,
+}
+
+#[derive(Clone, Copy)]
+enum PresentationKind {
+    Loaded,
+    Cropped,
+}
+
+struct PreviewWorker {
+    path: PathBuf,
+    kind: PresentationKind,
+    result_rx: Receiver<Result<(Arc<DecodedImage>, ImagePreview), String>>,
+}
+
+type AuxiliaryLoadResult = (
+    PathBuf,
+    Result<Option<crate::animated::DecodedAnimation>, String>,
+    crate::image_info::ImageDetails,
+);
+
+/// The aspect-ratio constraint to enforce when cropping.
+///
+/// Fixed ratios are data rather than enum variants so adding a preset never
+/// requires another branch in the crop geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CropRatio {
     /// Free-form cropping with no locked ratio.
     Free,
-    /// 1:1 square crop.
-    Square,
-    /// 4:3 crop.
-    FourThree,
-    /// 16:9 crop.
-    SixteenNine,
+    /// Preserve the current image's original pixel aspect ratio.
+    Original,
+    /// Lock to an explicit width-to-height ratio.
+    Fixed {
+        /// Relative width component. Zero is treated as an unlocked ratio.
+        width: u16,
+        /// Relative height component. Zero is treated as an unlocked ratio.
+        height: u16,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CropHandle {
+    TopLeft,
+    Top,
+    TopRight,
+    Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
+}
+
+impl CropRatio {
+    /// A square crop.
+    pub const SQUARE: Self = Self::fixed(1, 1);
+    /// Standard 3:2 landscape photography crop.
+    pub const THREE_TWO: Self = Self::fixed(3, 2);
+    /// Portrait orientation of [`Self::THREE_TWO`].
+    pub const TWO_THREE: Self = Self::fixed(2, 3);
+    /// Standard 4:3 landscape crop.
+    pub const FOUR_THREE: Self = Self::fixed(4, 3);
+    /// Portrait orientation of [`Self::FOUR_THREE`].
+    pub const THREE_FOUR: Self = Self::fixed(3, 4);
+    /// Common 8x10 and 16x20 landscape print crop.
+    pub const FIVE_FOUR: Self = Self::fixed(5, 4);
+    /// Portrait orientation of [`Self::FIVE_FOUR`].
+    pub const FOUR_FIVE: Self = Self::fixed(4, 5);
+    /// Standard 5:3 landscape crop.
+    pub const FIVE_THREE: Self = Self::fixed(5, 3);
+    /// Portrait orientation of [`Self::FIVE_THREE`].
+    pub const THREE_FIVE: Self = Self::fixed(3, 5);
+    /// Widescreen landscape crop.
+    pub const SIXTEEN_NINE: Self = Self::fixed(16, 9);
+    /// Portrait orientation of [`Self::SIXTEEN_NINE`].
+    pub const NINE_SIXTEEN: Self = Self::fixed(9, 16);
+
+    /// Construct an explicit width-to-height crop ratio.
+    #[must_use]
+    pub const fn fixed(width: u16, height: u16) -> Self {
+        Self::Fixed { width, height }
+    }
+
+    /// Return explicit ratio components, if this is a fixed ratio.
+    #[must_use]
+    pub const fn components(self) -> Option<(u16, u16)> {
+        match self {
+            Self::Fixed { width, height } if width != 0 && height != 0 => Some((width, height)),
+            Self::Free | Self::Original | Self::Fixed { .. } => None,
+        }
+    }
+
+    /// A compact label suitable for the crop toolbar.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Free => "Free".to_owned(),
+            Self::Original => "Original".to_owned(),
+            Self::Fixed { width, height } => format!("{width}:{height}"),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -310,16 +421,31 @@ const DEFAULT_HEAL_BRUSH_RADIUS: u32 = 18;
 struct HealTool {
     active: bool,
     brush_radius: u32,
+    feather_percent: u8,
     stroke: Vec<crate::heal::StrokePoint>,
     painting: bool,
     worker: Option<HealWorker>,
+    refresh: Option<HealRefresh>,
     history: crate::heal::PatchHistory,
 }
 
 struct HealWorker {
-    result_rx: Receiver<Result<crate::heal::ImagePatch, String>>,
+    result_rx: Receiver<HealWorkerOutput>,
     cancel: Arc<AtomicBool>,
     apply_result: bool,
+    replacing_latest: bool,
+    previous_candidate_index: usize,
+}
+
+struct HealWorkerOutput {
+    result: Result<crate::heal::SpotHealResult, String>,
+    job: Option<crate::heal::SpotHealJob>,
+}
+
+struct HealRefresh {
+    job: crate::heal::SpotHealJob,
+    candidate_index: usize,
+    candidate_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -357,9 +483,11 @@ impl Default for HealTool {
         Self {
             active: false,
             brush_radius: DEFAULT_HEAL_BRUSH_RADIUS,
+            feather_percent: crate::heal::DEFAULT_FEATHER_PERCENT,
             stroke: Vec::new(),
             painting: false,
             worker: None,
+            refresh: None,
             history: crate::heal::PatchHistory::new(EDIT_HISTORY_BYTES),
         }
     }
@@ -370,6 +498,7 @@ impl HealTool {
         self.cancel_worker();
         self.stroke.clear();
         self.painting = false;
+        self.refresh = None;
         self.history.clear();
     }
 
@@ -393,10 +522,26 @@ struct App {
     playlist: Option<Playlist>,
     scanner_rx: Option<Receiver<FolderScan>>,
     transform: Transform,
+    /// Last custom crop ratio entered during this process session.
+    custom_crop_ratio: (u16, u16),
     heal: HealTool,
     is_fullscreen: bool,
     last_trashed: Vec<TrashedFile>,
     current_image: Option<Arc<DecodedImage>>,
+    /// Timed frames for the current GIF, WebP, or APNG.
+    animation: Option<crate::animated::AnimationPlayback>,
+    /// Best-effort facts for the current Image Information panel.
+    image_details: Option<crate::image_info::ImageDetails>,
+    /// Replace-latest animation and metadata result for the current source.
+    auxiliary_loader_rx: Option<Receiver<AuxiliaryLoadResult>>,
+    /// Most recent foreground decode failure for the selected path.
+    load_error: Option<String>,
+    /// At most one explicit Save As encode running off the UI thread.
+    save_worker: Option<SaveWorker>,
+    /// At most one full-resolution crop running off the UI thread.
+    crop_worker: Option<CropWorker>,
+    /// Replace-latest over-limit preview prepared outside the event thread.
+    preview_worker: Option<PreviewWorker>,
     /// Source path corresponding exactly to `current_image` and the GPU texture.
     loaded_image_path: Option<PathBuf>,
     show_image_info: bool,
@@ -415,6 +560,10 @@ struct App {
     /// When true, Save As copies EXIF from the source. Default **false** (strip).
     retain_exif: bool,
     bg_override: Option<[f64; 4]>,
+    /// Persisted application-chrome and default-canvas appearance.
+    theme_preference: Preference,
+    /// Whether the accessible About window is open.
+    show_about: bool,
     image_loader_rx: Option<
         std::sync::mpsc::Receiver<(
             std::path::PathBuf,
@@ -445,6 +594,12 @@ struct App {
     space_dragged: bool,
     /// Left mouse button currently down.
     mouse_left_down: bool,
+    /// Right mouse button currently down.
+    mouse_right_down: bool,
+    /// Position where right click started.
+    right_click_start: Option<(f64, f64)>,
+    /// Screen position of the right-click context menu, if open.
+    context_menu_pos: Option<[f32; 2]>,
     /// Completed thumbnail results (or failures) from background jobs.
     thumb_result_tx: Sender<Result<ThumbRgba, (PathBuf, String)>>,
     /// Receiver for thumbnail results.
@@ -492,7 +647,7 @@ fn route_consumed_keyboard_key(
     match key {
         Key::Character(character) => {
             let character = character.as_str();
-            matches!(character, "0" | "1" | "+" | "=" | "-" | "_")
+            matches!(character, "0" | "1" | "+" | "=" | "-" | "_" | "/")
                 || [
                     "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "x", "b", "f", "z",
                     "y",
@@ -500,7 +655,7 @@ fn route_consumed_keyboard_key(
                 .iter()
                 .any(|shortcut| character.eq_ignore_ascii_case(shortcut))
         }
-        Key::Named(NamedKey::ArrowRight | NamedKey::ArrowLeft) => true,
+        Key::Named(NamedKey::ArrowRight | NamedKey::ArrowLeft | NamedKey::F5) => true,
         Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp) => is_cropping,
         Key::Named(NamedKey::Escape) => is_cropping || is_healing,
         _ => false,
@@ -509,6 +664,32 @@ fn route_consumed_keyboard_key(
 
 fn image_is_fully_displayed(source: Option<(u32, u32)>, displayed: Option<(u32, u32)>) -> bool {
     source.is_some() && source == displayed
+}
+
+fn validate_performance_report(
+    report: crate::performance::PerformanceReport,
+) -> Result<crate::performance::PerformanceReport, String> {
+    if report.decoded_cache_entries > prefetch::DEFAULT_CAPACITY {
+        return Err(format!(
+            "decoded cache retained {} entries; limit is {}",
+            report.decoded_cache_entries,
+            prefetch::DEFAULT_CAPACITY
+        ));
+    }
+    if report.decoded_cache_bytes > u64::try_from(prefetch::DEFAULT_MAX_BYTES).unwrap_or(u64::MAX) {
+        return Err(format!(
+            "decoded cache retained {} bytes; limit is {}",
+            report.decoded_cache_bytes,
+            prefetch::DEFAULT_MAX_BYTES
+        ));
+    }
+    if report.thumbnail_texture_entries > 9 {
+        return Err(format!(
+            "thumbnail cache retained {} entries; limit is 9",
+            report.thumbnail_texture_entries
+        ));
+    }
+    Ok(report)
 }
 
 impl App {
@@ -619,24 +800,134 @@ impl App {
     }
 
     fn display_loaded_image(&mut self, path: &Path, image: DecodedImage) {
-        let should_resize = self.resize_on_load.as_deref() == Some(path);
-        let mut uploaded = false;
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.set_image(&image);
-            uploaded = true;
-            if should_resize {
-                resize_window_to_image(renderer);
+        self.present_image(path, Arc::new(image), PresentationKind::Loaded);
+    }
+
+    fn present_image(&mut self, path: &Path, image: Arc<DecodedImage>, kind: PresentationKind) {
+        let required = self
+            .renderer
+            .as_ref()
+            .and_then(|renderer| renderer.required_preview(&image));
+        let Some(spec) = required else {
+            self.finish_image_presentation(path, image, None, kind);
+            return;
+        };
+
+        let generation = self.image_load_generation.load(Ordering::Acquire);
+        let current_generation = Arc::clone(&self.image_load_generation);
+        let worker_image = Arc::clone(&image);
+        let worker_path = path.to_owned();
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let scheduled = crate::decode::schedule_image_preview(move || {
+            let result = crate::gpu::prepare_image_preview(&worker_image, spec, || {
+                current_generation.load(Ordering::Acquire) != generation
+            });
+            match result {
+                Ok(Some(preview)) => {
+                    let _ = sender.send(Ok((worker_image, preview)));
+                    let _ = event_proxy.send_event(UserEvent::Wake);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = sender.send(Err(error.to_string()));
+                    let _ = event_proxy.send_event(UserEvent::Wake);
+                }
+            }
+        });
+        match scheduled {
+            Ok(()) => {
+                self.preview_worker = Some(PreviewWorker {
+                    path: worker_path,
+                    kind,
+                    result_rx: receiver,
+                });
+                self.show_toast("Preparing a display-sized preview in the background");
+            }
+            Err(error) => {
+                log::error!("failed to queue image preview");
+                self.show_toast(format!("Could not prepare image preview: {error}"));
             }
         }
-        if should_resize && uploaded {
+    }
+
+    fn finish_image_presentation(
+        &mut self,
+        path: &Path,
+        image: Arc<DecodedImage>,
+        preview: Option<&ImagePreview>,
+        kind: PresentationKind,
+    ) {
+        let should_resize = self.resize_on_load.as_deref() == Some(path);
+        let full_resolution = if let Some(renderer) = self.renderer.as_mut() {
+            match renderer.set_image(&image, preview) {
+                Ok(full_resolution) => {
+                    if should_resize {
+                        resize_window_to_image(renderer);
+                    }
+                    full_resolution
+                }
+                Err(error) => {
+                    log::error!("failed to upload prepared image");
+                    self.show_toast(format!("Could not display image: {error}"));
+                    return;
+                }
+            }
+        } else {
+            true
+        };
+        if should_resize && self.renderer.is_some() {
             self.resize_on_load = None;
         }
-        self.current_image = Some(Arc::new(image));
+        self.current_image = Some(image);
         self.loaded_image_path = Some(path.to_owned());
+        self.load_error = None;
+        match kind {
+            PresentationKind::Loaded => self.start_auxiliary_load(path),
+            PresentationKind::Cropped => {
+                self.heal.reset_for_image();
+                self.show_toast("Crop applied");
+            }
+        }
+        if !full_resolution {
+            self.show_toast(
+                "Full image shown as a GPU-limited preview; export remains full resolution",
+            );
+        }
+    }
+
+    fn poll_preview_result(&mut self) {
+        let completed = self.preview_worker.as_ref().and_then(|worker| {
+            worker
+                .result_rx
+                .try_recv()
+                .ok()
+                .map(|result| (worker.path.clone(), worker.kind, result))
+        });
+        let Some((path, kind, result)) = completed else {
+            return;
+        };
+        self.preview_worker = None;
+        if self.image_path.as_ref() != Some(&path) {
+            return;
+        }
+        match result {
+            Ok((image, preview)) => {
+                self.finish_image_presentation(&path, image, Some(&preview), kind);
+                self.request_redraw();
+            }
+            Err(error) => self.show_toast(format!("Could not prepare image preview: {error}")),
+        }
     }
 
     fn invalidate_displayed_image(&mut self) {
         self.heal.reset_for_image();
+        self.crop_worker = None;
+        self.preview_worker = None;
+        self.animation = None;
+        self.image_details = None;
+        self.auxiliary_loader_rx = None;
+        self.load_error = None;
         self.current_image = None;
         self.loaded_image_path = None;
         if let Some(renderer) = self.renderer.as_mut() {
@@ -644,10 +935,201 @@ impl App {
         }
     }
 
+    /// Stop work and edit state tied to the old image while leaving its last
+    /// good pixels on screen until a replacement has decoded successfully.
+    fn prepare_for_image_load(&mut self) {
+        self.heal.reset_for_image();
+        self.crop_worker = None;
+        self.preview_worker = None;
+        self.animation = None;
+        self.auxiliary_loader_rx = None;
+        self.load_error = None;
+    }
+
+    fn start_auxiliary_load(&mut self, path: &Path) {
+        self.animation = None;
+        self.image_details = None;
+        self.auxiliary_loader_rx = None;
+        let path = path.to_owned();
+        let job_path = path.clone();
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let current_generation = Arc::clone(&self.image_load_generation);
+        let generation = current_generation.load(Ordering::Acquire);
+        let scheduled = crate::decode::schedule_current_image_details(move || {
+            if current_generation.load(Ordering::Acquire) != generation {
+                return;
+            }
+            let animation = crate::animated::DecodedAnimation::load_background_if_current(
+                &job_path,
+                &current_generation,
+                generation,
+            )
+            .map_err(|error| error.to_string());
+            if current_generation.load(Ordering::Acquire) != generation {
+                return;
+            }
+            let details = crate::image_info::ImageDetails::load(&job_path);
+            if current_generation.load(Ordering::Acquire) != generation {
+                return;
+            }
+            let _ = sender.send((job_path, animation, details));
+            let _ = event_proxy.send_event(UserEvent::Wake);
+        });
+        match scheduled {
+            Ok(()) => self.auxiliary_loader_rx = Some(receiver),
+            Err(error) => {
+                log::error!("failed to queue current-image details");
+                self.show_toast(format!("Image details unavailable: {error}"));
+            }
+        }
+    }
+
+    fn poll_auxiliary_load(&mut self) {
+        let completed = self
+            .auxiliary_loader_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some((path, result, details)) = completed else {
+            return;
+        };
+        self.auxiliary_loader_rx = None;
+        if self.loaded_image_path.as_ref() != Some(&path) || self.image_path.as_ref() != Some(&path)
+        {
+            return;
+        }
+        self.image_details = Some(details);
+        match result {
+            Ok(Some(animation)) => {
+                let mut playback =
+                    crate::animated::AnimationPlayback::new(animation, Instant::now());
+                if self.transform.is_cropping || self.heal.active {
+                    playback.pause();
+                }
+                let image = playback.current_image();
+                if let Err(error) = self.upload_realtime_image(&image) {
+                    self.show_toast(format!(
+                        "Animation unavailable; showing first frame: {error}"
+                    ));
+                    return;
+                }
+                self.current_image = Some(image);
+                self.animation = Some(playback);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                log::debug!("animation playback unavailable");
+                self.show_toast(format!(
+                    "Animation unavailable; showing first frame: {error}"
+                ));
+            }
+        }
+        self.request_redraw();
+    }
+
+    fn advance_animation(&mut self, now: Instant) {
+        let image = self
+            .animation
+            .as_mut()
+            .and_then(|playback| playback.advance(now).then(|| playback.current_image()));
+        let Some(image) = image else {
+            return;
+        };
+        if let Err(error) = self.upload_realtime_image(&image) {
+            self.animation = None;
+            self.show_toast(format!("Animation stopped: {error}"));
+            return;
+        }
+        self.current_image = Some(image);
+    }
+
+    fn toggle_animation_playback(&mut self) {
+        let image = self.animation.as_mut().map(|playback| {
+            playback.toggle(Instant::now());
+            playback.current_image()
+        });
+        let Some(image) = image else {
+            return;
+        };
+        if let Err(error) = self.upload_realtime_image(&image) {
+            self.animation = None;
+            self.show_toast(format!("Animation stopped: {error}"));
+            return;
+        }
+        self.current_image = Some(image);
+    }
+
+    fn upload_realtime_image(&mut self, image: &DecodedImage) -> Result<(), String> {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return Ok(());
+        };
+        if renderer.required_preview(image).is_some() {
+            return Err("frames exceed the GPU preview limit".into());
+        }
+        renderer
+            .set_image(image, None)
+            .map_err(|error| error.to_string())?;
+        renderer.window().request_redraw();
+        Ok(())
+    }
+
+    fn pause_animation(&mut self) {
+        if let Some(playback) = self.animation.as_mut() {
+            playback.pause();
+        }
+    }
+
+    fn discard_animation_for_pixel_edit(&mut self) {
+        self.animation = None;
+        self.auxiliary_loader_rx = None;
+    }
+
     fn cancel_pending_image_load(&mut self) {
         self.image_load_generation.fetch_add(1, Ordering::AcqRel);
         self.image_loader_rx = None;
+        self.preview_worker = None;
         self.resize_on_load = None;
+        self.load_error = None;
+    }
+
+    fn retry_current_image_load(&mut self) {
+        let Some(path) = self.image_path.clone() else {
+            return;
+        };
+        self.spawn_image_load(path);
+        self.request_redraw();
+    }
+
+    fn reload_current_image(&mut self) {
+        if self.heal.is_busy() || self.heal.painting {
+            self.show_toast("Wait for spot heal to finish before reloading");
+            return;
+        }
+        if self.crop_worker.is_some() {
+            self.show_toast("Wait for the crop to finish before reloading");
+            return;
+        }
+        if self.save_worker.is_some() {
+            self.show_toast("Wait for Save As to finish before reloading");
+            return;
+        }
+        if self.image_loader_rx.is_some() || self.preview_worker.is_some() {
+            self.show_toast("An image is already loading");
+            return;
+        }
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+            return;
+        };
+
+        // A reload is an explicit disk refresh. Drop any speculative copy and
+        // stale filmstrip texture, then keep the last good pixels presented
+        // while the replacement decodes in the foreground.
+        let _ = self.prefetch.take(&path);
+        self.thumb_textures.remove(&path);
+        self.transform = Transform::default();
+        self.spawn_image_load(path);
+        self.show_toast("Reloading file from disk");
+        self.request_redraw();
     }
 
     fn current_loaded_path(&self) -> Option<&Path> {
@@ -757,6 +1239,47 @@ impl App {
         }
     }
 
+    fn rotate_current(&mut self, quarter_turns: i32) {
+        if self.current_loaded_path().is_some()
+            && self.crop_worker.is_none()
+            && self.save_worker.is_none()
+        {
+            self.transform.rotation_steps += quarter_turns;
+            if self.transform.is_cropping
+                && let Some(image_size) = self.renderer.as_ref().and_then(Renderer::image_size)
+            {
+                let ratio =
+                    crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
+                let current = self
+                    .transform
+                    .crop_rect
+                    .unwrap_or_else(|| default_crop_rect(image_size, ratio));
+                self.transform.crop_rect = Some(fit_crop_rect_to_ratio(current, image_size, ratio));
+            }
+            self.request_redraw();
+        }
+    }
+
+    fn flip_current_horizontally(&mut self) {
+        if self.current_loaded_path().is_some()
+            && self.crop_worker.is_none()
+            && self.save_worker.is_none()
+        {
+            self.transform.flip_h = !self.transform.flip_h;
+            self.request_redraw();
+        }
+    }
+
+    fn flip_current_vertically(&mut self) {
+        if self.current_loaded_path().is_some()
+            && self.crop_worker.is_none()
+            && self.save_worker.is_none()
+        {
+            self.transform.flip_v = !self.transform.flip_v;
+            self.request_redraw();
+        }
+    }
+
     fn handle_single_key_shortcut(&mut self, key: &str) {
         match key {
             "o" | "O" => self.open_image_dialog(),
@@ -778,24 +1301,22 @@ impl App {
                 self.request_redraw();
             }
             "r" | "R" => {
-                self.transform.rotation_steps += 1;
-                self.request_redraw();
+                self.rotate_current(1);
             }
             "l" | "L" => {
-                self.transform.rotation_steps -= 1;
-                self.request_redraw();
+                self.rotate_current(-1);
             }
             "h" | "H" => {
-                self.transform.flip_h = !self.transform.flip_h;
-                self.request_redraw();
+                self.flip_current_horizontally();
             }
             "v" | "V" => {
-                self.transform.flip_v = !self.transform.flip_v;
-                self.request_redraw();
+                self.flip_current_vertically();
             }
             "c" | "C" => self.toggle_crop_mode(),
             "j" | "J" => self.toggle_heal_mode(),
+            "/" if self.heal.active => self.refresh_heal_source(),
             "u" | "U" => self.undo_trash(),
+            "x" | "X" if self.transform.is_cropping => self.swap_crop_ratio(),
             "x" | "X" => self.toggle_flag_current(),
             "b" | "B" => self.trash_flagged(),
             "f" | "F" => self.toggle_fullscreen(),
@@ -897,6 +1418,10 @@ impl App {
     }
 
     fn toggle_flag_current(&mut self) {
+        if self.crop_worker.is_some() || self.save_worker.is_some() || self.preview_worker.is_some()
+        {
+            return;
+        }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
@@ -913,6 +1438,10 @@ impl App {
     }
 
     fn trash_current(&mut self) {
+        if self.crop_worker.is_some() || self.save_worker.is_some() || self.preview_worker.is_some()
+        {
+            return;
+        }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
@@ -937,6 +1466,13 @@ impl App {
     }
 
     fn trash_flagged(&mut self) {
+        if self.crop_worker.is_some()
+            || self.save_worker.is_some()
+            || self.preview_worker.is_some()
+            || self.heal.is_busy()
+        {
+            return;
+        }
         let flagged = self.flags.take_all_sorted();
         if flagged.is_empty() {
             return;
@@ -1012,6 +1548,21 @@ impl App {
     }
 
     fn toggle_crop_mode(&mut self) {
+        if self.preview_worker.is_some() {
+            self.show_toast("Wait for the image preview to finish before cropping");
+            return;
+        }
+        if self.current_loaded_path().is_none() {
+            return;
+        }
+        if self.crop_worker.is_some() {
+            self.show_toast("A crop is already being applied");
+            return;
+        }
+        if self.save_worker.is_some() {
+            self.show_toast("Wait for the current save to finish before cropping");
+            return;
+        }
         if self.transform.is_cropping {
             self.cancel_crop();
             return;
@@ -1025,13 +1576,15 @@ impl App {
         self.heal.stroke.clear();
         self.heal.painting = false;
         self.heal.cancel_worker();
+        self.pause_animation();
         self.transform.is_cropping = true;
         self.transform.crop_start = None;
+        let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
         self.transform.crop_rect = self
             .renderer
             .as_ref()
             .and_then(Renderer::image_size)
-            .map(|image_size| default_crop_rect(image_size, self.transform.crop_ratio));
+            .map(|image_size| default_crop_rect(image_size, ratio));
         if let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
         }
@@ -1042,19 +1595,127 @@ impl App {
         if self.transform.is_cropping
             && let Some(image_size) = self.renderer.as_ref().and_then(Renderer::image_size)
         {
+            let source_ratio = crop_ratio_for_source(ratio, self.transform.rotation_steps);
             let current = self
                 .transform
                 .crop_rect
                 .unwrap_or_else(|| default_crop_rect(image_size, CropRatio::Free));
-            self.transform.crop_rect = Some(fit_crop_rect_to_ratio(current, image_size, ratio));
+            self.transform.crop_rect =
+                Some(fit_crop_rect_to_ratio(current, image_size, source_ratio));
         }
         if let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
         }
     }
 
+    fn swap_crop_ratio(&mut self) {
+        let swapped = match self.transform.crop_ratio {
+            CropRatio::Original => {
+                let Some((width, height)) = self
+                    .renderer
+                    .as_ref()
+                    .and_then(Renderer::image_size)
+                    .and_then(|(width, height)| reduced_crop_ratio(height, width))
+                else {
+                    return;
+                };
+                CropRatio::fixed(width, height)
+            }
+            CropRatio::Fixed { width, height } if width != 0 && height != 0 => {
+                CropRatio::fixed(height, width)
+            }
+            CropRatio::Free | CropRatio::Fixed { .. } => return,
+        };
+        self.set_crop_ratio(swapped);
+    }
+
+    fn move_crop_from_logical_pointer(&mut self, pointer: [f32; 2], delta: [f32; 2]) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let scale = renderer.window().scale_factor() as f32;
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        let previous = [pointer[0] - delta[0], pointer[1] - delta[1]];
+        let Some((previous_u, previous_v)) = self.screen_to_uv(
+            f64::from(previous[0] * scale),
+            f64::from(previous[1] * scale),
+        ) else {
+            return;
+        };
+        let Some((pointer_u, pointer_v)) =
+            self.screen_to_uv(f64::from(pointer[0] * scale), f64::from(pointer[1] * scale))
+        else {
+            return;
+        };
+        let Some(image_size) = self.renderer.as_ref().and_then(Renderer::image_size) else {
+            return;
+        };
+        let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
+        let current = self
+            .transform
+            .crop_rect
+            .unwrap_or_else(|| default_crop_rect(image_size, ratio));
+        self.transform.crop_rect = Some(adjust_crop_rect(
+            current,
+            image_size,
+            ratio,
+            pointer_u - previous_u,
+            pointer_v - previous_v,
+            false,
+        ));
+        self.request_redraw();
+    }
+
+    fn resize_crop_from_logical_pointer(&mut self, handle_center: [f32; 2], pointer: [f32; 2]) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let scale = renderer.window().scale_factor() as f32;
+        let Some(image_size) = renderer.image_size() else {
+            return;
+        };
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        let Some(handle_uv) = self.screen_to_uv(
+            f64::from(handle_center[0] * scale),
+            f64::from(handle_center[1] * scale),
+        ) else {
+            return;
+        };
+        let Some(pointer_uv) =
+            self.screen_to_uv(f64::from(pointer[0] * scale), f64::from(pointer[1] * scale))
+        else {
+            return;
+        };
+        let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
+        let current = self
+            .transform
+            .crop_rect
+            .unwrap_or_else(|| default_crop_rect(image_size, ratio));
+        let handle = crop_handle_from_uv(current, handle_uv);
+        self.transform.crop_rect = Some(resize_crop_rect_from_pointer(
+            current, image_size, ratio, handle, pointer_uv,
+        ));
+        self.request_redraw();
+    }
+
     fn toggle_heal_mode(&mut self) {
-        if self.current_image.is_none() {
+        if self.current_loaded_path().is_none() {
+            return;
+        }
+        if !self.heal.active && self.crop_worker.is_some() {
+            self.show_toast("Wait for the crop to finish before using Spot Heal");
+            return;
+        }
+        if !self.heal.active && self.preview_worker.is_some() {
+            self.show_toast("Wait for the image preview to finish before using Spot Heal");
+            return;
+        }
+        if !self.heal.active && self.save_worker.is_some() {
+            self.show_toast("Wait for the current save to finish before using Spot Heal");
             return;
         }
         if !self.heal.active && self.heal.is_busy() {
@@ -1078,6 +1739,7 @@ impl App {
                 self.show_toast("Finishing spot heal in memory");
             }
         } else {
+            self.pause_animation();
             self.heal.active = true;
             self.heal.stroke.clear();
             self.heal.painting = false;
@@ -1093,7 +1755,9 @@ impl App {
             self.current_image
                 .as_ref()
                 .map(|image| (image.width, image.height)),
-            self.renderer.as_ref().and_then(Renderer::image_size),
+            self.renderer
+                .as_ref()
+                .and_then(Renderer::image_texture_size),
         )
     }
 
@@ -1103,10 +1767,63 @@ impl App {
         self.request_redraw();
     }
 
+    fn set_heal_feather(&mut self, percent: u8) {
+        self.heal.feather_percent = percent.min(crate::heal::MAX_FEATHER_PERCENT);
+        self.request_redraw();
+    }
+
+    fn refresh_heal_source(&mut self) {
+        if self.heal.is_busy()
+            || self.crop_worker.is_some()
+            || self.save_worker.is_some()
+            || self.preview_worker.is_some()
+        {
+            return;
+        }
+        let Some(refresh) = self.heal.refresh.as_ref() else {
+            return;
+        };
+        if refresh.candidate_count < 2 {
+            return;
+        }
+        let previous_candidate_index = refresh.candidate_index;
+        let candidate_index = (previous_candidate_index + 1) % refresh.candidate_count;
+        let job = refresh.job.clone();
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let spawn = std::thread::Builder::new()
+            .name("viewr-spot-heal-refresh".into())
+            .spawn(move || {
+                let result = job
+                    .run_ranked_cancellable(candidate_index, &worker_cancel)
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(HealWorkerOutput {
+                    result,
+                    job: Some(job),
+                });
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
+        match spawn {
+            Ok(_) => {
+                self.heal.worker = Some(HealWorker {
+                    result_rx: receiver,
+                    cancel,
+                    apply_result: true,
+                    replacing_latest: true,
+                    previous_candidate_index,
+                });
+                self.request_redraw();
+            }
+            Err(error) => self.show_toast(format!("Could not refresh heal source: {error}")),
+        }
+    }
+
     fn heal_point_at(&self, screen: (f64, f64)) -> Option<crate::heal::StrokePoint> {
         let renderer = self.renderer.as_ref()?;
         let image = self.current_image.as_ref()?;
-        if renderer.image_size() != Some((image.width, image.height)) {
+        if renderer.image_texture_size() != Some((image.width, image.height)) {
             return None;
         }
         let size = renderer.window().inner_size();
@@ -1136,7 +1853,12 @@ impl App {
     }
 
     fn begin_heal_stroke(&mut self) {
-        if !self.heal.active || self.heal.is_busy() {
+        if !self.heal.active
+            || self.heal.is_busy()
+            || self.crop_worker.is_some()
+            || self.save_worker.is_some()
+            || self.preview_worker.is_some()
+        {
             return;
         }
         self.heal.stroke.clear();
@@ -1144,6 +1866,7 @@ impl App {
             self.heal.painting = false;
             return;
         };
+        self.discard_animation_for_pixel_edit();
         self.heal.stroke.push(point);
         self.heal.painting = true;
         self.request_redraw();
@@ -1178,6 +1901,7 @@ impl App {
         };
         let points = std::mem::take(&mut self.heal.stroke);
         let brush_radius = self.heal.brush_radius;
+        let feather_percent = self.heal.feather_percent;
         let (sender, receiver) = mpsc::channel();
         let event_proxy = self.event_proxy.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -1185,20 +1909,37 @@ impl App {
         let spawn = std::thread::Builder::new()
             .name("viewr-spot-heal".into())
             .spawn(move || {
-                let result = if worker_cancel.load(Ordering::Relaxed) {
-                    Err(crate::heal::HealError::Cancelled)
+                let output = if worker_cancel.load(Ordering::Relaxed) {
+                    HealWorkerOutput {
+                        result: Err(crate::heal::HealError::Cancelled.to_string()),
+                        job: None,
+                    }
                 } else {
-                    let prepared =
-                        crate::heal::SpotHealJob::prepare(image.as_ref(), &points, brush_radius);
+                    let prepared = crate::heal::SpotHealJob::prepare_with_feather(
+                        image.as_ref(),
+                        &points,
+                        brush_radius,
+                        feather_percent,
+                    );
                     drop(image);
                     match prepared {
-                        Ok(Some(job)) => job.run_cancellable(&worker_cancel),
-                        Ok(None) => Err(crate::heal::HealError::InvalidStroke),
-                        Err(error) => Err(error),
+                        Ok(Some(job)) => HealWorkerOutput {
+                            result: job
+                                .run_ranked_cancellable(0, &worker_cancel)
+                                .map_err(|error| error.to_string()),
+                            job: Some(job),
+                        },
+                        Ok(None) => HealWorkerOutput {
+                            result: Err(crate::heal::HealError::InvalidStroke.to_string()),
+                            job: None,
+                        },
+                        Err(error) => HealWorkerOutput {
+                            result: Err(error.to_string()),
+                            job: None,
+                        },
                     }
-                }
-                .map_err(|error| error.to_string());
-                let _ = sender.send(result);
+                };
+                let _ = sender.send(output);
                 let _ = event_proxy.send_event(UserEvent::Wake);
             });
         match spawn {
@@ -1207,6 +1948,8 @@ impl App {
                     result_rx: receiver,
                     cancel,
                     apply_result: true,
+                    replacing_latest: false,
+                    previous_candidate_index: 0,
                 });
                 self.request_redraw();
             }
@@ -1220,14 +1963,22 @@ impl App {
     fn poll_heal_result(&mut self) {
         use std::sync::mpsc::TryRecvError;
 
-        let polled = self
-            .heal
-            .worker
-            .as_ref()
-            .map(|worker| (worker.result_rx.try_recv(), worker.apply_result));
-        let (result, apply_result) = match polled {
-            Some((Ok(result), apply_result)) => (Some(result), apply_result),
-            Some((Err(TryRecvError::Disconnected), apply_result)) => {
+        let polled = self.heal.worker.as_ref().map(|worker| {
+            (
+                worker.result_rx.try_recv(),
+                worker.apply_result,
+                worker.replacing_latest,
+                worker.previous_candidate_index,
+            )
+        });
+        let (output, apply_result, replacing_latest, previous_candidate_index) = match polled {
+            Some((Ok(output), apply_result, replacing_latest, previous_candidate_index)) => (
+                Some(output),
+                apply_result,
+                replacing_latest,
+                previous_candidate_index,
+            ),
+            Some((Err(TryRecvError::Disconnected), apply_result, _, _)) => {
                 self.heal.worker = None;
                 self.heal.stroke.clear();
                 if apply_result {
@@ -1235,9 +1986,9 @@ impl App {
                 }
                 return;
             }
-            Some((Err(TryRecvError::Empty), _)) | None => (None, false),
+            Some((Err(TryRecvError::Empty), _, _, _)) | None => (None, false, false, 0),
         };
-        let Some(result) = result else {
+        let Some(output) = output else {
             return;
         };
         self.heal.worker = None;
@@ -1246,8 +1997,9 @@ impl App {
             self.request_redraw();
             return;
         }
-        match result {
-            Ok(patch) => {
+        match output.result {
+            Ok(result) => {
+                let patch = result.patch;
                 let apply_result = self
                     .current_image
                     .as_mut()
@@ -1256,20 +2008,51 @@ impl App {
                     .and_then(|image| crate::heal::apply_patch(image, &patch));
                 match apply_result {
                     Ok(inverse) => {
-                        self.heal.history.record(inverse);
+                        if !replacing_latest {
+                            self.heal.history.record(inverse);
+                        }
+                        self.heal.refresh = output.job.and_then(|job| {
+                            (result.candidate_count > 1).then_some(HealRefresh {
+                                job,
+                                candidate_index: result.candidate_index,
+                                candidate_count: result.candidate_count,
+                            })
+                        });
                         self.update_rendered_patch(&patch);
-                        self.show_toast("Spot healed. Undo is available.");
+                        self.show_toast(if replacing_latest {
+                            format!(
+                                "Heal source {} of {}",
+                                result.candidate_index + 1,
+                                result.candidate_count
+                            )
+                        } else {
+                            "Spot healed. Undo is available.".to_owned()
+                        });
                     }
-                    Err(error) => self.show_toast(format!("Spot heal failed: {error}")),
+                    Err(error) => {
+                        if replacing_latest && let Some(refresh) = self.heal.refresh.as_mut() {
+                            refresh.candidate_index = previous_candidate_index;
+                        }
+                        self.show_toast(format!("Spot heal failed: {error}"));
+                    }
                 }
             }
-            Err(error) => self.show_toast(format!("Spot heal failed: {error}")),
+            Err(error) => {
+                if replacing_latest && let Some(refresh) = self.heal.refresh.as_mut() {
+                    refresh.candidate_index = previous_candidate_index;
+                }
+                self.show_toast(format!("Spot heal failed: {error}"));
+            }
         }
         self.request_redraw();
     }
 
     fn undo_edit(&mut self) {
-        if self.heal.is_busy() {
+        if self.heal.is_busy()
+            || self.crop_worker.is_some()
+            || self.save_worker.is_some()
+            || self.preview_worker.is_some()
+        {
             return;
         }
         let result = self
@@ -1279,6 +2062,7 @@ impl App {
             .map(|image| self.heal.history.undo_patch(image));
         match result {
             Some(Ok(Some(patch))) => {
+                self.heal.refresh = None;
                 self.update_rendered_patch(&patch);
                 self.show_toast("Undid spot heal");
             }
@@ -1288,7 +2072,11 @@ impl App {
     }
 
     fn redo_edit(&mut self) {
-        if self.heal.is_busy() {
+        if self.heal.is_busy()
+            || self.crop_worker.is_some()
+            || self.save_worker.is_some()
+            || self.preview_worker.is_some()
+        {
             return;
         }
         let result = self
@@ -1298,6 +2086,7 @@ impl App {
             .map(|image| self.heal.history.redo_patch(image));
         match result {
             Some(Ok(Some(patch))) => {
+                self.heal.refresh = None;
                 self.update_rendered_patch(&patch);
                 self.show_toast("Redid spot heal");
             }
@@ -1314,8 +2103,9 @@ impl App {
         if !updated
             && let (Some(image), Some(renderer)) =
                 (self.current_image.as_ref(), self.renderer.as_mut())
+            && let Err(error) = renderer.set_image(image, None)
         {
-            renderer.set_image(image);
+            log::error!("failed to restore complete image texture: {error}");
         }
     }
 
@@ -1328,10 +2118,11 @@ impl App {
         } else {
             0.01
         };
+        let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
         let current = self
             .transform
             .crop_rect
-            .unwrap_or_else(|| default_crop_rect(image_size, self.transform.crop_ratio));
+            .unwrap_or_else(|| default_crop_rect(image_size, ratio));
         let resize = self.modifiers.shift_key();
         let matrix = crate::view::uv_transform(
             self.transform.rotation_steps,
@@ -1342,7 +2133,7 @@ impl App {
         self.transform.crop_rect = Some(adjust_crop_rect(
             current,
             image_size,
-            self.transform.crop_ratio,
+            ratio,
             horizontal * precision,
             vertical * precision,
             resize,
@@ -1440,6 +2231,23 @@ impl App {
             (edge[0] - center[0]).hypot(edge[1] - center[1])
         });
         (stroke, cursor, radius)
+    }
+
+    fn update_cursor_icon(&self) {
+        if let Some(renderer) = self.renderer.as_ref() {
+            let cursor = if self.space_held {
+                if self.mouse_left_down {
+                    winit::window::CursorIcon::Grabbing
+                } else {
+                    winit::window::CursorIcon::Grab
+                }
+            } else if self.transform.is_cropping || self.heal.active {
+                winit::window::CursorIcon::Crosshair
+            } else {
+                winit::window::CursorIcon::Default
+            };
+            renderer.window().set_cursor(cursor);
+        }
     }
 
     fn zoom_at_cursor(&mut self, factor: f32) {
@@ -1666,6 +2474,10 @@ impl App {
     }
 
     fn permanent_delete_current(&mut self) {
+        if self.crop_worker.is_some() || self.save_worker.is_some() || self.preview_worker.is_some()
+        {
+            return;
+        }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
@@ -1775,7 +2587,7 @@ impl App {
             .image_load_generation
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
-        self.invalidate_displayed_image();
+        self.prepare_for_image_load();
 
         // Prefer RAM cache even for non-navigate loads (undo, filmstrip jump).
         if let Some(image) = self.prefetch.take(&path) {
@@ -1803,90 +2615,272 @@ impl App {
         if let Err(error) = scheduled {
             self.image_loader_rx = None;
             log::error!("failed to queue foreground decode");
-            self.show_toast(format!("Could not start image decode: {error}"));
+            let message = format!("Could not start image decode: {error}");
+            self.load_error = Some(message.clone());
+            self.show_toast(message);
         }
     }
 
     fn save_as(&mut self) {
-        if self.heal.is_busy() {
+        if self.preview_worker.is_some() {
+            self.show_toast("Wait for the image preview to finish before saving");
+            return;
+        }
+        if self.heal.is_busy() || self.heal.painting {
             self.show_toast("Wait for spot heal to finish before saving");
             return;
         }
-        if let Some(path) = &self.image_path
-            && let Some(image) = &self.current_image
-            && self.loaded_image_path.as_ref() == Some(path)
-        {
-            let default_name = path.with_extension("jpg");
-            if let Some(file_name) = default_name.file_name()
-                && let Some(save_path) = rfd::FileDialog::new()
-                    .set_file_name(file_name.to_string_lossy())
-                    .add_filter("JPEG", &["jpg", "jpeg"])
-                    .add_filter("PNG", &["png"])
-                    .add_filter("WebP", &["webp"])
-                    .add_filter("BMP", &["bmp"])
-                    .save_file()
-            {
-                let opts = if self.retain_exif {
-                    crate::edit::SaveOptions::retain_exif()
-                } else {
-                    crate::edit::SaveOptions::strip()
-                };
-                match crate::edit::save_with_options(image, &save_path, Some(path), opts) {
-                    Ok(()) => {
-                        if self.retain_exif {
-                            self.show_toast("Saved · EXIF retained");
-                        } else {
-                            self.show_toast("Saved · metadata stripped");
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("failed to save image");
-                        self.show_toast(format!("Save failed: {e}"));
-                    }
-                }
+        if self.crop_worker.is_some() {
+            self.show_toast("Wait for the crop to finish before saving");
+            return;
+        }
+        if self.save_worker.is_some() {
+            self.show_toast("A copy is already being saved");
+            return;
+        }
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+            return;
+        };
+        let Some(image) = self.current_image.as_ref().map(Arc::clone) else {
+            return;
+        };
+        let pixel_transform = crate::edit::PixelTransform::new(
+            self.transform.rotation_steps,
+            self.transform.flip_h,
+            self.transform.flip_v,
+        );
+        let default_name = path.with_extension("jpg");
+        let Some(file_name) = default_name.file_name() else {
+            return;
+        };
+        let Some(save_path) = rfd::FileDialog::new()
+            .set_file_name(file_name.to_string_lossy())
+            .add_filter("JPEG", &["jpg", "jpeg"])
+            .add_filter("PNG", &["png"])
+            .add_filter("WebP", &["webp"])
+            .add_filter("BMP", &["bmp"])
+            .save_file()
+        else {
+            return;
+        };
+        let retain_exif = self.retain_exif;
+        let options = if retain_exif {
+            crate::edit::SaveOptions::retain_exif()
+        } else {
+            crate::edit::SaveOptions::strip()
+        };
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let spawn = std::thread::Builder::new()
+            .name("viewr-save".into())
+            .spawn(move || {
+                let result = (|| {
+                    let transformed = (!pixel_transform.is_identity())
+                        .then(|| pixel_transform.apply(image.as_ref()))
+                        .transpose()
+                        .map_err(|error| error.to_string())?;
+                    let export_image = transformed.as_ref().unwrap_or(image.as_ref());
+                    crate::edit::save_with_options(export_image, &save_path, Some(&path), options)
+                        .map_err(|error| error.to_string())
+                })();
+                let _ = sender.send(result);
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
+        match spawn {
+            Ok(_) => {
+                self.save_worker = Some(SaveWorker {
+                    result_rx: receiver,
+                });
+                self.show_toast("Saving copy in the background");
+            }
+            Err(error) => {
+                log::error!("failed to start save worker");
+                self.show_toast(format!("Could not start save: {error}"));
             }
         }
     }
 
-    /// Convert a UV crop rect (0..1) into pixel coordinates for [`crate::edit::crop`].
-    fn crop_pixel_rect(rect: [f32; 4], width: u32, height: u32) -> Option<crate::edit::Rect> {
-        let cw = width as f32;
-        let ch = height as f32;
-        let x = nonneg_round_u32(rect[0] * cw);
-        let y = nonneg_round_u32(rect[1] * ch);
-        let w = nonneg_round_u32((rect[2] - rect[0]) * cw);
-        let h = nonneg_round_u32((rect[3] - rect[1]) * ch);
-        if w == 0 || h == 0 {
+    fn poll_save_result(&mut self) {
+        let result = match self
+            .save_worker
+            .as_ref()
+            .map(|worker| worker.result_rx.try_recv())
+        {
+            Some(Ok(result)) => result,
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.save_worker = None;
+                self.show_toast("Save stopped unexpectedly");
+                return;
+            }
+            Some(Err(mpsc::TryRecvError::Empty)) | None => return,
+        };
+        self.save_worker = None;
+        match result {
+            Ok(crate::edit::MetadataDisposition::Retained) => {
+                self.show_toast("Saved copy · EXIF retained");
+            }
+            Ok(crate::edit::MetadataDisposition::NotPresent) => {
+                self.show_toast("Saved copy · no EXIF found");
+            }
+            Ok(crate::edit::MetadataDisposition::Stripped) => {
+                self.show_toast("Saved copy · metadata stripped");
+            }
+            Err(error) => {
+                log::error!("failed to save image");
+                self.show_toast(format!("Save failed: {error}"));
+            }
+        }
+    }
+
+    /// Convert a UV crop rect into one bounded pixel rectangle. Locked ratios
+    /// are quantized as whole multiples of their reduced integer components,
+    /// so the exported pixel dimensions keep the ratio exactly.
+    fn crop_pixel_rect(
+        rect: [f32; 4],
+        width: u32,
+        height: u32,
+        ratio: CropRatio,
+    ) -> Option<crate::edit::Rect> {
+        if width == 0 || height == 0 {
             return None;
         }
+        let left = f64::from(rect[0].min(rect[2]).clamp(0.0, 1.0));
+        let top = f64::from(rect[1].min(rect[3]).clamp(0.0, 1.0));
+        let right = f64::from(rect[0].max(rect[2]).clamp(0.0, 1.0));
+        let bottom = f64::from(rect[1].max(rect[3]).clamp(0.0, 1.0));
+
+        let Some((ratio_width, ratio_height)) = crop_integer_ratio((width, height), ratio) else {
+            let x = nonnegative_floor_u32(left * f64::from(width)).min(width);
+            let y = nonnegative_floor_u32(top * f64::from(height)).min(height);
+            let right = nonnegative_ceil_u32(right * f64::from(width)).min(width);
+            let bottom = nonnegative_ceil_u32(bottom * f64::from(height)).min(height);
+            let crop_width = right.saturating_sub(x);
+            let crop_height = bottom.saturating_sub(y);
+            return (crop_width != 0 && crop_height != 0).then_some(crate::edit::Rect {
+                x,
+                y,
+                width: crop_width,
+                height: crop_height,
+            });
+        };
+
+        let maximum_scale = (width / ratio_width).min(height / ratio_height);
+        if maximum_scale == 0 {
+            return None;
+        }
+        let selected_width = (right - left) * f64::from(width);
+        let selected_height = (bottom - top) * f64::from(height);
+        let desired_scale = (selected_width / f64::from(ratio_width))
+            .min(selected_height / f64::from(ratio_height))
+            .round()
+            .clamp(1.0, f64::from(maximum_scale));
+        let scale = nonnegative_floor_u32(desired_scale).clamp(1, maximum_scale);
+        let crop_width = ratio_width.checked_mul(scale)?;
+        let crop_height = ratio_height.checked_mul(scale)?;
+        let center_x = (left + right) * 0.5 * f64::from(width);
+        let center_y = (top + bottom) * 0.5 * f64::from(height);
+        let x = centered_crop_origin(center_x, crop_width, width);
+        let y = centered_crop_origin(center_y, crop_height, height);
         Some(crate::edit::Rect {
             x,
             y,
-            width: w,
-            height: h,
+            width: crop_width,
+            height: crop_height,
         })
     }
 
     fn apply_crop_rect(&mut self) {
+        let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
+            return;
+        };
+        if self.crop_worker.is_some() {
+            self.show_toast("A crop is already being applied");
+            return;
+        }
+        if self.preview_worker.is_some() {
+            self.show_toast("Wait for the image preview to finish before cropping");
+            return;
+        }
+        if self.save_worker.is_some() {
+            self.show_toast("Wait for the current save to finish before cropping");
+            return;
+        }
+        if self.heal.is_busy() {
+            self.show_toast("Wait for spot heal to finish before cropping");
+            return;
+        }
         let Some(rect) = self.transform.crop_rect else {
             return;
         };
-        let Some(image) = &self.current_image else {
+        let Some(image) = self.current_image.as_ref().map(Arc::clone) else {
             return;
         };
-        let Some(pixel_rect) = Self::crop_pixel_rect(rect, image.width, image.height) else {
+        let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
+        let Some(pixel_rect) = Self::crop_pixel_rect(rect, image.width, image.height, ratio) else {
+            self.show_toast("The selected ratio is too large for this image");
             return;
         };
-        let cropped = crate::edit::crop(image, pixel_rect);
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.set_image(&cropped);
+
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let spawn = std::thread::Builder::new()
+            .name("viewr-crop".into())
+            .spawn(move || {
+                let cropped = crate::edit::crop(image.as_ref(), pixel_rect)
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(cropped);
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
+        if let Err(error) = spawn {
+            self.show_toast(format!("Could not start crop: {error}"));
+            return;
         }
-        self.current_image = Some(Arc::new(cropped));
-        self.heal.reset_for_image();
-        self.transform = Transform::default();
-        if let Some(r) = self.renderer.as_mut() {
-            r.window().request_redraw();
+
+        self.discard_animation_for_pixel_edit();
+        self.transform.zoom = 1.0;
+        self.transform.offset_x = 0.0;
+        self.transform.offset_y = 0.0;
+        self.transform.is_panning = false;
+        self.transform.last_cursor = None;
+        self.transform.crop_rect = None;
+        self.transform.is_cropping = false;
+        self.transform.crop_start = None;
+        self.crop_worker = Some(CropWorker {
+            source_path,
+            result_rx: receiver,
+        });
+        self.show_toast("Applying crop in the background");
+        self.request_redraw();
+    }
+
+    fn poll_crop_result(&mut self) {
+        let polled = self
+            .crop_worker
+            .as_ref()
+            .map(|worker| (worker.source_path.clone(), worker.result_rx.try_recv()));
+        let (source_path, cropped) = match polled {
+            Some((source_path, Ok(Ok(cropped)))) => (source_path, cropped),
+            Some((_, Ok(Err(error)))) => {
+                self.crop_worker = None;
+                self.show_toast(format!("Crop failed: {error}"));
+                return;
+            }
+            Some((_, Err(mpsc::TryRecvError::Disconnected))) => {
+                self.crop_worker = None;
+                self.show_toast("Crop stopped unexpectedly");
+                return;
+            }
+            Some((_, Err(mpsc::TryRecvError::Empty))) | None => return,
+        };
+        self.crop_worker = None;
+
+        if self.image_path.as_ref() != Some(&source_path)
+            || self.loaded_image_path.as_ref() != Some(&source_path)
+        {
+            return;
         }
+        self.present_image(&source_path, Arc::new(cropped), PresentationKind::Cropped);
+        self.request_redraw();
     }
 
     fn performance_probe_has_presented_current(&self) -> bool {
@@ -1899,6 +2893,9 @@ impl App {
         if probe.last_presented_path.as_deref() != Some(current_path)
             || probe.navigation_target.is_some()
             || self.image_loader_rx.is_some()
+            || self.preview_worker.is_some()
+            || self.auxiliary_loader_rx.is_some()
+            || self.crop_worker.is_some()
             || self.scanner_rx.is_some()
         {
             return false;
@@ -1910,10 +2907,13 @@ impl App {
         if !self.performance_probe_has_presented_current()
             || !self.prefetch_in_flight.is_empty()
             || !self.thumbs_in_flight.is_empty()
-            || self.egui_repaint_at.is_some()
+            || self.auxiliary_loader_rx.is_some()
         {
             return false;
         }
+        // A scheduled egui repaint is exactly what the idle observation window
+        // is meant to measure. Treating it as background work can starve the
+        // probe when hover or accessibility state keeps requesting frames.
         self.visible_filmstrip_paths()
             .iter()
             .all(|path| self.thumb_textures.contains_key(path))
@@ -1946,13 +2946,14 @@ impl App {
         format!(
             concat!(
                 "probe exceeded its {} second deadline ",
-                "(scan={}, image={}, navigation={}, remaining_navigation={}, ",
+                "(scan={}, image={}, auxiliary={}, navigation={}, remaining_navigation={}, ",
                 "presented_current={}, idle_started={}, prefetch={}, thumbnails={}, ",
                 "ready_thumbnails={}/{})"
             ),
             PERFORMANCE_PROBE_TIMEOUT.as_secs(),
             self.scanner_rx.is_some(),
-            self.image_loader_rx.is_some(),
+            self.image_loader_rx.is_some() || self.preview_worker.is_some(),
+            self.auxiliary_loader_rx.is_some(),
             self.performance_probe
                 .as_ref()
                 .is_some_and(|probe| probe.navigation_target.is_some()),
@@ -2067,22 +3068,10 @@ impl App {
             peak_resident_bytes: probe.peak_resident_bytes,
             playlist_entries: playlist_len,
             decoded_cache_entries: self.prefetch.len(),
+            decoded_cache_bytes: u64::try_from(self.prefetch.bytes()).unwrap_or(u64::MAX),
             thumbnail_texture_entries: self.thumb_textures.len(),
         };
-        let outcome = if report.decoded_cache_entries > prefetch::DEFAULT_CAPACITY {
-            Err(format!(
-                "decoded cache retained {} entries; limit is {}",
-                report.decoded_cache_entries,
-                prefetch::DEFAULT_CAPACITY
-            ))
-        } else if report.thumbnail_texture_entries > 9 {
-            Err(format!(
-                "thumbnail cache retained {} entries; limit is 9",
-                report.thumbnail_texture_entries
-            ))
-        } else {
-            Ok(report)
-        };
+        let outcome = validate_performance_report(report);
         self.performance_probe.as_mut().unwrap().outcome = Some(outcome);
         event_loop.exit();
     }
@@ -2091,18 +3080,82 @@ impl App {
 const DEFAULT_CROP_MARGIN: f32 = 0.1;
 const MINIMUM_CROP_SPAN: f32 = 0.02;
 
-fn crop_uv_aspect(image_size: (u32, u32), ratio: CropRatio) -> Option<f32> {
-    let pixel_aspect = match ratio {
-        CropRatio::Free => return None,
-        CropRatio::Square => 1.0,
-        CropRatio::FourThree => 4.0 / 3.0,
-        CropRatio::SixteenNine => 16.0 / 9.0,
+/// Convert a ratio chosen in visible/output orientation to the decoded source
+/// axes used by crop geometry. A quarter turn swaps width and height.
+pub(crate) fn crop_ratio_for_source(ratio: CropRatio, rotation_steps: i32) -> CropRatio {
+    if rotation_steps.rem_euclid(2) == 0 {
+        return ratio;
+    }
+    match ratio {
+        CropRatio::Fixed { width, height } => CropRatio::fixed(height, width),
+        CropRatio::Free | CropRatio::Original => ratio,
+    }
+}
+
+/// Quantize a normalized crop selection through the exact exporter path.
+/// Chrome and accessibility consumers use this seam so announced pixel bounds
+/// cannot drift from the full-resolution crop that will be written.
+pub(crate) fn quantized_crop_pixel_rect(
+    rect: [f32; 4],
+    width: u32,
+    height: u32,
+    ratio: CropRatio,
+) -> Option<crate::edit::Rect> {
+    App::crop_pixel_rect(rect, width, height, ratio)
+}
+
+fn crop_integer_ratio(image_size: (u32, u32), ratio: CropRatio) -> Option<(u32, u32)> {
+    let (width, height) = match ratio {
+        CropRatio::Original => image_size,
+        CropRatio::Fixed { width, height } if width != 0 && height != 0 => {
+            (u32::from(width), u32::from(height))
+        }
+        CropRatio::Free | CropRatio::Fixed { .. } => return None,
     };
-    let (width, height) = image_size;
     if width == 0 || height == 0 {
         return None;
     }
-    Some(pixel_aspect * height as f32 / width as f32)
+    let divisor = greatest_common_divisor(width, height);
+    Some((width / divisor, height / divisor))
+}
+
+const fn greatest_common_divisor(mut left: u32, mut right: u32) -> u32 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
+}
+
+fn reduced_crop_ratio(width: u32, height: u32) -> Option<(u16, u16)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let divisor = greatest_common_divisor(width, height);
+    let width = u16::try_from(width / divisor).ok()?;
+    let height = u16::try_from(height / divisor).ok()?;
+    Some((width, height))
+}
+
+fn crop_pixel_aspect(image_size: (u32, u32), ratio: CropRatio) -> Option<f32> {
+    let (image_width, image_height) = image_size;
+    if image_width == 0 || image_height == 0 {
+        return None;
+    }
+    match ratio {
+        CropRatio::Original => Some(image_width as f32 / image_height as f32),
+        CropRatio::Fixed { width, height } if width != 0 && height != 0 => {
+            Some(f32::from(width) / f32::from(height))
+        }
+        CropRatio::Free | CropRatio::Fixed { .. } => None,
+    }
+}
+
+fn crop_uv_aspect(image_size: (u32, u32), ratio: CropRatio) -> Option<f32> {
+    let (image_width, image_height) = image_size;
+    let pixel_aspect = crop_pixel_aspect(image_size, ratio)?;
+    Some(pixel_aspect * image_height as f32 / image_width as f32)
 }
 
 fn default_crop_rect(image_size: (u32, u32), ratio: CropRatio) -> [f32; 4] {
@@ -2145,6 +3198,245 @@ fn fit_crop_rect_to_ratio(bounds: [f32; 4], image_size: (u32, u32), ratio: CropR
         center_x + width * 0.5,
         center_y + height * 0.5,
     ]
+}
+
+fn crop_handle_from_uv(rect: [f32; 4], point: (f32, f32)) -> CropHandle {
+    fn nearest_zone(value: f32, start: f32, end: f32) -> i8 {
+        let center = (start + end) * 0.5;
+        let candidates = [
+            ((value - start).abs(), -1),
+            ((value - center).abs(), 0),
+            ((value - end).abs(), 1),
+        ];
+        candidates
+            .into_iter()
+            .min_by(|left, right| left.0.total_cmp(&right.0))
+            .map_or(0, |candidate| candidate.1)
+    }
+
+    let left = rect[0].min(rect[2]);
+    let top = rect[1].min(rect[3]);
+    let right = rect[0].max(rect[2]);
+    let bottom = rect[1].max(rect[3]);
+    match (
+        nearest_zone(point.0, left, right),
+        nearest_zone(point.1, top, bottom),
+    ) {
+        (-1, -1) => CropHandle::TopLeft,
+        (0, -1) => CropHandle::Top,
+        (1, -1) => CropHandle::TopRight,
+        (1, 0) => CropHandle::Right,
+        (1, 1) => CropHandle::BottomRight,
+        (0, 1) => CropHandle::Bottom,
+        (-1, 1) => CropHandle::BottomLeft,
+        (-1, 0) => CropHandle::Left,
+        // A handle center never maps to the middle, but choosing the nearest
+        // horizontal edge is a deterministic fallback for malformed geometry.
+        (0, 0) => {
+            if (point.0 - left).abs() <= (right - point.0).abs() {
+                CropHandle::Left
+            } else {
+                CropHandle::Right
+            }
+        }
+        _ => CropHandle::Right,
+    }
+}
+
+fn resize_crop_rect_from_pointer(
+    rect: [f32; 4],
+    image_size: (u32, u32),
+    ratio: CropRatio,
+    handle: CropHandle,
+    pointer: (f32, f32),
+) -> [f32; 4] {
+    let normalized = [
+        rect[0].min(rect[2]).clamp(0.0, 1.0),
+        rect[1].min(rect[3]).clamp(0.0, 1.0),
+        rect[0].max(rect[2]).clamp(0.0, 1.0),
+        rect[1].max(rect[3]).clamp(0.0, 1.0),
+    ];
+    let pointer = (pointer.0.clamp(0.0, 1.0), pointer.1.clamp(0.0, 1.0));
+    crop_uv_aspect(image_size, ratio).map_or_else(
+        || resize_free_crop_rect(normalized, handle, pointer),
+        |aspect| resize_locked_crop_rect(normalized, handle, pointer, aspect),
+    )
+}
+
+fn resize_free_crop_rect(
+    [left, top, right, bottom]: [f32; 4],
+    handle: CropHandle,
+    pointer: (f32, f32),
+) -> [f32; 4] {
+    let next_left = pointer.0.min(right - MINIMUM_CROP_SPAN);
+    let next_right = pointer.0.max(left + MINIMUM_CROP_SPAN);
+    let next_top = pointer.1.min(bottom - MINIMUM_CROP_SPAN);
+    let next_bottom = pointer.1.max(top + MINIMUM_CROP_SPAN);
+    match handle {
+        CropHandle::TopLeft => [next_left, next_top, right, bottom],
+        CropHandle::Top => [left, next_top, right, bottom],
+        CropHandle::TopRight => [left, next_top, next_right, bottom],
+        CropHandle::Right => [left, top, next_right, bottom],
+        CropHandle::BottomRight => [left, top, next_right, next_bottom],
+        CropHandle::Bottom => [left, top, right, next_bottom],
+        CropHandle::BottomLeft => [next_left, top, right, next_bottom],
+        CropHandle::Left => [next_left, top, right, bottom],
+    }
+}
+
+fn resize_locked_crop_rect(
+    rect: [f32; 4],
+    handle: CropHandle,
+    pointer: (f32, f32),
+    aspect: f32,
+) -> [f32; 4] {
+    match handle {
+        CropHandle::TopLeft => {
+            locked_corner_crop((rect[2], rect[3]), pointer, (-1.0, -1.0), aspect)
+        }
+        CropHandle::TopRight => {
+            locked_corner_crop((rect[0], rect[3]), pointer, (1.0, -1.0), aspect)
+        }
+        CropHandle::BottomRight => {
+            locked_corner_crop((rect[0], rect[1]), pointer, (1.0, 1.0), aspect)
+        }
+        CropHandle::BottomLeft => {
+            locked_corner_crop((rect[2], rect[1]), pointer, (-1.0, 1.0), aspect)
+        }
+        CropHandle::Left | CropHandle::Right => {
+            locked_horizontal_edge_crop(rect, handle, pointer.0, aspect)
+        }
+        CropHandle::Top | CropHandle::Bottom => {
+            locked_vertical_edge_crop(rect, handle, pointer.1, aspect)
+        }
+    }
+}
+
+fn fit_locked_extent(
+    desired_width: f32,
+    desired_height: f32,
+    maximum_width: f32,
+    maximum_height: f32,
+    aspect: f32,
+) -> (f32, f32) {
+    let mut width = desired_width
+        .max(desired_height * aspect)
+        .max(MINIMUM_CROP_SPAN)
+        .max(MINIMUM_CROP_SPAN * aspect);
+    let mut height = width / aspect;
+    let scale = (maximum_width / width)
+        .min(maximum_height / height)
+        .clamp(0.0, 1.0);
+    width *= scale;
+    height *= scale;
+    (width, height)
+}
+
+fn locked_corner_crop(
+    anchor: (f32, f32),
+    pointer: (f32, f32),
+    direction: (f32, f32),
+    aspect: f32,
+) -> [f32; 4] {
+    let maximum_width = if direction.0 < 0.0 {
+        anchor.0
+    } else {
+        1.0 - anchor.0
+    };
+    let maximum_height = if direction.1 < 0.0 {
+        anchor.1
+    } else {
+        1.0 - anchor.1
+    };
+    let (width, height) = fit_locked_extent(
+        (pointer.0 - anchor.0).abs(),
+        (pointer.1 - anchor.1).abs(),
+        maximum_width,
+        maximum_height,
+        aspect,
+    );
+    let (left, right) = if direction.0 < 0.0 {
+        (anchor.0 - width, anchor.0)
+    } else {
+        (anchor.0, anchor.0 + width)
+    };
+    let (top, bottom) = if direction.1 < 0.0 {
+        (anchor.1 - height, anchor.1)
+    } else {
+        (anchor.1, anchor.1 + height)
+    };
+    [left, top, right, bottom]
+}
+
+fn locked_horizontal_edge_crop(
+    [left, top, right, bottom]: [f32; 4],
+    handle: CropHandle,
+    pointer_x: f32,
+    aspect: f32,
+) -> [f32; 4] {
+    let center_y = (top + bottom) * 0.5;
+    let (anchor_x, direction) = if handle == CropHandle::Left {
+        (right, -1.0)
+    } else {
+        (left, 1.0)
+    };
+    let maximum_width = if direction < 0.0 {
+        anchor_x
+    } else {
+        1.0 - anchor_x
+    };
+    let maximum_height = 2.0 * center_y.min(1.0 - center_y);
+    let (width, height) = fit_locked_extent(
+        (pointer_x - anchor_x).abs(),
+        0.0,
+        maximum_width,
+        maximum_height,
+        aspect,
+    );
+    let (left, right) = if direction < 0.0 {
+        (anchor_x - width, anchor_x)
+    } else {
+        (anchor_x, anchor_x + width)
+    };
+    [
+        left,
+        center_y - height * 0.5,
+        right,
+        center_y + height * 0.5,
+    ]
+}
+
+fn locked_vertical_edge_crop(
+    [left, top, right, bottom]: [f32; 4],
+    handle: CropHandle,
+    pointer_y: f32,
+    aspect: f32,
+) -> [f32; 4] {
+    let center_x = (left + right) * 0.5;
+    let (anchor_y, direction) = if handle == CropHandle::Top {
+        (bottom, -1.0)
+    } else {
+        (top, 1.0)
+    };
+    let maximum_width = 2.0 * center_x.min(1.0 - center_x);
+    let maximum_height = if direction < 0.0 {
+        anchor_y
+    } else {
+        1.0 - anchor_y
+    };
+    let (width, height) = fit_locked_extent(
+        0.0,
+        (pointer_y - anchor_y).abs(),
+        maximum_width,
+        maximum_height,
+        aspect,
+    );
+    let (top, bottom) = if direction < 0.0 {
+        (anchor_y - height, anchor_y)
+    } else {
+        (anchor_y, anchor_y + height)
+    };
+    [center_x - width * 0.5, top, center_x + width * 0.5, bottom]
 }
 
 fn adjust_crop_rect(
@@ -2261,17 +3553,29 @@ fn resize_window_to_image(renderer: &Renderer) {
     let _ = renderer.window().request_inner_size(size);
 }
 
-/// Round a non-negative f32 to u32 without triggering sign-loss noise.
-fn nonneg_round_u32(v: f32) -> u32 {
-    let v = v.round().max(0.0);
-    if v >= f32::from(u16::MAX) {
-        u32::from(u16::MAX)
-    } else {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        {
-            v as u32
-        }
+fn nonnegative_floor_u32(value: f64) -> u32 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
     }
+    if value >= f64::from(u32::MAX) {
+        return u32::MAX;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        value.floor() as u32
+    }
+}
+
+fn nonnegative_ceil_u32(value: f64) -> u32 {
+    nonnegative_floor_u32(value.ceil())
+}
+
+fn centered_crop_origin(center: f64, extent: u32, bound: u32) -> u32 {
+    let maximum = bound.saturating_sub(extent);
+    let origin = (center - f64::from(extent) * 0.5)
+        .round()
+        .clamp(0.0, f64::from(maximum));
+    nonnegative_floor_u32(origin)
 }
 
 fn load_icon() -> Option<winit::window::Icon> {
@@ -2294,6 +3598,7 @@ impl ApplicationHandler<UserEvent> for App {
             .with_title("viewr")
             .with_inner_size(LogicalSize::new(1000.0, 720.0))
             .with_min_inner_size(LogicalSize::new(640.0, 480.0))
+            .with_theme(self.theme_preference.window_theme())
             .with_visible(false);
 
         if let Some(icon) = load_icon() {
@@ -2309,8 +3614,13 @@ impl ApplicationHandler<UserEvent> for App {
             }
         };
 
-        let mode = Mode::from_winit_or_dark(window.theme());
-        match pollster::block_on(Renderer::new(window, mode)) {
+        let mode = self.theme_preference.resolve(window.theme());
+        let max_base_pixels = if self.performance_probe.is_some() {
+            crate::gpu::PERFORMANCE_PROBE_GPU_BASE_PIXELS
+        } else {
+            crate::gpu::MAX_GPU_BASE_PIXELS
+        };
+        match pollster::block_on(Renderer::new(window, mode, max_base_pixels)) {
             Ok(renderer) => {
                 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 let mut renderer = renderer;
@@ -2322,13 +3632,24 @@ impl ApplicationHandler<UserEvent> for App {
                     .as_deref()
                     .is_some_and(|path| self.resize_on_load.as_deref() == Some(path));
                 if let Some(image) = self.current_image.as_ref() {
-                    let renderer = self.renderer.as_mut().unwrap();
-                    renderer.set_image(image);
-                    if should_resize {
-                        resize_window_to_image(renderer);
+                    let image = Arc::clone(image);
+                    let path = self.loaded_image_path.clone();
+                    if let Some(path) = path
+                        && self
+                            .renderer
+                            .as_ref()
+                            .is_some_and(|renderer| renderer.required_preview(&image).is_some())
+                    {
+                        self.present_image(&path, image, PresentationKind::Loaded);
+                    } else if let Some(renderer) = self.renderer.as_mut() {
+                        if let Err(error) = renderer.set_image(&image, None) {
+                            log::error!("failed to upload initial image: {error}");
+                        } else if should_resize {
+                            resize_window_to_image(renderer);
+                        }
                     }
                 }
-                if should_resize {
+                if should_resize && self.preview_worker.is_none() {
                     self.resize_on_load = None;
                 }
                 let _ = self.renderer.as_mut().unwrap().render(None, None, |_| {});
@@ -2389,7 +3710,8 @@ impl ApplicationHandler<UserEvent> for App {
                 } => true,
                 WindowEvent::CursorMoved { .. } if self.heal.painting => true,
                 WindowEvent::KeyboardInput { event, .. } => {
-                    !egui_popup_open
+                    !self.show_about
+                        && !egui_popup_open
                         && route_consumed_keyboard_key(
                             &event.logical_key,
                             self.transform.is_cropping,
@@ -2442,52 +3764,87 @@ impl ApplicationHandler<UserEvent> for App {
                     self.zoom_at_cursor(factor);
                 }
             }
-            WindowEvent::MouseInput {
-                state,
-                button: winit::event::MouseButton::Left,
-                ..
-            } => {
+            WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = state == winit::event::ElementState::Pressed;
-                self.mouse_left_down = pressed;
-                if !pressed {
-                    self.transform.is_panning = false;
-                }
-                if pressed && !self.transform.is_cropping && !self.heal.active {
-                    let now = Instant::now();
-                    let pos = self.cursor_pos;
-                    if let Some((t, (lx, ly))) = self.last_click {
-                        let near = (pos.0 - lx).hypot(pos.1 - ly) < 6.0;
-                        if near && now.duration_since(t) < Duration::from_millis(350) {
-                            self.toggle_fit_actual();
-                            self.last_click = None;
-                            return;
+                if button == winit::event::MouseButton::Right {
+                    self.mouse_right_down = pressed;
+                    if pressed {
+                        self.right_click_start = Some(self.cursor_pos);
+                        self.context_menu_pos = None;
+                    } else {
+                        if let Some(start) = self.right_click_start {
+                            let dist =
+                                (self.cursor_pos.0 - start.0).hypot(self.cursor_pos.1 - start.1);
+                            if dist < 5.0 {
+                                self.context_menu_pos =
+                                    Some([self.cursor_pos.0 as f32, self.cursor_pos.1 as f32]);
+                                if let Some(renderer) = self.renderer.as_mut() {
+                                    renderer.window().request_redraw();
+                                }
+                            }
                         }
+                        self.right_click_start = None;
                     }
-                    self.last_click = Some((now, pos));
-                }
-                if !pressed && self.heal.painting {
-                    self.finish_heal_stroke();
-                } else if self.heal.active && !self.space_held {
+                } else if button == winit::event::MouseButton::Left {
                     if pressed {
-                        self.begin_heal_stroke();
+                        self.context_menu_pos = None;
                     }
-                } else if self.transform.is_cropping && !self.space_held {
-                    if pressed {
-                        if let Some((x, y)) = self.transform.last_cursor {
-                            self.transform.crop_start = self.screen_to_uv(x, y);
-                            self.transform.crop_rect = None;
-                            self.renderer.as_mut().unwrap().window().request_redraw();
+                    self.mouse_left_down = pressed;
+                    self.update_cursor_icon();
+                    if !pressed {
+                        self.transform.is_panning = false;
+                    }
+                    if pressed && !self.transform.is_cropping && !self.heal.active {
+                        let now = Instant::now();
+                        let pos = self.cursor_pos;
+                        if let Some((t, (lx, ly))) = self.last_click {
+                            let near = (pos.0 - lx).hypot(pos.1 - ly) < 6.0;
+                            if near && now.duration_since(t) < Duration::from_millis(350) {
+                                self.toggle_fit_actual();
+                                self.last_click = None;
+                                return;
+                            }
+                        }
+                        self.last_click = Some((now, pos));
+                    }
+                    if !pressed && self.heal.painting {
+                        self.finish_heal_stroke();
+                    } else if self.heal.active && !self.space_held {
+                        if pressed {
+                            self.begin_heal_stroke();
+                        }
+                    } else if self.transform.is_cropping && !self.space_held {
+                        if pressed {
+                            if let Some((x, y)) = self.transform.last_cursor {
+                                self.transform.crop_start = self.screen_to_uv(x, y);
+                                if let Some(renderer) = self.renderer.as_mut() {
+                                    renderer.window().request_redraw();
+                                }
+                            }
+                        } else {
+                            self.transform.crop_start = None;
                         }
                     } else {
-                        self.transform.crop_start = None;
+                        self.transform.is_panning = pressed;
                     }
-                } else {
-                    self.transform.is_panning = pressed;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                let dx = position.x - self.cursor_pos.0;
                 self.cursor_pos = (position.x, position.y);
-                if self.heal.active
+                if self.mouse_right_down && self.heal.active {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let new_radius = (f64::from(self.heal.brush_radius) + dx * 0.5).clamp(
+                        f64::from(crate::heal::MIN_BRUSH_RADIUS),
+                        f64::from(crate::heal::MAX_BRUSH_RADIUS),
+                    ) as u32;
+                    if new_radius != self.heal.brush_radius {
+                        self.heal.brush_radius = new_radius;
+                        if let Some(renderer) = self.renderer.as_mut() {
+                            renderer.window().request_redraw();
+                        }
+                    }
+                } else if self.heal.active
                     && self.heal.painting
                     && self.mouse_left_down
                     && !self.space_held
@@ -2503,17 +3860,16 @@ impl ApplicationHandler<UserEvent> for App {
                     let mut u_max = start.0.max(end.0).clamp(0.0, 1.0);
                     let mut v_max = start.1.max(end.1).clamp(0.0, 1.0);
 
-                    if self.transform.crop_ratio != CropRatio::Free
-                        && let Some(renderer) = self.renderer.as_ref()
+                    if let Some(renderer) = self.renderer.as_ref()
                         && let Some((img_w, img_h)) = renderer.image_size()
+                        && let Some(target_ratio) = crop_pixel_aspect(
+                            (img_w, img_h),
+                            crop_ratio_for_source(
+                                self.transform.crop_ratio,
+                                self.transform.rotation_steps,
+                            ),
+                        )
                     {
-                        // Free is excluded by the outer guard; grouped with Square for exhaustiveness.
-                        let target_ratio = match self.transform.crop_ratio {
-                            CropRatio::FourThree => 4.0 / 3.0,
-                            CropRatio::SixteenNine => 16.0 / 9.0,
-                            CropRatio::Square | CropRatio::Free => 1.0,
-                        };
-
                         let width = (u_max - u_min) * (img_w as f32);
                         let height = (v_max - v_min) * (img_h as f32);
 
@@ -2544,7 +3900,9 @@ impl ApplicationHandler<UserEvent> for App {
                         u_max.clamp(0.0, 1.0),
                         v_max.clamp(0.0, 1.0),
                     ]);
-                    self.renderer.as_mut().unwrap().window().request_redraw();
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.window().request_redraw();
+                    }
                 } else if self.mouse_left_down
                     && (self.transform.is_panning || self.space_held)
                     && let Some((last_x, last_y)) = self.transform.last_cursor
@@ -2554,14 +3912,16 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     let dx = position.x - last_x;
                     let dy = position.y - last_y;
-                    let win_size = self.renderer.as_mut().unwrap().window().inner_size();
-
-                    self.transform.offset_x += (dx as f32) / (win_size.width as f32 / 2.0);
-                    self.transform.offset_y -= (dy as f32) / (win_size.height as f32 / 2.0);
-
-                    self.renderer.as_mut().unwrap().window().request_redraw();
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        let win_size = renderer.window().inner_size();
+                        self.transform.offset_x += (dx as f32) / (win_size.width as f32 / 2.0);
+                        self.transform.offset_y -= (dy as f32) / (win_size.height as f32 / 2.0);
+                        renderer.window().request_redraw();
+                    }
                 }
                 self.transform.last_cursor = Some((position.x, position.y));
+
+                self.update_cursor_icon();
             }
             WindowEvent::KeyboardInput {
                 event:
@@ -2571,6 +3931,9 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 use winit::keyboard::{Key, NamedKey};
+                if self.show_about {
+                    return;
+                }
                 let pressed = state == winit::event::ElementState::Pressed;
                 // Space: hold = temporary hand tool; tap (no drag) = reset view.
                 let is_space = matches!(&logical_key, Key::Named(NamedKey::Space))
@@ -2582,8 +3945,10 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         self.space_held = true;
                         self.space_dragged = false;
+                        self.update_cursor_icon();
                     } else {
                         self.space_held = false;
+                        self.update_cursor_icon();
                         if !self.space_dragged {
                             self.transform = Transform::default();
                             if let Some(r) = self.renderer.as_mut() {
@@ -2631,6 +3996,22 @@ impl ApplicationHandler<UserEvent> for App {
                     {
                         self.redo_edit();
                     }
+                    Key::Character(c) if (c == "0") && primary_modifier_pressed(self.modifiers) => {
+                        self.fit_to_view();
+                    }
+                    Key::Character(c) if (c == "1") && primary_modifier_pressed(self.modifiers) => {
+                        self.set_actual_size();
+                    }
+                    Key::Character(c)
+                        if (c == "+" || c == "=") && primary_modifier_pressed(self.modifiers) =>
+                    {
+                        self.zoom_at_viewport_center(1.15);
+                    }
+                    Key::Character(c)
+                        if (c == "-" || c == "_") && primary_modifier_pressed(self.modifiers) =>
+                    {
+                        self.zoom_at_viewport_center(1.0 / 1.15);
+                    }
                     Key::Character(c) if single_key_shortcut_allowed(self.modifiers) => {
                         self.handle_single_key_shortcut(c.as_str());
                     }
@@ -2671,19 +4052,22 @@ impl ApplicationHandler<UserEvent> for App {
                             r.window().request_redraw();
                         }
                     }
+                    Key::Named(NamedKey::F5) => self.reload_current_image(),
                     Key::Named(NamedKey::F11) => self.toggle_fullscreen(),
                     _ => {}
                 }
             }
             WindowEvent::Resized(size) => {
-                let renderer = self.renderer.as_mut().unwrap();
-                renderer.resize(size.width, size.height);
-                renderer.window().request_redraw();
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.resize(size.width, size.height);
+                    renderer.window().request_redraw();
+                }
             }
             WindowEvent::ThemeChanged(theme) => {
-                let renderer = self.renderer.as_mut().unwrap();
-                renderer.set_mode(Mode::from_winit(theme));
-                renderer.window().request_redraw();
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.set_mode(self.theme_preference.resolve(Some(theme)));
+                    renderer.window().request_redraw();
+                }
             }
             WindowEvent::RedrawRequested => {
                 if let Some(probe) = self.performance_probe.as_mut()
@@ -2718,14 +4102,19 @@ impl ApplicationHandler<UserEvent> for App {
                 self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
                 let is_flagged = self
-                    .image_path
+                    .loaded_image_path
                     .as_ref()
                     .is_some_and(|p| self.flags.contains(p));
                 let flag_count = self.flags.len();
                 let toast = self.toast.clone();
+                let is_loading = self.image_loader_rx.is_some() || self.preview_worker.is_some();
+                let load_error = self.load_error.clone();
+                let save_busy = self.save_worker.is_some();
+                let crop_busy = self.crop_worker.is_some();
                 let path_str = self
-                    .image_path
+                    .loaded_image_path
                     .as_ref()
+                    .or(self.image_path.as_ref())
                     .map(|p| p.to_string_lossy().into_owned());
                 let show_image_info = self.show_image_info;
                 let show_tools_panel = self.show_tools_panel;
@@ -2735,20 +4124,46 @@ impl ApplicationHandler<UserEvent> for App {
                 let filmstrip_panel_open = self.filmstrip_panel_open;
                 let image_info_side = self.image_info_side;
                 let retain_exif = self.retain_exif;
+                let theme_preference = self.theme_preference;
+                let show_about = self.show_about;
                 let source_image_size = self
                     .current_image
                     .as_ref()
                     .map(|image| (image.width, image.height));
+                let animation =
+                    self.animation
+                        .as_ref()
+                        .map(|playback| crate::ui::AnimationUiInfo {
+                            frame_index: playback.frame_index(),
+                            frame_count: playback.frame_count(),
+                            is_playing: playback.is_playing(),
+                        });
+                let details = self.image_details.clone();
+                let color_profile = self.current_image.as_ref().map(|image| image.color_profile);
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
+                let custom_crop_ratio = self.custom_crop_ratio;
                 let is_healing = self.heal.active;
                 let heal_busy = self.heal.is_busy();
                 let heal_brush_radius = self.heal.brush_radius;
-                let can_undo_edit = !heal_busy && self.heal.history.can_undo();
-                let can_redo_edit = !heal_busy && self.heal.history.can_redo();
+                let heal_feather_percent = self.heal.feather_percent;
+                let heal_source = self
+                    .heal
+                    .refresh
+                    .as_ref()
+                    .map(|refresh| (refresh.candidate_index, refresh.candidate_count));
+                let can_undo_edit =
+                    !heal_busy && !crop_busy && !save_busy && self.heal.history.can_undo();
+                let can_redo_edit =
+                    !heal_busy && !crop_busy && !save_busy && self.heal.history.can_redo();
                 let is_panning =
                     self.transform.is_panning || (self.space_held && self.mouse_left_down);
                 let bg_override = self.bg_override;
+                let theme_mode = self.theme_preference.resolve(
+                    self.renderer
+                        .as_ref()
+                        .and_then(|renderer| renderer.window().theme()),
+                );
                 let zoom_t = self.transform.zoom;
                 let offset_x = self.transform.offset_x;
                 let offset_y = self.transform.offset_y;
@@ -2776,17 +4191,16 @@ impl ApplicationHandler<UserEvent> for App {
                 });
                 let logical_image_viewport =
                     image_viewport.and_then(|viewport| viewport.logical_bounds(scale_factor));
-                let is_loading = self.image_loader_rx.is_some();
                 let performance_image_path = self.loaded_image_path.clone();
 
-                let renderer = self.renderer.as_mut().unwrap();
+                let Some(renderer) = self.renderer.as_mut() else {
+                    return;
+                };
 
                 if let Some(bg) = bg_override {
                     renderer.set_clear_color(bg);
                 } else {
-                    renderer.set_mode(crate::theme::Mode::from_winit_or_dark(
-                        renderer.window().theme(),
-                    ));
+                    renderer.set_mode(theme_mode);
                 }
 
                 let placement = if let Some(size) = renderer.image_size() {
@@ -2816,11 +4230,18 @@ impl ApplicationHandler<UserEvent> for App {
                 };
 
                 let img_size = renderer.image_size();
-                let can_heal = image_is_fully_displayed(source_image_size, img_size);
+                let can_heal = !is_loading
+                    && load_error.is_none()
+                    && !crop_busy
+                    && !save_busy
+                    && image_is_fully_displayed(source_image_size, renderer.image_texture_size());
                 let frame = crate::ui::UiFrameOwned {
                     show_image_info,
                     retain_exif,
                     background_override: bg_override,
+                    theme_preference,
+                    theme_mode,
+                    show_about,
                     show_tools_panel,
                     tools_panel_open,
                     tools_panel_side,
@@ -2829,12 +4250,18 @@ impl ApplicationHandler<UserEvent> for App {
                     image_info_side,
                     file_path: path_str,
                     img_size,
+                    animation,
+                    details,
+                    color_profile,
                     is_cropping,
                     crop_ratio,
+                    custom_crop_ratio,
                     is_healing,
                     can_heal,
                     heal_busy,
                     heal_brush_radius,
+                    heal_feather_percent,
+                    heal_source,
                     can_undo_edit,
                     can_redo_edit,
                     is_panning,
@@ -2842,16 +4269,21 @@ impl ApplicationHandler<UserEvent> for App {
                     flag_count,
                     has_image: img_size.is_some(),
                     is_loading,
+                    load_error,
+                    save_busy,
+                    crop_busy,
                     playlist_pos,
                     pixel_scale: pixel_scale.unwrap_or(0.0),
                     toast,
                     filmstrip,
                     crop_screen,
                     crop_uv: crop_rect,
+                    crop_swaps_axes: rot_steps.rem_euclid(2) != 0,
                     image_viewport: logical_image_viewport,
                     heal_stroke_screen,
                     heal_cursor_screen,
                     heal_brush_screen_radius,
+                    context_menu_pos: self.context_menu_pos,
                 };
 
                 let presents_image = placement.is_some();
@@ -2881,6 +4313,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.open_image_dialog();
                         }
                         crate::ui::UiAction::OpenFolder => self.open_folder_dialog(),
+                        crate::ui::UiAction::Reload => self.reload_current_image(),
                         crate::ui::UiAction::SaveAs => self.save_as(),
                         crate::ui::UiAction::Trash => {
                             self.trash_current();
@@ -2912,6 +4345,29 @@ impl ApplicationHandler<UserEvent> for App {
                             if let Some(r) = self.renderer.as_mut() {
                                 r.window().request_redraw();
                             }
+                        }
+                        crate::ui::UiAction::SetTheme(preference) => {
+                            self.theme_preference = preference;
+                            let save_error = crate::theme::save_preference(preference).err();
+                            if let Some(renderer) = self.renderer.as_mut() {
+                                renderer.window().set_theme(preference.window_theme());
+                                let mode = preference.resolve(renderer.window().theme());
+                                renderer.set_mode(mode);
+                                renderer.window().request_redraw();
+                            }
+                            if let Some(error) = save_error {
+                                self.show_toast(format!(
+                                    "Appearance changed for this session but could not be remembered: {error}"
+                                ));
+                            }
+                        }
+                        crate::ui::UiAction::ShowAbout => {
+                            self.show_about = true;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::CloseAbout => {
+                            self.show_about = false;
+                            self.request_redraw();
                         }
                         crate::ui::UiAction::ToggleImageInfo => {
                             self.show_image_info = !self.show_image_info;
@@ -2969,39 +4425,35 @@ impl ApplicationHandler<UserEvent> for App {
                                 "Saved copies will strip camera metadata (default)"
                             });
                         }
+                        crate::ui::UiAction::ToggleAnimationPlayback => {
+                            self.toggle_animation_playback();
+                        }
+                        crate::ui::UiAction::RetryLoad => {
+                            self.retry_current_image_load();
+                        }
                         crate::ui::UiAction::RotateCw => {
-                            self.transform.rotation_steps += 1;
-                            if let Some(r) = self.renderer.as_mut() {
-                                r.window().request_redraw();
-                            }
+                            self.rotate_current(1);
                         }
                         crate::ui::UiAction::RotateCcw => {
-                            self.transform.rotation_steps -= 1;
-                            if let Some(r) = self.renderer.as_mut() {
-                                r.window().request_redraw();
-                            }
+                            self.rotate_current(-1);
                         }
                         crate::ui::UiAction::FlipH => {
-                            self.transform.flip_h = !self.transform.flip_h;
-                            if let Some(r) = self.renderer.as_mut() {
-                                r.window().request_redraw();
-                            }
+                            self.flip_current_horizontally();
                         }
                         crate::ui::UiAction::FlipV => {
-                            self.transform.flip_v = !self.transform.flip_v;
-                            if let Some(r) = self.renderer.as_mut() {
-                                r.window().request_redraw();
-                            }
+                            self.flip_current_vertically();
                         }
                         crate::ui::UiAction::ToggleFullscreen => {
                             self.is_fullscreen = !self.is_fullscreen;
-                            let renderer = self.renderer.as_mut().unwrap();
-                            if self.is_fullscreen {
-                                renderer.window().set_fullscreen(Some(
-                                    winit::window::Fullscreen::Borderless(None),
-                                ));
-                            } else {
-                                renderer.window().set_fullscreen(None);
+                            if let Some(renderer) = self.renderer.as_mut() {
+                                renderer.window().request_redraw();
+                                if self.is_fullscreen {
+                                    renderer.window().set_fullscreen(Some(
+                                        winit::window::Fullscreen::Borderless(None),
+                                    ));
+                                } else {
+                                    renderer.window().set_fullscreen(None);
+                                }
                             }
                         }
                         crate::ui::UiAction::FitToView => self.fit_to_view(),
@@ -3024,9 +4476,33 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::SetCropRatio(r) => {
                             self.set_crop_ratio(r);
                         }
+                        crate::ui::UiAction::SetCustomCropRatio(width, height) => {
+                            self.custom_crop_ratio = (width.max(1), height.max(1));
+                        }
+                        crate::ui::UiAction::SwapCropRatio => {
+                            self.swap_crop_ratio();
+                        }
+                        crate::ui::UiAction::MoveCrop { pointer, delta } => {
+                            self.move_crop_from_logical_pointer(pointer, delta);
+                        }
+                        crate::ui::UiAction::ResizeCrop {
+                            handle_center,
+                            pointer,
+                        } => {
+                            self.resize_crop_from_logical_pointer(handle_center, pointer);
+                        }
                         crate::ui::UiAction::ToggleHeal => self.toggle_heal_mode(),
+                        crate::ui::UiAction::CloseContextMenu => {
+                            self.context_menu_pos = None;
+                        }
                         crate::ui::UiAction::SetHealBrushRadius(radius) => {
                             self.set_heal_brush_radius(radius);
+                        }
+                        crate::ui::UiAction::SetHealFeather(percent) => {
+                            self.set_heal_feather(percent);
+                        }
+                        crate::ui::UiAction::RefreshHealSource => {
+                            self.refresh_heal_source();
                         }
                         crate::ui::UiAction::UndoEdit => self.undo_edit(),
                         crate::ui::UiAction::RedoEdit => self.redo_edit(),
@@ -3070,6 +4546,10 @@ impl ApplicationHandler<UserEvent> for App {
         self.poll_thumbnails();
         self.poll_prefetch();
         self.poll_heal_result();
+        self.poll_preview_result();
+        self.poll_auxiliary_load();
+        self.poll_crop_result();
+        self.poll_save_result();
         if let Some(rx) = &self.image_loader_rx
             && let Ok((path, result)) = rx.try_recv()
         {
@@ -3092,7 +4572,11 @@ impl ApplicationHandler<UserEvent> for App {
                         self.resize_on_load = None;
                     }
                     log::error!("decode failed");
-                    self.show_toast(format!("Could not decode: {e}"));
+                    let message = format!("Could not decode: {e}");
+                    self.load_error = Some(message.clone());
+                    self.show_toast(format!(
+                        "{message}. The previous image remains visible; Retry is available."
+                    ));
                     if let Some(r) = self.renderer.as_mut() {
                         r.window().request_redraw();
                     }
@@ -3114,6 +4598,8 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        self.advance_animation(Instant::now());
+
         self.advance_performance_probe(event_loop);
         let probe_repaint_at = self
             .performance_probe
@@ -3125,10 +4611,19 @@ impl ApplicationHandler<UserEvent> for App {
                     .unwrap_or(probe.deadline)
                     .min(probe.deadline)
             });
-        let next_repaint = [self.egui_repaint_at, self.toast_until, probe_repaint_at]
-            .into_iter()
-            .flatten()
-            .min();
+        let animation_repaint_at = self
+            .animation
+            .as_ref()
+            .and_then(crate::animated::AnimationPlayback::next_deadline);
+        let next_repaint = [
+            self.egui_repaint_at,
+            self.toast_until,
+            probe_repaint_at,
+            animation_repaint_at,
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         match next_repaint {
             Some(deadline) if deadline <= Instant::now() => {
                 if self.egui_repaint_at.is_some_and(|at| at <= deadline) {
@@ -3230,13 +4725,15 @@ mod test {
 
     #[test]
     fn canceling_a_heal_retains_and_invalidates_the_single_worker() {
-        let (_sender, result_rx) = mpsc::channel();
+        let (_sender, result_rx) = mpsc::channel::<HealWorkerOutput>();
         let cancel = Arc::new(AtomicBool::new(false));
         let mut heal = HealTool {
             worker: Some(HealWorker {
                 result_rx,
                 cancel: cancel.clone(),
                 apply_result: true,
+                replacing_latest: false,
+                previous_candidate_index: 0,
             }),
             ..HealTool::default()
         };
@@ -3294,6 +4791,11 @@ mod test {
         ));
         assert!(route_consumed_keyboard_key(
             &Key::Named(NamedKey::ArrowRight),
+            false,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Named(NamedKey::F5),
             false,
             false,
         ));
@@ -3409,9 +4911,208 @@ mod test {
     #[test]
     fn default_square_crop_accounts_for_non_square_pixels_in_uv_space() {
         assert_rect_close(
-            default_crop_rect((400, 200), CropRatio::Square),
+            default_crop_rect((400, 200), CropRatio::SQUARE),
             [0.3, 0.1, 0.7, 0.9],
         );
+    }
+
+    #[test]
+    fn all_standard_crop_presets_hold_their_pixel_aspect() {
+        let presets = [
+            CropRatio::SQUARE,
+            CropRatio::THREE_TWO,
+            CropRatio::TWO_THREE,
+            CropRatio::FOUR_THREE,
+            CropRatio::THREE_FOUR,
+            CropRatio::FIVE_FOUR,
+            CropRatio::FOUR_FIVE,
+            CropRatio::FIVE_THREE,
+            CropRatio::THREE_FIVE,
+            CropRatio::SIXTEEN_NINE,
+            CropRatio::NINE_SIXTEEN,
+        ];
+        for image_size in [(4032, 3024), (3024, 4032), (1001, 667)] {
+            for ratio in presets {
+                let rect = default_crop_rect(image_size, ratio);
+                let pixel_width = (rect[2] - rect[0]) * image_size.0 as f32;
+                let pixel_height = (rect[3] - rect[1]) * image_size.1 as f32;
+                let expected = crop_pixel_aspect(image_size, ratio).unwrap();
+                assert!(
+                    (pixel_width / pixel_height - expected).abs() < 1e-4,
+                    "{} did not hold for {image_size:?}",
+                    ratio.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn locked_crop_exports_exact_integer_ratios_on_odd_dimensions() {
+        let presets = [
+            CropRatio::SQUARE,
+            CropRatio::THREE_TWO,
+            CropRatio::TWO_THREE,
+            CropRatio::FOUR_THREE,
+            CropRatio::THREE_FOUR,
+            CropRatio::FIVE_FOUR,
+            CropRatio::FOUR_FIVE,
+            CropRatio::FIVE_THREE,
+            CropRatio::THREE_FIVE,
+            CropRatio::SIXTEEN_NINE,
+            CropRatio::NINE_SIXTEEN,
+            CropRatio::fixed(7, 11),
+        ];
+        for image_size in [(101, 101), (1001, 667), (4031, 3023)] {
+            for ratio in presets {
+                let uv = default_crop_rect(image_size, ratio);
+                let pixel = App::crop_pixel_rect(uv, image_size.0, image_size.1, ratio)
+                    .unwrap_or_else(|| panic!("{} did not fit {image_size:?}", ratio.label()));
+                let (ratio_width, ratio_height) = crop_integer_ratio(image_size, ratio).unwrap();
+                assert_eq!(
+                    u64::from(pixel.width) * u64::from(ratio_height),
+                    u64::from(pixel.height) * u64::from(ratio_width),
+                    "{} did not quantize exactly for {image_size:?}",
+                    ratio.label()
+                );
+                assert!(pixel.x + pixel.width <= image_size.0);
+                assert!(pixel.y + pixel.height <= image_size.1);
+            }
+        }
+
+        let rect = default_crop_rect((101, 101), CropRatio::SIXTEEN_NINE);
+        let pixel = App::crop_pixel_rect(rect, 101, 101, CropRatio::SIXTEEN_NINE).unwrap();
+        assert_eq!((pixel.width, pixel.height), (80, 45));
+    }
+
+    #[test]
+    fn crop_pixel_quantization_handles_free_edges_rotation_and_tiny_images() {
+        let free = App::crop_pixel_rect([0.8, 0.8, 1.0, 1.0], 101, 101, CropRatio::Free).unwrap();
+        assert_eq!(
+            free,
+            crate::edit::Rect {
+                x: 80,
+                y: 80,
+                width: 21,
+                height: 21
+            }
+        );
+
+        let source_ratio = crop_ratio_for_source(CropRatio::SIXTEEN_NINE, 1);
+        let rect = default_crop_rect((101, 151), source_ratio);
+        let rotated = App::crop_pixel_rect(rect, 101, 151, source_ratio).unwrap();
+        assert_eq!(u64::from(rotated.width) * 16, u64::from(rotated.height) * 9);
+        assert!(
+            App::crop_pixel_rect([0.0, 0.0, 1.0, 1.0], 15, 8, CropRatio::SIXTEEN_NINE).is_none()
+        );
+    }
+
+    #[test]
+    fn fixed_crop_ratio_tracks_the_visible_orientation() {
+        let image_size = (4_000, 3_000);
+        let source_ratio = crop_ratio_for_source(CropRatio::SIXTEEN_NINE, 1);
+        assert_eq!(source_ratio, CropRatio::NINE_SIXTEEN);
+        let rect = default_crop_rect(image_size, source_ratio);
+        let source_width = (rect[2] - rect[0]) * image_size.0 as f32;
+        let source_height = (rect[3] - rect[1]) * image_size.1 as f32;
+        assert!((source_height / source_width - 16.0 / 9.0).abs() < 1e-4);
+        assert_eq!(
+            crop_ratio_for_source(CropRatio::Original, 1),
+            CropRatio::Original
+        );
+        assert_eq!(
+            crop_ratio_for_source(CropRatio::FOUR_FIVE, 2),
+            CropRatio::FOUR_FIVE
+        );
+    }
+
+    #[test]
+    fn original_crop_ratio_tracks_each_image() {
+        for image_size in [(4032, 3024), (3024, 4032), (1001, 667)] {
+            let rect = default_crop_rect(image_size, CropRatio::Original);
+            let pixel_width = (rect[2] - rect[0]) * image_size.0 as f32;
+            let pixel_height = (rect[3] - rect[1]) * image_size.1 as f32;
+            assert!(
+                (pixel_width / pixel_height - image_size.0 as f32 / image_size.1 as f32).abs()
+                    < 1e-4
+            );
+        }
+    }
+
+    #[test]
+    fn image_dimensions_reduce_to_a_stable_custom_ratio() {
+        assert_eq!(reduced_crop_ratio(4032, 3024), Some((4, 3)));
+        assert_eq!(reduced_crop_ratio(3024, 4032), Some((3, 4)));
+        assert_eq!(reduced_crop_ratio(0, 10), None);
+    }
+
+    #[test]
+    fn crop_handle_hit_mapping_uses_source_geometry() {
+        let rect = [0.2, 0.3, 0.8, 0.9];
+        assert_eq!(crop_handle_from_uv(rect, (0.2, 0.3)), CropHandle::TopLeft);
+        assert_eq!(crop_handle_from_uv(rect, (0.5, 0.3)), CropHandle::Top);
+        assert_eq!(crop_handle_from_uv(rect, (0.8, 0.6)), CropHandle::Right);
+        assert_eq!(
+            crop_handle_from_uv(rect, (0.2, 0.9)),
+            CropHandle::BottomLeft
+        );
+    }
+
+    #[test]
+    fn free_crop_handles_move_only_the_expected_edges() {
+        let rect = [0.2, 0.2, 0.8, 0.8];
+        assert_rect_close(
+            resize_crop_rect_from_pointer(
+                rect,
+                (400, 300),
+                CropRatio::Free,
+                CropHandle::TopLeft,
+                (0.1, 0.15),
+            ),
+            [0.1, 0.15, 0.8, 0.8],
+        );
+        assert_rect_close(
+            resize_crop_rect_from_pointer(
+                rect,
+                (400, 300),
+                CropRatio::Free,
+                CropHandle::Right,
+                (0.9, 0.4),
+            ),
+            [0.2, 0.2, 0.9, 0.8],
+        );
+    }
+
+    #[test]
+    fn every_locked_crop_handle_preserves_ratio_and_bounds() {
+        let handles = [
+            CropHandle::TopLeft,
+            CropHandle::Top,
+            CropHandle::TopRight,
+            CropHandle::Right,
+            CropHandle::BottomRight,
+            CropHandle::Bottom,
+            CropHandle::BottomLeft,
+            CropHandle::Left,
+        ];
+        let image_size = (400, 300);
+        let ratio = CropRatio::SIXTEEN_NINE;
+        let initial = default_crop_rect(image_size, ratio);
+        let expected = crop_pixel_aspect(image_size, ratio).unwrap();
+        for handle in handles {
+            for pointer in [(-0.2, -0.1), (0.15, 0.25), (0.95, 0.85), (1.2, 1.1)] {
+                let rect =
+                    resize_crop_rect_from_pointer(initial, image_size, ratio, handle, pointer);
+                assert!(rect[0] >= -1e-6 && rect[1] >= -1e-6);
+                assert!(rect[2] <= 1.0 + 1e-6 && rect[3] <= 1.0 + 1e-6);
+                assert!(rect[2] > rect[0] && rect[3] > rect[1]);
+                let pixel_width = (rect[2] - rect[0]) * image_size.0 as f32;
+                let pixel_height = (rect[3] - rect[1]) * image_size.1 as f32;
+                assert!(
+                    (pixel_width / pixel_height - expected).abs() < 1e-4,
+                    "{handle:?} produced {rect:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3432,7 +5133,7 @@ mod test {
         let resized = adjust_crop_rect(
             [0.3, 0.1, 0.7, 0.9],
             (400, 200),
-            CropRatio::Square,
+            CropRatio::SQUARE,
             0.1,
             0.0,
             true,

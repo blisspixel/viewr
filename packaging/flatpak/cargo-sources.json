@@ -2641,19 +2641,6 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/jxl-color/jxl-color-0.11.0.crate",
-    "sha256": "f316b1358c1711755b3ee8e8cb5c4a1dad12e796233088a7a513440782de80b2",
-    "dest": "cargo/vendor/jxl-color-0.11.0"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"f316b1358c1711755b3ee8e8cb5c4a1dad12e796233088a7a513440782de80b2\", \"files\": {}}",
-    "dest": "cargo/vendor/jxl-color-0.11.0",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/jxl-frame/jxl-frame-0.13.3.crate",
     "sha256": "2d967c6fd669c7c01060b5022d8835fa82fd46b06ffc98b549f17600a097c2b3",
     "dest": "cargo/vendor/jxl-frame-0.13.3"

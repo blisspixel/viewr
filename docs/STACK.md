@@ -4,20 +4,20 @@ This document records *what* viewr is built on and *why*, including the options 
 evaluated and rejected. It's written as a set of decisions so that a future
 contributor can see the reasoning, not just the result.
 
-## Decision 1 — Language: Rust
+## Decision 1: Language: Rust
 
 **Chosen: Rust.**
 
 The single most dangerous thing a photo viewer does is parse an untrusted file.
 Image decoders (JPEG, PNG, GIF, WebP, …) are historically the largest source of
-remote-code-execution vulnerabilities across every operating system — a malformed
+remote-code-execution vulnerabilities across every operating system. A malformed
 file overflows a buffer and the attacker is running code. Rust eliminates that
 entire bug class at compile time. For an app whose headline promise is *"safe and
 private,"* the language's core guarantee **is** the product requirement.
 
 Secondary wins that also matter:
 
-- Compiles to a single small native binary — no runtime, no interpreter, no GC.
+- Compiles to a single small native binary: no runtime, no interpreter, no GC.
 - No garbage-collector pauses, so panning and folder-flipping stay smooth.
 - Excellent cross-compilation to Linux, macOS, and Windows.
 - A mature ecosystem of *pure-Rust* image and GUI crates, so the safety story
@@ -25,26 +25,26 @@ Secondary wins that also matter:
 
 **Rejected:**
 
-- **C++ / Qt** — the most mature native GUI toolkit in existence, but no memory
+- **C++ / Qt**: the most mature native GUI toolkit in existence, but no memory
   safety (wrong for our threat model) and licensing friction. This is what the
   *old* good viewers used; it's exactly the surface we want to avoid.
-- **Swift / SwiftUI + WinUI + GTK** — the most genuinely native per-OS feel, but
+- **Swift / SwiftUI + WinUI + GTK**: the most genuinely native per-OS feel, but
   three codebases. The opposite of small and maintainable.
-- **Go** — great tooling and easy static binaries, but the weakest desktop-GUI
+- **Go**: great tooling and easy static binaries, but the weakest desktop-GUI
   ecosystem of the serious options; no path to the fit-and-finish we require.
-- **Dart / Flutter** — the strongest runner-up for *polish*: GPU-rendered,
+- **Dart / Flutter**: the strongest runner-up for *polish*: GPU-rendered,
   pixel-identical everywhere, fast to build. Rejected because (a) it paints its
   own UI rather than being truly native and ships a heavier binary, and (b) Dart
   is memory-*managed* but decoding still drops into native libraries, so the exact
   CVE surface we most want to close stays open.
-- **Mojo / Slang / Triton / Taichi / Bend / MoonBit / Gleam / Hylo** — a category
+- **Mojo / Slang / Triton / Taichi / Bend / MoonBit / Gleam / Hylo**: a category
   error for this project. The first group are GPU-kernel / shader languages: they
   make GPU cores fast, they do not open windows, read folders, or draw UI. The
   rest are application languages aimed at servers, WebAssembly, or research, and
   several are pre-1.0. None targets trustworthy native desktop GUI. viewr does not
-  hand-write GPU kernels — the GUI framework's renderer handles pan/zoom.
+  hand-write GPU kernels. The GUI framework's renderer handles pan/zoom.
 
-## Decision 2 — UI foundation: winit + wgpu + egui
+## Decision 2: UI foundation: winit + wgpu + egui
 
 **Chosen: [winit](https://lib.rs/crates/winit) for windowing and input, plus
 [wgpu](https://wgpu.rs/) for rendering, with our own render pipeline and an `egui` overlay for chrome.**
@@ -80,17 +80,17 @@ exceptional from adequate.
 
 **Rejected:**
 
-- **Iced** — pure-Rust, GPU-rendered, MIT (composes fine with our license), and the
+- **Iced**: pure-Rust, GPU-rendered, MIT (composes fine with our license), and the
   fastest path to a polished result. Rejected not on licensing but on control and
   dependency weight: it abstracts the exact render and memory details we most need
   to own, and pulls a large tree. The decision was explicit: we are optimizing for
   the best possible outcome, not for the least effort.
-- **Slint** — polished and follows the system theme for free, but dual-licensed
+- **Slint**: polished and follows the system theme for free, but dual-licensed
   GPL-or-commercial, incompatible with our permissive intent, and still a framework
   layer over the pipeline.
-- **GTK-rs / Qt bindings** — heavier native dependencies and a less clean Rust-first
+- **GTK-rs / Qt bindings**: heavier native dependencies and a less clean Rust-first
   story.
-- **Tauri / any WebView** — the bloat we exist to replace. Non-starter.
+- **Tauri / any WebView**: the bloat we exist to replace. Non-starter.
 
 **Cost we accept:** building our own chrome is more work than adopting a framework,
 and the risk is spending effort on UI plumbing instead of the viewer. We accept it
@@ -99,7 +99,7 @@ because control over the canvas is where "exceptional" is won. We still study th
 frameworks we rejected (Iced's message architecture, egui's immediate-mode chrome)
 for ideas; we just do not depend on them.
 
-## Decision 3 — Rendering: our own wgpu pipeline
+## Decision 3: Rendering: our own wgpu pipeline
 
 We render through **`wgpu`** directly, giving GPU-accelerated scaling, panning, and
 zooming with a pipeline we control. Large (4K+) images stay smooth by uploading
@@ -109,6 +109,16 @@ every redraw. This is the difference between "flips through a folder instantly" 
 quality and color management right rather than accepting a framework's defaults.
 See `ARCHITECTURE.md` for the texture-cache strategy.
 
+The shipped SDR path uses an sRGB image texture, generates every mip level on the
+GPU after upload or a pixel patch, and samples trilinearly. Sources larger than the
+adapter texture or pixel limit receive a bounded preview prepared on a cancellable
+replace-latest background worker. The preview uses a linear-light, alpha-correct
+area filter and fallible output allocation, while full decoded pixels remain
+available to export. Embedded RGB ICC profiles are normalized into sRGB before
+upload. That is a strong SDR baseline, not a completed wide-gamut or HDR pipeline;
+output-display transforms and higher-precision working pixels remain in
+`ROADMAP.md`.
+
 A note on GPU compute languages (CUDA, Mojo, and similar): they are not used and
 not needed. Displaying an image is drawing one textured rectangle, which a small
 wgpu shader does. GPU compute kernels are for matrix math and simulation, not for a
@@ -116,7 +126,7 @@ viewer. wgpu already provides cross-vendor hardware acceleration (Metal on macOS
 Vulkan and D3D12 on Windows, Vulkan and OpenGL on Linux) across AMD, Intel, Apple,
 and Nvidia, in pure Rust.
 
-## Decision 4 — Image decoding: image-rs (+ jxl-oxide), toward every format
+## Decision 4: Image decoding: image-rs (+ jxl-oxide), toward every format
 
 **Goal:** the VLC of image viewers. If it is an image, viewr opens it, and the user
 never has to think about which app handles which file. See ROADMAP.md Phase 6 for
@@ -126,11 +136,9 @@ the order in which formats are added.
 decoder, covering JPEG, PNG, GIF (including animation), WebP (including animation),
 BMP, TIFF, ICO, PNM, TGA, QOI, DDS, HDR, OpenEXR, and farbfeld out of the box.
 **[`jxl-oxide`](https://lib.rs/crates/jxl-oxide)** adds JPEG XL, and
-**[`resvg`](https://lib.rs/crates/resvg)** (pure Rust) renders SVG. AVIF is an
-optional C-backed worker feature in the current implementation.
-
-All of the above are **pure-Rust decoders**, which keeps the memory-safety
-guarantee intact across the whole untrusted-input path.
+**[`resvg`](https://lib.rs/crates/resvg)** (pure Rust) renders SVG. These core
+decoders are pure Rust. AVIF is a separate optional C-backed worker feature in the
+current implementation.
 
 **Formats that need care** (AVIF, HEIC/HEIF, and camera RAW) are routed to a
 resource-limited worker rather than linked into the main process. AVIF and HEIC
@@ -138,16 +146,21 @@ are feature-gated; RAW remains explicitly deferred. Every format must ship with
 golden-file decode tests and enter the fuzz corpus before it is claimed complete
 (see STANDARDS.md).
 
-## Decision 5: System light/dark image background
+## Decision 5: Complete local appearance themes
 
-**Chosen:** use winit's native window theme signal, which is already part of the
-event loop, to select the default image background and react to theme changes. No
-additional theme-detection dependency or background service is required. The user
-can override the image background with black, neutral gray, or white. Persistent
-chrome remains dark so control contrast is stable against every photo and every
-background choice.
+**Chosen:** use winit's native window theme signal, already part of the event
+loop, for System and native decoration. View > Appearance also offers explicit
+Light, Dark, and Console choices. Each resolved mode supplies complete tokens for
+the GPU canvas, standard widgets, custom-painted controls, focus, overlays, and
+text. Console switches interface type to monospace. Black, neutral gray, and white
+remain independent image-inspection background overrides.
 
-## Decision 6 — Deletes: the `trash` crate + sandbox
+The explicit choice is persisted as one validated lower-case word in the platform
+configuration directory using only the standard library. Reads are capped at 32
+bytes and unknown values fall back to System. This adds no settings framework,
+serialization dependency, photo history, or background service.
+
+## Decision 6: Deletes: the `trash` crate + sandbox
 
 **Chosen:** the [`trash`](https://lib.rs/crates/trash) crate. Deleting the current
 image moves it to the **OS trash / recycle bin**, never a raw unlink. viewr is a
@@ -155,7 +168,7 @@ curation tool, not a shredder; mistakes must be recoverable. A deliberate,
 separate gesture (Shift+Delete with confirmation) offers permanent deletion for
 users who explicitly want it.
 
-## Decision 7 — Security posture: sandboxed, no network
+## Decision 7: Security posture: sandboxed, no network
 
 - **No remote-service client is linked.** The application implements no HTTP,
   TLS, telemetry, or update client. Linux local accessibility IPC uses the generic
@@ -164,14 +177,14 @@ users who explicitly want it.
   layered invariant is enforced in CI and at runtime (see `PRIVACY.md`).
 - **Ship sandboxed with network denied:** repository profiles target macOS App
   Sandbox, Windows AppContainer, and Linux Flatpak without `--share=network`.
-  Runtime package verification remains a Phase 7 gate, and bare Cargo builds do
-  not inherit these profiles.
+  Local package construction and schema/profile verification are implemented;
+  bare Cargo builds do not inherit the package boundaries.
 - **Split decoding by risk.** Pure-Rust formats decode in-process with resource
   and concurrency limits. Optional C-backed formats use a bounded worker; Linux
   also denies its classic and io_uring networking syscalls. Filesystem narrowing
   comes from the enclosing package profile.
 
-## Supporting crates (planned)
+## Supporting crates (shipped)
 
 | Need | Crate | Note |
 |---|---|---|
@@ -180,7 +193,8 @@ users who explicitly want it.
 | Text rendering | `egui` | immediate mode GUI overlay |
 | Accessibility | `accesskit` / `accesskit_winit` | semantic tree and native delivery on Windows/macOS/Linux; Linux local IPC is runtime confined |
 | Decode (common formats) | `image` | pure-Rust |
-| Decode JPEG XL | `jxl-oxide` | pure-Rust |
+| Decode JPEG XL | `jxl-oxide` | pure-Rust; reviewed local `jxl-color` patch enforces the 10 MiB ICC initialization ceiling |
+| Input ICC conversion | `moxcms` | bounded pure-Rust RGB profile transform into the current sRGB path |
 | Trash / recycle | `trash` | recoverable deletes |
 | OS theme | `winit` window theme | default image background only; no extra dependency |
 | File dialogs | `rfd` | native open/save dialogs |

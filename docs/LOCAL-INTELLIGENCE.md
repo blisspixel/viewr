@@ -26,8 +26,10 @@ identify a person, group similar faces, construct embeddings, or build a library
 
 The shipped Spot Heal tool intentionally does not require a model. Small dust,
 skin, sensor, and background blemishes are repaired by deterministic local patch
-matching over a bounded region of interest. A model is justified only if measured
-quality on larger repairs earns the additional runtime and packaging cost.
+ranking over a bounded region of interest, with edge agreement, robust local tone
+adaptation, adjustable feathering, alternate sources, and directional fallback
+inpainting. A model is justified only if measured quality on larger repairs earns
+the additional runtime and packaging cost.
 
 ## Description interaction
 

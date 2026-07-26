@@ -32,6 +32,9 @@ thiserror = "2"
 anyhow = "1"
 rfd = "0.17.2"
 jxl-oxide = { version = "0.12.6", features = ["image"] }
+# Direct use verifies that the locally patched decoder and viewr enforce one
+# shared embedded-ICC ceiling during JPEG XL initialization and conversion.
+jxl-color = "0.11.0"
 viewr-protocol = { path = "../viewr-protocol" }
 egui = "0.35"
 egui-winit = "0.35"
@@ -45,6 +48,19 @@ bytemuck = "1.25.2"
 resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
 trash = { version = "5.2.6", default-features = false, features = ["coinit_apartmentthreaded"] }
 little_exif = "0.6.23"
+same-file = "1.0.6"
+# Save As is assembled beside the destination and persisted only after pixels
+# and optional metadata are both complete.
+tempfile = "3.27.0"
+# Pure-Rust bounded inspection of compressed PNG ICC metadata before image-rs
+# materializes the profile.
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+# PNG chunk integrity is checked before opt-in EXIF metadata reaches the parser.
+# The crate is already present through image-rs, but this is a direct use.
+crc32fast = "1.5.0"
+# Already used transitively by image-rs. Declared directly for bounded,
+# pure-Rust embedded ICC conversion into the renderer's sRGB pipeline.
+moxcms = "0.8.1"
 
 # Windows Job Object limits for the decode worker (kill-on-close with parent).
 [target.'cfg(windows)'.dependencies]

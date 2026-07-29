@@ -54,6 +54,48 @@ pub struct ImagePatch {
     pub rgba: Vec<u8>,
 }
 
+/// Failure while applying pixels and presenting the same patch as one transaction.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PatchPresentationError<E> {
+    /// The patch could not be applied to the decoded image.
+    Edit(HealError),
+    /// Presentation failed and the decoded pixels were restored exactly.
+    Presentation(E),
+    /// Presentation failed and the inverse patch could not restore decoded pixels.
+    Rollback {
+        /// Original presentation failure.
+        presentation: E,
+        /// Failure while restoring the decoded pixels.
+        rollback: HealError,
+    },
+}
+
+impl<E> PatchPresentationError<E> {
+    /// Whether decoded pixels could not be restored after presentation failed.
+    #[must_use]
+    pub const fn rollback_failed(&self) -> bool {
+        matches!(self, Self::Rollback { .. })
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for PatchPresentationError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Edit(error) => error.fmt(formatter),
+            Self::Presentation(error) => {
+                write!(formatter, "could not update displayed pixels: {error}")
+            }
+            Self::Rollback {
+                presentation,
+                rollback,
+            } => write!(
+                formatter,
+                "display update failed ({presentation}) and pixel rollback failed ({rollback})"
+            ),
+        }
+    }
+}
+
 /// Result of a ranked spot-heal repair.
 ///
 /// `candidate_count` is zero when the bounded inpainting fallback was needed.
@@ -203,6 +245,89 @@ impl PatchHistory {
             Err(error) => {
                 self.redo_bytes = self.redo_bytes.saturating_add(patch.rgba.len());
                 self.redo.push_back(patch);
+                Err(error)
+            }
+        }
+    }
+
+    /// Undo one edit only if the resulting pixels are presented successfully.
+    ///
+    /// History and decoded pixels remain unchanged when presentation fails.
+    ///
+    /// # Errors
+    /// Returns [`PatchPresentationError`] when the patch, presentation, or exact
+    /// decoded-pixel rollback fails.
+    pub fn undo_presented<E>(
+        &mut self,
+        image: &mut DecodedImage,
+        present: impl FnOnce(&DecodedImage, &ImagePatch) -> Result<(), E>,
+    ) -> Result<bool, PatchPresentationError<E>> {
+        self.history_patch_presented(image, true, present)
+    }
+
+    /// Redo one edit only if the resulting pixels are presented successfully.
+    ///
+    /// History and decoded pixels remain unchanged when presentation fails.
+    ///
+    /// # Errors
+    /// Returns [`PatchPresentationError`] when the patch, presentation, or exact
+    /// decoded-pixel rollback fails.
+    pub fn redo_presented<E>(
+        &mut self,
+        image: &mut DecodedImage,
+        present: impl FnOnce(&DecodedImage, &ImagePatch) -> Result<(), E>,
+    ) -> Result<bool, PatchPresentationError<E>> {
+        self.history_patch_presented(image, false, present)
+    }
+
+    fn history_patch_presented<E>(
+        &mut self,
+        image: &mut DecodedImage,
+        is_undo: bool,
+        present: impl FnOnce(&DecodedImage, &ImagePatch) -> Result<(), E>,
+    ) -> Result<bool, PatchPresentationError<E>> {
+        let patch = if is_undo {
+            self.undo.pop_back()
+        } else {
+            self.redo.pop_back()
+        };
+        let Some(patch) = patch else {
+            return Ok(false);
+        };
+        if is_undo {
+            self.undo_bytes = self.undo_bytes.saturating_sub(patch.rgba.len());
+        } else {
+            self.redo_bytes = self.redo_bytes.saturating_sub(patch.rgba.len());
+        }
+
+        match apply_presented_patch(image, &patch, present) {
+            Ok(inverse) => {
+                if is_undo {
+                    push_bounded(
+                        &mut self.redo,
+                        &mut self.redo_bytes,
+                        inverse,
+                        self.byte_limit,
+                    );
+                } else {
+                    push_bounded(
+                        &mut self.undo,
+                        &mut self.undo_bytes,
+                        inverse,
+                        self.byte_limit,
+                    );
+                }
+                Ok(true)
+            }
+            Err(error) => {
+                let patch_bytes = patch.rgba.len();
+                if is_undo {
+                    self.undo.push_back(patch);
+                    self.undo_bytes = self.undo_bytes.saturating_add(patch_bytes);
+                } else {
+                    self.redo.push_back(patch);
+                    self.redo_bytes = self.redo_bytes.saturating_add(patch_bytes);
+                }
                 Err(error)
             }
         }
@@ -581,6 +706,32 @@ pub fn apply_patch(image: &mut DecodedImage, patch: &ImagePatch) -> Result<Image
         bounds: patch.bounds,
         rgba: previous,
     })
+}
+
+/// Apply one patch and retain it only if the same pixels are presented.
+///
+/// The returned patch is the exact inverse to record for a later undo. When
+/// presentation fails, the inverse is applied immediately so decoded pixels
+/// remain identical to their state before this call.
+///
+/// # Errors
+/// Returns [`PatchPresentationError`] when apply, presentation, or rollback fails.
+pub fn apply_presented_patch<E>(
+    image: &mut DecodedImage,
+    patch: &ImagePatch,
+    present: impl FnOnce(&DecodedImage, &ImagePatch) -> Result<(), E>,
+) -> Result<ImagePatch, PatchPresentationError<E>> {
+    let inverse = apply_patch(image, patch).map_err(PatchPresentationError::Edit)?;
+    if let Err(presentation) = present(image, patch) {
+        return match apply_patch(image, &inverse) {
+            Ok(_) => Err(PatchPresentationError::Presentation(presentation)),
+            Err(rollback) => Err(PatchPresentationError::Rollback {
+                presentation,
+                rollback,
+            }),
+        };
+    }
+    Ok(inverse)
 }
 
 fn validate_image(image: &DecodedImage) -> Result<(), HealError> {
@@ -1526,9 +1677,10 @@ fn append_blended_pixel(output: &mut Vec<u8>, original: &[u8], repaired: &[u8], 
 mod tests {
     use super::{
         CHANNELS, HealError, ImagePatch, LocalRect, MAX_STROKE_POINTS, MIN_BRUSH_RADIUS,
-        PatchHistory, SpotHealJob, StrokePoint, apply_patch, best_patch_offset,
-        boundary_tone_adjustment, directional_boundary_fill, feather_coverage, patch_match_score,
-        ranked_patch_offsets, rasterize_stroke,
+        PatchHistory, PatchPresentationError, SpotHealJob, StrokePoint, apply_patch,
+        apply_presented_patch, best_patch_offset, boundary_tone_adjustment,
+        directional_boundary_fill, feather_coverage, patch_match_score, ranked_patch_offsets,
+        rasterize_stroke,
     };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
@@ -2061,6 +2213,88 @@ mod tests {
         assert!(history.undo(&mut image).unwrap());
         history.record(apply_patch(&mut image, &first).unwrap());
         assert!(!history.can_redo());
+    }
+
+    #[test]
+    fn presentation_failure_restores_patch_pixels_and_history_exactly() {
+        let mut image = patterned_image(8, 8);
+        let patch = ImagePatch {
+            bounds: Rect {
+                x: 2,
+                y: 3,
+                width: 1,
+                height: 1,
+            },
+            rgba: vec![250, 1, 2, 255],
+        };
+        let original = image.rgba.clone();
+        let result = apply_presented_patch(&mut image, &patch, |presented, applied| {
+            assert_eq!(pixel(presented, 2, 3), [250, 1, 2, 255]);
+            assert_eq!(applied, &patch);
+            Err("injected presentation failure")
+        });
+        assert_eq!(
+            result,
+            Err(PatchPresentationError::Presentation(
+                "injected presentation failure"
+            ))
+        );
+        assert_eq!(image.rgba, original);
+
+        let mut history = PatchHistory::new(32);
+        history.record(apply_patch(&mut image, &patch).unwrap());
+        let after_first = image.rgba.clone();
+        let second = ImagePatch {
+            bounds: Rect {
+                x: 4,
+                y: 5,
+                width: 1,
+                height: 1,
+            },
+            rgba: vec![3, 4, 252, 255],
+        };
+        history.record(apply_patch(&mut image, &second).unwrap());
+        let edited = image.rgba.clone();
+        let undo_before = history.undo.clone();
+        let redo_before = history.redo.clone();
+        let undo_bytes_before = history.undo_bytes;
+        let redo_bytes_before = history.redo_bytes;
+        assert_eq!(
+            history.undo_presented(&mut image, |_, _| Err("undo display failure")),
+            Err(PatchPresentationError::Presentation("undo display failure"))
+        );
+        assert_eq!(image.rgba, edited);
+        assert_eq!(history.undo, undo_before);
+        assert_eq!(history.redo, redo_before);
+        assert_eq!(history.undo_bytes, undo_bytes_before);
+        assert_eq!(history.redo_bytes, redo_bytes_before);
+        assert_eq!(history.undo.len(), 2);
+        assert!(history.can_undo());
+        assert!(!history.can_redo());
+
+        assert!(
+            history
+                .undo_presented(&mut image, |_, _| Ok::<_, &str>(()))
+                .unwrap()
+        );
+        assert_eq!(image.rgba, after_first);
+        assert!(history.can_undo());
+        assert!(history.can_redo());
+        let undo_before = history.undo.clone();
+        let redo_before = history.redo.clone();
+        let undo_bytes_before = history.undo_bytes;
+        let redo_bytes_before = history.redo_bytes;
+        assert_eq!(
+            history.redo_presented(&mut image, |_, _| Err("redo display failure")),
+            Err(PatchPresentationError::Presentation("redo display failure"))
+        );
+        assert_eq!(image.rgba, after_first);
+        assert_eq!(history.undo, undo_before);
+        assert_eq!(history.redo, redo_before);
+        assert_eq!(history.undo_bytes, undo_bytes_before);
+        assert_eq!(history.redo_bytes, redo_bytes_before);
+        assert!(history.can_undo());
+        assert!(history.can_redo());
     }
 
     #[test]

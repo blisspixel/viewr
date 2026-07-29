@@ -15,6 +15,7 @@ import zlib
 
 from scripts.performance_gate import (
     _command,
+    _idle_diagnostics,
     _median_report,
     Budgets,
     PerformanceGateError,
@@ -29,12 +30,17 @@ from scripts.performance_gate import (
 )
 
 
-def report(**overrides: int) -> ProbeReport:
+def report(**overrides: int | bool) -> ProbeReport:
     values = {
         "window_ready_us": 100_000,
         "first_pixel_us": 200_000,
         "max_navigation_us": 10_000,
         "idle_redraws": 0,
+        "idle_non_redraw_events": 0,
+        "idle_event_repaint_requests": 0,
+        "idle_scheduled_egui_repaints": 0,
+        "idle_window_focused": False,
+        "idle_pointer_inside": False,
         "peak_resident_bytes": 200 * 1024 * 1024,
         "playlist_entries": 16,
         "decoded_cache_entries": 5,
@@ -91,7 +97,7 @@ class PerformanceGateTests(unittest.TestCase):
                 first = create_linked_corpus(root / "corpus", source, 2)
             self.assertEqual(first.read_bytes(), b"source")
 
-    def test_report_parser_requires_exact_nonnegative_integer_schema(self) -> None:
+    def test_report_parser_requires_exact_integer_and_boolean_schema(self) -> None:
         payload = report().__dict__
         self.assertEqual(parse_report(json.dumps(payload)), report())
         with self.assertRaises(PerformanceGateError):
@@ -100,6 +106,8 @@ class PerformanceGateTests(unittest.TestCase):
             parse_report(json.dumps({**payload, "first_pixel_us": -1}))
         with self.assertRaises(PerformanceGateError):
             parse_report(json.dumps({**payload, "first_pixel_us": True}))
+        with self.assertRaises(PerformanceGateError):
+            parse_report(json.dumps({**payload, "idle_window_focused": 1}))
         self.assertEqual(parse_report("{not json}\n" + json.dumps(payload)), report())
         with self.assertRaises(PerformanceGateError):
             parse_report("not json")
@@ -153,12 +161,16 @@ class PerformanceGateTests(unittest.TestCase):
             report(
                 window_ready_us=300,
                 first_pixel_us=900,
+                idle_non_redraw_events=1,
+                idle_window_focused=False,
                 peak_resident_bytes=1,
                 decoded_cache_bytes=1,
             ),
             report(
                 window_ready_us=100,
                 first_pixel_us=500,
+                idle_non_redraw_events=3,
+                idle_pointer_inside=True,
                 peak_resident_bytes=3,
                 decoded_cache_bytes=3,
             ),
@@ -174,6 +186,35 @@ class PerformanceGateTests(unittest.TestCase):
         self.assertEqual(combined.first_pixel_us, 700)
         self.assertEqual(combined.peak_resident_bytes, 3)
         self.assertEqual(combined.decoded_cache_bytes, 3)
+        self.assertEqual(combined.idle_non_redraw_events, 3)
+        self.assertFalse(combined.idle_window_focused)
+        self.assertTrue(combined.idle_pointer_inside)
+
+    def test_idle_diagnostics_preserve_run_order_and_fixed_fields(self) -> None:
+        rendered = _idle_diagnostics(
+            [
+                report(idle_redraws=1, idle_window_focused=True),
+                report(
+                    idle_redraws=3,
+                    idle_non_redraw_events=2,
+                    idle_event_repaint_requests=1,
+                    idle_scheduled_egui_repaints=4,
+                    idle_pointer_inside=True,
+                ),
+            ],
+            [report(idle_redraws=2)],
+            report(idle_redraws=1),
+        )
+        payload = json.loads(rendered)
+        self.assertEqual(
+            [item["delivered_redraws"] for item in payload["small"]], [1, 3]
+        )
+        self.assertEqual(payload["small"][1]["non_redraw_events"], 2)
+        self.assertEqual(payload["small"][1]["event_repaint_requests"], 1)
+        self.assertEqual(payload["small"][1]["scheduled_egui_repaints"], 4)
+        self.assertTrue(payload["small"][0]["window_focused"])
+        self.assertTrue(payload["small"][1]["pointer_inside"])
+        self.assertNotIn("path", rendered.casefold())
 
     def test_evaluate_reports_every_timing_memory_and_cache_violation(self) -> None:
         budgets = Budgets(3000, 5000, 500, 2, 768, 96)
@@ -312,6 +353,15 @@ class PerformanceGateTests(unittest.TestCase):
                     self.assertEqual(main(base), 0)
             self.assertEqual(probe.call_count, 3)
             self.assertIn("performance gate: OK", output.getvalue())
+            self.assertNotIn("idle diagnostics:", output.getvalue())
+
+            diagnostic_output = io.StringIO()
+            with mock.patch(
+                "scripts.performance_gate.run_probe", side_effect=probe_results
+            ):
+                with redirect_stdout(diagnostic_output):
+                    self.assertEqual(main([*base, "--idle-diagnostics"]), 0)
+            self.assertIn("idle diagnostics:", diagnostic_output.getvalue())
 
             failing_results = [
                 report(first_pixel_us=5_000_001, playlist_entries=5),
@@ -329,6 +379,7 @@ class PerformanceGateTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()), redirect_stderr(errors):
                     self.assertEqual(main(base), 1)
             self.assertIn("first pixel", errors.getvalue())
+            self.assertIn("idle diagnostics:", errors.getvalue())
 
     def test_main_rejects_missing_binary_even_runs_and_invalid_counts(self) -> None:
         with self.assertRaisesRegex(PerformanceGateError, "does not exist"):

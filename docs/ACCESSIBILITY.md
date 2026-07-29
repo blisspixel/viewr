@@ -18,23 +18,69 @@ The minimum contract is:
   keyboard focus.
 - Custom-painted tools, disclosure controls, and previews are actionable buttons
   with descriptive names and selected or expanded state where applicable.
-- Tools, Folder Previews, and Image Information expose their visible state. Tools
-  and Folder Previews also expose collapse and expansion actions.
+- Tools, Folder Previews, and Image Information expose their visible state. Their
+  `T`, `G`, and `I` shortcuts are visible in View > Panels and included in the
+  accessible menu names. Tools and Folder Previews also expose collapse and expansion
+  actions.
 - The metadata-retention checkbox is named plainly and starts unchecked.
+- Source Privacy exposes supported EXIF count, privacy-risk presence categories,
+  and the limited-scan caveat as text. Sensitive raw metadata is not used as an
+  accessible name or value.
 - Current filename, folder position, source dimensions, and displayed zoom are
-  available as text.
+  available as text. During a genuine replacement load, the presented filename
+  remains truthful to the visible pixels while a separate bounded filename names
+  the selected target. Failure and Retry name that same target. Derived preview
+  work is identified as preview preparation rather than a new file open. Loading,
+  failure, and preview-preparation labels use polite AccessKit live-region
+  semantics; long target text remains bounded and discoverable when visually
+  elided. Transient toasts remain semantic but non-live, so a coexisting visual
+  toast is not a second polite announcement source.
+- The empty state exposes the file-versus-folder session scope as visible text,
+  followed by separately named Open File and Open Folder actions.
 - Crop exposes exact source-pixel origin, output dimensions, ratio, eight resize
-  handles, and keyboard controls.
+  handles, and keyboard controls at every positive selection size. If application
+  fails while the same source is current, the exact selection returns as the
+  persistent retry surface and the fixed visual message names Enter as retry.
 - Spot Heal exposes brush radius, feather, ranked-source position, Refresh Source,
   Undo, Redo, and Done. `/` refreshes the source without requiring a pointer.
-- Appearance exposes System, Light, Dark, and Console as named radio choices.
-  Every resolved palette meets the same automated AA contrast floor.
+  Edit success is exposed only after decoded pixels, history, and presentation
+  commit together. Busy destructive keyboard actions produce specific visible
+  wait text instead of a silent no-op; transient toast announcement remains part
+  of the manual target-OS matrix.
+- Appearance exposes its current preference on the parent View entry, then System,
+  Light, Dark, and Console as described radio choices.
+  Each semantic name includes its visible outcome, System reports its effective
+  Light or Dark mode while active, and the visible scope text distinguishes app
+  appearance from image pixels and independent background overrides. Every
+  resolved palette meets the same automated AA contrast floor. Normal missing
+  state is quiet; abnormal startup fallback announces `Could not restore saved
+  appearance. Using System.` once through the semantic status surface.
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape.
+- Update viewr is a separate named modal window that blocks background input and
+  exposes the running version, local-only behavior, absence of a verified public
+  source, trusted-channel guidance, and the locked source-build command. It closes
+  with an explicit button or Escape and never presents a network action.
 - Animation exposes current frame, frame count, and pause/resume state.
-- Reload and Retry remain reachable and announce progress or failure without
-  clearing the last good image.
-- Loading, empty, and error states are announced without relying on color.
+- Reload and Retry remain reachable and expose progress or failure as semantic
+  text without clearing the last good image.
+- On Windows, Open With is reachable from both File and the image right-click
+  surface. Its help names the original source and external-app trust boundary.
+  Successful delegation produces one persistent polite `F5` reminder; cancellation
+  and failure do not claim that an edit occurred.
+- Restore exposes one polite operation status while native work runs. Conflicting
+  open, navigation, edit, Trash, and permanent-delete controls are disabled; zoom,
+  pan, panels, and appearance remain usable. Closing changes the status to say the
+  restore is finishing before exit. No percentage or cancel control implies an
+  unsupported guarantee. Unexpected worker loss replaces the active status with
+  durable recovery guidance and directs `U` reconciliation. A new Trash move stays
+  disabled until that ownership is settled, so a newer receipt cannot replace an
+  uncertain action.
+- Permanent delete uses a native warning dialog whose actions are named Delete
+  permanently and Cancel. Its filename cannot inject controls, bidi overrides, or
+  a second quote-delimited name into the confirmation text.
+- Loading, empty, and error states are available as semantic text without relying
+  on color. Target-OS announcement timing remains part of the manual matrix.
 - No panel covers the image, including at high display scale or when both side
   panels share an edge.
 
@@ -52,8 +98,11 @@ small disposable images beneath `target/`, launches the real app, discovers the
 out-of-process AccessKit tree, and verifies:
 
 - the application root and menu focusability;
-- the About modal's native window identity, action path, and close action;
-- System and Console appearance radio state, the exact isolated preference file,
+- the visible first-run file-versus-folder session scope and both open actions;
+- the Update viewr and About modals' native window identities, action paths,
+  truthful local-only content, and close actions;
+- visible Appearance scope, descriptive System, Light, Dark, and Console radio
+  names, all four selected-state transitions, the exact isolated preference file,
   and Console selection after a real process restart;
 - filename, dimensions, and folder position;
 - default-hidden panel state;
@@ -61,8 +110,16 @@ out-of-process AccessKit tree, and verifies:
   its named radius, feather, and refresh controls;
 - distinct selected states and native actions for left/right panel placement;
 - the metadata checkbox's default-off and toggled-on state;
+- the enabled current-image Move to Trash action and absence of the removed
+  mark, review, and batch-trash controls;
+- the exact disabled `Undo Trash` label before a recoverable receipt exists;
 - showing Folder Previews and discovering both thumbnail buttons; and
 - accessible thumbnail activation and resulting image navigation.
+
+In-process semantic regressions separately cover settled Undo Trash ownership,
+its path-free other-folder guidance, menu bounds, and generic copy while restore
+ownership is active or uncertain. Native dynamic-state and announcement timing
+remain in the manual target-OS matrix.
 
 It closes the exact process it launched and removes only its two known fixtures
 and empty unique directory. The Windows CI job runs the same script against the
@@ -91,25 +148,27 @@ Run the same workflow on every platform:
 
 | Area | Action | Required result |
 |---|---|---|
-| Launch | Enable the screen reader, then open the first image in a folder of at least three | `viewr`, the current file, position, dimensions, and zoom are discoverable; focus is not lost during initial decode |
+| Launch | Enable the screen reader, record the empty window dimensions, then open the first image in a folder of at least three | `viewr`, the current file, position, dimensions, and zoom are discoverable; focus is not lost during initial decode; the application client area keeps the recorded dimensions |
 | Focus | Traverse forward and backward through the window | Order is predictable, every interactive item has one clear name, and visual focus follows assistive focus |
 | Menus | Open File, Edit, View, Tools, Help, Panels, Panel Position, Image Background, and Appearance from the keyboard | Items, shortcuts, checked states, radio states, disabled states, and submenus are announced accurately |
 | Panels | Show and hide Tools, Folder Previews, and Image Information with `T`, `G`, and `I` | State changes are announced, hidden controls leave the tree, and the image refits without being covered |
 | Disclosure | Collapse and expand Tools and Folder Previews | The control name changes between Collapse and Expand, remains actionable, and preserves the panel's visible state |
 | Position | Move Tools and Image Information left and right, including both on one side | Selected radio state is announced and controls remain reachable in a coherent order |
-| Navigation | Use Left, Right, Home, End, Page Up, Page Down, and a preview button | Filename and folder position update once per action; stale decode completion never announces the wrong image |
+| Navigation | Use Left, Right, Home, End, Page Up, Page Down, and a preview button | Immediate reuse remains quiet; a genuine miss names the selected target while the visible filename remains tied to presented pixels; stale decode completion never announces the wrong image |
 | Reload | Invoke File > Reload File and `F5` on a disposable file changed by another app | Reload is announced, the old frame remains until success, and a failed refresh exposes Retry without losing focus |
+| Open With | On Windows, inspect File > Open With and the image right-click action; choose and cancel a disposable editor handoff, then make one external change and press `F5` | Both entry points have one clear name and boundary explanation; cancellation is quiet and safe; success leaves a polite reload reminder without a path; the selected app receives the original rather than unsaved viewr edits; explicit reload presents the changed file |
 | View | Use Fit, Actual Size, Zoom In, Zoom Out, and Fullscreen | The action and resulting zoom are discoverable; fullscreen does not strand focus |
 | Editing | Rotate, flip, and start crop | Each tool has one descriptive name and the visible result matches the invoked action |
-| Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape | Ratio and exact source origin/output size update; a rotated 16:9 selection remains 16:9 in output; apply and cancel return focus predictably |
-| Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, and the pointer-only brush overlay is not the sole source of state |
-| Appearance | Select System, Light, Dark, and Console, then restart | The selected radio state is announced, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
+| Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
+| Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, and the pointer-only brush overlay is not the sole source of state |
+| Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
+| Update | Open Help > Update viewr; read its contents; close with its button and Escape | A modal named Update viewr exposes the running version, no-check/no-download behavior, absence of a verified public source, trusted-channel guidance, and the locked source-build command; it exposes no network action, background controls cannot activate, and focus returns predictably |
 | About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, shortcuts, and privacy; background controls cannot activate while it is open; focus returns predictably |
 | Animation | Open GIF, WebP, and APNG fixtures and toggle playback from Image Information | Frame position and play/pause state are announced without flooding speech on every timed frame |
-| Metadata | Toggle Keep camera metadata when saving | It starts unchecked, announces checked state, and remains session-only |
+| Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |
 | Save | Open Save As and complete or cancel a disposable export | The native dialog is usable, cancellation is safe, and focus returns to viewr |
-| Trash | Trash and undo a disposable copy; open permanent-delete confirmation but cancel | Confirmation and result are announced; cancel is safe; Undo restores the exact copy |
-| Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading and failure are announced once with useful text; menus and recovery actions remain reachable |
+| Trash | Use File > Move to Trash and `Delete` on disposable copies; confirm bare `B`, `M`, and normal-mode `X` do nothing; restore with `U`; inspect settled, active, and uncertain Undo ownership; try Delete during active Spot Heal; inspect a control-character filename in permanent-delete confirmation but cancel | Only the visible current image moves, the removed culling keys trigger no destructive or review action, active work has a specific result, confirmation is path-free and visually unambiguous, cancel is safe, unsettled Undo does not claim settled state, cross-folder Undo does not insert into the unrelated view, and restore uses only the exact receipt. Transient result announcement remains a manual target-OS check |
+| Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading, failure, and Retry name only the selected filename; each transition is announced once; menus and recovery actions remain reachable |
 | Contrast and scale | Repeat key flows at 100%, 150%, and 200% scale in Light, Dark, and Console with white and dark image backgrounds | Focus and text stay visible; no clipping, overlap, or image-covering panel appears |
 
 ## Linux-specific checks
@@ -126,8 +185,26 @@ both results are required.
 
 ## Recording a result
 
-For each failure, record exact reproduction steps, expected announcement, actual
-announcement, focus before and after, screenshot or short recording when useful,
-and whether the defect reproduces without the screen reader. Do not mark the
-ROADMAP accessibility item complete until every row passes on all three platforms
-or a deliberately scoped exception is documented and approved.
+Create no result file until one platform run is complete. Store a completed run at
+`docs/release-evidence/accessibility/<version>/<platform>.md`, using `windows`,
+`macos`, or `linux` for the platform name. Each record must include:
+
+- the tested version, repository commit SHA, artifact filename, and SHA-256;
+- the test date and accountable reviewer or team;
+- the operating-system version, assistive-technology version, package type,
+  display scale, graphics adapter, and Linux desktop and display protocol when
+  applicable;
+- Pass, Fail, or Approved exception for every workflow row above, with a concise
+  evidence reference for each failure or exception;
+- exact reproduction steps, expected and actual announcement, focus before and
+  after, and whether each failure reproduces without the screen reader; and
+- the scope, rationale, approver, and required retest condition for every Approved
+  exception.
+
+Use only synthetic filenames and fixtures in tracked evidence. Do not include a
+personal image, private path, raw metadata, or unrelated screen content. Link the
+platform's Status cell above to its completed record only after every row has a
+disposition. If the tested artifact bytes change, the record no longer closes the
+gate and that platform must be rerun against the new SHA-256. Do not mark the
+ROADMAP accessibility item complete until all three platform records pass or each
+remaining exception is deliberately scoped and approved.

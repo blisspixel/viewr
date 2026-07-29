@@ -5,9 +5,10 @@
 //! space and never cover the photo. Amber marks active tools only.
 
 use egui::containers::scroll_area::ScrollBarVisibility;
+use egui::text::LayoutJob;
 use egui::{
-    Align2, Area, Color32, CornerRadius, CursorIcon, Frame, Panel, Pos2, Rect, RichText,
-    ScrollArea, Sense, Stroke, Vec2, WidgetInfo, WidgetType,
+    Align2, Area, Color32, CornerRadius, CursorIcon, FontId, Frame, Panel, Pos2, Rect, RichText,
+    ScrollArea, Sense, Stroke, TextFormat, Vec2, WidgetInfo, WidgetType,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +59,9 @@ const PRIMARY_MODIFIER: &str = "Ctrl";
 
 /// Logical height reserved for the persistent menu and image status bar.
 pub const TOP_BAR_HEIGHT: f32 = 40.0;
+const TOP_STATUS_MAX_WIDTH: f32 = 220.0;
+const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
+const TOP_METADATA_GAP: f32 = 8.0;
 /// Logical width of the collapsed tools rail.
 pub const TOOLS_RAIL_WIDTH: f32 = 44.0;
 /// Logical width of the expanded tools panel.
@@ -70,6 +74,17 @@ pub const FILMSTRIP_RAIL_HEIGHT: f32 = 44.0;
 pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
 /// Logical width of the Image Info panel.
 pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
+
+const OPEN_SCOPE_SUMMARY: &str = "Open a file to start. Its folder is browsed when access allows. Open Folder selects it explicitly for this session.";
+const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
+const OPEN_FOLDER_SCOPE_HELP: &str =
+    "Choose a folder explicitly and browse its supported images for this session.";
+#[cfg(target_os = "windows")]
+const OPEN_WITH_HELP: &str = "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. Press F5 to reload possible changes.";
+const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.";
+const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
+const EXTERNAL_EDIT_STATUS: &str =
+    "External app opened source. Press F5 to reload possible changes.";
 
 /// Horizontal edge used by a docked side panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,6 +173,8 @@ pub enum UiAction {
     Reload,
     /// Open a save as dialog.
     SaveAs,
+    /// Ask the operating system which external app should open the current source.
+    OpenWith,
     /// Move the current file to the trash.
     Trash,
     /// Undo the last trash operation.
@@ -170,6 +187,10 @@ pub enum UiAction {
     ShowAbout,
     /// Close the About viewr surface.
     CloseAbout,
+    /// Open the local update-instructions surface.
+    ShowUpdate,
+    /// Close the local update-instructions surface.
+    CloseUpdate,
     /// Toggle the Image Info panel.
     ToggleImageInfo,
     /// Show or fully hide the docked tools panel.
@@ -252,10 +273,6 @@ pub enum UiAction {
     UndoEdit,
     /// Reapply the latest undone in-memory pixel edit.
     RedoEdit,
-    /// Toggle flag on the current image for batch cull.
-    ToggleFlag,
-    /// Move all flagged images to the system trash.
-    TrashFlagged,
     /// Permanently delete the current image (UI will confirm).
     PermanentDelete,
 }
@@ -275,6 +292,10 @@ pub struct UiFrameOwned {
     pub theme_mode: crate::theme::Mode,
     /// Whether the About viewr surface is open.
     pub show_about: bool,
+    /// Whether the local update-instructions surface is open.
+    pub show_update: bool,
+    /// Whether an external handoff may have made the displayed pixels stale.
+    pub external_edit_pending: bool,
     /// Whether the docked tools panel is visible at all.
     pub show_tools_panel: bool,
     /// Whether the visible tools panel is expanded.
@@ -287,8 +308,10 @@ pub struct UiFrameOwned {
     pub filmstrip_panel_open: bool,
     /// Horizontal edge used by Image Information.
     pub image_info_side: DockSide,
-    /// Path of the current image (display only).
+    /// Path associated with the currently presented pixels (display only).
     pub file_path: Option<String>,
+    /// Privacy-safe basename of the currently selected file.
+    pub selected_file_name: Option<String>,
     /// Pixel dimensions of the current image, if any.
     pub img_size: Option<(u32, u32)>,
     /// Playback state for an animated image.
@@ -319,29 +342,37 @@ pub struct UiFrameOwned {
     pub can_undo_edit: bool,
     /// Whether an undone in-memory pixel edit can be reapplied.
     pub can_redo_edit: bool,
+    /// Whether a retained exact Trash receipt can be acted on in the current UI state.
+    pub can_undo_trash: bool,
+    /// Whether a prior Restore must reconcile before Undo ownership can be replaced.
+    pub restore_recovery_unsettled: bool,
     /// Hand tool is currently dragging.
     pub is_panning: bool,
-    /// Current image is in the flag set.
-    pub is_flagged: bool,
-    /// Number of flagged paths in the folder session.
-    pub flag_count: usize,
     /// An image texture is loaded.
     pub has_image: bool,
-    /// A requested image is currently decoding.
+    /// A decode or display-preparation job is blocking image actions.
     pub is_loading: bool,
+    /// A selected source is decoding or preparing its first display preview.
+    pub is_opening: bool,
     /// Most recent decode failure for the selected path.
     pub load_error: Option<String>,
     /// An explicit Save As encode is running.
     pub save_busy: bool,
     /// A full-resolution crop is being applied off the UI thread.
     pub crop_busy: bool,
+    /// Fixed, path-private description of active Trash restore work.
+    pub curation_status: Option<String>,
+    /// Durable recovery guidance after an indeterminate restore worker loss.
+    pub curation_recovery_status: Option<String>,
+    /// A folder scan is still deciding the active playlist scope.
+    pub folder_scan_busy: bool,
     /// 1-based index and total in the folder playlist, if known.
     pub playlist_pos: Option<(usize, usize)>,
     /// Physical display pixels per source-image pixel (`1.0` = actual size).
     pub pixel_scale: f32,
     /// Transient toast message (trash undo hint, etc.).
     pub toast: Option<String>,
-    /// Neighbor filmstrip entries (index, name, flagged, optional texture).
+    /// Neighbor filmstrip entries.
     pub filmstrip: Vec<FilmstripItem>,
     /// Crop rectangle in screen pixels `[x0, y0, x1, y1]` when previewing.
     pub crop_screen: Option<[f32; 4]>,
@@ -373,12 +404,37 @@ pub struct AnimationUiInfo {
 }
 
 impl UiFrameOwned {
+    fn curation_busy(&self) -> bool {
+        self.curation_status.is_some()
+    }
+
     fn current_selection_ready(&self) -> bool {
         self.has_image
             && !self.is_loading
             && self.load_error.is_none()
             && !self.crop_busy
             && !self.save_busy
+            && !self.heal_busy
+            && !self.curation_busy()
+    }
+
+    fn curation_action_ready(&self) -> bool {
+        !self.is_loading
+            && !self.crop_busy
+            && !self.save_busy
+            && !self.heal_busy
+            && !self.is_cropping
+            && !self.is_healing
+            && !self.folder_scan_busy
+            && !self.curation_busy()
+    }
+
+    fn trash_undo_ready(&self) -> bool {
+        self.can_undo_trash && self.curation_action_ready()
+    }
+
+    fn trash_move_ready(&self) -> bool {
+        !self.restore_recovery_unsettled && self.current_selection_ready()
     }
 }
 
@@ -389,8 +445,6 @@ pub struct FilmstripItem {
     pub index: usize,
     /// File basename for tooltip / fallback label.
     pub name: String,
-    /// Whether the path is flagged for batch cull.
-    pub flagged: bool,
     /// Thumbnail texture when ready.
     pub texture: Option<egui::TextureHandle>,
 }
@@ -402,31 +456,69 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let colors = chrome_colors(ui);
 
     render_top_menu(ui, &mut actions, frame);
-    if frame.show_about {
+    if frame.show_update {
+        render_update(ui, &mut actions);
+    } else if frame.show_about {
         render_about(ui, &mut actions);
     }
 
     if !frame.has_image {
-        render_empty_state(
-            ui,
-            &mut actions,
-            frame.is_loading,
-            frame.load_error.as_deref(),
-        );
+        render_empty_state(ui, &mut actions, frame);
         if let Some(msg) = &frame.toast {
             render_toast(ui, msg, frame);
         }
         return actions;
     }
 
-    if let Some(pos) = frame.context_menu_pos {
-        let mut close = false;
-        egui::Window::new("Quick Tools")
-            .fixed_pos(Pos2::new(pos[0], pos[1]))
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .show(ui.ctx(), |ui| {
+    render_context_menu(ui, &mut actions, frame, colors);
+
+    if frame.show_image_info {
+        render_image_info_panel(ui, &mut actions, frame);
+    }
+
+    if frame.show_filmstrip_panel && frame.filmstrip.len() > 1 {
+        render_filmstrip(ui, &mut actions, frame);
+    }
+
+    if frame.show_tools_panel {
+        render_tools_panel(ui, &mut actions, frame);
+    }
+
+    if frame.is_healing {
+        render_heal_panel(ui, &mut actions, frame);
+        render_heal_overlay(ui, frame);
+    }
+
+    if let Some(msg) = &frame.toast {
+        render_toast(ui, msg, frame);
+    }
+
+    if frame.is_cropping {
+        render_crop_overlay(ui, frame, &mut actions);
+    }
+
+    apply_cursor(ui, frame);
+    actions
+}
+
+fn render_context_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
+    let Some(pos) = frame.context_menu_pos else {
+        return;
+    };
+    let mut close = false;
+    egui::Window::new("Quick Tools")
+        .fixed_pos(Pos2::new(pos[0], pos[1]))
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(false)
+        .show(ui.ctx(), |ui| {
+            ui.set_max_width(320.0);
+            ui.add_enabled_ui(!frame.curation_busy(), |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Spot Heal (J)").clicked() {
                         actions.push(UiAction::ToggleHeal);
@@ -468,42 +560,26 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
                 if response.changed() {
                     actions.push(UiAction::SetHealFeather(feather));
                 }
+                #[cfg(target_os = "windows")]
+                {
+                    ui.separator();
+                    let enabled = frame.current_selection_ready();
+                    let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
+                    open_with.widget_info(|| {
+                        WidgetInfo::labeled(WidgetType::Button, enabled, "Open With...")
+                    });
+                    if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
+                        actions.push(UiAction::OpenWith);
+                        close = true;
+                    }
+                    ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
+                }
             });
+        });
 
-        if close
-            || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui())
-        {
-            actions.push(UiAction::CloseContextMenu);
-        }
+    if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
+        actions.push(UiAction::CloseContextMenu);
     }
-
-    if frame.show_image_info {
-        render_image_info_panel(ui, &mut actions, frame);
-    }
-
-    if frame.show_filmstrip_panel && frame.filmstrip.len() > 1 {
-        render_filmstrip(ui, &mut actions, frame);
-    }
-
-    if frame.show_tools_panel {
-        render_tools_panel(ui, &mut actions, frame);
-    }
-
-    if frame.is_healing {
-        render_heal_panel(ui, &mut actions, frame);
-        render_heal_overlay(ui, frame);
-    }
-
-    if let Some(msg) = &frame.toast {
-        render_toast(ui, msg, frame);
-    }
-
-    if frame.is_cropping {
-        render_crop_overlay(ui, frame, &mut actions);
-    }
-
-    apply_cursor(ui, frame);
-    actions
 }
 
 fn apply_chrome_theme(ctx: &egui::Context, mode: crate::theme::Mode) {
@@ -572,6 +648,15 @@ fn docked_frame(colors: ChromeColors) -> Frame {
         .inner_margin(4.0)
 }
 
+fn configure_top_menu_widgets(ui: &mut egui::Ui, colors: ChromeColors) {
+    ui.spacing_mut().button_padding = Vec2::new(10.0, 4.0);
+    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.hovered.bg_fill = colors.raised;
+    ui.visuals_mut().widgets.hovered.weak_bg_fill = colors.raised;
+    ui.visuals_mut().widgets.active.bg_fill = colors.active;
+}
+
 fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     Panel::top("top_panel")
@@ -579,12 +664,7 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
         .resizable(false)
         .frame(menu_frame(colors))
         .show(ui, |ui| {
-            ui.spacing_mut().button_padding = Vec2::new(10.0, 4.0);
-            ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.hovered.bg_fill = colors.raised;
-            ui.visuals_mut().widgets.hovered.weak_bg_fill = colors.raised;
-            ui.visuals_mut().widgets.active.bg_fill = colors.active;
+            configure_top_menu_widgets(ui, colors);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 file_menu(ui, actions, frame);
@@ -593,28 +673,36 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
                 tools_menu(ui, actions, frame);
                 help_menu(ui, actions);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if frame.load_error.is_some() {
-                        if ui
-                            .add(egui::Button::new("Retry").min_size(Vec2::new(58.0, 30.0)))
-                            .on_hover_text("Retry opening the selected image")
-                            .clicked()
+                    if let Some(status) = frame.curation_status.as_deref() {
+                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+                        add_top_status(ui, status, colors);
+                    } else if frame.has_image && frame.load_error.is_some() {
+                        add_retry_button(ui, actions, frame.selected_file_name.as_deref());
+                        if let Some(status) =
+                            image_open_status(false, true, frame.selected_file_name.as_deref())
                         {
-                            actions.push(UiAction::RetryLoad);
+                            add_top_status(ui, &status, colors);
                         }
-                        ui.label(RichText::new("Open failed").size(12.5).color(colors.muted));
-                    } else if frame.is_loading {
+                    } else if frame.has_image && frame.is_opening {
                         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        ui.label(RichText::new("Opening...").size(12.5).color(colors.muted));
-                    } else if frame.save_busy {
+                        if let Some(status) =
+                            image_open_status(true, false, frame.selected_file_name.as_deref())
+                        {
+                            add_top_status(ui, &status, colors);
+                        }
+                    } else if frame.has_image && frame.is_loading {
                         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        ui.label(RichText::new("Saving...").size(12.5).color(colors.muted));
-                    } else if frame.crop_busy {
+                        add_top_status(ui, "Preparing preview...", colors);
+                    } else if frame.has_image && frame.save_busy {
                         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        ui.label(
-                            RichText::new("Applying crop...")
-                                .size(12.5)
-                                .color(colors.muted),
-                        );
+                        add_top_status(ui, "Saving...", colors);
+                    } else if frame.has_image && frame.crop_busy {
+                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+                        add_top_status(ui, "Applying crop...", colors);
+                    } else if let Some(status) = frame.curation_recovery_status.as_deref() {
+                        add_top_status(ui, status, colors);
+                    } else if frame.external_edit_pending {
+                        add_top_status(ui, EXTERNAL_EDIT_STATUS, colors);
                     }
                     if let Some((i, n)) = frame.playlist_pos {
                         Frame::new()
@@ -630,19 +718,25 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
                             });
                     }
                     let show_details = ui.ctx().content_rect().width() >= 720.0;
+                    let mut has_detail = false;
                     if show_details && frame.has_image {
                         ui.label(
                             RichText::new(format!("{:.0}%", frame.pixel_scale * 100.0))
                                 .size(12.5)
                                 .color(colors.muted),
                         );
+                        has_detail = true;
                     }
                     if show_details && let Some((w, h)) = frame.img_size {
+                        if has_detail {
+                            ui.add_space(TOP_METADATA_GAP);
+                        }
                         ui.label(
                             RichText::new(format!("{w} × {h}"))
                                 .size(12.5)
                                 .color(colors.muted),
                         );
+                        has_detail = true;
                     }
                     if show_details
                         && let Some(name) = frame.file_path.as_ref().and_then(|path| {
@@ -651,6 +745,9 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
                                 .map(|name| name.to_string_lossy().into_owned())
                         })
                     {
+                        if has_detail {
+                            ui.add_space(TOP_METADATA_GAP);
+                        }
                         let response = ui.add(
                             egui::Label::new(RichText::new(&name).size(12.5).color(colors.text))
                                 .truncate(),
@@ -666,20 +763,24 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("File").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(238.0);
-        if ui
-            .add(egui::Button::new("Open File...").shortcut_text(format!("{PRIMARY_MODIFIER}+O")))
-            .clicked()
-        {
+        let open_file = ui
+            .add_enabled(
+                !frame.curation_busy(),
+                egui::Button::new("Open File...").shortcut_text(format!("{PRIMARY_MODIFIER}+O")),
+            )
+            .on_hover_text(OPEN_FILE_SCOPE_HELP);
+        if open_file.clicked() {
             actions.push(UiAction::Open);
             ui.close();
         }
-        if ui
-            .add(
+        let open_folder = ui
+            .add_enabled(
+                !frame.curation_busy(),
                 egui::Button::new("Open Folder...")
                     .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+O")),
             )
-            .clicked()
-        {
+            .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+        if open_folder.clicked() {
             actions.push(UiAction::OpenFolder);
             ui.close();
         }
@@ -692,6 +793,19 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         {
             actions.push(UiAction::Reload);
             ui.close();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let open_with = ui
+                .add_enabled(
+                    frame.current_selection_ready(),
+                    egui::Button::new("Open With..."),
+                )
+                .on_hover_text(OPEN_WITH_HELP);
+            if open_with.clicked() {
+                actions.push(UiAction::OpenWith);
+                ui.close();
+            }
         }
         if ui
             .add_enabled(
@@ -707,28 +821,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         ui.separator();
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
-                egui::Button::new("Flag for review").shortcut_text("X"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ToggleFlag);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                frame.flag_count > 0 && !frame.save_busy && !frame.crop_busy && !frame.heal_busy,
-                egui::Button::new(format!("Move {} flagged to Trash", frame.flag_count))
-                    .shortcut_text("B"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::TrashFlagged);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                frame.current_selection_ready(),
+                frame.trash_move_ready(),
                 egui::Button::new("Move to Trash").shortcut_text("Delete"),
             )
             .clicked()
@@ -738,7 +831,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                frame.current_selection_ready() && !frame.heal_busy,
                 egui::Button::new("Permanently Delete...").shortcut_text("Shift+Delete"),
             )
             .clicked()
@@ -746,14 +839,22 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             actions.push(UiAction::PermanentDelete);
             ui.close();
         }
-        if ui
-            .add(egui::Button::new("Undo Trash").shortcut_text("U"))
-            .clicked()
-        {
-            actions.push(UiAction::UndoTrash);
-            ui.close();
-        }
+        undo_trash_menu_item(ui, actions, frame);
     });
+}
+
+fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let label = "Undo Trash";
+    let unsettled = frame.curation_busy() || frame.restore_recovery_unsettled;
+    let help = trash_undo_help(frame.can_undo_trash, unsettled);
+    let enabled = frame.trash_undo_ready();
+    let response = ui.add_enabled(enabled, egui::Button::new(label).shortcut_text("U"));
+    let accessible_label = trash_undo_accessible_label(frame.can_undo_trash, unsettled);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, &accessible_label));
+    if response.on_hover_text(help).clicked() {
+        actions.push(UiAction::UndoTrash);
+        ui.close();
+    }
 }
 
 fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -914,6 +1015,106 @@ fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &
     }
 }
 
+fn add_top_status(ui: &mut egui::Ui, status: &str, colors: ChromeColors) {
+    let responsive_limit = if ui.ctx().content_rect().width() < 720.0 {
+        TOP_STATUS_COMPACT_MAX_WIDTH
+    } else {
+        TOP_STATUS_MAX_WIDTH
+    };
+    let max_width = ui.available_width().min(responsive_limit);
+    ui.scope(|ui| {
+        ui.set_max_width(max_width);
+        let response = ui.add(
+            egui::Label::new(RichText::new(status).size(12.5).color(colors.muted))
+                .truncate()
+                .show_tooltip_when_elided(true),
+        );
+        mark_as_polite_status(&response);
+    });
+}
+
+fn mark_as_polite_status(response: &egui::Response) {
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_live(egui::accesskit::Live::Polite);
+    });
+}
+
+fn image_open_status(
+    is_opening: bool,
+    has_error: bool,
+    selected_file_name: Option<&str>,
+) -> Option<String> {
+    let subject = selected_file_name.unwrap_or("image");
+    if has_error {
+        Some(format!("Could not open {subject}"))
+    } else if is_opening {
+        Some(format!("Opening {subject}"))
+    } else {
+        None
+    }
+}
+
+fn retry_open_label(selected_file_name: Option<&str>) -> String {
+    format!("Retry opening {}", selected_file_name.unwrap_or("image"))
+}
+
+fn trash_undo_help(can_undo: bool, unsettled: bool) -> &'static str {
+    if unsettled {
+        "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
+    } else if can_undo {
+        "Restores the latest safely recoverable Trash action. It may belong to another folder."
+    } else {
+        "No safely recoverable Trash action is available."
+    }
+}
+
+fn trash_undo_accessible_label(can_undo: bool, unsettled: bool) -> String {
+    if !can_undo && !unsettled {
+        "Undo Trash".to_owned()
+    } else {
+        format!("Undo Trash. {}", trash_undo_help(can_undo, unsettled))
+    }
+}
+
+fn appearance_menu_label(preference: crate::theme::Preference) -> String {
+    format!("Appearance: {}", preference.name())
+}
+
+fn add_retry_button(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    selected_file_name: Option<&str>,
+) {
+    let label = retry_open_label(selected_file_name);
+    let response = ui
+        .add(egui::Button::new("Retry").min_size(Vec2::new(58.0, 30.0)))
+        .on_hover_text(&label);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
+    if response.clicked() {
+        actions.push(UiAction::RetryLoad);
+    }
+}
+
+fn add_empty_retry_button(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    selected_file_name: Option<&str>,
+    colors: ChromeColors,
+) {
+    let label = retry_open_label(selected_file_name);
+    let response = ui
+        .add(
+            egui::Button::new(RichText::new("Retry").color(colors.accent_ink))
+                .fill(colors.accent)
+                .min_size(Vec2::new(92.0, 36.0)),
+        )
+        .on_hover_text(&label);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
+    if response.clicked() {
+        actions.push(UiAction::RetryLoad);
+    }
+}
+
 fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("View").size(13.5).color(colors.text), |ui| {
@@ -975,8 +1176,8 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         ui.menu_button("Image Background", |ui| {
             background_menu(ui, actions, frame.background_override);
         });
-        ui.menu_button("Appearance", |ui| {
-            appearance_menu(ui, actions, frame.theme_preference);
+        ui.menu_button(appearance_menu_label(frame.theme_preference), |ui| {
+            appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
         });
     });
 }
@@ -1007,11 +1208,19 @@ fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOw
         ),
     ];
     for (label, shortcut, enabled, selected, action) in choices {
-        let mut checked = selected;
         let response = ui
-            .add_enabled(enabled, egui::Checkbox::new(&mut checked, label))
-            .on_hover_text(format!("{label} ({shortcut})"));
-        if response.changed() {
+            .add_enabled(
+                enabled,
+                egui::Button::new(label)
+                    .shortcut_text(shortcut)
+                    .selected(selected)
+                    .min_size(Vec2::new(ui.available_width(), 0.0)),
+            )
+            .on_hover_text(format!("Toggle {label} ({shortcut})"));
+        response.ctx.accesskit_node_builder(response.id, |node| {
+            node.set_keyboard_shortcut(shortcut);
+        });
+        if response.clicked() {
             actions.push(action);
             ui.close();
         }
@@ -1091,16 +1300,64 @@ fn appearance_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     current: crate::theme::Preference,
+    resolved: crate::theme::Mode,
 ) {
-    ui.set_min_width(172.0);
-    let choices = [
-        (crate::theme::Preference::System, "System"),
-        (crate::theme::Preference::Light, "Light"),
-        (crate::theme::Preference::Dark, "Dark"),
-        (crate::theme::Preference::Console, "Console"),
-    ];
-    for (preference, label) in choices {
-        if ui.radio(current == preference, label).clicked() {
+    const MENU_WIDTH: f32 = 320.0;
+    const TEXT_WIDTH: f32 = 282.0;
+    let colors = chrome_colors(ui);
+    ui.set_width(MENU_WIDTH);
+    ui.add(
+        egui::Label::new(
+            RichText::new(APPEARANCE_SCOPE_HELP)
+                .size(11.5)
+                .color(colors.muted),
+        )
+        .wrap(),
+    );
+    ui.separator();
+    let current_system_mode = (current == crate::theme::Preference::System).then_some(resolved);
+    for preference in crate::theme::Preference::ALL {
+        let description = preference.description(current_system_mode);
+        let mut label = LayoutJob::default();
+        label.wrap.max_width = TEXT_WIDTH;
+        label.append(
+            preference.name(),
+            0.0,
+            TextFormat {
+                font_id: FontId::proportional(13.0),
+                color: colors.text,
+                ..TextFormat::default()
+            },
+        );
+        label.append(
+            "\n",
+            0.0,
+            TextFormat {
+                font_id: FontId::proportional(11.5),
+                color: colors.muted,
+                ..TextFormat::default()
+            },
+        );
+        label.append(
+            &description,
+            0.0,
+            TextFormat {
+                font_id: FontId::proportional(11.5),
+                color: colors.muted,
+                ..TextFormat::default()
+            },
+        );
+        let accessibility_label = preference.accessible_label(current_system_mode);
+        let response = ui.add(egui::RadioButton::new(current == preference, label));
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                current == preference,
+                &accessibility_label,
+            )
+        });
+        if response.clicked() {
             actions.push(UiAction::SetTheme(preference));
             ui.close();
         }
@@ -1111,6 +1368,15 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("Help").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(180.0);
+        if ui
+            .button("Update viewr...")
+            .on_hover_text("Show local update instructions. No network check or download.")
+            .clicked()
+        {
+            actions.push(UiAction::ShowUpdate);
+            ui.close();
+        }
+        ui.separator();
         if ui.button("About viewr").clicked() {
             actions.push(UiAction::ShowAbout);
             ui.close();
@@ -1199,32 +1465,109 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     }
 }
 
-fn render_empty_state(
-    ui: &mut egui::Ui,
-    actions: &mut Vec<UiAction>,
-    is_loading: bool,
-    load_error: Option<&str>,
-) {
+fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+    let colors = chrome_colors(ui);
+    let mut close_clicked = false;
+    let response = egui::Modal::new(egui::Id::new("update_viewr"))
+        .backdrop_color(Color32::from_black_alpha(140))
+        .frame(
+            Frame::new()
+                .fill(colors.panel)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20)),
+        )
+        .show(ui.ctx(), |ui| {
+            ui.set_max_width(440.0);
+            ui.vertical(|ui| {
+                ui.heading(RichText::new("Update viewr").size(26.0).color(colors.text));
+                ui.label(
+                    RichText::new(format!("Current version: {}", env!("CARGO_PKG_VERSION")))
+                        .size(13.0)
+                        .color(colors.muted),
+                );
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("viewr does not check, download, or install updates.")
+                        .size(13.0)
+                        .color(colors.text),
+                );
+                ui.label(
+                    RichText::new("No verified public update source is configured for this build.")
+                        .size(13.0)
+                        .color(colors.muted),
+                );
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(
+                        "Return to the trusted source or package channel from which you obtained viewr. For a source checkout, close viewr and run:",
+                    )
+                    .size(13.0)
+                    .color(colors.text),
+                );
+                Frame::new()
+                    .fill(colors.raised)
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new("cargo build --release --workspace --locked")
+                                .monospace()
+                                .size(12.0)
+                                .color(colors.text),
+                        );
+                    });
+                ui.label(
+                    RichText::new(
+                        "Keep viewr and viewr-decode from the same trusted build side by side.",
+                    )
+                    .size(12.0)
+                    .color(colors.muted),
+                );
+                ui.add_space(14.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+        });
+    response.response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Window,
+            true,
+            "Update viewr. Local instructions only. No network check, download, or install.",
+        )
+    });
+    if close_clicked || response.should_close() {
+        actions.push(UiAction::CloseUpdate);
+    }
+}
+
+fn render_empty_state(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let is_opening = frame.is_opening;
+    let load_error = frame.load_error.as_deref();
+    let selected_file_name = frame.selected_file_name.as_deref();
     let colors = chrome_colors(ui);
     let screen = ui.ctx().content_rect();
     let card_width = (screen.width() - 40.0).clamp(280.0, 420.0);
-    let card_height = if is_loading { 188.0 } else { 250.0 };
-    let card_rect = Rect::from_center_size(screen.center(), Vec2::new(card_width, card_height));
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .id_salt("empty_state")
-            .max_rect(card_rect)
-            .layout(egui::Layout::top_down(egui::Align::Center)),
-        |ui| {
-            ui.set_min_width(card_width);
-            Frame::new()
+    Area::new("empty_state".into())
+        .fixed_pos(screen.center())
+        .pivot(Align2::CENTER_CENTER)
+        .constrain_to(screen)
+        .movable(false)
+        .fade_in(false)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            ui.set_width(card_width);
+            let card = Frame::new()
                 .fill(colors.panel)
                 .corner_radius(CornerRadius::same(12))
                 .stroke(Stroke::new(1.0, colors.border))
                 .inner_margin(egui::Margin::symmetric(28, 24))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        if is_loading {
+                        if is_opening {
                             ui.add(egui::Spinner::new().size(28.0).color(colors.accent));
                         } else {
                             let (icon_rect, _) =
@@ -1232,72 +1575,81 @@ fn render_empty_state(
                             paint_empty_image_icon(ui.painter(), icon_rect, colors);
                         }
                         ui.add_space(12.0);
-                        ui.label(
-                            RichText::new(if is_loading {
-                                "Opening image"
-                            } else if load_error.is_some() {
-                                "Could not open image"
-                            } else {
-                                "Open an image"
-                            })
-                            .size(20.0)
-                            .color(colors.text)
-                            .strong(),
+                        let heading =
+                            image_open_status(is_opening, load_error.is_some(), selected_file_name)
+                                .unwrap_or_else(|| "Open an image".to_owned());
+                        let heading_response = ui.add(
+                            egui::Label::new(
+                                RichText::new(&heading)
+                                    .size(20.0)
+                                    .color(colors.text)
+                                    .strong(),
+                            )
+                            .truncate()
+                            .show_tooltip_when_elided(true),
                         );
+                        if is_opening || load_error.is_some() {
+                            mark_as_polite_status(&heading_response);
+                        }
                         ui.add_space(8.0);
-                        let description = if is_loading {
+                        let description = if is_opening {
                             "Decoding locally while the window stays responsive."
                         } else {
-                            load_error
-                                .unwrap_or("Drop a file or folder here, or choose where to start.")
+                            load_error.unwrap_or(OPEN_SCOPE_SUMMARY)
                         };
                         ui.label(RichText::new(description).size(13.0).color(colors.muted));
-                        if !is_loading {
-                            ui.add_space(16.0);
-                            ui.horizontal_centered(|ui| {
-                                if load_error.is_some()
-                                    && ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new("Retry").color(colors.accent_ink),
-                                            )
-                                            .fill(colors.accent)
-                                            .min_size(Vec2::new(92.0, 36.0)),
-                                        )
-                                        .clicked()
-                                {
-                                    actions.push(UiAction::RetryLoad);
-                                }
-                                if ui
-                                    .add(
-                                        egui::Button::new("Open File")
-                                            .min_size(Vec2::new(116.0, 36.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    actions.push(UiAction::Open);
-                                }
-                                if ui
-                                    .add(
-                                        egui::Button::new("Open Folder")
-                                            .min_size(Vec2::new(116.0, 36.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    actions.push(UiAction::OpenFolder);
-                                }
-                            });
-                            ui.add_space(12.0);
+                        if !is_opening {
+                            render_empty_state_actions(ui, actions, frame, colors);
                         }
                         ui.label(
-                            RichText::new("Maximum privacy. It just works.")
+                            RichText::new(LOCAL_PRIVACY_SUMMARY)
                                 .size(12.0)
                                 .color(colors.muted),
                         );
                     });
                 });
-        },
-    );
+            card.response.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Panel, true, "Open an image source")
+            });
+        });
+}
+
+fn render_empty_state_actions(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
+    let load_error = frame.load_error.as_deref();
+    let selected_file_name = frame.selected_file_name.as_deref();
+    let curation_busy = frame.curation_busy();
+    ui.add_space(16.0);
+    ui.horizontal(|ui| {
+        if load_error.is_some() {
+            ui.add_enabled_ui(!curation_busy, |ui| {
+                add_empty_retry_button(ui, actions, selected_file_name, colors);
+            });
+        }
+        let open_file = ui
+            .add_enabled(
+                !curation_busy,
+                egui::Button::new("Open File").min_size(Vec2::new(116.0, 36.0)),
+            )
+            .on_hover_text(OPEN_FILE_SCOPE_HELP);
+        if open_file.clicked() {
+            actions.push(UiAction::Open);
+        }
+        let open_folder = ui
+            .add_enabled(
+                !curation_busy,
+                egui::Button::new("Open Folder").min_size(Vec2::new(116.0, 36.0)),
+            )
+            .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+        if open_folder.clicked() {
+            actions.push(UiAction::OpenFolder);
+        }
+    });
+    ui.add_space(12.0);
 }
 
 fn paint_empty_image_icon(painter: &egui::Painter, rect: Rect, colors: ChromeColors) {
@@ -1344,7 +1696,8 @@ fn render_image_info_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame
             });
             render_file_info(ui, actions, frame);
             render_capture_info(ui, frame);
-            render_review_and_privacy(ui, actions, frame);
+            render_source_privacy(ui, frame);
+            render_export_privacy(ui, actions, frame);
         });
 }
 
@@ -1448,32 +1801,80 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         "Settings",
         (!settings.is_empty()).then_some(settings.as_str()),
     );
-    if details.has_location {
-        ui.label(RichText::new("GPS location is present in the source").color(colors.muted));
-    }
 }
 
-fn render_review_and_privacy(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_source_privacy(ui: &mut egui::Ui, frame: &UiFrameOwned) {
+    let Some(details) = frame.details.as_ref() else {
+        return;
+    };
     let colors = chrome_colors(ui);
     ui.add_space(8.0);
     ui.separator();
-    ui.label(RichText::new("Review").color(colors.muted).small().strong());
+    ui.label(RichText::new("Source Privacy").color(colors.text).strong());
+    ui.add_space(4.0);
+    if details.exif_tag_count == 0 {
+        ui.label(RichText::new("No supported EXIF detected.").color(colors.muted));
+    } else {
+        let noun = if details.exif_tag_count == 1 {
+            "tag"
+        } else {
+            "tags"
+        };
+        ui.label(
+            RichText::new(format!(
+                "{} supported EXIF {noun} detected.",
+                details.exif_tag_count
+            ))
+            .color(colors.muted),
+        );
+        let categories = source_privacy_categories(details);
+        if categories.is_empty() {
+            ui.label(
+                RichText::new("No common identity or location fields detected.")
+                    .color(colors.muted),
+            );
+        } else {
+            for category in categories {
+                ui.label(RichText::new(format!("Present: {category}")).color(colors.text));
+            }
+            ui.label(
+                RichText::new("Presence only. Sensitive values stay hidden on screen.")
+                    .size(11.0)
+                    .color(colors.muted),
+            );
+        }
+    }
     ui.add_space(4.0);
     ui.label(
-        RichText::new(if frame.is_flagged {
-            "Flagged for review"
-        } else {
-            "Not flagged"
-        })
-        .color(if frame.is_flagged {
-            colors.accent
-        } else {
-            colors.muted
-        }),
+        RichText::new("Limited EXIF scan. Other metadata or hidden pixel data may still exist.")
+            .size(11.0)
+            .color(colors.muted),
     );
-    ui.label(
-        RichText::new(format!("{} flagged in this folder", frame.flag_count)).color(colors.muted),
-    );
+}
+
+fn source_privacy_categories(details: &crate::image_info::ImageDetails) -> Vec<&'static str> {
+    [
+        (details.has_location, "location-related data"),
+        (details.has_owner_or_author, "owner or author data"),
+        (
+            details.has_device_identifier,
+            "camera, lens, or image identifiers",
+        ),
+        (
+            details.has_description_or_comment,
+            "description or comment data",
+        ),
+        (details.has_software_history, "software history"),
+        (details.has_embedded_thumbnail, "embedded thumbnail"),
+        (details.has_maker_specific_data, "maker-specific data"),
+    ]
+    .into_iter()
+    .filter_map(|(present, label)| present.then_some(label))
+    .collect()
+}
+
+fn render_export_privacy(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let colors = chrome_colors(ui);
     ui.add_space(8.0);
     ui.separator();
     ui.label(RichText::new("Export Privacy").color(colors.text).strong());
@@ -1505,7 +1906,6 @@ fn has_camera_details(details: &crate::image_info::ImageDetails) -> bool {
         || details.aperture.is_some()
         || details.iso.is_some()
         || details.focal_length.is_some()
-        || details.has_location
 }
 
 fn image_detail_value(ui: &mut egui::Ui, label: &str, value: Option<&str>) {
@@ -1524,7 +1924,6 @@ enum ToolIcon {
     FlipV,
     Crop,
     Heal,
-    Flag,
 }
 
 #[derive(Clone, Copy)]
@@ -1667,15 +2066,6 @@ fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                                 actions.push(UiAction::ToggleHeal);
                             });
                         });
-                        icon_btn(
-                            ui,
-                            ToolIcon::Flag,
-                            "Flag for review (X)",
-                            frame.is_flagged,
-                            || {
-                                actions.push(UiAction::ToggleFlag);
-                            },
-                        );
                         });
                     });
                 }
@@ -1795,17 +2185,6 @@ fn paint_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color3
                 stroke,
             );
             painter.circle_filled(c + Vec2::new(s * 0.82, -s * 0.82), 1.8, color);
-        }
-        ToolIcon::Flag => {
-            let points = [
-                c + Vec2::new(-s * 0.5, s),
-                c + Vec2::new(-s * 0.5, -s),
-                c + Vec2::new(s * 0.6, -s * 0.55),
-                c + Vec2::new(-s * 0.5, -s * 0.1),
-            ];
-            painter.line_segment([points[0], points[1]], stroke);
-            painter.line_segment([points[1], points[2]], stroke);
-            painter.line_segment([points[2], points[3]], stroke);
         }
     }
 }
@@ -1970,13 +2349,12 @@ fn render_heal_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         painter.circle_filled(Pos2::new(point[0], point[1]), radius, mask);
     }
     for pair in frame.heal_stroke_screen.windows(2) {
-        painter.line_segment(
-            [
-                Pos2::new(pair[0][0], pair[0][1]),
-                Pos2::new(pair[1][0], pair[1][1]),
-            ],
-            Stroke::new(radius * 2.0, mask),
-        );
+        if let [a, b] = pair {
+            painter.line_segment(
+                [Pos2::new(a[0], a[1]), Pos2::new(b[0], b[1])],
+                Stroke::new(radius * 2.0, mask),
+            );
+        }
     }
     if !frame.heal_busy
         && let Some(cursor) = frame.heal_cursor_screen
@@ -2036,11 +2414,13 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            ui.horizontal_centered(|ui| {
-                                ui.spacing_mut().item_spacing.x = 8.0;
-                                for item in &frame.filmstrip {
-                                    render_filmstrip_item(ui, actions, item, current);
-                                }
+                            ui.add_enabled_ui(!frame.curation_busy(), |ui| {
+                                ui.horizontal_centered(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+                                    for item in &frame.filmstrip {
+                                        render_filmstrip_item(ui, actions, item, current);
+                                    }
+                                });
                             });
                         });
                 });
@@ -2071,8 +2451,6 @@ fn render_filmstrip_item(
     let selected = current == Some(item.index);
     let border = if selected {
         Stroke::new(2.0, colors.accent)
-    } else if item.flagged {
-        Stroke::new(1.0, with_alpha(colors.accent, 180))
     } else {
         Stroke::new(1.0, colors.border)
     };
@@ -2084,12 +2462,7 @@ fn render_filmstrip_item(
     } else {
         colors.panel
     };
-    let accessibility_label = format!(
-        "{}image {}: {}",
-        if item.flagged { "Flagged " } else { "" },
-        item.index + 1,
-        item.name
-    );
+    let accessibility_label = format!("image {}: {}", item.index + 1, item.name);
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::Button,
@@ -2136,9 +2509,6 @@ fn render_filmstrip_item(
             egui::FontId::proportional(14.0),
             colors.muted,
         );
-    }
-    if item.flagged {
-        painter.circle_filled(rect.right_top() + Vec2::new(-9.0, 9.0), 4.0, colors.accent);
     }
     if response.clicked() {
         actions.push(UiAction::NavigateTo(item.index));
@@ -2459,18 +2829,32 @@ fn render_crop_dimensions_and_move(
         colors.text,
     );
 
-    let visible_rect = rect.shrink(10.0).intersect(image_viewport);
-    if !visible_rect.is_positive() {
+    let drag_rect = rect.shrink(10.0).intersect(image_viewport);
+    let can_drag = drag_rect.is_positive();
+    let semantic_rect = if can_drag {
+        drag_rect
+    } else {
+        rect.intersect(image_viewport)
+    };
+    if !semantic_rect.is_positive() {
         return;
     }
-    let response = ui
-        .interact(
-            visible_rect,
-            egui::Id::new("crop_rect_sense"),
-            Sense::drag(),
-        )
-        .on_hover_cursor(CursorIcon::Grab);
-    if response.dragged()
+    let response = ui.interact(
+        semantic_rect,
+        egui::Id::new("crop_rect_sense"),
+        if can_drag {
+            Sense::drag()
+        } else {
+            Sense::hover()
+        },
+    );
+    let response = if can_drag {
+        response.on_hover_cursor(CursorIcon::Grab)
+    } else {
+        response
+    };
+    if can_drag
+        && response.dragged()
         && let Some(pointer) = response.interact_pointer_pos()
     {
         let delta = response.drag_delta();
@@ -2482,14 +2866,24 @@ fn render_crop_dimensions_and_move(
         }
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
     }
-    let accessibility_label = format!(
-        "Crop selection: {pixel_width} by {pixel_height} output pixels, source starts at x \
-         {pixel_x}, y {pixel_y}. Drag inside to move. Arrow keys move; Shift plus Arrow \
-         keys resize."
-    );
+    let accessibility_label =
+        crop_accessibility_label((pixel_x, pixel_y, pixel_width, pixel_height), can_drag);
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::Panel, ui.is_enabled(), &accessibility_label)
     });
+}
+
+fn crop_accessibility_label(bounds: (u32, u32, u32, u32), can_drag: bool) -> String {
+    let (pixel_x, pixel_y, pixel_width, pixel_height) = bounds;
+    let controls = if can_drag {
+        "Drag inside to move. Arrow keys move; Shift plus Arrow keys resize."
+    } else {
+        "Arrow keys move; Shift plus Arrow keys resize."
+    };
+    format!(
+        "Crop selection: {pixel_width} by {pixel_height} output pixels, source starts at x \
+         {pixel_x}, y {pixel_y}. {controls}"
+    )
 }
 
 fn crop_pixel_bounds(
@@ -2576,11 +2970,16 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "windows")]
+    use super::OPEN_WITH_HELP;
     use super::{
-        ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
-        FilmstripItem, HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, TOOLS_PANEL_WIDTH,
-        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, UiAction, UiFrameOwned, chrome_colors_for,
-        crop_pixel_bounds, render, viewport_insets,
+        APPEARANCE_SCOPE_HELP, ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT,
+        FILMSTRIP_RAIL_HEIGHT, FilmstripItem, HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH,
+        LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH,
+        TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, appearance_menu,
+        appearance_menu_label, chrome_colors_for, crop_pixel_bounds, image_open_status,
+        panels_menu, render, retry_open_label, trash_undo_accessible_label, trash_undo_help,
+        undo_trash_menu_item, viewport_insets,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -2616,6 +3015,8 @@ mod tests {
             theme_preference: crate::theme::Preference::System,
             theme_mode: crate::theme::Mode::Dark,
             show_about: false,
+            show_update: false,
+            external_edit_pending: false,
             show_tools_panel: true,
             tools_panel_open: true,
             tools_panel_side: DockSide::Left,
@@ -2623,6 +3024,7 @@ mod tests {
             filmstrip_panel_open: true,
             image_info_side: DockSide::Right,
             file_path: Some("C:/photos/current.png".to_owned()),
+            selected_file_name: Some("current.png".to_owned()),
             img_size: Some((1920, 1080)),
             animation: None,
             details: None,
@@ -2638,14 +3040,18 @@ mod tests {
             heal_source: Some((0, 4)),
             can_undo_edit: false,
             can_redo_edit: false,
+            can_undo_trash: true,
+            restore_recovery_unsettled: false,
             is_panning: false,
-            is_flagged: false,
-            flag_count: 1,
             has_image: true,
             is_loading: false,
+            is_opening: false,
             load_error: None,
             save_busy: false,
             crop_busy: false,
+            curation_status: None,
+            curation_recovery_status: None,
+            folder_scan_busy: false,
             playlist_pos: Some((1, 2)),
             pixel_scale: 1.0,
             toast: None,
@@ -2653,13 +3059,11 @@ mod tests {
                 FilmstripItem {
                     index: 0,
                     name: "current.png".to_owned(),
-                    flagged: false,
                     texture: None,
                 },
                 FilmstripItem {
                     index: 1,
-                    name: "flagged.png".to_owned(),
-                    flagged: true,
+                    name: "second.png".to_owned(),
                     texture: None,
                 },
             ],
@@ -2674,6 +3078,244 @@ mod tests {
         }
     }
 
+    #[test]
+    fn trash_undo_copy_reports_availability_without_batch_counts() {
+        assert_eq!(
+            trash_undo_help(false, false),
+            "No safely recoverable Trash action is available."
+        );
+        assert_eq!(
+            trash_undo_help(true, false),
+            "Restores the latest safely recoverable Trash action. It may belong to another folder."
+        );
+        assert_eq!(
+            trash_undo_help(true, true),
+            "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
+        );
+        assert_eq!(trash_undo_accessible_label(false, false), "Undo Trash");
+        assert_eq!(
+            trash_undo_accessible_label(true, false),
+            "Undo Trash. Restores the latest safely recoverable Trash action. It may belong to another folder."
+        );
+        assert_eq!(
+            trash_undo_accessible_label(true, true),
+            "Undo Trash. Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
+        );
+    }
+
+    #[test]
+    fn trash_undo_label_fits_its_menu_and_accessibility_node() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = accessibility_test_frame();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(238.0, 80.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
+        let output = context.run_ui(input, |ui| {
+            let mut actions = Vec::new();
+            undo_trash_menu_item(ui, &mut actions, &frame);
+            assert!(actions.is_empty());
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let node = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.label()
+                    == Some(
+                        "Undo Trash. Restores the latest safely recoverable Trash action. It may belong to another folder.",
+                    )
+            })
+            .expect("Undo Trash action");
+
+        assert_eq!(node.role(), egui::accesskit::Role::Button);
+        assert!(!node.is_disabled());
+        let bounds = node.bounds().expect("Undo Trash action bounds");
+        assert!(bounds.x0 >= 0.0 && bounds.x1 <= 238.0);
+        assert!(bounds.y0 >= 0.0 && bounds.y1 <= 80.0);
+    }
+
+    #[test]
+    fn trash_and_restore_are_disabled_during_conflicting_visible_work() {
+        let mut frame = accessibility_test_frame();
+        assert!(frame.trash_move_ready());
+        assert!(frame.trash_undo_ready());
+
+        frame.restore_recovery_unsettled = true;
+        assert!(frame.current_selection_ready());
+        assert!(!frame.trash_move_ready());
+        assert!(frame.trash_undo_ready());
+        frame.restore_recovery_unsettled = false;
+
+        frame.is_loading = true;
+        assert!(!frame.trash_move_ready());
+        assert!(!frame.trash_undo_ready());
+        frame.is_loading = false;
+        frame.crop_busy = true;
+        assert!(!frame.trash_move_ready());
+        assert!(!frame.trash_undo_ready());
+        frame.crop_busy = false;
+        frame.save_busy = true;
+        assert!(!frame.trash_move_ready());
+        assert!(!frame.trash_undo_ready());
+        frame.save_busy = false;
+        frame.heal_busy = true;
+        assert!(!frame.trash_move_ready());
+        assert!(!frame.trash_undo_ready());
+        frame.heal_busy = false;
+        frame.is_healing = true;
+        assert!(frame.current_selection_ready());
+        assert!(!frame.trash_undo_ready());
+        frame.is_healing = false;
+        frame.is_cropping = true;
+        assert!(!frame.trash_undo_ready());
+        frame.is_cropping = false;
+        frame.folder_scan_busy = true;
+        assert!(!frame.trash_undo_ready());
+        frame.folder_scan_busy = false;
+        frame.curation_status = Some("Restoring 1 file from Trash...".to_owned());
+        assert!(!frame.trash_undo_ready());
+        assert!(!frame.current_selection_ready());
+    }
+
+    #[test]
+    fn active_curation_is_a_polite_status_and_disables_conflicting_surface_actions() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        let status = "Restoring 1 file from Trash...";
+        frame.curation_status = Some(status.to_owned());
+        frame.context_menu_pos = Some([100.0, 100.0]);
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+
+        assert!(nodes.iter().any(|node| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(status)
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+        for label in [
+            "image 1: current.png",
+            "image 2: second.png",
+            "Spot Heal (J)",
+            "Crop (C)",
+        ] {
+            let node = nodes
+                .iter()
+                .find(|node| node.label() == Some(label))
+                .unwrap_or_else(|| panic!("missing curation control: {label}"));
+            assert!(
+                node.is_disabled(),
+                "curation control stayed enabled: {label}"
+            );
+        }
+        let inspection_control = nodes
+            .iter()
+            .find(|node| node.label() == Some("Collapse folder previews"))
+            .expect("missing non-mutating folder preview control");
+        assert!(
+            !inspection_control.is_disabled(),
+            "non-mutating folder preview control was disabled"
+        );
+
+        let empty_context = egui::Context::default();
+        empty_context.enable_accesskit();
+        frame.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.filmstrip.clear();
+        let empty_output = empty_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let empty_update = empty_output
+            .platform_output
+            .accesskit_update
+            .expect("empty-state AccessKit update should be generated");
+        for label in ["Open File", "Open Folder"] {
+            let node = empty_update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.label() == Some(label))
+                .unwrap_or_else(|| panic!("missing empty-state curation control: {label}"));
+            assert!(
+                node.is_disabled(),
+                "curation control stayed enabled: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn curation_recovery_is_polite_and_yields_to_current_load_failure() {
+        let recovery_context = egui::Context::default();
+        recovery_context.enable_accesskit();
+        let mut recovery_frame = accessibility_test_frame();
+        let recovery =
+            "Trash restore stopped unexpectedly. Review the folder and system Trash, then retry U.";
+        recovery_frame.curation_recovery_status = Some(recovery.to_owned());
+        let recovery_output = recovery_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &recovery_frame);
+        });
+        let recovery_update = recovery_output
+            .platform_output
+            .accesskit_update
+            .expect("recovery AccessKit update should be generated");
+        assert!(
+            recovery_update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .any(|node| {
+                    node.value() == Some(recovery)
+                        && node.live() == Some(egui::accesskit::Live::Polite)
+                })
+        );
+
+        let load_failure_context = egui::Context::default();
+        load_failure_context.enable_accesskit();
+        recovery_frame.load_error = Some("controlled load failure".to_owned());
+        let load_failure_output = load_failure_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &recovery_frame);
+        });
+        let load_failure_update = load_failure_output
+            .platform_output
+            .accesskit_update
+            .expect("load-failure AccessKit update should be generated");
+        let load_failure_nodes = load_failure_update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        assert!(
+            load_failure_nodes
+                .iter()
+                .any(|node| node.label() == Some("Retry opening current.png"))
+        );
+        assert!(load_failure_nodes.iter().any(|node| {
+            node.value() == Some("Could not open current.png")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
     fn accessibility_input() -> egui::RawInput {
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -2682,6 +3324,22 @@ mod tests {
             )),
             ..egui::RawInput::default()
         }
+    }
+
+    fn assert_accesskit_node_within(
+        name: &str,
+        node: &egui::accesskit::Node,
+        container: &egui::accesskit::Node,
+    ) {
+        let bounds = node.bounds().expect("accessible node bounds");
+        let container_bounds = container.bounds().expect("accessible container bounds");
+        assert!(
+            bounds.x0 >= container_bounds.x0
+                && bounds.x1 <= container_bounds.x1
+                && bounds.y0 >= container_bounds.y0
+                && bounds.y1 <= container_bounds.y1,
+            "{name} escaped its container: {bounds:?} outside {container_bounds:?}"
+        );
     }
 
     #[test]
@@ -2710,8 +3368,6 @@ mod tests {
         let _ = UiAction::RedoEdit;
         let _ = UiAction::Navigate(1);
         let _ = UiAction::NavigateTo(0);
-        let _ = UiAction::ToggleFlag;
-        let _ = UiAction::TrashFlagged;
         let _ = UiAction::PermanentDelete;
         let _ = UiAction::ToggleImageInfo;
         let _ = UiAction::ToggleAnimationPlayback;
@@ -2729,6 +3385,8 @@ mod tests {
         let _ = UiAction::SetTheme(crate::theme::Preference::Console);
         let _ = UiAction::ShowAbout;
         let _ = UiAction::CloseAbout;
+        let _ = UiAction::ShowUpdate;
+        let _ = UiAction::CloseUpdate;
     }
 
     #[test]
@@ -2826,6 +3484,251 @@ mod tests {
     }
 
     #[test]
+    fn open_status_copy_names_only_an_active_or_failed_target() {
+        assert_eq!(
+            image_open_status(true, false, Some("target.png")).as_deref(),
+            Some("Opening target.png")
+        );
+        assert_eq!(
+            image_open_status(false, true, Some("target.png")).as_deref(),
+            Some("Could not open target.png")
+        );
+        assert_eq!(
+            image_open_status(true, false, None).as_deref(),
+            Some("Opening image")
+        );
+        assert_eq!(image_open_status(false, false, Some("target.png")), None);
+        assert_eq!(
+            retry_open_label(Some("target.png")),
+            "Retry opening target.png"
+        );
+        assert_eq!(retry_open_label(None), "Retry opening image");
+    }
+
+    #[test]
+    fn appearance_parent_label_exposes_the_current_preference() {
+        for (preference, expected) in [
+            (crate::theme::Preference::System, "Appearance: System"),
+            (crate::theme::Preference::Light, "Appearance: Light"),
+            (crate::theme::Preference::Dark, "Appearance: Dark"),
+            (crate::theme::Preference::Console, "Appearance: Console"),
+        ] {
+            assert_eq!(appearance_menu_label(preference), expected);
+        }
+    }
+
+    #[test]
+    fn replacement_status_names_selected_target_and_keeps_presented_identity() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.file_path = Some("C:/photos/presented.png".to_owned());
+        frame.selected_file_name = Some("target.png".to_owned());
+        frame.is_loading = true;
+        frame.is_opening = true;
+        frame.playlist_pos = Some((2, 2));
+
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let labels = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        let values = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+
+        assert!(
+            values.contains(&"Opening target.png"),
+            "status should name the selected target: labels={labels:?}, values={values:?}"
+        );
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Opening target.png")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+        assert!(values.contains(&"presented.png"));
+        assert!(!values.contains(&"Opening..."));
+    }
+
+    #[test]
+    fn failed_and_preview_states_publish_specific_semantics() {
+        let failed_context = egui::Context::default();
+        failed_context.enable_accesskit();
+        let mut failed = accessibility_test_frame();
+        failed.selected_file_name = Some("target.png".to_owned());
+        failed.load_error = Some("Could not decode this image".to_owned());
+        failed.toast = Some("Could not display image: adapter rejected upload".to_owned());
+        let failed_output = failed_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &failed);
+        });
+        let failed_update = failed_output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let failed_labels = failed_update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        assert!(failed_update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Could not open target.png")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+        assert!(failed_labels.contains(&"Retry opening target.png"));
+        assert!(failed_update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Could not display image: adapter rejected upload")
+        }));
+        assert!(
+            failed_update
+                .nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.value() == Some("Could not display image: adapter rejected upload")
+                })
+                .all(|(_, node)| node.live() != Some(egui::accesskit::Live::Polite))
+        );
+
+        let preview_context = egui::Context::default();
+        preview_context.enable_accesskit();
+        let mut preview = accessibility_test_frame();
+        preview.selected_file_name = Some("target.png".to_owned());
+        preview.is_loading = true;
+        preview.is_opening = false;
+        let preview_output = preview_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &preview);
+        });
+        let preview_update = preview_output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let preview_labels = preview_update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        let preview_values = preview_update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        assert!(preview_update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Preparing preview...")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+        assert!(!preview_values.contains(&"Opening target.png"));
+        assert!(!preview_labels.contains(&"Opening target.png"));
+
+        let empty_context = egui::Context::default();
+        empty_context.enable_accesskit();
+        let mut empty = accessibility_test_frame();
+        empty.has_image = false;
+        empty.file_path = None;
+        empty.is_loading = true;
+        empty.is_opening = true;
+        empty.playlist_pos = None;
+        empty.filmstrip.clear();
+        let empty_output = empty_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &empty);
+        });
+        let empty_update = empty_output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let empty_labels = empty_update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        let empty_values = empty_update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        assert!(
+            empty_values.contains(&"Opening current.png"),
+            "the empty-state card should name the opening target: labels={empty_labels:?}, values={empty_values:?}"
+        );
+        assert!(empty_update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Opening current.png")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
+    fn long_open_target_status_keeps_the_minimum_top_bar_bounded() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        let target_name = format!("{}.png", "x".repeat(92));
+        let expected_status = format!("Opening {target_name}");
+        frame.selected_file_name = Some(target_name);
+        frame.is_loading = true;
+        frame.is_opening = true;
+        frame.playlist_pos = Some((2, 2));
+        frame.show_tools_panel = false;
+        frame.show_filmstrip_panel = false;
+        frame.show_image_info = false;
+        let mut input = accessibility_input();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(640.0, 480.0),
+        ));
+
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let status_nodes = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| (node.value() == Some(&expected_status)).then_some(node))
+            .collect::<Vec<_>>();
+        assert!(!status_nodes.is_empty());
+        for node in status_nodes {
+            let bounds = node.bounds().expect("status bounds");
+            assert!(bounds.x0 >= 0.0 && bounds.x1 <= 640.0);
+            assert!(bounds.y0 >= 0.0 && bounds.y1 <= f64::from(TOP_BAR_HEIGHT));
+            assert!(bounds.x1 - bounds.x0 <= f64::from(TOP_STATUS_COMPACT_MAX_WIDTH) + 1.0);
+        }
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("2 / 2")
+                && node.bounds().is_some_and(|bounds| {
+                    bounds.x0 >= 0.0
+                        && bounds.x1 <= 640.0
+                        && bounds.y0 >= 0.0
+                        && bounds.y1 <= f64::from(TOP_BAR_HEIGHT)
+                })
+        }));
+        for (_, node) in &update.nodes {
+            let Some(label) = node.label() else {
+                continue;
+            };
+            if !["File", "Edit", "View", "Tools", "Help"].contains(&label) {
+                continue;
+            }
+            let menu_bounds = node.bounds().expect("menu bounds");
+            assert!(
+                menu_bounds.x0 >= 0.0
+                    && menu_bounds.x1 <= 640.0
+                    && menu_bounds.y0 >= 0.0
+                    && menu_bounds.y1 <= f64::from(TOP_BAR_HEIGHT),
+                "menu {label} escaped the minimum top bar: {menu_bounds:?}"
+            );
+        }
+    }
+
+    #[test]
     fn custom_controls_publish_descriptive_accessibility_nodes() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -2842,14 +3745,13 @@ mod tests {
             .iter()
             .map(|(_, node)| node)
             .collect::<Vec<_>>();
-
         for expected in [
             "Collapse tools panel",
             "Rotate clockwise (R)",
             "Spot heal (J)",
             "Collapse folder previews",
             "image 1: current.png",
-            "Flagged image 2: flagged.png",
+            "image 2: second.png",
             "Keep camera metadata when saving",
         ] {
             assert!(
@@ -2865,6 +3767,344 @@ mod tests {
         assert_eq!(
             current_thumbnail.toggled(),
             Some(egui::accesskit::Toggled::True)
+        );
+    }
+
+    #[test]
+    fn panel_menu_exposes_visible_shortcuts_as_accessible_accelerators() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = accessibility_test_frame();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let mut actions = Vec::new();
+            panels_menu(ui, &mut actions, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        for (label, shortcut) in [
+            ("Tools", "T"),
+            ("Folder Previews", "G"),
+            ("Image Information", "I"),
+        ] {
+            let accessible_label = format!("{label} {shortcut}");
+            let node = update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.label() == Some(accessible_label.as_str()))
+                .unwrap_or_else(|| panic!("missing panel menu item: {label}"));
+            assert_eq!(node.keyboard_shortcut(), Some(shortcut));
+        }
+    }
+
+    #[test]
+    fn source_privacy_reports_categories_and_an_honest_scan_limit() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.details = Some(crate::image_info::ImageDetails {
+            exif_tag_count: 7,
+            has_location: true,
+            has_owner_or_author: true,
+            has_device_identifier: true,
+            has_description_or_comment: true,
+            has_software_history: true,
+            has_embedded_thumbnail: true,
+            has_maker_specific_data: true,
+            ..Default::default()
+        });
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let values = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        for expected in [
+            "Source Privacy",
+            "7 supported EXIF tags detected.",
+            "Present: location-related data",
+            "Present: owner or author data",
+            "Present: camera, lens, or image identifiers",
+            "Present: description or comment data",
+            "Present: software history",
+            "Present: embedded thumbnail",
+            "Present: maker-specific data",
+            "Presence only. Sensitive values stay hidden on screen.",
+            "Limited EXIF scan. Other metadata or hidden pixel data may still exist.",
+        ] {
+            assert!(
+                values.contains(&expected),
+                "missing privacy text: {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_supported_exif_is_not_presented_as_a_complete_privacy_verdict() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.details = Some(crate::image_info::ImageDetails::default());
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let values = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        assert!(values.contains(&"No supported EXIF detected."));
+        assert!(
+            values.contains(
+                &"Limited EXIF scan. Other metadata or hidden pixel data may still exist."
+            )
+        );
+        assert!(!values.iter().any(|value| value.contains("metadata-free")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn open_with_context_action_explains_source_and_reload_boundaries() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.context_menu_pos = Some([100.0, 100.0]);
+        assert!(frame.current_selection_ready());
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        assert!(
+            nodes.iter().any(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Open With...")
+            }),
+            "missing accessible Open With action"
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.value() == Some(OPEN_WITH_HELP))
+        );
+    }
+
+    #[test]
+    fn external_handoff_reminder_is_persistent_polite_status() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.external_edit_pending = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value()
+                    == Some("External app opened source. Press F5 to reload possible changes.")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
+    fn empty_state_publishes_file_access_scope_and_actions() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.filmstrip.clear();
+        let mut input = accessibility_input();
+        let screen_rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(640.0, 480.0));
+        input.screen_rect = Some(screen_rect);
+
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        let labels = nodes
+            .iter()
+            .filter_map(|node| node.label())
+            .collect::<Vec<_>>();
+        let values = nodes
+            .iter()
+            .filter_map(|node| node.value())
+            .collect::<Vec<_>>();
+
+        for expected in [OPEN_SCOPE_SUMMARY, LOCAL_PRIVACY_SUMMARY] {
+            assert!(
+                nodes.iter().any(|node| {
+                    node.role() == egui::accesskit::Role::Label && node.value() == Some(expected)
+                }),
+                "missing empty-state accessible text: {expected}; values: {values:?}"
+            );
+        }
+        for expected in ["Open File", "Open Folder"] {
+            assert!(
+                nodes.iter().any(|node| {
+                    node.role() == egui::accesskit::Role::Button && node.label() == Some(expected)
+                }),
+                "missing empty-state action: {expected}; labels: {labels:?}"
+            );
+        }
+
+        let card = nodes
+            .iter()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Pane
+                    && node.label() == Some("Open an image source")
+            })
+            .expect("empty-state card node");
+        let card_bounds = card.bounds().expect("empty-state card bounds");
+        assert!(
+            card_bounds.x0 >= f64::from(screen_rect.left())
+                && card_bounds.x1 <= f64::from(screen_rect.right())
+                && card_bounds.y0 >= f64::from(screen_rect.top())
+                && card_bounds.y1 <= f64::from(screen_rect.bottom()),
+            "empty-state card escaped the minimum window: {card_bounds:?}"
+        );
+        let scope = nodes
+            .iter()
+            .find(|node| node.value() == Some(OPEN_SCOPE_SUMMARY))
+            .expect("scope text node");
+        let open_file = nodes
+            .iter()
+            .find(|node| node.label() == Some("Open File"))
+            .expect("Open File node");
+        let open_folder = nodes
+            .iter()
+            .find(|node| node.label() == Some("Open Folder"))
+            .expect("Open Folder node");
+        let privacy = nodes
+            .iter()
+            .find(|node| node.value() == Some(LOCAL_PRIVACY_SUMMARY))
+            .expect("privacy text node");
+        for (name, node) in [
+            ("scope", scope),
+            ("Open File", open_file),
+            ("Open Folder", open_folder),
+            ("privacy", privacy),
+        ] {
+            assert_accesskit_node_within(name, node, card);
+        }
+        assert!(
+            scope.bounds().expect("scope bounds").y1
+                <= open_file.bounds().expect("Open File bounds").y0
+        );
+        assert!(
+            open_file.bounds().expect("Open File bounds").y1
+                <= privacy.bounds().expect("privacy bounds").y0
+        );
+    }
+
+    #[test]
+    fn empty_state_geometry_stays_stable_across_unchanged_frames() {
+        let context = egui::Context::default();
+        let mut frame = accessibility_test_frame();
+        frame.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.filmstrip.clear();
+        let screen_rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1_000.0, 720.0));
+        let mut observed = Vec::new();
+
+        for _ in 0..8 {
+            let mut input = accessibility_input();
+            input.screen_rect = Some(screen_rect);
+            let _ = context.run_ui(input, |ui| {
+                let _ = render(ui, &frame);
+            });
+            observed.push(
+                context
+                    .memory(|memory| memory.area_rect(egui::Id::new("empty_state")))
+                    .expect("empty-state area"),
+            );
+        }
+
+        let settled = &observed[1..];
+        for pair in settled.windows(2) {
+            let previous = pair[0];
+            let current = pair[1];
+            assert!(
+                (previous.min.y - current.min.y).abs() <= 1.0
+                    && (previous.height() - current.height()).abs() <= 1.0,
+                "unchanged empty state moved between frames: {observed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn top_image_facts_have_distinct_reading_space() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = accessibility_test_frame();
+        let mut input = accessibility_input();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(1_200.0, 800.0),
+        ));
+
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        let bounds_for = |value: &str| {
+            update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.value() == Some(value))
+                .unwrap_or_else(|| panic!("missing top-bar value: {value}"))
+                .bounds()
+                .unwrap_or_else(|| panic!("missing top-bar bounds: {value}"))
+        };
+        let name = bounds_for("current.png");
+        let dimensions = bounds_for("1920 × 1080");
+        let zoom = bounds_for("100%");
+
+        assert!(
+            dimensions.x0 - name.x1 >= 8.0,
+            "filename and dimensions are crowded: {name:?}, {dimensions:?}"
+        );
+        assert!(
+            zoom.x0 - dimensions.x1 >= 8.0,
+            "dimensions and zoom are crowded: {dimensions:?}, {zoom:?}"
         );
     }
 
@@ -2890,6 +4130,46 @@ mod tests {
             assert!(
                 labels.iter().any(|label| label.contains(expected)),
                 "missing About node: {expected}; labels: {labels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn update_surface_is_present_and_truthful_in_the_accessibility_tree() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_update = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Update viewr",
+            concat!("Current version: ", env!("CARGO_PKG_VERSION")),
+            "viewr does not check, download, or install updates.",
+            "No verified public update source is configured for this build.",
+            "cargo build --release --workspace --locked",
+            "Close",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing update guidance: {expected}; exposed text: {exposed:?}"
+            );
+        }
+        for forbidden in ["https://", "git pull", "latest version", "Download now"] {
+            assert!(
+                exposed.iter().all(|text| !text.contains(forbidden)),
+                "update surface made an unsupported claim: {forbidden}; exposed text: {exposed:?}"
             );
         }
     }
@@ -2938,6 +4218,86 @@ mod tests {
     }
 
     #[test]
+    fn appearance_menu_exposes_scope_and_descriptive_radio_names() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let mut actions = Vec::new();
+            appearance_menu(
+                ui,
+                &mut actions,
+                crate::theme::Preference::System,
+                crate::theme::Mode::Dark,
+            );
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("Appearance AccessKit update should be generated");
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        assert!(nodes.iter().any(|node| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(APPEARANCE_SCOPE_HELP)
+        }));
+        for (expected, selected) in [
+            (
+                "System: Follows your operating system. Currently Dark.",
+                true,
+            ),
+            (
+                "Light: Bright neutral chrome, light window frame, soft-white canvas.",
+                false,
+            ),
+            (
+                "Dark: Low-glare charcoal chrome, dark window frame, deep-ink canvas.",
+                false,
+            ),
+            (
+                "Console: Green-screen look, near-black canvas, phosphor-green chrome, monospaced type.",
+                false,
+            ),
+        ] {
+            let node = nodes
+                .iter()
+                .find(|node| node.label() == Some(expected))
+                .unwrap_or_else(|| panic!("missing Appearance radio: {expected}"));
+            assert_eq!(node.role(), egui::accesskit::Role::RadioButton);
+            assert_eq!(
+                node.toggled(),
+                Some(if selected {
+                    egui::accesskit::Toggled::True
+                } else {
+                    egui::accesskit::Toggled::False
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn appearance_recovery_toast_is_exposed_as_semantic_status_text() {
+        const NOTICE: &str = "Could not restore saved appearance. Using System.";
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.toast = Some(NOTICE.to_owned());
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("toast AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && (node.label() == Some(NOTICE) || node.value() == Some(NOTICE))
+        }));
+    }
+
+    #[test]
     fn crop_selection_publishes_exact_accessible_bounds() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -2959,6 +4319,40 @@ mod tests {
                      Drag inside to move. Arrow keys move; Shift plus Arrow keys resize.",
                 )
         }));
+    }
+
+    #[test]
+    fn tiny_crop_selection_keeps_exact_accessible_bounds_without_an_inner_drag_area() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.is_cropping = true;
+        frame.crop_screen = Some([300.0, 240.0, 312.0, 252.0]);
+        frame.crop_uv = Some([0.5, 0.5, 0.505, 0.505]);
+        let (pixel_x, pixel_y, pixel_width, pixel_height) = crop_pixel_bounds(
+            frame.img_size.unwrap(),
+            frame.crop_uv.unwrap(),
+            false,
+            crate::crop::CropRatio::Free,
+        )
+        .unwrap();
+        let expected = format!(
+            "Crop selection: {pixel_width} by {pixel_height} output pixels, source starts at x \
+             {pixel_x}, y {pixel_y}. Arrow keys move; Shift plus Arrow keys resize."
+        );
+        let crop_output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let crop_update = crop_output
+            .platform_output
+            .accesskit_update
+            .expect("tiny crop AccessKit update should be generated");
+        assert!(
+            crop_update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(expected.as_str()))
+        );
     }
 
     #[test]

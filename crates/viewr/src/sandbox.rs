@@ -25,13 +25,14 @@ const MAX_IDLE_WORKERS: usize = 2;
 /// Decode via the isolated `viewr-decode` worker (AVIF / HEIC / RAW paths).
 pub(crate) fn load_via_worker(
     path: &Path,
+    file: std::fs::File,
     generation: DecodeGeneration<'_>,
 ) -> Result<DecodedImage, Error> {
     // Resolve and read the user-selected file before reserving a worker. Host
     // filesystem I/O is bounded by the decode executor rather than the IPC
     // timeout thread, whose cancellation can only terminate the child process.
     let format = worker_format(path)?;
-    let encoded = read_bounded_input_if_current(path, generation)?;
+    let encoded = read_bounded_input_if_current(file, generation)?;
     generation
         .ensure_current()
         .map_err(|error| Error::Decode(error.to_string()))?;
@@ -93,21 +94,18 @@ fn worker_format(path: &Path) -> Result<String, Error> {
 
 #[cfg(test)]
 fn read_bounded_input(path: &Path) -> Result<Vec<u8>, Error> {
-    read_bounded_input_if_current(path, DecodeGeneration::unconditional())
+    let source = crate::fs::ImageSource::open(path)
+        .map_err(|error| Error::Decode(format!("failed to open worker input: {error}")))?;
+    let file = source
+        .clone_for_decode()
+        .map_err(|error| Error::Decode(format!("failed to open worker input: {error}")))?;
+    read_bounded_input_if_current(file, DecodeGeneration::unconditional())
 }
 
 fn read_bounded_input_if_current(
-    path: &Path,
+    file: std::fs::File,
     generation: DecodeGeneration<'_>,
 ) -> Result<Vec<u8>, Error> {
-    let path_metadata = std::fs::metadata(path)
-        .map_err(|error| Error::Decode(format!("failed to inspect worker input: {error}")))?;
-    if !path_metadata.is_file() {
-        return Err(Error::Decode("worker input must be a regular file".into()));
-    }
-
-    let file = std::fs::File::open(path)
-        .map_err(|error| Error::Decode(format!("failed to open worker input: {error}")))?;
     let metadata = file
         .metadata()
         .map_err(|error| Error::Decode(format!("failed to inspect open worker input: {error}")))?;
@@ -166,9 +164,13 @@ fn read_bounded_if_current(
             .map_err(|error| Error::Decode(error.to_string()))?;
         let remaining = max_bytes.saturating_sub(encoded.len());
         let read_limit = chunk.len().min(remaining.saturating_add(1));
-        let count = reader
-            .read(&mut chunk[..read_limit])
-            .map_err(|error| Error::Decode(format!("failed to read worker input: {error}")))?;
+        let count = if let Some(slice) = chunk.get_mut(..read_limit) {
+            reader
+                .read(slice)
+                .map_err(|error| Error::Decode(format!("failed to read worker input: {error}")))?
+        } else {
+            0
+        };
         generation
             .ensure_current()
             .map_err(|error| Error::Decode(error.to_string()))?;
@@ -183,7 +185,9 @@ fn read_bounded_if_current(
         encoded
             .try_reserve_exact(count)
             .map_err(|_| Error::Decode("not enough memory to read worker input".into()))?;
-        encoded.extend_from_slice(&chunk[..count]);
+        if let Some(slice) = chunk.get(..count) {
+            encoded.extend_from_slice(slice);
+        }
     }
     Ok(encoded)
 }
@@ -574,8 +578,9 @@ fn return_worker(worker: DaemonWorker) {
 mod tests {
     use super::{
         DaemonWorker, exchange_with_worker, finish_worker_output, normalize_worker_color_profile,
-        read_bounded, read_bounded_if_current, read_bounded_input, receive_worker_output,
-        run_worker_operation_with_cancellation, run_worker_operation_with_timeout,
+        read_bounded, read_bounded_if_current, read_bounded_input, read_bounded_input_if_current,
+        receive_worker_output, run_worker_operation_with_cancellation,
+        run_worker_operation_with_timeout,
     };
     use crate::decode::DecodeGeneration;
     use crate::ephemeral::TempWorkspace;
@@ -936,5 +941,27 @@ mod tests {
         let workspace = TempWorkspace::new("worker_non_regular_input").unwrap();
         let error = read_bounded_input(workspace.path()).unwrap_err();
         assert!(error.to_string().contains("must be a regular file"));
+    }
+
+    #[test]
+    fn worker_input_reads_the_accepted_handle_after_path_replacement() {
+        let workspace = TempWorkspace::new("sandbox_source_identity").unwrap();
+        let path = workspace.path().join("source.avif");
+        let retained = workspace.path().join("retained.avif");
+        std::fs::write(&path, b"accepted worker bytes").unwrap();
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+        std::fs::rename(&path, &retained).unwrap();
+        std::fs::write(&path, b"replacement bytes").unwrap();
+
+        let encoded = read_bounded_input_if_current(
+            source.clone_for_decode().unwrap(),
+            DecodeGeneration::unconditional(),
+        )
+        .unwrap();
+        assert_eq!(encoded, b"accepted worker bytes");
+        assert_eq!(
+            source.matches_path(&path),
+            crate::fs::ImageSourceMatch::Changed
+        );
     }
 }

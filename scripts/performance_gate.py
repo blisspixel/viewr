@@ -31,6 +31,11 @@ REPORT_KEYS = frozenset(
         "first_pixel_us",
         "max_navigation_us",
         "idle_redraws",
+        "idle_non_redraw_events",
+        "idle_event_repaint_requests",
+        "idle_scheduled_egui_repaints",
+        "idle_window_focused",
+        "idle_pointer_inside",
         "peak_resident_bytes",
         "playlist_entries",
         "decoded_cache_entries",
@@ -38,6 +43,8 @@ REPORT_KEYS = frozenset(
         "thumbnail_texture_entries",
     }
 )
+BOOLEAN_REPORT_KEYS = frozenset({"idle_window_focused", "idle_pointer_inside"})
+INTEGER_REPORT_KEYS = REPORT_KEYS - BOOLEAN_REPORT_KEYS
 MAX_LINKED_TARGETS_PER_SOURCE = 512
 MAX_PROBE_RUNS = 9
 MAX_CORPUS_COUNT = 100_000
@@ -77,6 +84,11 @@ class ProbeReport:
     first_pixel_us: int
     max_navigation_us: int
     idle_redraws: int
+    idle_non_redraw_events: int
+    idle_event_repaint_requests: int
+    idle_scheduled_egui_repaints: int
+    idle_window_focused: bool
+    idle_pointer_inside: bool
     peak_resident_bytes: int
     playlist_entries: int
     decoded_cache_entries: int
@@ -163,10 +175,11 @@ def parse_report(stdout: str) -> ProbeReport:
         if not isinstance(payload, dict) or frozenset(payload) != REPORT_KEYS:
             raise PerformanceGateError("probe report has an unexpected schema")
         if any(
-            type(payload[key]) is not int or payload[key] < 0 for key in REPORT_KEYS
-        ):
+            type(payload[key]) is not int or payload[key] < 0
+            for key in INTEGER_REPORT_KEYS
+        ) or any(type(payload[key]) is not bool for key in BOOLEAN_REPORT_KEYS):
             raise PerformanceGateError(
-                "probe report values must be non-negative integers"
+                "probe report values must use non-negative integers and exact booleans"
             )
         return ProbeReport(**payload)
     raise PerformanceGateError("probe produced no machine-readable report")
@@ -221,6 +234,15 @@ def _median_report(reports: list[ProbeReport]) -> ProbeReport:
         ),
         max_navigation_us=max(report.max_navigation_us for report in reports),
         idle_redraws=max(report.idle_redraws for report in reports),
+        idle_non_redraw_events=max(report.idle_non_redraw_events for report in reports),
+        idle_event_repaint_requests=max(
+            report.idle_event_repaint_requests for report in reports
+        ),
+        idle_scheduled_egui_repaints=max(
+            report.idle_scheduled_egui_repaints for report in reports
+        ),
+        idle_window_focused=any(report.idle_window_focused for report in reports),
+        idle_pointer_inside=any(report.idle_pointer_inside for report in reports),
         peak_resident_bytes=max(report.peak_resident_bytes for report in reports),
         playlist_entries=max(report.playlist_entries for report in reports),
         decoded_cache_entries=max(report.decoded_cache_entries for report in reports),
@@ -229,6 +251,29 @@ def _median_report(reports: list[ProbeReport]) -> ProbeReport:
             report.thumbnail_texture_entries for report in reports
         ),
     )
+
+
+def _idle_diagnostics(
+    small: list[ProbeReport], large: list[ProbeReport], cache_stress: ProbeReport
+) -> str:
+    """Return fixed, path-free per-run idle evidence without losing run order."""
+
+    def one(report: ProbeReport) -> dict[str, int | bool]:
+        return {
+            "delivered_redraws": report.idle_redraws,
+            "non_redraw_events": report.idle_non_redraw_events,
+            "event_repaint_requests": report.idle_event_repaint_requests,
+            "scheduled_egui_repaints": report.idle_scheduled_egui_repaints,
+            "window_focused": report.idle_window_focused,
+            "pointer_inside": report.idle_pointer_inside,
+        }
+
+    payload = {
+        "small": [one(report) for report in small],
+        "large": [one(report) for report in large],
+        "cache_stress": one(cache_stress),
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
 def evaluate(
@@ -361,6 +406,11 @@ def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--first-pixel-ms", type=_positive_finite_float, default=5000)
     parser.add_argument("--navigation-ms", type=_positive_finite_float, default=500)
     parser.add_argument("--idle-redraws", type=_nonnegative_int, default=2)
+    parser.add_argument(
+        "--idle-diagnostics",
+        action="store_true",
+        help="print fixed per-run idle attribution even when the gate passes",
+    )
     parser.add_argument("--peak-resident-mib", type=_positive_finite_float, default=768)
     parser.add_argument("--folder-growth-mib", type=_positive_finite_float, default=96)
     parser.add_argument(
@@ -449,6 +499,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             CACHE_STRESS_WIDTH * CACHE_STRESS_HEIGHT * 4,
         )
     )
+    if args.idle_diagnostics or failures:
+        destination = sys.stderr if failures else sys.stdout
+        print(
+            f"idle diagnostics: {_idle_diagnostics(small_reports, large_reports, cache_stress)}",
+            file=destination,
+        )
     if failures:
         for failure in failures:
             print(f"performance gate failed: {failure}", file=sys.stderr)

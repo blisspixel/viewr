@@ -3,7 +3,6 @@
 //! Frames stay in memory only for the current image. Decoding runs through the
 //! same foreground-priority gate as still images and never creates a disk cache.
 
-use std::fs::File;
 use std::io::{BufReader, Seek};
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -45,41 +44,66 @@ impl DecodedAnimation {
     /// or a supported container with only one frame returns `Ok(None)`.
     pub(crate) fn load_background_if_current(
         path: &Path,
+        source: &crate::fs::ImageSource,
         current_generation: &AtomicU64,
         generation: u64,
     ) -> Result<Option<Self>, Error> {
+        let file = source
+            .clone_for_decode()
+            .map_err(|error| Error::Decode(error.to_string()))?;
         crate::decode::with_background_decode_permit(|| {
-            Self::load_with_cancellation(path, &|| {
+            Self::load_file_with_cancellation(path, file, &|| {
                 current_generation.load(Ordering::Acquire) == generation
             })
         })
     }
 
+    #[cfg(test)]
     fn load_with_cancellation(
         path: &Path,
+        is_current: &impl Fn() -> bool,
+    ) -> Result<Option<Self>, Error> {
+        let source =
+            crate::fs::ImageSource::open(path).map_err(|error| Error::Decode(error.to_string()))?;
+        let file = source
+            .clone_for_decode()
+            .map_err(|error| Error::Decode(error.to_string()))?;
+        Self::load_file_with_cancellation(path, file, is_current)
+    }
+
+    fn load_file_with_cancellation(
+        _path: &Path,
+        mut file: std::fs::File,
         is_current: &impl Fn() -> bool,
     ) -> Result<Option<Self>, Error> {
         if !is_current() {
             return Ok(None);
         }
-        let format = image::ImageReader::open(path)
+        let format = file
+            .try_clone()
+            .map(BufReader::new)
+            .map(image::ImageReader::new)
             .and_then(image::ImageReader::with_guessed_format)
             .map_err(|error| Error::Decode(format!("animation format detection failed: {error}")))?
             .format();
+        file.rewind()
+            .map_err(|error| Error::Decode(error.to_string()))?;
         if !is_current() {
             return Ok(None);
         }
         match format {
-            Some(image::ImageFormat::Gif) => Self::decode_gif(path, is_current),
-            Some(image::ImageFormat::WebP) => Self::decode_webp(path, is_current),
-            Some(image::ImageFormat::Png) => Self::decode_apng(path, is_current),
+            Some(image::ImageFormat::Gif) => Self::decode_gif(file, is_current),
+            Some(image::ImageFormat::WebP) => Self::decode_webp(file, is_current),
+            Some(image::ImageFormat::Png) => Self::decode_apng(file, is_current),
             _ => Ok(None),
         }
     }
 
-    fn decode_gif(path: &Path, is_current: &impl Fn() -> bool) -> Result<Option<Self>, Error> {
-        let reader =
-            BufReader::new(File::open(path).map_err(|error| Error::Decode(error.to_string()))?);
+    fn decode_gif(
+        file: std::fs::File,
+        is_current: &impl Fn() -> bool,
+    ) -> Result<Option<Self>, Error> {
+        let reader = BufReader::new(file);
         let mut decoder = image::codecs::gif::GifDecoder::new(reader)
             .map_err(|error| animation_decode_error(&error))?;
         decoder
@@ -93,9 +117,11 @@ impl DecodedAnimation {
         collect_frames(decoder, orientation, &color_normalizer, is_current)
     }
 
-    fn decode_webp(path: &Path, is_current: &impl Fn() -> bool) -> Result<Option<Self>, Error> {
-        let mut reader =
-            BufReader::new(File::open(path).map_err(|error| Error::Decode(error.to_string()))?);
+    fn decode_webp(
+        file: std::fs::File,
+        is_current: &impl Fn() -> bool,
+    ) -> Result<Option<Self>, Error> {
+        let mut reader = BufReader::new(file);
         crate::decode::enforce_embedded_metadata_limits(&mut reader)?;
         reader
             .rewind()
@@ -113,9 +139,11 @@ impl DecodedAnimation {
         collect_frames(decoder, orientation, &color_normalizer, is_current)
     }
 
-    fn decode_apng(path: &Path, is_current: &impl Fn() -> bool) -> Result<Option<Self>, Error> {
-        let mut reader =
-            BufReader::new(File::open(path).map_err(|error| Error::Decode(error.to_string()))?);
+    fn decode_apng(
+        file: std::fs::File,
+        is_current: &impl Fn() -> bool,
+    ) -> Result<Option<Self>, Error> {
+        let mut reader = BufReader::new(file);
         crate::decode::enforce_embedded_metadata_limits(&mut reader)?;
         reader
             .rewind()
@@ -369,6 +397,7 @@ mod tests {
     use super::*;
     use crate::decode::ColorProfileStatus;
     use crate::ephemeral::TempWorkspace;
+    use std::fs::File;
 
     fn frame(id: u8, delay_ms: u64) -> AnimationFrame {
         AnimationFrame {
@@ -428,6 +457,38 @@ mod tests {
         assert_eq!(animation.frames[0].image.rgba[0], 255);
         assert_eq!(animation.frames[1].image.rgba[2], 255);
         assert_eq!(animation.repeat, AnimationRepeat::Infinite);
+    }
+
+    #[test]
+    fn animation_frames_use_the_accepted_source_handle_after_path_replacement() {
+        let workspace = TempWorkspace::new("animated_source_identity").unwrap();
+        let path = workspace.path().join("animated.gif");
+        let retained = workspace.path().join("retained.gif");
+        let encode = |path: &Path, color: image::Rgba<u8>| {
+            let file = File::create(path).unwrap();
+            let mut encoder = image::codecs::gif::GifEncoder::new(file);
+            encoder
+                .encode_frames([
+                    image::Frame::new(image::RgbaImage::from_pixel(1, 1, color)),
+                    image::Frame::new(image::RgbaImage::from_pixel(1, 1, color)),
+                ])
+                .unwrap();
+        };
+        encode(&path, image::Rgba([255, 0, 0, 255]));
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+        std::fs::rename(&path, &retained).unwrap();
+        encode(&path, image::Rgba([0, 255, 0, 255]));
+        let generation = AtomicU64::new(1);
+
+        let animation =
+            DecodedAnimation::load_background_if_current(&path, &source, &generation, 1)
+                .unwrap()
+                .unwrap();
+        assert_eq!(&animation.frames[0].image.rgba[..4], &[255, 0, 0, 255]);
+        assert_eq!(
+            source.matches_path(&path),
+            crate::fs::ImageSourceMatch::Changed
+        );
     }
 
     #[test]

@@ -23,28 +23,42 @@ disappears. This spec is the converged result of two rounds of design critique
 
 - The image is scaled to fit the window (aspect preserved) and centered. The
   letterbox area is the solid theme background, nothing else.
+- Loading an image never changes the application-window dimensions. The initial
+  1000px by 720px logical window, or the dimensions the user chooses by resizing,
+  remains stable while image fit and zoom resolve inside its viewport.
 - Persistent chrome never overlaps the image. The image fit rectangle is computed
   from the window minus every visible docked panel. Opening, closing, or resizing
   chrome refits and recenters the photo inside the remaining viewport.
 - Top bar: a fixed 40px neutral surface with five conventional menus: File,
   Edit, View, Tools, and Help. The right side shows a stable folder counter and, when space
   permits, the filename, dimensions, and physical zoom percentage, where 100
-  percent means one source pixel per physical display pixel. Long names truncate
-  with the full value available as a tooltip.
+  percent means one source pixel per physical display pixel. Filename, dimensions,
+  and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
+  spacing. Long names truncate with the full value available as a tooltip.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`
   shows a 64px docked panel containing only high-frequency image operations:
-  rotate, flip, crop, and flag. Its vector chevron collapses it to a 44px rail.
+  rotate, flip, crop, and Spot Heal. Its vector chevron collapses it to a 44px rail.
   View > Panel Position docks it on either the left or right. Save and destructive
   actions remain in File so the tool surface stays calm.
 - Folder Previews: hidden by default. When a folder contains multiple images,
-  View > Panels or `G` shows a 112px docked thumbnail strip with current and
-  flagged states. Its chevron collapses it to a 44px bottom rail. Thumbnails decode
-  only while the panel is visible and expanded.
-- Image Information: an optional 304px panel contains file facts, review state,
-  and the explicit export-privacy checkbox. View > Panels or `I` toggles it, and
+  View > Panels or `G` shows a 112px docked thumbnail strip with the current item
+  identified. Its chevron collapses it to a 44px bottom rail.
+  Thumbnails decode only while the panel is visible and expanded. The strip stays
+  bounded to four neighbors on either side.
+- Image Information: an optional 304px panel contains file facts and the explicit
+  export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
+  risk-category presence without displaying raw sensitive values, and states that
+  the limited scan cannot prove other metadata or hidden pixel data is absent.
+  View > Panels or `I` toggles it, and
   View > Panel Position independently docks it on the left or right.
+- View > Panels renders `T`, `G`, and `I` as right-aligned accelerators on selected
+  menu buttons. The same shortcuts are included in accessible menu output; no
+  hover is required to discover them.
 - Empty and loading states use an opaque themed card with tested AA text contrast.
   They remain readable on black, gray, white, and theme-driven image backgrounds.
+  The empty state explains ambient sibling browsing versus explicit session folder
+  selection without adding a confirmation step. Its measured card geometry is
+  stable across unchanged frames, so no resting content drifts vertically.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws
   a precise border, rule-of-thirds guides, eight visible pointer handles, exact
   output dimensions, a compact aspect popover, and Apply/Cancel. The popover
@@ -58,11 +72,24 @@ disappears. This spec is the converged result of two rounds of design critique
 
 ## Color
 
-- View > Appearance offers System, Light, Dark, and Console. System follows live
+- View summarizes the selected preference as Appearance: System, Light, Dark, or
+  Console, then offers those four choices. System follows live
   operating-system changes. Explicit Light and Dark also update native window
   decoration. Console uses a near-black canvas, green phosphor-inspired chrome,
   and monospaced interface type. One validated appearance word is remembered in
-  the platform configuration directory.
+  the platform configuration directory through same-directory atomic
+  replacement.
+- The Appearance chooser exposes one concrete outcome line per radio choice.
+  System reports the effective Light or Dark mode while it is active; Console
+  identifies itself as the green-screen look. A scope line states that appearance
+  changes app chrome and the default canvas, not decoded image pixels, and that
+  Image Background overrides the canvas independently. The same complete text is
+  the radio's accessible name.
+- No preference is the quiet System default. Invalid, oversized, unreadable, or
+  unavailable saved state also uses System but produces one semantic, path-free
+  startup toast: `Could not restore saved appearance. Using System.` Selecting an
+  appearance replaces rejected state when writable; startup never repairs it
+  automatically.
 - Every appearance owns a complete token set for panel, raised and pressed
   surfaces, borders, primary and secondary text, active state, and text on the
   active state. Standard widgets and custom-painted controls use the same tokens.
@@ -93,15 +120,38 @@ The current interface uses immediate state changes. It does not claim transition
 inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Navigation (the most-touched interaction)
-- Default is an instant texture swap, no crossfade. Held arrows during culling
+- Default is an instant texture swap, no crossfade. Held arrows during rapid review
   must never fight an animation.
+- Reversing to a pristine frame that is still presented cancels the abandoned
+  replacement and settles without another decode or texture upload. Once a new
+  frame from a move within two positions is presented, the just-left pristine
+  source decode can remain in the existing bounded neighbor cache for a normal
+  immediate cache hit. Larger jumps, crop and Spot Heal results, animation
+  playback frames, explicit-Reload state, and over-budget or evicted images use
+  the normal loading path.
 - A prefetched cache hit replaces the texture immediately. On a cache miss,
-  reload, or failed replacement, the last good image remains visible while a clear
-  loading or error status names the selected path. There is no black/background
-  flash, shimmer, slide, crossfade, or edge bounce.
+  reload, or failed replacement, the last good image and its filename remain
+  visible while the selected folder position advances. Loading and failure status
+  names the selected target by a bounded, path-free filename; the visible
+  filename, dimensions, and zoom remain attached to the pixels on screen. Crop
+  preview preparation uses separate copy, and immediate reuse or a full-resolution
+  cache hit emits no loading state. Source-load preview or upload failures stay in
+  the existing durable Retry flow. Target status is width-capped, contracts
+  further at the minimum window width to preserve separate menu and playlist
+  controls, and exposes its bounded full text when elided. A
+  coexisting visual toast is not a second live region. There is no
+  black/background flash, shimmer, slide, crossfade, or edge bounce.
 - File > Reload File (`F5`) bypasses the decoded-neighbor cache and reads the
   current path again. It resets in-memory view edits only when the action is safe,
   retains the last good frame during decode, and exposes Retry on failure.
+- On Windows, File and the image right-click surface expose Open With.... The
+  action uses the native single-file chooser for the exact accepted source and
+  never constructs a shell command or stores an editor preference. Compact help
+  explains that the original metadata is included, unsaved viewr edits are not,
+  and the chosen app can modify the source. A persistent path-free top status
+  requests `F5` after successful handoff because automatic external-change
+  watching is not implemented. Cancellation and launch failure are distinct;
+  macOS and Linux chooser parity remains roadmap work.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the
@@ -112,10 +162,75 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 - Pan follows the pointer directly with no inertia or rubber banding. Holding Space
   temporarily selects pan; tapping Space without dragging resets fit.
 
+### Ratings and folder filter
+
+Ratings are approved but not implemented. `docs/RATINGS.md` owns the complete
+storage, safety, navigation, and accessibility contract.
+
+- The source image is the only durable rating record. viewr will write standard
+  embedded 0-to-5 metadata after one explicit disclosure per session and will not
+  create a database, sidecar, alternate stream, timestamp, or activity record.
+- In normal viewing mode, `0` clears a rating and `1` through `5` assign it. Fit
+  Image to View and Actual Size move to the primary modifier plus `0` and `1`.
+  Numeric input, menus, popups, modals, Crop, Spot Heal, and key repeat always win
+  over rating shortcuts.
+- Edit owns rating assignment. View owns the session-only minimum-rating filter.
+  The current textual rating and any active filter remain visible outside menus.
+- One canonical natural-order folder catalog owns Trash and Undo positions. A
+  filter derives visible indices for navigation, Folder Previews, and prefetch.
+- Unsupported, malformed, conflicting, read-only, changed, or unsafe sources stay
+  untouched and expose fixed recovery copy. No persistence fallback exists.
+
 ### Delete and undo
-- Delete moves the current file to the operating-system trash, advances the
-  playlist deterministically, and shows a three-second non-blocking toast. `U`
-  restores the latest successful single or batch trash action.
+- `Delete` moves only the currently displayed file to the operating-system Trash.
+  File > Move to Trash exposes the same action. There is no bare-letter shortcut,
+  mark state, review mode, or batch-trash action. Destructive intent therefore
+  stays attached to a conventional key and a visible current target.
+- Accepted pixels retain their exact open source handle through foreground,
+  worker, animated, prefetched, cropped, and edited presentation. Trash runs only
+  when the pathname still identifies the retained source that supplied accepted
+  pixels.
+  A missing, replaced, linked, or unverifiable entry fails closed without changing
+  playlist or Undo state. Success advances the playlist deterministically and
+  shows a three-second non-blocking toast. `U` owns the latest safely recoverable
+  Trash action. Windows and Linux identify each move by its
+  sole new Trash item identifier only when that item's native identity matches the
+  live accepted-source handle; macOS uses the exact resulting URL with the same
+  handle. Restore repeats the identity check and never falls back to an older item
+  with the same original pathname. Restore then makes a later platform move using
+  the checked identifier on Windows and Linux or checked Trash URL on macOS, so
+  this final boundary is narrow but is not a handle-bound transaction against a
+  hostile concurrent swap.
+- File > Undo Trash does not expose filenames, paths, or history. Its label stays
+  generic while restore work is active or its result is uncertain.
+- A successful move without an exact in-app receipt remains recoverable through
+  the system Trash and preserves any previous valid `U` action. Permanent delete
+  never replaces or clears that prior Trash action, and its success copy explicitly
+  separates the non-recoverable deletion from the older action still assigned to
+  `U`.
+- Restore transfers exact native inputs to one typed worker. The top bar shows a
+  polite operation state while playlist, edit, and destructive actions wait;
+  zoom, pan, panels, and appearance remain responsive. A normal close request
+  changes the status to finishing, then waits for result reconciliation and worker
+  join. The design offers no false percentage or cancel control. Spawn failure
+  keeps state unchanged; result-channel loss keeps the receipt and directs system
+  Trash review through durable, operation-bound polite status. Unresolved restore
+  recovery disables a new Trash move until `U` produces a typed reconciliation,
+  preventing newer receipt ownership from replacing an uncertain action.
+- Foreground reload, preview preparation, crop, Save As, an active Spot Heal
+  stroke, or a heal worker owns current state. Trash, permanent delete, and restore
+  wait instead of racing that work. Keyboard shortcuts give a specific visual wait
+  reason. Restore retains only transient and resolvable receipts for `U`. Missing
+  exact items end the in-app retry; ambiguous, unsupported, and invalid receipts
+  direct the user to system Trash review without claiming that `U` can help.
+- During Crop, `X` remains the crop-ratio orientation shortcut.
+- Permanent delete verifies the retained accepted source before showing its
+  bounded control-safe and quote-safe filename, labels its affirmative action
+  Delete permanently, and labels the alternative Cancel. After confirmation it
+  verifies the same source again immediately before deletion; a confirmation-time
+  replacement remains untouched and receives fixed recovery guidance.
+  Platform Trash and restore failures cross a fixed path-free category boundary
+  before entering interface copy or operator diagnostics.
 
 ### Crop
 - Enter crop mode with `C` or select Crop from the Tools panel. Crop immediately
@@ -132,16 +247,25 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   are visible and published to the accessibility tree. Fixed ratios describe the
   visible exported orientation, so selecting 16:9 after a 90-degree rotation still
   produces a 16:9 output. Confirming applies the crop at full decoded resolution
-  off the UI thread. Esc cancels crop before it can affect fullscreen state.
+  off the UI thread. The attempt carries the exact selection, view, paused
+  animation state, source generation, and decoded-image identity until renderer
+  presentation succeeds. Compute, preview, or renderer failure leaves original
+  pixels unchanged and restores the same selection for Enter-key retry. A source
+  change cooperatively cancels obsolete row copying and never restores stale
+  state. After a failed image load or Reload, crop entry and Apply stay blocked
+  until Retry succeeds, so retained last-good pixels cannot become a new edit
+  source. Esc cancels crop before it can affect fullscreen state.
 
 ### Source animation
 
 - GIF, WebP, and APNG timing is content, not decorative interface motion. Frames
   are bounded in count and bytes, honor container delay and loop behavior, and can
   be paused or resumed from Image Information.
-- Navigation and crop deterministically stop or discard playback state tied to
-  the old source. Rotation, flips, and pixel edits are applied consistently to
-  each displayed frame. A late animation decode cannot replace a newer image.
+- Navigation and a successfully presented crop deterministically stop or discard
+  playback state tied to the old source. A failed crop restores the paused
+  playback and pending auxiliary ownership it captured. Rotation, flips, and
+  pixel edits are applied consistently to each displayed frame. A late animation
+  decode cannot replace a newer image.
 
 ### Spot Heal
 
@@ -158,9 +282,13 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   translated source fits, a distance-ordered directional fill continues local
   gradients instead of repeatedly averaging a flat blur. The source file remains
   untouched; Save As is the only edit-persistence path.
-- Repair, undo, and redo update only the bounded changed base-texture region and
-  regenerate its dependent mip chain. If the GPU cannot display the complete
-  decoded image in one texture, Spot Heal is
+- Repair, undo, and redo apply decoded pixels and present the same bounded patch
+  before committing history or success copy. If patch presentation is
+  unavailable, full-texture presentation is attempted. If both fail, exact
+  inverse pixels are restored and history remains unchanged. An internal inverse
+  failure automatically reloads the selected source. Successful edits regenerate
+  the dependent mip chain. If the GPU cannot display the complete decoded image
+  in one texture, Spot Heal is
   unavailable instead of risking an edit at the wrong source coordinate.
 - `Ctrl+Z` or `Command+Z` undoes an in-memory pixel patch, the shifted equivalent
   redoes it, and Esc leaves the tool. A submitted repair finishes and applies
@@ -179,12 +307,17 @@ the fallback follows the structure-propagation direction of exemplar and fast
 marching inpainting rather than adding a model runtime. Full global PatchMatch,
 generative fill, and an unbounded Poisson solve are outside this focused tool.
 
-### About and product identity
+### Help, updates, and product identity
 
 - Help > About viewr opens a centered modal that blocks background input and
   closes with its Close button, backdrop click, or Escape.
 - It exposes version, platform, license, core shortcuts, and the local-only
   privacy contract. Its modal container has an explicit accessible window name.
+- Help > Update viewr opens a separate centered modal with the running version,
+  the trusted source-channel boundary, and the exact locked source-build command.
+  It does not check a network, claim that the running build is latest, download,
+  install, or open a browser. A future link or check requires a verified canonical
+  release source and signed-release policy first.
 
 ### Micro-interactions
 - Buttons use deterministic hover, active, selected, and focus colors. Custom

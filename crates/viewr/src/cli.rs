@@ -198,10 +198,12 @@ viewr update - local only
 viewr never phones home and does not download updates for you.
 That is intentional (see docs/PRIVACY.md and docs/ROADMAP.md).
 
-From a source checkout:
+No verified public update source is configured for this build.
+Return to the trusted source or package channel from which you obtained viewr.
+For a source checkout, update that source using its documented process, close
+viewr, then run:
 
-  git pull
-  cargo build --release --workspace
+  cargo build --release --workspace --locked
 
 Keep the binaries side by side:
 
@@ -212,8 +214,8 @@ Optional C-backed worker formats (needs system libraries):
 
   cargo build --release -p viewr-decode --features avif,heic
 
-If you installed with cargo-dist or a manual copy, replace those files with a
-fresh build. There is no background updater and no `viewr update --download`.
+Replace an installation only with files from that same trusted channel.
+There is no background updater and no `viewr update --download`.
 "
     )
 }
@@ -612,7 +614,11 @@ mod tests {
         assert_eq!(code, ExitCode::SUCCESS);
         assert!(error.is_empty());
         assert!(update.contains("never phones home"));
+        assert!(update.contains("No verified public update source"));
+        assert!(update.contains("cargo build --release --workspace --locked"));
         assert!(update.contains("There is no background updater"));
+        assert!(!update.contains("git pull"));
+        assert!(!update.contains("https://"));
 
         let (code, output, error) = invoke(Invocation::Gui { image: None });
         assert_eq!(code, ExitCode::FAILURE);

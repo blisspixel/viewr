@@ -21,6 +21,19 @@ code, and where possible it's enforced in CI so it can't quietly regress.
 - Your photos, filenames, and folder structure **never leave your machine.**
   viewr does **not** build or retain a library index, thumbnail database, or
   "recent folders" list of your collection.
+- **Native dialog and external-app boundary.** Open, Open Folder, Save As, and
+  destructive-action confirmation use native operating-system dialogs. Windows
+  Open With also delegates the exact current source to an application the user
+  explicitly selects. That application receives the original file, path, and
+  embedded metadata and may read, transmit, modify, or replace it under its own
+  privacy and security rules. viewr constructs no shell command, remembers no
+  editor choice, and retains no handoff history. The operating system may record
+  paths in its recent-item, quick-access, or jump-list data according to policy.
+- **Memory boundary.** Decoded pixels and thumbnails stay in bounded process and
+  GPU memory rather than a viewr disk cache. The operating system may page process
+  memory, GPU drivers may retain copies, and viewr does not claim secure erasure
+  against a live-system or forensic adversary. Full-disk encryption and operating-
+  system controls are the relevant at-rest protections for that threat model.
 - **Zero product temp debris.** The GUI never writes under the system temp folder
   for probes. `viewr doctor` and `viewr benchmark` (without a directory) run
   fully **in memory**. On launch, viewr also scrubs any leftover `viewr_*` names
@@ -47,7 +60,23 @@ VIEWR_LOG=info
 ```
 
 Even when logging is on, viewr avoids writing full filesystem paths into log
-lines. Nothing is ever sent off-machine.
+lines. Bare levels such as `info` apply only to viewr. Only the exact `viewr`
+target or a `viewr::` descendant can emit records; prefix lookalikes and
+dependency-target directives are rejected because external payloads do not share
+viewr's path-private logging contract. Nothing is ever sent off-machine.
+Behavior tests prove that no logger is constructed when both logging variables are
+absent, that `RUST_LOG` retains precedence over `VIEWR_LOG`, and that an
+external-target-only directive constructs no logger. The repository privacy
+wrappers add narrow source tripwires around reviewed orchestration and ephemeral
+contracts; they are not described as a general Rust write-path analyzer.
+Batch curation records use fixed counts and monotonic elapsed milliseconds only.
+Receipt-capture evidence distinguishes fixed listing, candidate, ambiguity, and
+identity categories without logging original paths, filenames, Trash identifiers,
+native identities, or raw platform errors. The records are not retained after
+stderr is consumed. The serialized batch worker adds only fixed start,
+deferred-close, reconciliation, or disconnect categories with operation type and
+submitted count. Exact source handles, paths, receipts, and playlist scope stay in
+process memory and never enter those records.
 
 ## How the code enforces it
 
@@ -84,9 +113,23 @@ A promise you can verify beats a promise you have to trust.
    additionally install a default-deny syscall allowlist before reading IPC;
    Ubuntu 24.04 CI decodes generated AVIF and HEIC inputs through the release-mode
    worker and fails if that policy blocks required decoder behavior.
-   File and folder access remains user-directed: **Open File** grants one selected
-   item, while **Open Folder** is the explicit consent path for sibling navigation.
-   viewr does not request broad photo-library access or persist a folder grant.
+   File and folder access remains session-scoped. In a sandbox, **Open File** may
+   grant only the selected item, while **Open Folder** is the explicit consent path
+   for sibling navigation. Outside a file-access sandbox, opening one file also
+   scans its containing folder for navigation when normal operating-system
+   permissions allow it. Automatic scans include only regular directory entries
+   and do not follow sibling symlinks. A symlink chosen directly through Open File
+   remains the explicit selected path and does not expand automatic discovery.
+   After sibling access succeeds, prefetch selects at most four nearby paths for
+   each current position. The shared executor separately caps queued and
+   concurrent decoding, and decoded neighbors remain only in memory; viewr writes
+   none of them to disk. Failed or over-budget speculative results remain
+   suppressed until the playlist generation changes or a successful foreground
+   presentation reopens the path. Stale generations cannot populate the cache,
+   and their queued or active reads observe cooperative cancellation. With
+   diagnostics explicitly enabled, an effective terminal outcome names only a
+   control-safe, bounded filename, never its directory. viewr does not request a
+   whole-library capability or persist a folder grant.
 3. **No analytics/telemetry SDKs, ever.** There is no analytics dependency to
    configure. This is also enforced by the dependency audit above.
 4. **Split decode boundary.** Common pure-Rust formats decode in the main process
@@ -112,23 +155,74 @@ A promise you can verify beats a promise you have to trust.
   `light`, `dark`, or `console` in the platform configuration directory under
   `viewr/appearance`. It contains no path, timestamp, device identifier, or image
   data. Windows uses `%APPDATA%`, macOS uses `Library/Application Support`, and
-  Linux uses `XDG_CONFIG_HOME` or `.config`. Deleting that file restores System.
+  Linux uses `XDG_CONFIG_HOME` or `.config`. Deleting that file quietly restores
+  System. Invalid, oversized, unreadable, or unavailable state also uses System
+  and shows one fixed recovery notice without the path, raw error, or stored
+  content. A failed explicit save keeps the selected appearance for the current
+  session and shows fixed recovery guidance. Explicitly enabled diagnostics
+  receive only a fixed load reason or failed save phase, never a raw error or
+  configuration path.
 - viewr **does not** write history, a recently-opened list, thumbnail database,
-  photo-library search index, or general settings database. Flags, picks,
-  filmstrip thumbs, panel visibility/position, and neighbor **prefetch** live
-  **only in RAM for the current session** and disappear when the app closes
-  (never under temp or beside your photos).
+  photo-library search index, rating/flag/pick database, or general settings
+  database. Filmstrip thumbnails, panel visibility/position, and neighbor
+  **prefetch** live **only in RAM for the current session** and disappear when the
+  app closes (never under temp or beside your photos). The accepted-source native
+  identity used for guarded Trash and permanent-delete checks is never persisted,
+  displayed, or logged. Replacement, missing, unsupported, unavailable, and
+  platform Trash outcomes enter diagnostics only as fixed categories.
 - viewr **does not** create companion files next to your photos (no `_picks.txt`,
   no sidecar caches).
+- Durable ratings are an approved but unimplemented exception to the current
+  no-source-mutation viewer behavior. The contract in `docs/RATINGS.md` stores
+  only a disclosed 0-to-5 preference in standard embedded image metadata. It
+  never creates a database, companion file, alternate stream, timestamp, or
+  viewing-history record. Rating an image will intentionally modify that source
+  file and make the small preference value visible to other metadata-aware apps.
+  No control ships until bounded parsing, atomic replacement, rollback, and
+  unrelated-metadata preservation are proven.
 - Spot-heal strokes, repair regions, and undo/redo pixel patches exist only in
-  bounded RAM. Navigation clears them. The source file is never edited in place.
+  bounded RAM. Navigation clears them. Decoded pixels, bounded history, and GPU
+  presentation commit together; presentation failure restores exact pixels and
+  history before reporting failure. The source file is never edited in place.
+- A pending crop keeps only its source decode, exact in-memory selection, paused
+  animation ownership, and generation token. It writes nothing. Navigation sets
+  cooperative cancellation before dropping that state; a current-source failure
+  restores the selection, while a stale generation cannot present or restore it.
 - **Save As / convert** only writes the file path you choose in the save dialog.
   It validates the source, destination format, pixels, and metadata option first,
   builds a sibling temporary output, and replaces the destination only after both
   pixel encoding and optional metadata writing succeed.
 - Deletes go to the **system trash**, so your OS (not viewr) holds the recoverable
   copy under its normal rules. Permanent delete requires an explicit confirmation
-  dialog and skips the trash.
+  dialog with Delete permanently and Cancel actions, then skips the trash. Its
+  filename is bounded, path-free, control-safe, bidi-safe, and quote-safe.
+  Single Trash verifies the retained source that supplied accepted pixels before
+  calling the platform. Permanent delete verifies it before confirmation and
+  again after confirmation immediately before deletion. Missing, replaced,
+  linked, and identity-unavailable entries remain untouched. Fixed rejection
+  copy and diagnostics contain neither paths nor native identifiers.
+  External Trash errors can contain paths and arbitrary platform descriptions,
+  so viewr maps them, including macOS destination inspection failures, to fixed
+  categories before showing or logging them. Identity-rejected and failed platform
+  Trash attempts leave the current image and playlist unchanged, while retryable
+  restore receipts remain only in session memory for explicit retry.
+  Windows and Linux receipts contain a new platform Trash item identifier only
+  after its native file identity matches the retained accepted-source handle;
+  macOS receipts contain the exact resulting URL and the same handle. The handle
+  prevents identity reuse, and restore repeats the identity check. These values
+  are never logged, displayed, or persisted, and restore never falls back to
+  matching an original pathname. Missing items end the in-app retry, while
+  ambiguous or invalid receipts direct manual system Trash review.
+  The File menu exposes only whether Undo Trash is available or unsettled, never a
+  filename, original path, Trash identifier, native identity, or history count.
+  A successful receiptless move and a permanent delete both preserve any earlier
+  valid `U` action; neither claims the new action can be restored in-app. The final
+  Trash and permanent-delete operations remain pathname based. Restore also
+  makes a later platform call with the checked Trash identifier on Windows and
+  Linux or the checked Trash URL on macOS. The immediate identity checks narrow
+  but do not eliminate a hostile final swap before the operating system consumes
+  that path, identifier, or URL.
+  The Windows dialog manifest requests the current user's privilege, not elevation.
 
 Any future convenience preference such as remembered window size must be
 local-only, plainly documented, and easy to clear. It will never be transmitted.
@@ -147,6 +241,17 @@ acceptance gate are specified in `docs/LOCAL-INTELLIGENCE.md`.
 
 Images carry EXIF metadata, often including **GPS coordinates**, camera serial
 numbers, and timestamps. Bloated apps silently preserve all of it when you export.
+
+Image Information performs a bounded supported-EXIF scan through a duplicate of
+the accepted source handle that supplied the displayed pixels. It reports the tag
+count and only the presence of location-related data, owner or author fields,
+camera, lens, or image identifiers, descriptions or comments, software history,
+embedded thumbnails, and opaque maker-specific data. Raw coordinates, serials,
+owner names, comments, and maker data are not displayed or logged. `No supported
+EXIF detected` is deliberately not called clean or metadata-free: XMP, IPTC,
+format-specific fields, filenames, filesystem attributes, application history,
+and data hidden in image pixels may still exist. viewr does not claim to detect
+steganography or prove that a source is safe to share.
 
 viewr does the opposite by default: on **Save As / convert**, the app re-encodes
 the raw image pixels and **drops EXIF, GPS, and all other metadata**. Your address
@@ -169,6 +274,13 @@ pixel-strip locators, so large ordinary TIFF pixel data does not need to enter t
 metadata parser. Retention is content-driven and writes only JPEG, PNG, or WebP
 destinations supported by the transactional export path.
 
+On Windows, Open With passes the unmodified original source to the native chooser.
+It does not pass viewr's unsaved crop, rotation, flip, or Spot Heal state and does
+not sanitize metadata first. After a successful handoff, a path-private status
+remains visible until the user invokes `F5` or loads another image. The status says
+only that the external app may have changed the source. viewr does not infer edit
+completion from another process lifetime and does not reload automatically.
+
 ## Updates
 
 viewr does **not** check for updates in the background or contact any server on
@@ -187,8 +299,9 @@ diagnostics, and any future local preferences stay under your control.
 
 ## Summary
 
-Most apps ask you to trust a privacy policy. viewr is built so there is nothing to
-trust: no network code to leak through, no telemetry to disable, no account to
-compromise, no activity log by default, no leftover temp debris, and CI that fails
-if networking sneaks in. Privacy here is the absence of the machinery that
-violates it.
+Most apps ask you to trust a privacy policy. viewr removes the main product-owned
+collection paths: no remote client, telemetry, account, activity log, persistent
+library index, or product temp cache. Native dialogs, operating-system paging,
+system trash, GPU memory, explicitly selected external applications, and optional
+package boundaries remain platform-owned surfaces and are stated above instead of
+being presented as guarantees viewr does not control.

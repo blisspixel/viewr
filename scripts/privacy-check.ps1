@@ -67,15 +67,11 @@ foreach ($crate in @("reqwest", "hyper", "rustls", "native-tls")) {
     }
 }
 
-Write-Host "== source must not write activity side-files or always-on logging =="
-# No OpenOptions append-to-disk activity log next to user photos.
+Write-Host "== narrow source privacy tripwires + ephemeral contracts =="
+# This orchestration check is a regression tripwire, not a complete Rust
+# write-path analyzer. Default logger behavior is covered by Rust tests.
 if (Select-String -Path "crates/viewr/src/app.rs" -Pattern "OpenOptions" -Quiet) {
-    Write-Error "app.rs must not use OpenOptions (activity side-files are forbidden)"
-    exit 1
-}
-$main = Get-Content "crates/viewr/src/main.rs" -Raw
-if ($main -match "default_filter_or") {
-    Write-Error "main.rs must not enable env_logger by default (opt-in only via RUST_LOG/VIEWR_LOG)"
+    Write-Error "app.rs must not acquire direct OpenOptions persistence capability"
     exit 1
 }
 if (-not (Test-Path "crates/viewr/src/ephemeral.rs")) {

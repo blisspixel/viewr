@@ -16,6 +16,14 @@ It is built for people who are tired of watching a simple image viewer turn into
 advertising surface with a photos app bolted on. It looks simple, and that simplicity
 is the visible result of a great deal of underlying discipline, not the absence of it.
 
+## Current availability
+
+viewr is pre-1.0 and does not yet publish public downloads, signed installers, or
+store packages. The supported paths today are a source build or a locally built and
+verified dual-binary archive. See [`docs/INSTALL.md`](docs/INSTALL.md) for exact steps
+and [`docs/VERIFY.md`](docs/VERIFY.md) for what each check proves and where its
+evidence stops.
+
 ## Principles
 
 These are not marketing lines. Every one of them is a constraint the codebase is
@@ -31,7 +39,12 @@ held to, and most are enforced in CI.
    and io_uring before GUI threads start, including x32 syscall aliases on x86-64.
    Network-denied OS packaging profiles add another boundary when those packages
    are used.
-3. Zero logs, zero insights, zero background indexing. No telemetry, no analytics, no crash reporting, no auto-tagging, no usage improvement toggle. There is no opt-out because there is nothing to opt out of. Your filenames, folders, and photos never leave your machine, and viewr will **never** silently alter your files to add metadata or AI inferences.
+3. Zero persistent activity logs, zero insights, zero background indexing. No
+   telemetry, analytics, crash reporting, auto-tagging, or usage-improvement
+   toggle. Normal runs emit no diagnostic stream; optional local stderr diagnostics
+   are explicit, path-private, and never persisted by viewr. Your filenames,
+   folders, and photos never leave your machine, and viewr will **never** silently
+   alter your files to add metadata or AI inferences.
 4. Safe with hostile files. Opening an image means parsing untrusted bytes. The
    pure-Rust core decoders run off the UI thread with strict decoded dimension and
    allocation bounds; SVG also has a pre-parse input cap. Optional C-backed formats
@@ -40,7 +53,7 @@ held to, and most are enforced in CI.
    and filesystem boundary.
 5. Simple on the surface, uncompromising underneath. It looks simple and does
    exactly what you want with no friction. That simplicity sits on top of rock-solid
-   memory safety, a decode sandbox, elite-level testing, broad format coverage, and
+   memory safety, a decode sandbox, strict testing, broad format coverage, and
    layered privacy. viewr is minimal in surface area and maximal in engineering
    rigor. This is not a lightweight app that does less. It is a deeply engineered app
    that shows you a picture and asks nothing of you.
@@ -54,11 +67,51 @@ with metadata stripped by default, and delete to the system trash with undo. Spo
 Heal is deterministic, local, and in-memory. It ranks clean source patches using
 color, tone, and edge structure, adapts the selected source to its boundary, and
 offers adjustable feather plus Refresh Source (`/`). The edit persists only if
-you explicitly save a copy.
+you explicitly save a copy. Spot Heal, Undo, and Redo commit decoded pixels,
+bounded history, and displayed pixels together. If the display cannot accept an
+edit, decoded pixels and history are restored before failure is reported, so a
+later Save As cannot silently differ from the canvas.
 
-Network-denied packages expose both **Open File** and **Open Folder**. Opening a
-folder is the explicit, session-only consent path that enables sibling navigation
-without granting viewr broad access to a photo library.
+Image Information performs a bounded, local EXIF inspection through the retained
+source handle that supplied the displayed pixels. It shows privacy-risk presence
+categories for location, ownership, unique device or image identifiers, comments,
+software history, embedded thumbnails, and maker data without putting sensitive
+raw values on screen. The panel explicitly says that this limited EXIF scan cannot
+prove that other metadata or hidden pixel data is absent.
+
+**Open File** starts with one image. When operating-system access allows, viewr
+scans its containing folder for supported regular-file siblings, and prefetch may
+read nearby images for faster navigation. A restrictive sandbox may expose
+only the selected item. **Open Folder** explicitly selects a folder for sibling
+navigation during the current session. viewr persists neither grant, builds no
+library index, and requests no broad photo-library access.
+
+Immediate reverse navigation reuses a pristine frame that is still presented.
+For moves within two positions, after a replacement appears, the just-left
+pristine decode is retained in the same five-entry, 256 MiB neighbor cache without
+copying its pixels when those limits permit. Larger jumps and evicted entries use
+the normal loading path. Crop results, Spot Heal results, animation playback
+frames, and frames held across an explicit Reload File are never admitted as
+reusable source decodes.
+
+On a genuine cache miss, the loading or failure status names the selected target
+by a bounded filename only, while the visible filename, dimensions, and zoom keep
+describing the pixels still on screen. First-load recovery uses the same specific
+filename and Retry label. Decode, display-preview, and GPU upload failures remain
+durable and retryable. Immediate reuse and full-resolution cache hits show no
+loading state; derived-image preview preparation is labeled separately.
+
+Open and Save As currently use native operating-system dialogs. On Windows, File
+and the image right-click surface also offer **Open With...**, which asks the
+Windows chooser to pass the exact current source to an app you select. It includes
+the original metadata and excludes unsaved viewr edits. The selected app has its
+own privacy and file-writing behavior; viewr retains a visible `F5` reminder until
+you explicitly reload possible changes. These dialogs and handoffs may update the
+operating system's recent-item history according to its own settings.
+Decoded pixels remain in bounded process and GPU memory, but viewr does not claim
+to prevent operating-system paging or live-system memory inspection. The exact
+privacy boundary and practical mitigations are documented in
+[`docs/PRIVACY.md`](docs/PRIVACY.md).
 
 Does not, and will not: accounts, cloud sync, sharing services, ads, discover
 feeds, face grouping, background indexing, silent AI analysis, automatic or background update checks, telemetry, or a settings screen
@@ -67,32 +120,119 @@ strong signal we do not want it.
 
 ## Interaction
 
+### Viewing and editing
+
 The image always owns a dedicated viewport. Tools, Folder Previews, and Image
 Information are optional docked panels that reserve their own space and never cover
-the photo. `T`, `G`, and `I` show or fully hide them; Tools and Folder Previews can
-also collapse to quiet disclosure rails. View > Panel Position independently docks
+the photo. Opening the first image never changes the current application-window
+dimensions. The photo fits inside the existing viewport; only normal window
+resizing changes the window itself, while View commands control fit and zoom within
+it. `T`, `G`, and `I` show or fully hide the panels, and View > Panels displays
+those keys beside the corresponding selected controls. Tools and Folder Previews
+can also collapse to quiet disclosure rails. View > Panel Position independently docks
 Tools and Image Information on the left or right. Every visibility, collapse, or
 position change refits and recenters the image. `J` opens a temporary docked Spot
 Heal inspector that also reserves its own space; only its brush mask is drawn over
 the photo. Its inspector exposes brush radius, feather, alternate ranked sources,
-Undo, and Redo. Image Information contains the
-explicit session-only export-metadata choice. View also exposes Fit Image to View
+Undo, and Redo. Image Information separates the bounded Source Privacy summary
+from the explicit session-only export-metadata choice. View also exposes Fit Image to View
 (`0`), Actual Size (`1`), Zoom In (`+`), and Zoom Out (`-`) so zoom never depends on
 a mouse or trackpad. The empty, loading, and load-error states use an opaque
 high-contrast surface, so they remain readable even when the image background is
 white. File > Reload File (`F5`) explicitly bypasses the decoded-neighbor cache
 and refreshes the current file from disk while retaining the last good frame until
-the replacement is ready. Crop offers Free, Original, 1:1, ten landscape and
+the replacement is ready. On Windows, Open With is available from File and the
+image right-click surface; it opens the original source, not unsaved viewr edits,
+and leaves a persistent `F5` reminder because viewr does not yet watch external
+changes automatically. Loading and failure copy names that requested file
+without exposing its directory. Crop offers Free, Original, 1:1, ten landscape and
 portrait photo/video ratios, reversible orientation, numeric custom ratios, eight
-pointer handles, and full keyboard operation. The automated native bridge check
-and manual three-platform acceptance
-matrix live in [`docs/ACCESSIBILITY.md`](docs/ACCESSIBILITY.md).
+pointer handles, and full keyboard operation. Applying a crop binds its exact
+selection to the current image generation and keeps the original decoded and
+displayed pixels until renderer presentation succeeds. A failure restores the
+same selection for immediate Enter-key retry, while navigation cooperatively
+cancels obsolete row-copy work.
 
-View > Appearance selects System, Light, Dark, or Console. The complete chrome,
-native window decoration, and default image canvas change together. The choice is
-remembered as one local word and contains no photo path or activity history. Help
-> About viewr opens a keyboard-dismissible modal with build, license, shortcut,
-and privacy details.
+Star ratings and rating-threshold folder filters are not implemented yet. Their
+[approved contract](docs/RATINGS.md) uses standard embedded 0-to-5 metadata, never
+a sidecar, activity database, alternate stream, or session-only imitation. It is
+blocked until a patched bounded XMP path and failure-atomic preservation tests can
+prove that rating one image cannot corrupt its pixels or unrelated metadata.
+
+### Trash and recovery
+
+`Delete` moves only the currently displayed image to the operating system Trash.
+There is no bare-letter trash shortcut and no mark, review, or batch-trash mode.
+This keeps a destructive action on the conventional Delete key and makes its
+target visible at the moment it runs. File > Move to Trash provides the same
+pointer-accessible action.
+
+Press `U`, or choose File > Undo Trash, to restore the latest safely recoverable
+Trash action. Undo belongs to that action even if you have opened another folder.
+When restoring into a different folder, viewr does not insert the restored file
+into the unrelated current view. Reopen its source folder to refresh that list.
+If viewr cannot retain an exact receipt, it directs recovery to the system Trash
+and preserves any earlier valid in-app Undo action.
+
+#### Safety and recovery details
+
+Trash retains the live file handle that supplied the displayed pixels. Immediately
+before moving the file, viewr verifies that the current path still identifies the
+same regular filesystem object without following a replacement link. Missing,
+replaced, linked, or unverifiable entries fail closed without changing the
+playlist or Undo receipt. Windows and Linux retain a new Trash item identifier
+only when its native file identity matches that accepted-source handle. macOS
+retains the exact resulting Trash URL and the same handle. `U` never falls back to
+another item with the same original pathname.
+
+Foreground reload, preview preparation, Crop, Save As, and an active Spot Heal
+stroke or worker block Trash and restore until the visible work is settled. Restore
+runs through a typed native worker so the window stays responsive. The top bar
+reports the operation without inventing a percentage, estimate, or cancellation
+promise. If the worker ends without a result, viewr retains the receipt and asks
+the user to reconcile it with `U` instead of claiming that nothing happened. A new
+Trash move cannot silently replace uncertain restore ownership.
+
+`Shift+Delete` is the separate permanent-delete path. It verifies the accepted
+source before opening a bounded filename confirmation, then verifies it again
+after the explicit Delete permanently action and immediately before removal.
+Cancel performs no filesystem action. A successful permanent delete states that
+it cannot be undone and preserves any prior valid Trash action assigned to `U`.
+
+These checks are immediate fail-closed preflights. Desktop Trash and permanent
+delete ultimately consume a pathname. Restore later calls the platform with the
+checked receipt identifier on Windows and Linux or checked Trash URL on macOS.
+These narrow final calls are not an atomic guarantee against another process
+swapping the entry before the operating system consumes it. The automated native
+bridge check and manual three-platform acceptance matrix live in
+[`docs/ACCESSIBILITY.md`](docs/ACCESSIBILITY.md).
+
+### Appearance choices
+
+View summarizes the current choice and describes every option before selection:
+
+- **System** follows the operating system's Light or Dark setting and reports the
+  effective mode while active.
+- **Light** uses bright neutral chrome, a light window frame, and a soft-white
+  canvas.
+- **Dark** uses low-glare charcoal chrome, a dark frame, and a deep-ink canvas.
+- **Console** is the green-screen look, with a near-black canvas, phosphor-green
+  chrome, and monospaced interface type.
+
+Appearance changes app chrome and its default canvas, never image pixels. View >
+Image Background can override the canvas independently. The choice is atomically
+remembered as one local word and contains no photo path or activity history. A
+missing preference quietly uses System. Unusable saved state also uses System but
+shows `Could not restore saved appearance. Using System.` without a path, stored
+value, or raw error. Choosing an appearance replaces rejected state when storage
+is writable; a save failure remains visible through fixed session-only recovery
+copy and a path-free diagnostic phase. Help > About viewr opens a
+keyboard-dismissible modal with build, license, shortcut, and privacy details.
+Help > Update viewr opens a local-only modal with the current version, the trusted
+source-channel boundary, and the locked source-build command. It performs no
+network check, download, install, or browser launch because no verified public
+update source is configured yet. The `viewr update` CLI command prints the same
+contract.
 
 ## Formats
 
@@ -133,20 +273,29 @@ navigator. Full table:
   decoder materialization, with one shared 10 MiB embedded-ICC ceiling. Declared
   still-image and animation output sizes are validated before pixel allocation.
 - Deletes: native system trash APIs, recoverable, never a raw delete by default.
-  Windows and Linux use the `trash` crate; macOS retains the exact
-  `NSFileManager` result URL so in-app Undo can restore the same item safely.
-  Undo covers every successful item in the latest single or batch trash action.
+  Windows and Linux retain a new `trash` item identifier only after its native
+  file identity matches the live accepted-source handle; macOS retains the exact
+  `NSFileManager` result URL with that handle. In-app Undo restores only those exact
+  receipts from the latest recoverable single or batch action, never a pathname
+  match. A move without an exact receipt remains recoverable through system Trash
+  and does not erase a previous valid in-app Undo action. Permanent delete also
+  preserves that prior Trash action while remaining non-recoverable itself.
+  External platform failures cross a fixed path-free copy boundary before they
+  reach the interface.
 - Spot Heal: a bounded pure-Rust worker ranks up to eight spatially distinct
   source patches with robust tone and edge-aware scoring, applies local color
   adaptation and feathered compositing, and falls back to directional inpainting.
   It has no model dependency, source-file write, image cache, or sidecar.
-  Pixel-patch undo and redo stay in memory, and only the changed GPU texture
-  region is uploaded after each edit.
+  Pixel-patch undo and redo stay in memory, commit only after presentation, and
+  roll back exact pixels and history on presentation failure. Only the changed GPU
+  texture region is uploaded after each edit.
 - Theme and icon: System, Light, Dark, and phosphor-green Console palettes cover
   native decoration, standard widgets, custom controls, typography, and the
   default image canvas. Black, neutral gray, and white remain independent image
-  inspection backgrounds. One validated appearance word is the only persistent
-  UI preference. A custom SVG/ICO app icon is embedded via `winres`.
+  inspection backgrounds. The chooser describes each outcome and keeps image
+  pixels outside theme scope. One validated, atomically replaced appearance word
+  is the only persistent UI preference. A custom SVG/ICO app icon is embedded via
+  `winres`.
 
 Full reasoning, including the alternatives we rejected, is in
 [`docs/STACK.md`](docs/STACK.md).
@@ -154,7 +303,7 @@ Full reasoning, including the alternatives we rejected, is in
 ## Quality bar
 
 viewr targets 85 percent or higher line coverage on its testable logic (currently
-90.64 percent lines and 81.62 percent functions), clippy at pedantic with warnings
+90.97 percent lines and 83.58 percent functions), clippy at pedantic with warnings
 as errors, continuous fuzzing of the decode path, and behavior-level contract tests
 that keep the coverage honest.
 The full set of engineering standards is in
@@ -178,11 +327,17 @@ Linux, macOS, and Windows from a single codebase.
 - [`docs/DESIGN.md`](docs/DESIGN.md), the visual and interaction system.
 - [`docs/PRIVACY.md`](docs/PRIVACY.md), the privacy guarantee stated plainly, and
   how the code enforces it.
+- [`docs/RATINGS.md`](docs/RATINGS.md), the approved embedded-rating, filter,
+  privacy, interoperability, and source-write safety contract.
 - [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md), what we measure and the current
   numbers.
 - [`docs/LOCAL-INTELLIGENCE.md`](docs/LOCAL-INTELLIGENCE.md), the strict product,
   privacy, runtime, and evaluation gate for any optional local model.
 - [`docs/INSTALL.md`](docs/INSTALL.md), how to install on each OS and cut a release.
+- [`docs/VERIFY.md`](docs/VERIFY.md), what local source and artifact checks prove,
+  and where their evidence stops.
+- [`SECURITY.md`](SECURITY.md), supported versions, safe vulnerability disclosure,
+  and the current private-channel status.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md), the phased plan from first window to 1.0 and
   beyond.
 

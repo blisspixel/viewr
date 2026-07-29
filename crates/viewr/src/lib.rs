@@ -9,14 +9,13 @@
 pub(crate) mod animated;
 pub mod app;
 pub mod cli;
+pub mod color;
+pub mod crop;
 pub mod curate;
 pub mod decode;
 pub mod edit;
 pub mod ephemeral;
 pub mod error;
-pub mod color;
-pub mod crop;
-pub mod session;
 pub mod fs;
 pub mod gpu;
 pub mod heal;
@@ -24,12 +23,16 @@ pub mod image_info;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod performance;
+/// Folder and navigation state.
+pub mod playlist;
 pub mod prefetch;
 pub mod privacy;
 pub(crate) mod sandbox;
+/// State for the selected, loading, and presented image.
+pub mod session;
 pub mod theme;
 pub mod thumbs;
-/// The main user interface module utilizing egui for overlays.
+/// The main user interface module built with egui.
 pub mod ui;
 pub mod view;
 pub(crate) mod worker_limit;

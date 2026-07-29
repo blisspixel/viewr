@@ -1,59 +1,99 @@
-# Verifiable Builds & Trust
+# Build and artifact verification
 
-At `viewr`, privacy is not a promise you have to trust—it is a mathematical property of the code. However, open-source code is only trustworthy if you can guarantee that the release binaries actually match the source code.
+This guide explains what can be verified from the current repository and where
+the evidence stops. viewr does not yet publish a public release or a canonical
+checksum set. Until it does, verification is local and applies to the exact source,
+target, toolchain, dependency lockfiles, build environment, and artifacts you use.
 
-This document explains how to perform a **deterministic, verifiable build** of `viewr` so you can independently confirm that the binaries we distribute have not been injected with spyware or network clients.
+## What each check establishes
 
-## The Threat Model
-Supply-chain attacks often involve compromising a CI/CD pipeline or a developer's machine so that the published binary contains malicious code not present in the public repository. 
+- A Git commit identifies the source tree you reviewed.
+- `rust-toolchain.toml` and committed Cargo lockfiles constrain the compiler and
+  Rust dependency graph.
+- `cargo deny check` verifies that the resolved dependency graph complies with the
+  repository's source, license, advisory, and banned-dependency policy. It does not
+  prove that arbitrary source code cannot perform networking.
+- The privacy check enforces repository-owned dependency and packaging boundaries
+  and keeps narrow source tripwires around the reviewed orchestration and ephemeral
+  contracts. Rust behavior tests separately prove that absent logging variables and
+  unsupported external-only directives construct no logger.
+- A SHA-256 checksum identifies one exact artifact. A checksum match proves that
+  two byte sequences match; it does not independently prove which source produced
+  those bytes.
+- The release-artifact verifier checks the archive's internal manifest, expected
+  dual-binary contents, and checksum sidecar.
 
-Our defense against this is reproducibility: if you check out the exact commit tag for a release and build it using our locked toolchain, your output should hash to the exact same SHA-256 checksum that we publish.
+## 1. Pin the source and toolchain
 
-## 1. Prerequisites
-To guarantee determinism, you must use the exact compiler version defined in `rust-toolchain.toml` and the exact dependencies locked in `Cargo.lock`.
+Record the commit you intend to verify and ensure the repository is not silently
+using a different toolchain or dependency graph:
 
-```bash
-# Clone the repository and checkout a release tag
-git clone https://github.com/viewr/viewr.git
-cd viewr
-git checkout v1.0.0
-
-# Ensure you have the exact Rust toolchain installed
-rustup show
+```text
+git rev-parse HEAD
+git status --short
+rustup show active-toolchain
+cargo metadata --locked --format-version 1
 ```
 
-## 2. Dependency Audit
-Before building, you can independently verify that our dependency tree is free of network clients (HTTP, TLS, etc.) by running our `cargo-deny` config.
+A dirty tree is valid for local development, but its output is not evidence for
+the unmodified commit alone. Review and record the diff if local changes are part
+of the build.
 
-```bash
-cargo install cargo-deny
+## 2. Run the local trust and quality gates
+
+Use the commands documented in `docs/INSTALL.md` and `docs/STANDARDS.md`. The core
+verification set includes formatting, strict Clippy, tests, coverage, privacy,
+dependency policy, advisory checks, and the separate fuzz workspace lockfile.
+
+```text
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
 cargo deny check
-```
-If this command passes, it mathematically proves that no remote-service client stack has been linked into the dependency graph.
-
-## 3. The Verifiable Build
-To build the reproducible binaries (the main app and the isolated decode worker), use the standard release profile. The Cargo configurations are pinned to ensure deterministic optimizer behavior.
-
-```bash
-cargo build --release
+cargo audit
+pwsh -NoProfile -File scripts/privacy-check.ps1
+cargo check --manifest-path fuzz/Cargo.toml --locked
 ```
 
-## 4. Comparing Checksums
-Once the build is complete, generate the SHA-256 checksums for the binaries:
+Platform package and optional C-decoder checks require their documented local
+SDKs or system libraries. A skipped platform check is an evidence gap, not a pass.
+## 3. Build the exact target
 
-### Linux / macOS
-```bash
-sha256sum target/release/viewr
-sha256sum target/release/viewr-decode
+Build both workspace binaries from locked dependencies:
+
+```text
+cargo build --release --workspace --locked
 ```
 
-### Windows (PowerShell)
-```powershell
-Get-FileHash target\release\viewr.exe -Algorithm SHA256
-Get-FileHash target\release\viewr-decode.exe -Algorithm SHA256
-```
+Record the target triple, operating-system image, linker and SDK versions, enabled
+features, environment variables that affect compilation, and the commit. These
+inputs can change executable bytes even when Rust source and Cargo dependencies
+are unchanged.
 
-Compare these checksums against the `SHA256SUMS` file published in the GitHub Release assets. If they match exactly, you have mathematically verified that the binaries running on your machine are identical to the auditable open-source code in this repository.
+## 4. Build and verify the release archive
 
-## Notes on OS-Specific Metadata
-Some platforms (like macOS) inject timestamped signatures into the final bundle (`.app`), which changes the checksum of the wrapper. Our verifiable checksums apply to the **bare executable binaries** before any OS-specific packaging or ad-hoc signing is applied.
+Use the target-specific `scripts/release_artifact.py build` and `verify` commands
+in `docs/INSTALL.md`. The builder creates a deterministic archive from the binary
+inputs it receives, includes the security policy and canonical Markdown set, writes
+an internal manifest, and emits a SHA-256 sidecar. The verifier then checks those
+exact bytes, the declared archive structure, and local README links written in the
+repository's simple inline Markdown form with repository-relative destinations.
+Reference-style links, Markdown images, and raw HTML destinations are not parsed
+and must not be used for the README's portable documentation navigation.
+
+The archive process is deterministic for identical inputs. The repository does
+not claim that separate operating-system images or linker versions produce
+bit-identical executables.
+
+## 5. Compare published artifacts when they exist
+
+For a future public release, obtain the checksum and provenance from the release's
+canonical page, verify signatures when available, and compare the downloaded
+artifact's SHA-256 value before opening it. A matching published checksum verifies
+download integrity relative to that release record. Independent source-to-binary
+reproduction requires a documented, controlled build environment and comparison
+against the unsigned executable produced there.
+
+Current release-readiness gaps, including hosted multi-OS evidence, signing,
+notarization, public checksums, and independent reproduction, remain tracked in
+`docs/ROADMAP.md`.

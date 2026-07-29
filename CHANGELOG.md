@@ -1,11 +1,103 @@
 # Changelog
 
-All notable changes to this project are documented here. The format is human-written and kept short.
+All notable changes to this project are documented here. The format is human-written
+and organized by user-visible concern.
 
 ## Unreleased
 
 ### Changed
 
+- The Windows performance probe now starts its strict 500 ms settled-idle window
+  only after egui has no delayed hover or activation repaint outstanding. The
+  two-redraw budget is unchanged; a UI that keeps scheduling frames still reaches
+  the existing hard timeout. A reproduced 11-redraw activation outlier now yields
+  a quiet measured interval, and the optimized seven-process gate records at most
+  one redraw per completed idle window.
+- The native Windows accessibility smoke now waits for the exact initial toggle
+  state of Tools and Image Information before activating either panel. A transient
+  accessibility-tree refresh can no longer produce an unhelpful null-parameter
+  failure, while a missing or wrongly selected control still reaches the existing
+  bounded diagnostic timeout.
+- The durable-rating product contract is now explicit. Future ratings use standard
+  embedded `xmp:Rating` and the compatible 0-to-5 `0x4746` mirror where proven,
+  never a sidecar, database, alternate stream, timestamp, or session-only fake.
+  Source-writing UI remains absent until a patched bounded XMP path and atomic
+  metadata-preservation evidence satisfy `docs/RATINGS.md`.
+- Image Information now reads metadata through the retained source handle used for
+  the displayed pixels and reports a bounded Source Privacy summary. It counts
+  supported EXIF tags and identifies location, ownership, unique identifiers,
+  comments, software history, embedded thumbnails, and maker-specific data by
+  presence only. Raw sensitive values remain hidden, and the panel explicitly says
+  that no supported EXIF is not proof that other metadata or hidden pixel data is
+  absent.
+- View > Panels now displays `T`, `G`, and `I` as right-aligned shortcuts and
+  includes the shortcut text in accessible menu names while preserving selected and
+  disabled state.
+- Windows now offers Open With... in File and the image right-click surface. It
+  uses the native single-file chooser with the current accepted source, never a
+  shell command, and does not remember an editor. The handoff explains that the
+  external app receives the original file and metadata, excludes unsaved viewr
+  edits, and may modify the source. A persistent path-free status directs `F5`
+  reload after a successful handoff; cancellation and launch failure remain
+  distinct outcomes. macOS and Linux chooser parity remains roadmap work.
+- Opening the first image no longer resizes the application window around that
+  image. The window keeps its current dimensions while the image fits inside the
+  available viewport; window dragging and explicit View zoom or fit actions remain
+  under the user's control.
+- Removed the session-only mark, review, and batch-trash workflow. Bare `B` and
+  `M` are unassigned, normal-mode `X` is unassigned, and `X` remains only the Crop
+  ratio-orientation shortcut while Crop is active. `Delete` and File > Move to
+  Trash now form the sole recoverable destructive path for the visible image;
+  `U` restores its latest exact receipt. Obsolete top-bar, File, Tools, thumbnail,
+  state, diagnostics, automation, tests, and documentation were removed together.
+- The unchanged first-run card now stays fixed instead of drifting vertically,
+  and filename, dimensions, and zoom use distinct reading gaps in the top status.
+  Help now includes an accessible local-only Update viewr modal with the running
+  version, trusted-channel guidance, and the locked source-build command. The CLI
+  guidance matches it and no longer assumes `git pull`; neither surface checks a
+  network, claims the running build is latest, downloads, installs, or opens a
+  browser while no verified public update source exists.
+- The explicit performance probe now preserves path-free per-run idle evidence:
+  delivered redraws, non-redraw window events, event-driven and scheduled egui
+  repaint requests, final focus, and pointer-inside state. The harness prints it
+  on request and automatically when completed reports violate a gate, while normal
+  launches remain silent. No repaint scheduling or two-redraw budget changed.
+- Default-silent logging now has direct behavior-level proof: absent logging
+  variables and unsupported external-only directives construct no logger, while
+  `RUST_LOG` keeps precedence over `VIEWR_LOG`. Privacy wrappers retain narrow
+  orchestration and ephemeral regression tripwires without claiming to prove every
+  possible future Rust file write.
+- README now states the current pre-1.0 distribution boundary beside the product
+  introduction and links directly to the supported local install and verification
+  paths. Archive guidance now distinguishes structure and byte checks against
+  co-produced records from publisher authentication and independent source
+  provenance. No public release, signature, or hosted evidence is claimed.
+- File > Undo Trash now exposes settled availability without retaining or showing
+  a history count. Its path-free help explains that the latest recoverable action
+  may belong to another folder. If a restore worker stops without a result,
+  a new Trash move waits for `U` to reconcile the retained receipt; a newer action
+  can no longer replace uncertain recovery ownership or falsely clear guidance.
+- Appearance save failures now keep the chosen theme for the current session,
+  show fixed recovery guidance, and expose only the failed persistence phase to
+  opt-in diagnostics. Raw storage errors and configuration paths cannot enter
+  the interface or diagnostic record.
+- Appearance startup now keeps a normal missing preference quiet while explaining
+  abnormal fallback with `Could not restore saved appearance. Using System.`
+  Invalid, oversized, unreadable, and unavailable state remain bounded, use fixed
+  path-free diagnostic categories, and are never rewritten without an explicit
+  appearance choice.
+- View > Appearance now describes System, Light, Dark, and Console before
+  selection, including Console's near-black, phosphor-green, monospaced
+  green-screen treatment. The chooser reports System's effective mode while
+  active and clarifies that themes change app chrome and the default canvas, not
+  image pixels or an explicit Image Background override. The complete descriptions
+  are native accessible radio names, Windows automation selects all four, and the
+  parent View entry now summarizes the current preference.
+- The first-run surface now explains that Open File browses its containing folder
+  when access allows, while Open Folder selects that folder explicitly for the
+  session. Both actions add concise pointer help, the explanation is present in
+  the native accessibility tree, and README and privacy guidance now disclose
+  nearby sibling prefetch. The vague “Maximum privacy” slogan is gone.
 - Source pixels now cross one validated, cancellable normalization boundary into
   an explicit RGBA8 sRGB working encoding. Still, JPEG XL, animated, and isolated
   worker decodes check supersession between ICC rows. Crop and pixel transforms
@@ -15,9 +107,157 @@ All notable changes to this project are documented here. The format is human-wri
   non-sRGB presentation surfaces instead of silently changing the transfer
   contract. Failed or superseded transforms cannot expose partially converted
   pixels.
+- Extracted playlist data, GUI performance-probe state, crop/output geometry, and
+  selected/loading/presented session state from the application orchestrator.
+  Session and performance transitions now have direct unit coverage.
+- Page Up and Page Down now navigate one image at a time. Undo Trash is disabled
+  when no recoverable receipt exists, and its keyboard shortcut reports that state
+  instead of failing silently.
+- Trash Undo now binds each receipt to the exact playlist that created it.
+  Restoring after a folder change no longer inserts prior-folder files into the
+  current view, and the result explains when the source folder needs a refresh.
+- Trash Undo now owns one latest safely recoverable action. Windows and Linux
+  retain a new system Trash item identifier only when its native file identity
+  matches the live accepted-source handle, macOS keeps the exact resulting URL
+  with that handle, and restore never substitutes an older item with the same
+  original pathname.
+  Receiptless successful moves direct recovery to system
+  Trash without erasing a prior valid `U` action. Permanent delete also preserves
+  that action and its success message makes clear that `U` applies only to the
+  earlier Trash operation. Restore failures retain `U` only for transient or
+  resolvable conditions; manual-review and terminal outcomes no longer advertise
+  a false retry.
+- Opt-in curation diagnostics now distinguish baseline Trash listing failure,
+  final listing failure, no new candidate, ambiguous candidates, and retained
+  source-identity mismatch using fixed categories. Undo reports its total native
+  restore duration. These stderr-only records contain counts and elapsed milliseconds,
+  never paths, filenames, receipt identifiers, native identities, or raw platform
+  errors. User-facing recovery copy and behavior are unchanged.
+- Trash restore now runs through one typed native worker instead of blocking
+  window repaint. The top bar exposes a polite operation state, conflicting open,
+  navigation, edit, and destructive actions wait, and normal close finishes
+  reconciliation before exit. Playlist scope and Undo receipts still commit once
+  on the event loop. Spawn failure leaves state unchanged; unexpected worker loss
+  keeps the receipt and directs system Trash review without claiming success. A
+  terminal wake runs even when the worker unwinds. The active state deliberately
+  offers no false percentage, estimate, or cancellation control.
+- Corrected privacy and build-verification documentation so native dialog history,
+  operating-system paging, and cross-environment linker limits are explicit.
+
+### Security
+
+- Deterministic release archives now include `SECURITY.md` and the complete
+  canonical Markdown documentation set. Verification also rejects unresolved
+  local README links written in the repository's simple inline Markdown form with
+  repository-relative destinations, so the current package cannot omit its
+  advertised privacy, recovery, architecture, accessibility, or disclosure
+  guidance.
+- Added a security policy with supported-version scope, privacy-safe synthetic
+  reproduction guidance, and explicit decode, file-mutation, privacy, sandbox,
+  packaging, dependency, and build-provenance boundaries. It records that no
+  verified private channel is operational yet and prohibits publishing technical
+  details while that release prerequisite remains open.
+- Corrected the reviewed `quick-xml` advisory exception to cover both real
+  dependency paths. Wayland XML remains fixed build-time input; little_exif uses
+  a plain reader and viewr calls its XMP-rewriting write path only on a freshly
+  encoded private temporary with no text or XMP chunks. Untrusted source metadata
+  crosses the existing bounded TIFF parser into typed tags and never reaches the
+  vulnerable XML paths. No compatible patched transitive release exists yet.
+- Single Trash and permanent delete now bind destructive intent to the retained
+  file handle that supplied accepted pixels. Delete rejects a changed, missing,
+  linked, or unverifiable entry before Trash. Shift+Delete verifies the source
+  before opening confirmation and repeats the check after acceptance immediately
+  before removal, so a confirmation-window replacement remains untouched. Fixed
+  path-free categories distinguish identity rejection from platform failure. The
+  final pathname operation remains documented as a narrow non-atomic boundary.
+- Exact Trash receipts remain in memory only and are neither logged nor
+  persisted. Windows and Linux snapshot existing Trash identifiers before the
+  move, accept exactly one new same-origin identifier afterward only when its
+  native file identity matches the retained source, and repeat that identity
+  check before restore. The live handle prevents identifier reuse. In-app restore
+  never falls back to matching only the original pathname. The later platform
+  identifier resolution remains documented as a narrow non-atomic boundary.
+- Opt-in logging now enables only viewr-owned targets. Bare levels and
+  `viewr=<level>` remain supported, while dependency directives are ignored so
+  path-bearing external warnings cannot cross the documented privacy boundary.
+  The boundary accepts only `viewr` or a `viewr::` descendant and rejects prefix
+  lookalikes.
+- Full-resolution crop work now checks cooperative cancellation before
+  allocation and between copied rows. Navigation cannot accumulate obsolete
+  crop copies, same-path Reload cannot accept an old-generation result, and
+  failed image loads cannot expose last-good pixels to keyboard crop commands.
+  Non-finite crop coordinates are rejected instead of becoming unintended
+  minimum geometry.
+- Permanent-delete confirmation now uses the same bounded, path-free,
+  control-safe, bidi-safe, and quote-safe filename contract as loading status.
+  Its affirmative button is labeled Delete permanently. Trash and restore errors
+  map external platform payloads to fixed actionable categories, so debug
+  descriptions, directories, and hostile filenames cannot reach failure copy.
+- Windows executables now embed the Common Controls v6 activation manifest
+  required by the native custom-button warning dialog, preventing a loader
+  failure while keeping the application at normal user privilege.
+- Automatic sibling scans now admit regular files only instead of following a
+  supported-image symlink to a target outside the selected directory. A directly
+  selected symlink remains openable as the user's explicit one-file selection.
+- Replaced reachable indexing and conversion assumptions at protocol and
+  user-input boundaries with checked access and explicit errors. The existing
+  hostile-input rule remains scoped to paths reachable from files and user input;
+  test assertions and documented internal invariants may still use unwrap or
+  expect.
 
 ### Fixed
 
+- The top status now contracts further at the 640-pixel minimum width so File,
+  Edit, View, Tools, Help, and playlist position remain separate. Pointer actions
+  for Trash and Undo share the same Crop, Spot Heal, folder-scan, save, load, and
+  restore blockers as their keyboard paths instead of appearing available before
+  returning guidance.
+- Crop now keeps its exact selection, view transform, paused animation state,
+  source generation, and decoded-image identity through computation, preview,
+  and renderer presentation. Any current-source failure leaves original pixels
+  unchanged, restores the selection, and names the Enter-key retry. Preview
+  channel disconnection clears busy ownership instead of hanging indefinitely,
+  and very small selections retain exact AccessKit bounds without claiming an
+  unusable inner drag target.
+- Spot Heal, Undo, and Redo now commit decoded pixels, bounded history, renderer
+  state, and success copy as one transaction. A failed patch or full-texture
+  presentation restores exact CPU pixels and history; an internal rollback
+  failure starts a source reload instead of leaving export state different from
+  the canvas. Destructive shortcuts and Trash restore wait for foreground reload,
+  preview, crop, Save As, active Spot Heal strokes, and active heal workers while
+  explaining the owning work. Restore copy identifies receipts retained for retry
+  without exposing paths.
+- Genuine cache-miss and first-load status now names the selected target by a
+  bounded, control-safe filename while the visible filename, dimensions, and zoom
+  continue to describe the last presented pixels. Failure and Retry use the same
+  target identity, cropped-image preview preparation is no longer mislabeled as a
+  file open, and immediate reverse reuse or full-resolution cache hits remain free
+  of loading status. Source-load preview queue, preparation, and GPU upload
+  failures now remain durable and retryable. Persistent loading, failure, and
+  preview-preparation statuses use polite AccessKit live-region semantics, while
+  transient toasts retain their prior semantic, non-live behavior. Target copy is
+  capped at the minimum window width without hiding the bounded full text when
+  elided.
+- Immediate reverse navigation now cancels the abandoned replacement and settles
+  on a pristine frame that is already presented without another decode or texture
+  upload. After a move within two positions completes, the just-left pristine
+  decode is shared into the existing five-entry, 256 MiB LRU without copying
+  pixels when those limits permit. Cache selection removes the shared alias before
+  edits can resume; larger jumps, crop and Spot Heal results, animation playback
+  frames, explicit Reload state, oversized or evicted entries, and old playlists
+  remain ineligible.
+- Appearance persistence now assembles and syncs the validated one-word value in
+  the configuration directory before atomic replacement, so an interrupted
+  assembly cannot truncate the last valid choice.
+- Neighbor prefetch now tags work with a playlist generation and suppresses a
+  failed or over-budget result until that playlist changes or a successful
+  foreground presentation proves the path usable. Stale completions cannot seed or
+  suppress replacement-playlist or explicit-Reload state, and a late speculative
+  failure cannot override a successful foreground presentation. Obsolete reads
+  now cancel cooperatively, and the first valid decode for a newly selected
+  neighbor wins instead of discarding ready pixels. Each effective terminal outcome
+  emits one bounded, filename-only operator diagnostic instead of an autonomous
+  retry loop.
 - GPU patch updates now reject reduced preview textures instead of applying
   full-resolution Spot Heal coordinates to them. The shared heal, undo, and redo
   fallback rebuilds the displayed image through the existing asynchronous preview
@@ -107,9 +347,8 @@ All notable changes to this project are documented here. The format is human-wri
   macOS trash Undo also preserves the exact resulting item URL and refuses to
   replace an existing restore target.
 - Trash receipts now store absolute original paths so relative command-line
-  opens restore correctly on Windows and Linux. Undo restores every successful
-  item from the latest batch, retains failed receipts for retry, and keeps files
-  that failed to move flagged instead of silently dropping them from the batch.
+  opens restore correctly on Windows and Linux. Undo retains retryable receipts
+  and reports when manual system Trash review is required.
 - Restored the quality baseline: `cargo fmt`, pedantic `clippy -D warnings`, and the full test suite are green again.
 - Raised measured logic coverage from 79.61% to 89.16% by testing CLI behavior and decode-boundary invariants, including diagnostics, benchmark paths, resource limits, explicit in-memory format dispatch, trash receipts, viewport geometry, and the corpus contract.
 - Prevented one process from deleting another process's live temporary test workspace by holding and respecting standard-library file locks during stale-debris cleanup.
@@ -209,7 +448,7 @@ All notable changes to this project are documented here. The format is human-wri
   contrast checks; and native AccessKit delivery on Windows, macOS, and Linux.
 - Filmstrip shows async real thumbnails (`thumbs` module); Space-hold temporary pan, tap Space resets view.
 - Linux worker: `no_new_privs`, non-dumpable, and seccomp-bpf that EPERMs classic and io_uring network paths (`seccompiler`).
-- Flag/batch cull (`X` / `B`) and Shift+Delete permanent delete with confirmation.
+- Shift+Delete permanent delete with confirmation.
 - `viewr-decode` is a workspace member with feature-gated C backends (`avif`, `heic`, `raw`); default build needs no system libraries.
 - Folder navigation recognizes worker formats (AVIF/HEIC/RAW extensions); decode routes through the worker when present.
 - `docs/FORMATS.md` capability table (core vs worker, RAW deferred).

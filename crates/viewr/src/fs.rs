@@ -6,9 +6,260 @@ use std::cmp::Ordering;
 #[cfg(target_os = "windows")]
 use std::ffi::{OsStr, OsString};
 use std::io;
+use std::io::{Seek, SeekFrom};
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
 use std::str::Chars;
+
+/// Result of comparing an accepted decode source with a current pathname entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ImageSourceMatch {
+    /// The current regular entry is the same filesystem object.
+    Same,
+    /// The pathname now identifies a different regular object.
+    Changed,
+    /// No entry currently exists at the pathname.
+    Missing,
+    /// The current entry is a link, reparse point, directory, or other unsupported type.
+    Unsupported,
+    /// The operating system would not provide trustworthy identity evidence.
+    Unavailable,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    volume: u64,
+    file_id: [u8; 16],
+}
+
+/// Live ownership of the filesystem object used to produce accepted image pixels.
+///
+/// The open handle prevents object-identifier reuse while the source is presented,
+/// cached, or prepared for a guarded action. Identity values and paths are deliberately never exposed.
+pub(crate) struct ImageSource {
+    file: std::fs::File,
+    identity: Option<FileIdentity>,
+    markable: bool,
+}
+
+impl std::fmt::Debug for ImageSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ImageSource")
+            .field("markable", &(self.markable && self.identity.is_some()))
+            .finish_non_exhaustive()
+    }
+}
+
+impl ImageSource {
+    /// Open one source object for decoding and retain its identity handle.
+    ///
+    /// A directly selected final symlink remains viewable for compatibility, but
+    /// is never markable because its displayed target and Trash entry differ.
+    pub(crate) fn open(path: &Path) -> io::Result<Self> {
+        let entry = std::fs::symlink_metadata(path)?;
+        let markable = metadata_is_markable_regular(&entry);
+        let file = if markable {
+            open_regular_no_follow(path)?
+        } else if entry.file_type().is_symlink() || entry.is_file() {
+            open_file_no_atime(path).or_else(|error| {
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    std::fs::File::open(path)
+                } else {
+                    Err(error)
+                }
+            })?
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "image source must be a regular file",
+            ));
+        };
+        let opened = file.metadata()?;
+        if !opened.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "image source must resolve to a regular file",
+            ));
+        }
+        if markable && !metadata_is_markable_regular(&opened) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "image source changed while it was opened",
+            ));
+        }
+        let identity = file_identity(&file, &opened).ok();
+        Ok(Self {
+            file,
+            identity,
+            markable,
+        })
+    }
+
+    /// Duplicate the accepted source handle and rewind it for a decoder.
+    pub(crate) fn clone_for_decode(&self) -> io::Result<std::fs::File> {
+        let mut file = self.file.try_clone()?;
+        file.seek(SeekFrom::Start(0))?;
+        Ok(file)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_without_identity_for_test(path: &Path) -> io::Result<Self> {
+        let mut source = Self::open(path)?;
+        source.identity = None;
+        Ok(source)
+    }
+
+    /// Compare this retained source with the current final pathname entry without
+    /// following a link or accepting a non-regular object.
+    #[must_use]
+    pub(crate) fn matches_path(&self, path: &Path) -> ImageSourceMatch {
+        if !self.markable {
+            return ImageSourceMatch::Unsupported;
+        }
+        let Some(expected_identity) = self.identity else {
+            return ImageSourceMatch::Unavailable;
+        };
+        let entry = match std::fs::symlink_metadata(path) {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return ImageSourceMatch::Missing;
+            }
+            Err(_) => return ImageSourceMatch::Unavailable,
+        };
+        if !metadata_is_markable_regular(&entry) {
+            return ImageSourceMatch::Unsupported;
+        }
+        let file = match open_regular_no_follow(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return ImageSourceMatch::Missing;
+            }
+            Err(_) => return ImageSourceMatch::Unavailable,
+        };
+        let opened = match file.metadata() {
+            Ok(opened) if metadata_is_markable_regular(&opened) => opened,
+            Ok(_) => return ImageSourceMatch::Unsupported,
+            Err(_) => return ImageSourceMatch::Unavailable,
+        };
+        match file_identity(&file, &opened) {
+            Ok(identity) if identity == expected_identity => ImageSourceMatch::Same,
+            Ok(_) => ImageSourceMatch::Changed,
+            Err(_) => ImageSourceMatch::Unavailable,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn metadata_is_markable_regular(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    metadata.is_file() && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+#[cfg(not(target_os = "windows"))]
+fn metadata_is_markable_regular(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_file()
+}
+
+#[cfg(unix)]
+fn open_regular_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let open_with = |flags| {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).custom_flags(flags);
+        options.open(path)
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        open_with(libc::O_NOFOLLOW | libc::O_NOATIME).or_else(|error| {
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                open_with(libc::O_NOFOLLOW)
+            } else {
+                Err(error)
+            }
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        open_with(libc::O_NOFOLLOW)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_regular_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    options.open(path)
+}
+
+#[cfg(unix)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "shared platform identity boundary is fallible on Windows and callers handle one Result contract"
+)]
+fn file_identity(_file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // one audited read-only Win32 file-identity query
+fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Result<FileIdentity> {
+    use std::mem::{MaybeUninit, size_of};
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+    };
+
+    let mut info = MaybeUninit::<FILE_ID_INFO>::uninit();
+    let size = u32::try_from(size_of::<FILE_ID_INFO>())
+        .map_err(|_| io::Error::other("file identity structure is too large"))?;
+    // SAFETY: `file` owns a valid handle for the duration of the call. `info`
+    // points to writable storage of exactly `size` bytes, and the API does not
+    // retain either pointer.
+    let succeeded = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if succeeded == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: A successful call initialized the complete FILE_ID_INFO buffer.
+    let info = unsafe { info.assume_init() };
+    Ok(FileIdentity {
+        volume: info.VolumeSerialNumber,
+        file_id: info.FileId.Identifier,
+    })
+}
 
 /// File extensions decoded by the always-on pure-Rust core.
 ///
@@ -180,7 +431,9 @@ fn windows_os_str_eq_ignore_case(left: &OsStr, right: &OsStr) -> bool {
 /// A failure to open the directory is returned so sandboxed callers can ask
 /// the user for explicit directory access. Entries that disappear or become
 /// unreadable during the scan are skipped, which keeps one unrelated race from
-/// invalidating an otherwise usable folder.
+/// invalidating an otherwise usable folder. Symlinks are excluded so automatic
+/// browsing never follows an entry outside the selected directory; a directly
+/// selected file retains the separate [`canonical_file_path`] behavior.
 ///
 /// # Errors
 /// Returns the filesystem error from opening `directory`.
@@ -195,7 +448,7 @@ pub fn scan_images(directory: &Path) -> io::Result<Vec<PathBuf>> {
                 return None;
             }
             let file_type = entry.file_type().ok()?;
-            (file_type.is_file() || (file_type.is_symlink() && path.is_file())).then_some(path)
+            file_type.is_file().then_some(path)
         })
         .collect::<Vec<_>>();
     files.sort_by(|a, b| {
@@ -267,6 +520,23 @@ fn take_number(it: &mut Peekable<Chars>) -> u64 {
         it.next();
     }
     n
+}
+
+/// Open a file while making a best-effort attempt to avoid updating its
+/// access time (`atime`). This is a privacy-first measure to prevent the OS
+/// from leaving a forensic trail that the file was read.
+pub fn open_file_no_atime(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOATIME flag on Linux
+        options.custom_flags(libc::O_NOATIME);
+    }
+
+    options.open(path)
 }
 
 #[cfg(test)]
@@ -417,5 +687,21 @@ mod tests {
         let file = workspace.path().join("image.png");
         fs::write(&file, b"fixture").unwrap();
         assert!(scan_images(&file).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn automatic_scan_excludes_file_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = TempWorkspace::new("folder_scan_symlink").unwrap();
+        let outside = TempWorkspace::new("folder_scan_symlink_target").unwrap();
+        let target = outside.path().join("outside.png");
+        fs::write(&target, b"fixture").unwrap();
+        let link = workspace.path().join("linked.png");
+        symlink(&target, &link).unwrap();
+
+        assert!(canonical_file_path(&link).unwrap().ends_with("linked.png"));
+        assert!(scan_images(workspace.path()).unwrap().is_empty());
     }
 }

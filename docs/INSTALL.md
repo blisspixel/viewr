@@ -33,7 +33,17 @@ viewr version
 viewr path\to\image.jpg   # open GUI
 ```
 
-`viewr update` never downloads anything; viewr does not phone home.
+`viewr update` never downloads anything; viewr does not phone home. Help > Update
+viewr exposes the same local guidance in the GUI. Both surfaces report the running
+version and direct the user back to the trusted source or package channel from
+which viewr was obtained. The repository currently has no verified public update
+source, so neither surface claims to find the latest version or opens a browser.
+
+For a source checkout, update the source using its documented process, close any
+running `viewr`, and run `cargo build --release --workspace --locked`. Keep
+`viewr` and `viewr-decode` from that same trusted build side by side. Windows
+cannot replace a running executable, so a release rebuild will fail until the open
+copy exits.
 
 ### Performance regression gate
 
@@ -166,16 +176,18 @@ pwsh -NoProfile -File scripts/accessibility-smoke.ps1 `
   -Binary target/debug/viewr.exe
 ```
 
-A passing result verifies native tree discovery, focusable menus, panel state and
-actions, distinct left/right docking state, metadata state, folder previews, and
-accessible navigation. It does not replace human testing with Narrator,
+A passing result verifies native tree discovery, focusable menus, first-run access
+scope, disabled Trash recovery without a receipt, panel state and actions,
+distinct left/right docking state, metadata state, folder previews, and accessible
+navigation. It does not replace human testing with Narrator,
 VoiceOver, or Orca. The complete release matrix and evidence requirements are in
 `docs/ACCESSIBILITY.md`.
 
 ## Build and verify a release archive
 
 The release archive contains the main executable and `viewr-decode` side by side,
-plus the license, README, and a canonical file manifest. The packaging tool checks
+plus the license, README, security policy, the complete canonical Markdown set from
+`docs/`, and a canonical file manifest. The packaging tool checks
 that both executable formats match the requested target, normalizes text files,
 uses a commit-derived `SOURCE_DATE_EPOCH`, stores deterministic ZIP metadata, and
 writes a standard SHA-256 sidecar.
@@ -189,7 +201,7 @@ python scripts/release_artifact.py build `
   --target x86_64-pc-windows-msvc `
   --binary-dir target/release
 python scripts/release_artifact.py verify `
-  target/release-artifacts/viewr-0.0.0-x86_64-pc-windows-msvc.zip
+  target/release-artifacts/viewr-0.1.0-x86_64-pc-windows-msvc.zip
 ```
 
 On Linux x86-64, Intel macOS, or Apple Silicon macOS, replace the target with one
@@ -218,9 +230,11 @@ for the repository's complete reusable CI and short fuzz workflows, including
 coverage, supply-chain, privacy, and native package-profile checks.
 
 The archive is reproducible from the same checked-out source, target, compiler,
-lockfile, and binary inputs. The manifest and sidecar make every produced byte
-verifiable. This is not a claim that different operating-system images or linker
-versions produce identical executables.
+lockfile, and binary inputs. The internal manifest and external sidecar let the
+verifier check the archive's exact structure and bytes against its co-produced
+records. Those records do not authenticate a publisher or independently prove
+which source produced the binaries. This is not a claim that different
+operating-system images or linker versions produce identical executables.
 
 ## What current build and archive paths do not do
 

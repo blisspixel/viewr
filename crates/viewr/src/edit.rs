@@ -6,6 +6,7 @@
 //! [`SaveOptions::retain_exif`]. See `docs/PRIVACY.md`.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use image::{ColorType, ImageFormat};
 use little_exif::exif_tag::ExifTag;
@@ -196,6 +197,30 @@ impl SaveOptions {
 /// Returns [`Error::Encode`] when the source buffer does not match its declared
 /// dimensions or the cropped buffer cannot be allocated.
 pub fn crop(src: &DecodedImage, rect: Rect) -> Result<DecodedImage, Error> {
+    match crop_while(src, rect, || false)? {
+        Some(image) => Ok(image),
+        None => unreachable!("a crop without a cancellation source cannot be cancelled"),
+    }
+}
+
+/// Crop while observing a cooperative cancellation flag before allocation and
+/// between copied rows. A cancelled crop returns no partial image.
+pub(crate) fn crop_cancellable(
+    src: &DecodedImage,
+    rect: Rect,
+    cancel: &AtomicBool,
+) -> Result<Option<DecodedImage>, Error> {
+    crop_while(src, rect, || cancel.load(Ordering::Acquire))
+}
+
+fn crop_while(
+    src: &DecodedImage,
+    rect: Rect,
+    mut is_cancelled: impl FnMut() -> bool,
+) -> Result<Option<DecodedImage>, Error> {
+    if is_cancelled() {
+        return Ok(None);
+    }
     let source_len = rgba_len(src.width, src.height)?;
     if src.rgba.len() != source_len {
         return Err(Error::Encode(
@@ -209,10 +234,16 @@ pub fn crop(src: &DecodedImage, rect: Rect) -> Result<DecodedImage, Error> {
     let mut rgba = Vec::new();
     rgba.try_reserve_exact(output_len)
         .map_err(|error| Error::Encode(format!("could not allocate cropped image: {error}")))?;
+    if is_cancelled() {
+        return Ok(None);
+    }
     let bottom =
         r.y.checked_add(r.height)
             .ok_or_else(|| Error::Encode("crop rectangle exceeds image dimensions".to_owned()))?;
     for row in r.y..bottom {
+        if is_cancelled() {
+            return Ok(None);
+        }
         let start = pixel_offset(r.x, row, src.width)?;
         let end = start
             .checked_add(row_bytes)
@@ -223,13 +254,16 @@ pub fn crop(src: &DecodedImage, rect: Rect) -> Result<DecodedImage, Error> {
             .ok_or_else(|| Error::Encode("crop row exceeds the pixel buffer".to_owned()))?;
         rgba.extend_from_slice(source_row);
     }
-    Ok(DecodedImage {
+    if is_cancelled() {
+        return Ok(None);
+    }
+    Ok(Some(DecodedImage {
         rgba,
         width: r.width,
         height: r.height,
         color_profile: src.color_profile,
         working_color: src.working_color,
-    })
+    }))
 }
 
 /// Save `image` to `path`, stripping all metadata (EXIF, GPS, …).
@@ -437,8 +471,8 @@ fn supports_alpha(format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        MetadataDisposition, PixelTransform, Rect, SaveOptions, crop, path_supports_exif, save,
-        save_with_options,
+        MetadataDisposition, PixelTransform, Rect, SaveOptions, crop, crop_cancellable, crop_while,
+        path_supports_exif, save, save_with_options,
     };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
@@ -446,6 +480,7 @@ mod tests {
     use little_exif::exif_tag::ExifTag;
     use little_exif::metadata::Metadata;
     use std::path::Path;
+    use std::sync::atomic::AtomicBool;
 
     /// A 4x4 image where each pixel's red channel encodes its (x + y*4) index,
     /// so crops can be checked precisely.
@@ -546,6 +581,29 @@ mod tests {
         assert_eq!(out.working_color, WorkingColorEncoding::SRGB_RGBA8);
         let reds: Vec<u8> = out.rgba.chunks_exact(4).map(|p| p[0]).collect();
         assert_eq!(reds, vec![5, 6, 9, 10]);
+    }
+
+    #[test]
+    fn cancellable_crop_stops_before_allocation_and_between_rows() {
+        let image = solid_rgba(16, 16);
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 16,
+            height: 16,
+        };
+        let cancel = AtomicBool::new(true);
+        assert!(crop_cancellable(&image, rect, &cancel).unwrap().is_none());
+
+        let checks = std::cell::Cell::new(0usize);
+        let cancelled = crop_while(&image, rect, || {
+            let next = checks.get() + 1;
+            checks.set(next);
+            next >= 5
+        })
+        .unwrap();
+        assert!(cancelled.is_none());
+        assert_eq!(checks.get(), 5);
     }
 
     #[test]

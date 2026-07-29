@@ -32,7 +32,10 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Next code focus: display fidelity. Next release focus: target-OS validation and
+**Next product-surface focus: prove the safe embedded-rating gate in
+`docs/RATINGS.md`, then add the filtered playlist projection before rating UI.
+Next fidelity focus: display correctness. Next reliability focus: narrower native
+Trash and restore handoff races. Next release focus: target-OS validation and
 public verifiable artifacts.** Optional model-backed description remains a gated
 post-1.0 candidate, not active Phase 8 scope.
 
@@ -124,6 +127,14 @@ the application feel unreliable even when the decoder technically succeeded.
 
 - [x] Keep the last good image visible during a cache miss or failed replacement.
 - [x] Add File > Reload File (`F5`) with cache bypass and no blank frame.
+- [x] Add a Windows-native Open With handoff in File and the image context surface.
+  It passes only the accepted current source through `SHOpenWithDialog`, persists
+  no editor or history, exposes the external-app privacy boundary, and keeps a
+  path-private `F5` reminder after successful delegation.
+- [ ] Add equivalent user-mediated chooser behavior on macOS and Linux only
+  through supported workspace or desktop-portal APIs, with package-sandbox and
+  native accessibility evidence. Do not substitute a shell command or silently
+  launch the default application.
 - [ ] Add a session-scoped file watcher for the current image and folder. Coalesce
   noisy events, preserve the old frame until a successful refresh, update the
   playlist deterministically, and write no history or database.
@@ -171,10 +182,15 @@ coverage gate currently excludes most native orchestration. The behavior is test
 in many focused helpers, but future race and accessibility work will get harder if
 load, edit, and dock state remain concentrated in two large files.
 
-- [ ] Extract pure crop/output geometry and its keyboard/pointer transitions into
+- [x] Extract pure crop/output geometry and its keyboard/pointer transitions into
   a covered module.
-- [ ] Extract a session/load state machine that owns selected path, presented path,
-  generations, retry/reload, and stale-result rejection.
+- [x] Extract selected path, presented path, generation, receiver, and load-error
+  transitions into a covered `Session` owner. Native scheduling and retry remain
+  in `App` until bounded job coordination is extracted.
+- [x] Extract `Playlist` folder list, index, and scan-purpose data into its own
+  module without introducing a second mutable store.
+- [x] Extract explicit `PerformanceProbe` state and transitions into a covered
+  module.
 - [ ] Extract bounded job coordination for image details, animation, crop, save,
   thumbnails, and prefetch, leaving `App` responsible for platform events.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
@@ -185,6 +201,42 @@ load, edit, and dock state remain concentrated in two large files.
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,
 edit, or panel state.
+
+### Priority 5: durable ratings without a photo-library database
+
+Why now: the product owner has explicitly selected the Lightroom-style workflow
+of rating the current image from 0 through 5 and narrowing a folder to a minimum
+rating. This is useful curation, but only if it stays local, interoperable, and
+durable without becoming an activity index or risking source corruption. The full
+approved behavior and safety contract is in `docs/RATINGS.md`.
+
+- [x] Choose standard embedded metadata as the only persistence model:
+  `xmp:Rating` with the 0-to-5 IFD0 `0x4746` SimpleRating mirror where supported.
+  Reject sidecars, manifests, databases, alternate streams, extended attributes,
+  timestamps, and viewing history.
+- [x] Define Unrated, ratings 1 through 5, Rejected, Conflict, Unsupported, and
+  Unreadable without silently rounding or repairing external metadata.
+- [x] Define first-write disclosure, bare `0` through `5` assignment guards,
+  modifier-based Fit and Actual Size, visible current state, minimum filters,
+  no-match recovery, and accessible names and selected state.
+- [ ] Replace the advisory-affected XMP path with a bounded parser and writer that
+  can consume hostile metadata without an ignored runtime vulnerability.
+- [ ] Prove failure-atomic ordinary-JPEG replacement, exact source-version checks,
+  permission and security-metadata preservation, rollback, unrelated-metadata
+  preservation, and cross-tool interoperability.
+- [ ] Refactor Playlist to retain one canonical catalog and a tested filtered
+  index projection. Prove deterministic navigation, prefetch, Trash, and Undo
+  against canonical positions before adding UI state.
+- [ ] Add the write worker, session-only folder scan and cache, Edit and View
+  surfaces, numeric shortcuts, persistent active-filter status, filtered-empty
+  state, and native accessibility coverage.
+- [ ] Keep the existing 85 percent logic-coverage floor and 50,000-file memory,
+  startup, navigation, and idle budgets green with ratings present.
+
+Definition of done: ratings survive restart and ordinary rename, other compliant
+software sees the same value, filters govern every navigation surface, unsupported
+files remain untouched, and no database, sidecar, history, or silent source write
+exists.
 
 ## Phase 0: Foundations
 
@@ -207,11 +259,14 @@ every quality gate is green, and adding an HTTP crate would fail the build.
 
 The smallest thing that is genuinely useful and genuinely fast.
 
-- Open from a command-line argument, an Open dialog (rfd), and the operating
+- Open from a command-line argument, a native Open dialog (`rfd`), and the operating
   system "open with" association.
 - Decode the common baseline formats (JPEG, PNG, GIF, WebP, BMP) via image-rs.
 - Display through our own winit and wgpu pipeline, fit to window by default, large images scaled
   correctly on first paint.
+- [x] Keep application-window dimensions independent of image dimensions. Opening
+  the first image fits it inside the existing viewport without moving or resizing
+  the window.
 - First-pixel latency tracked as a metric from day one.
 
 Definition of done: double-clicking a JPEG or PNG opens it near-instantly and
@@ -225,7 +280,12 @@ The core experience, which is flipping through a folder with no perceptible lag.
   img10.
 - Left and right arrows, Home and End, navigate the folder.
 - Neighbor prefetch into a bounded decoded-image RAM cache, so the next image is
-  usually decoded before it is requested and needs only a GPU upload.
+  usually decoded before it is requested and needs only a GPU upload. Immediate
+  reversal settles on a pristine frame that is still presented; after a move
+  within two positions completes, the just-left pristine decode is eligible for
+  the same bounded cache without a pixel copy. Genuine misses name the selected
+  target by a path-free filename while presented metadata remains tied to the
+  visible pixels; immediate reuse and full-resolution cache hits stay quiet.
 - Animated GIF, WebP, and APNG playback with bounded frames, correct frame timing,
   pause/resume, and container loop behavior.
 
@@ -249,9 +309,24 @@ Make viewing excellent, not merely functional.
   decoration, GPU canvas, standard widgets, custom controls, overlays, and
   typography. All resolved palettes have automated AA contrast checks and the
   one-word selection persists locally.
+- [x] Descriptive, accessible Appearance rows explain all four outcomes, identify
+  Console as the green-screen look, report System's effective mode while active,
+  and distinguish app appearance from image pixels and independent background
+  overrides. The parent View entry summarizes the current preference. Native UI
+  Automation selects every option and verifies restart.
+- [x] Appearance persistence assembles and syncs the validated word beside its
+  destination before atomic replacement, preserving the previous choice if
+  assembly fails.
+- [x] Appearance loading distinguishes quiet missing state from invalid,
+  oversized, unreadable, and unavailable state. Abnormal fallback uses System,
+  announces one path-free recovery status, emits only a fixed category to opt-in
+  diagnostics, and leaves repair to an explicit appearance choice.
 - [x] Compact docked `egui` controls with keyboard shortcuts and explicit
   disclosure rails. Persistent chrome reserves viewport space and never covers
   the image.
+- [x] Stable resting chrome: unchanged first-run content retains fixed geometry,
+  and filename, dimensions, and physical zoom have distinct reading gaps in the
+  top status.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and
@@ -261,18 +336,50 @@ collapsible, and no control or preview covers the photo.
 
 The feature that makes viewr a daily tool, done carefully.
 
-- [x] Delete to the system trash via the trash crate, with a non-blocking Undo toast
-  and index preservation, so the view lands on the image that replaced the deleted
-  one rather than jumping to the top.
-- [x] Undo (`U`) restores the latest trash action, including every successful
-  item in a batch, while retaining failed receipts for retry.
-- [x] Flag-then-batch cull: `X` flags, `B` batch-trashes flagged (tests on `FlagSet` /
-  playlist removal).
-- [x] Shift+Delete permanent delete with explicit confirmation dialog (only modal).
+- [x] Current-image Trash: `Delete` and File > Move to Trash move only the visible
+  image through the supported platform Trash API, preserve playlist position, and
+  advance to the image that replaces it rather than jumping to the top.
+- [x] Conventional destructive input: the former bare `B` mark/review/batch-trash
+  workflow was removed after product review. `B` and `M` are unassigned, and `X`
+  swaps crop-ratio orientation only while Crop is active. There is no hidden mark
+  state or batch action behind the simplified surface.
+- [x] Exact Undo (`U`): Windows and Linux accept a new Trash identifier only when
+  its native identity matches the retained accepted-source handle; macOS keeps the
+  exact resulting URL with that handle. Restore repeats the identity check and has
+  no pathname fallback. Receiptless moves preserve a prior valid action, and only
+  transient or resolvable failures remain retryable. Cross-folder Undo restores on
+  disk without inserting the source-folder path into an unrelated current view.
+- [x] Nonblocking restore ownership: native restore runs through one typed worker
+  and one-result wake channel. The event loop retains playlist scope, indices,
+  prior Undo ownership, and the only commit. Conflicting mutations wait while view
+  controls repaint. Fixed operation status avoids false percentage, estimate, or
+  cancellation claims. Normal close defers through terminal reconciliation and
+  join; spawn failure changes no state; worker loss retains the receipt with
+  durable polite guidance; new Trash waits for `U` to settle uncertain ownership.
+- [x] Source-bound single destructive actions: the displayed image retains the
+  handle that supplied accepted pixels. Delete verifies matching no-follow
+  regular-file identity immediately before Trash. Missing, replaced, linked, and
+  unverifiable entries fail closed with fixed path-free categories and do not
+  mutate playlist or Undo state.
+- [x] `Shift+Delete` permanent delete with an explicit bounded confirmation.
+  Source identity is verified before confirmation and again after acceptance
+  immediately before removal. Cancel performs no filesystem action, and permanent
+  delete preserves any prior valid Trash action.
+- [x] Destructive-action readiness: foreground load and preview work, Crop, Save
+  As, active Spot Heal strokes, and heal workers block Trash, permanent delete,
+  and restore with a specific visible reason. External platform errors cross a
+  fixed path-free boundary before interface copy or diagnostics.
+- [ ] Security and reliability debt: investigate platform-specific staged or
+  handle-relative Trash and restore operations that can close the remaining races
+  between the immediate identity comparison and later pathname or Trash-identifier
+  consumption by the operating system. Do not describe the current portable
+  preflight as atomic.
 
-Definition of done: a user can move through a folder deleting junk quickly, never
-loses a file to a misfire, never hits a modal during normal culling, and
-integration tests cover delete, undo, and index preservation.
+Definition of done: a user can move through a folder deleting junk quickly,
+source-bound preflights reject stale, replaced, linked, or unverifiable intent,
+normal Trash never opens a modal, and tests cover delete, undo, input routing, and
+index preservation. The later platform handoff remains the explicit security and
+reliability debt above.
 
 ## Phase 5: Basic tools, save, convert, crop
 
@@ -282,19 +389,31 @@ The simple tools people actually reach for, and nothing beyond them.
   output-oriented Free, Original, 1:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 5:3,
   3:5, 16:9, and 9:16 presets, reversible orientation, numeric custom ratios,
   exact dimensions, and direct full-resolution application.
+- [x] Crop transaction hardening: exact selection, view, paused animation,
+  generation, and decoded-image identity survive through renderer commit;
+  current-source failure restores immediate retry; navigation cancels obsolete
+  row copying; disconnected preview work cannot retain a permanent busy state;
+  and every positive selection retains exact accessible bounds.
 - [x] Focused Spot Heal for small blemishes: sparse image-space brush input,
   bounded deterministic edge-aware ranking of up to eight distinct sources off
   the UI thread, robust boundary tone adaptation, adjustable feathering,
   directional fallback inpainting, Refresh Source (`/`), in-memory undo/redo,
   bounded GPU texture-region updates, and a temporary docked inspector that never
   covers the photo. It adds no model or native dependency, refuses ambiguous
-  GPU-clamped source mappings, and never changes the source file.
+  GPU-clamped source mappings, commits pixels and history only after successful
+  presentation, rolls both back on presentation failure, and never changes the
+  source file.
 - [x] Save As and convert between supported output formats off the UI thread,
   applying the visible rotation and flips exactly.
 - [x] Metadata strip on export, presented prominently, with location and
   identifying fields stripped by default. Explicit session-only retention
   normalizes orientation, dimensions, and stale thumbnail offsets while retaining
   descriptive, camera, and GPS tags.
+- [x] Bind Image Information inspection to the accepted source handle and add a
+  bounded Source Privacy summary for EXIF tag count plus location, authorship,
+  identifiers, comments, software history, embedded thumbnails, and maker data.
+  Keep sensitive values off-screen and state that absent supported EXIF does not
+  prove other metadata or hidden pixel data is absent.
 
 Definition of done: a user can crop or spot-heal an image, export it to another
 format, and be confident their location data did not ride along, with tests over
@@ -395,14 +514,28 @@ submission.
   - [x] Buildable cargo-fuzz targets and seed corpora for every core decoder and the worker protocol (`fuzz/`).
   - [x] Pinned nightly cargo-fuzz smoke runs on changes plus 600-second scheduled runs (`.github/workflows/fuzz.yml`).
 - [x] Neighbor full-decode prefetch into a bounded in-memory LRU (no disk cache).
+- [x] Default-silent logger configuration is isolated behind pure filter selection
+  and construction seams: absent variables and unsupported external-only directives
+  construct no logger, `RUST_LOG` keeps precedence over `VIEWR_LOG`, and source
+  privacy checks are documented as narrow regression tripwires rather than a
+  general Rust write-path proof.
+- [x] Pristine reverse-navigation reuse: cancel an abandoned replacement when its
+  requested predecessor is still presented, otherwise retain the just-left decode
+  after moves within two positions through shared ownership in the same entry and
+  byte-bounded LRU. Larger jumps, derived edits, playback frames, explicit Reload
+  state, and oversized or evicted images use the normal loading path.
 - [x] Reproducibly buildable local/CI release artifacts: a pinned Rust toolchain,
   locked dependencies, exact target validation, deterministic dual-binary ZIP
-  assembly, an internal file manifest, SHA-256 sidecars, and a read-only four-target
-  CI workflow gated by the complete CI and fuzz contracts. This is repeatable
+  assembly, complete offline canonical Markdown documentation, a bounded check
+  that the current README's simple inline local links resolve, an internal file
+  manifest, SHA-256 sidecars, and a read-only four-target CI workflow gated by the
+  complete CI and fuzz contracts.
+  This is repeatable
   source-to-artifact verification, not a claim of bit-identical linker output
   across different host images. **Not** notarization, public release creation, or
   store signing (see out-of-scope below).
-- [x] Deletes use the system trash (`trash` crate), not a local `_trash` folder.
+- [x] Deletes use system Trash through the `trash` crate on Windows and Linux or
+  `NSFileManager` on macOS, not a local `_trash` folder.
 
 Definition of done: the app runs correctly with network denied by packaging
 profile and/or process policy where implemented, fuzzing finds no crashes at the
@@ -423,6 +556,18 @@ install from source or a simple GitHub-style release artifact.
   declarations; Flatpak desktop assets; native open delivery; and opt-in docs.
 - [x] Canonical tracked documentation and a human-written changelog, with no
   analytics, remote scripts, or tracker-bearing website required for 1.0.
+- [x] Release-trust entry point: README exposes the current pre-1.0 distribution
+  boundary before product detail, links the canonical local install and verification
+  paths, and distinguishes co-produced integrity records from publisher
+  authentication and independent source provenance.
+- [x] Local update guidance: Help > Update viewr and `viewr update` expose the
+  running version, trusted source-channel boundary, and locked source-build
+  command without a network check, download, browser launch, or unsupported
+  latest-version claim.
+- [ ] Publish and verify a private vulnerability-reporting channel before public
+  release. `SECURITY.md` already defines current-version support, privacy-safe
+  synthetic evidence, disclosure safeguards, explicit scope, and no invented
+  response-time promise, but it does not claim an unavailable channel works.
 - [ ] Accessibility pass:
   - [x] Keyboard-complete menus, docked controls, navigation, zoom, and crop.
   - [x] Screen-reader labels and state for custom controls and exact crop bounds.
@@ -433,11 +578,45 @@ install from source or a simple GitHub-style release artifact.
     socket policy.
   - [x] External Windows UI Automation smoke coverage for the native tree, state,
     focusability, and action path (`scripts/accessibility-smoke.ps1`).
+  - [x] Deterministic selected-versus-presented loading, failure, Retry, and
+    derived-preview semantics, polite live-region metadata, and minimum-width
+    long-target bounds in the AccessKit render tests. Transient toasts remain
+    semantic and non-live rather than competing with persistent status.
   - [ ] Manual screen-reader validation on Windows, macOS, and Linux using
-    `docs/ACCESSIBILITY.md`.
+    `docs/ACCESSIBILITY.md`, including one announcement per loading transition.
+    Retain one completed record per platform under
+    `docs/release-evidence/accessibility/`, bound to the tested commit and artifact
+    SHA-256. No record exists until every matrix row has a disposition.
 - [x] Performance budget locked in and regression-tested in CI: first presented
   window frame and image, sampled navigation, settled idle redraws,
   50,000-file memory scaling, and bounded decoded/thumbnail caches.
+- [x] Reliability hardening: generation-tagged neighbor prefetch suppresses failed
+  and over-budget results until the playlist changes or a successful foreground
+  presentation reopens the path, rejects stale completions including work from
+  before an explicit Reload, cooperatively cancels obsolete reads, presents the
+  first valid selected-path completion, and keeps scheduler saturation retryable.
+- [x] Security hardening: automatic sibling scans include regular files only and
+  never follow a symlink entry outside the selected directory; direct Open File
+  selection remains unchanged.
+- [x] Reliability debt: stabilize the Windows local settled-idle probe. On
+  2026-07-28 repeated optimized runs met every other budget but one final run
+  recorded 23 and 30 redraws during the 500 ms idle windows. Preserve the limit
+  of two and add a regression test before changing event-loop behavior again. A
+  controlled 2026-07-29 release run completed all seven windows focused and
+  pointer-inside, with all 11 passive samples confirming that state. Six windows
+  recorded one redraw, no non-redraw events or event-driven repaint requests, and
+  zero or one scheduled repaint. The first small-folder activation window recorded
+  four redraws with two non-redraw events, two event-driven repaint requests, and
+  three scheduled repaints, so the strict gate failed instead of hiding the
+  outlier. This narrows the focus and hover question but does not establish
+  causation or explain the historical 23 and 30 counts. Probe-only attribution,
+  scheduling, and the budget remain unchanged until evidence reproduces that
+  higher signal. A later reproduced 11-redraw activation run exposed an
+  outstanding egui deadline as the missing settled-state precondition. The probe
+  now waits for delayed UI work to become quiet before starting its unchanged
+  500 ms window. A focused and pointer-inside optimized rerun completed every
+  window at zero or one redraw without weakening the two-redraw budget or normal
+  application scheduling.
 - [ ] Display-fidelity acceptance from Priority 1: worker color metadata is
   complete; per-display output, reference-profile fixtures, and honest
   wide-gamut/HDR gates remain.

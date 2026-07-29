@@ -3,7 +3,7 @@ name: CI
 on:
   workflow_call:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
   schedule:
     - cron: "43 5 * * 1"

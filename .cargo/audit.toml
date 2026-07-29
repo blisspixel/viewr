@@ -4,6 +4,6 @@
 [advisories]
 ignore = [
     "RUSTSEC-2026-0192", # ttf-parser unmaintained; winit Linux decorations, build-time only
-    "RUSTSEC-2026-0194", # quick-xml DoS; winit wayland-scanner build-time, trusted input
-    "RUSTSEC-2026-0195", # quick-xml DoS; winit wayland-scanner build-time, trusted input
+    "RUSTSEC-2026-0194", # quick-xml DoS; build-time XML or fresh XMP-free private output only
+    "RUSTSEC-2026-0195", # quick-xml NsReader DoS; neither dependent uses it on user input
 ]

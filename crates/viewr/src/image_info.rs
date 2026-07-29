@@ -7,6 +7,7 @@ use crc32fast::Hasher;
 use flate2::read::ZlibDecoder;
 use little_exif::exif_tag::ExifTag;
 use little_exif::filetype::FileExtension;
+use little_exif::ifd::ExifTagGroup;
 use little_exif::metadata::Metadata;
 use little_exif::rational::uR64;
 
@@ -24,6 +25,10 @@ const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 /// Useful file and camera facts. Missing or malformed metadata leaves a field
 /// empty and never prevents the image itself from opening.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent presence flags intentionally avoid retaining sensitive EXIF values"
+)]
 pub struct ImageDetails {
     /// Encoded file size on disk.
     pub file_bytes: Option<u64>,
@@ -43,66 +48,133 @@ pub struct ImageDetails {
     pub iso: Option<String>,
     /// Focal length, such as `50 mm`.
     pub focal_length: Option<String>,
-    /// Whether latitude or longitude EXIF tags are present.
+    /// Number of supported EXIF tags inspected within the fixed parser budget.
+    pub exif_tag_count: usize,
+    /// Whether any location-related EXIF tags are present.
     pub has_location: bool,
+    /// Whether owner, artist, or copyright EXIF fields are present.
+    pub has_owner_or_author: bool,
+    /// Whether camera, lens, or image-specific identifiers are present.
+    pub has_device_identifier: bool,
+    /// Whether a description or comment is present.
+    pub has_description_or_comment: bool,
+    /// Whether an editing or encoding software field is present.
+    pub has_software_history: bool,
+    /// Whether EXIF carries an embedded thumbnail.
+    pub has_embedded_thumbnail: bool,
+    /// Whether opaque maker-specific data is present.
+    pub has_maker_specific_data: bool,
 }
 
 impl ImageDetails {
     /// Read file-system and supported EXIF facts without failing the open path.
     #[must_use]
     pub fn load(path: &Path) -> Self {
+        let Ok(source) = crate::fs::ImageSource::open(path) else {
+            return Self {
+                format: extension_format_label(path).map(str::to_owned),
+                ..Self::default()
+            };
+        };
+        Self::load_from_source(path, &source)
+    }
+
+    /// Inspect facts through the retained handle that supplied the accepted pixels.
+    #[must_use]
+    pub(crate) fn load_from_source(path: &Path, source: &crate::fs::ImageSource) -> Self {
         let mut details = Self {
-            file_bytes: std::fs::metadata(path).ok().map(|metadata| metadata.len()),
-            format: detected_format(path),
+            file_bytes: source
+                .clone_for_decode()
+                .ok()
+                .and_then(|file| file.metadata().ok())
+                .map(|metadata| metadata.len()),
+            format: detected_format_from_source(path, source),
             ..Self::default()
         };
-        let Some(metadata) = load_bounded_metadata(path) else {
+        let Some(metadata) = source
+            .clone_for_decode()
+            .ok()
+            .and_then(load_bounded_metadata_from_file)
+        else {
             return details;
         };
 
-        let mut make = None;
-        let mut model = None;
-        for tag in (&metadata).into_iter().take(MAX_EXIF_TAGS) {
-            match tag {
-                ExifTag::Make(value) => make = clean_text(value),
-                ExifTag::Model(value) => model = clean_text(value),
-                ExifTag::LensModel(value) => details.lens = clean_text(value),
-                ExifTag::DateTimeOriginal(value) => {
-                    details.captured_at = clean_text(value).map(normalize_exif_date);
-                }
-                ExifTag::ExposureTime(values) => {
-                    details.exposure = values.first().and_then(format_exposure);
-                }
-                ExifTag::FNumber(values) => {
-                    details.aperture = values
-                        .first()
-                        .and_then(rational_value)
-                        .map(|value| format!("f/{value:.1}"));
-                }
-                ExifTag::ISO(values) => {
-                    details.iso = values.first().map(|value| format!("ISO {value}"));
-                }
-                ExifTag::FocalLength(values) => {
-                    details.focal_length = values
-                        .first()
-                        .and_then(rational_value)
-                        .map(|value| format!("{value:.1} mm"));
-                }
-                ExifTag::GPSLatitude(values) | ExifTag::GPSLongitude(values) => {
-                    details.has_location |= !values.is_empty();
-                }
-                _ => {}
-            }
-        }
-        details.camera = combined_camera(make, model);
+        inspect_metadata(&mut details, &metadata);
         details
     }
 }
 
-fn detected_format(path: &Path) -> Option<String> {
-    image::ImageReader::open(path)
-        .and_then(image::ImageReader::with_guessed_format)
+fn inspect_metadata(details: &mut ImageDetails, metadata: &Metadata) {
+    let mut make = None;
+    let mut model = None;
+    for tag in metadata.into_iter().take(MAX_EXIF_TAGS) {
+        details.exif_tag_count = details.exif_tag_count.saturating_add(1);
+        details.has_location |= tag.get_group() == ExifTagGroup::GPS;
+        match tag {
+            ExifTag::Make(value) => make = clean_text(value),
+            ExifTag::Model(value) => model = clean_text(value),
+            ExifTag::LensModel(value) => details.lens = clean_text(value),
+            ExifTag::DateTimeOriginal(value) => {
+                details.captured_at = clean_text(value).map(normalize_exif_date);
+            }
+            ExifTag::ExposureTime(values) => {
+                details.exposure = values.first().and_then(format_exposure);
+            }
+            ExifTag::FNumber(values) => {
+                details.aperture = values
+                    .first()
+                    .and_then(rational_value)
+                    .map(|value| format!("f/{value:.1}"));
+            }
+            ExifTag::ISO(values) => {
+                details.iso = values.first().map(|value| format!("ISO {value}"));
+            }
+            ExifTag::FocalLength(values) => {
+                details.focal_length = values
+                    .first()
+                    .and_then(rational_value)
+                    .map(|value| format!("{value:.1} mm"));
+            }
+            ExifTag::OwnerName(value) | ExifTag::Artist(value) | ExifTag::Copyright(value) => {
+                details.has_owner_or_author |= clean_text(value).is_some();
+            }
+            ExifTag::SerialNumber(value)
+            | ExifTag::LensSerialNumber(value)
+            | ExifTag::ImageUniqueID(value) => {
+                details.has_device_identifier |= clean_text(value).is_some();
+            }
+            ExifTag::ImageDescription(value) => {
+                details.has_description_or_comment |= clean_text(value).is_some();
+            }
+            ExifTag::UserComment(value) => {
+                details.has_description_or_comment |= !value.is_empty();
+            }
+            ExifTag::Software(value) => {
+                details.has_software_history |= clean_text(value).is_some();
+            }
+            ExifTag::ThumbnailOffset(offsets, data) => {
+                details.has_embedded_thumbnail |=
+                    !data.is_empty() || offsets.iter().any(|offset| *offset != 0);
+            }
+            ExifTag::ThumbnailLength(lengths) => {
+                details.has_embedded_thumbnail |= lengths.iter().any(|length| *length != 0);
+            }
+            ExifTag::MakerNote(value) => {
+                details.has_maker_specific_data |= !value.is_empty();
+            }
+            _ => {}
+        }
+    }
+    details.camera = combined_camera(make, model);
+}
+
+fn detected_format_from_source(path: &Path, source: &crate::fs::ImageSource) -> Option<String> {
+    source
+        .clone_for_decode()
         .ok()
+        .map(BufReader::new)
+        .map(image::ImageReader::new)
+        .and_then(|reader| reader.with_guessed_format().ok())
         .and_then(|reader| reader.format())
         .map(format_label)
         .or_else(|| extension_format_label(path).map(str::to_owned))
@@ -138,7 +210,12 @@ fn extension_format_label(path: &Path) -> Option<&'static str> {
 /// past the viewer's fixed safety budget. Malformed, unsupported, or absent
 /// metadata is intentionally indistinguishable from an empty metadata set.
 pub(crate) fn load_bounded_metadata(path: &Path) -> Option<Metadata> {
-    let tiff = read_bounded_exif(path)?;
+    let file = crate::fs::open_file_no_atime(path).ok()?;
+    load_bounded_metadata_from_file(file)
+}
+
+fn load_bounded_metadata_from_file(file: std::fs::File) -> Option<Metadata> {
+    let tiff = read_bounded_exif_file(file)?;
     if !validate_tiff_payload(&tiff) {
         return None;
     }
@@ -147,8 +224,13 @@ pub(crate) fn load_bounded_metadata(path: &Path) -> Option<Metadata> {
         .ok()
 }
 
+#[cfg(test)]
 fn read_bounded_exif(path: &Path) -> Option<Vec<u8>> {
-    let file = std::fs::File::open(path).ok()?;
+    let file = crate::fs::open_file_no_atime(path).ok()?;
+    read_bounded_exif_file(file)
+}
+
+fn read_bounded_exif_file(file: std::fs::File) -> Option<Vec<u8>> {
     let mut reader = BufReader::new(file);
     let mut signature = [0_u8; 12];
     let signature_len = reader.read(&mut signature).ok()?;
@@ -1072,9 +1154,13 @@ fn combined_camera(make: Option<String>, model: Option<String>) -> Option<String
 
 fn normalize_exif_date(value: String) -> String {
     let mut bytes = value.into_bytes();
-    if bytes.len() >= 10 && bytes[4] == b':' && bytes[7] == b':' {
-        bytes[4] = b'-';
-        bytes[7] = b'-';
+    if bytes.len() >= 10 && bytes.get(4) == Some(&b':') && bytes.get(7) == Some(&b':') {
+        if let Some(b) = bytes.get_mut(4) {
+            *b = b'-';
+        }
+        if let Some(b) = bytes.get_mut(7) {
+            *b = b'-';
+        }
     }
     String::from_utf8(bytes).unwrap_or_default()
 }
@@ -1262,8 +1348,63 @@ mod tests {
         assert_eq!(details.aperture.as_deref(), Some("f/2.8"));
         assert_eq!(details.iso.as_deref(), Some("ISO 400"));
         assert_eq!(details.focal_length.as_deref(), Some("50.0 mm"));
+        assert!(details.exif_tag_count >= 9);
         assert!(details.has_location);
         assert!(details.file_bytes.is_some_and(|bytes| bytes > 0));
+    }
+
+    #[test]
+    fn privacy_summary_classifies_presence_without_retaining_sensitive_values() {
+        let mut metadata = Metadata::new();
+        metadata.set_tag(ExifTag::GPSLatitude(vec![uR64 {
+            nominator: 1,
+            denominator: 1,
+        }]));
+        metadata.set_tag(ExifTag::OwnerName("Private Owner".into()));
+        metadata.set_tag(ExifTag::SerialNumber("PRIVATE-SERIAL".into()));
+        metadata.set_tag(ExifTag::UserComment(b"private comment".to_vec()));
+        metadata.set_tag(ExifTag::Software("Private Editor".into()));
+        metadata.set_tag(ExifTag::ThumbnailLength(vec![128]));
+        metadata.set_tag(ExifTag::MakerNote(b"private maker data".to_vec()));
+
+        let mut details = ImageDetails::default();
+        inspect_metadata(&mut details, &metadata);
+
+        assert_eq!(details.exif_tag_count, 7);
+        assert!(details.has_location);
+        assert!(details.has_owner_or_author);
+        assert!(details.has_device_identifier);
+        assert!(details.has_description_or_comment);
+        assert!(details.has_software_history);
+        assert!(details.has_embedded_thumbnail);
+        assert!(details.has_maker_specific_data);
+        assert_eq!(details.camera, None);
+        assert_eq!(details.lens, None);
+    }
+
+    #[test]
+    fn accepted_source_details_ignore_a_later_path_replacement() {
+        let workspace = TempWorkspace::new("image_details_source_binding").unwrap();
+        let path = workspace.path().join("details.jpg");
+        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
+            .save(&path)
+            .unwrap();
+        let mut original_metadata = Metadata::new();
+        original_metadata.set_tag(ExifTag::Model("Original Camera".into()));
+        original_metadata.write_to_file(&path).unwrap();
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+
+        std::fs::rename(&path, workspace.path().join("original.jpg")).unwrap();
+        image::RgbImage::from_pixel(4, 3, image::Rgb([9, 8, 7]))
+            .save(&path)
+            .unwrap();
+        let mut replacement_metadata = Metadata::new();
+        replacement_metadata.set_tag(ExifTag::Model("Replacement Camera".into()));
+        replacement_metadata.write_to_file(&path).unwrap();
+
+        let details = ImageDetails::load_from_source(&path, &source);
+        assert_eq!(details.camera.as_deref(), Some("Original Camera"));
+        assert_ne!(details.camera.as_deref(), Some("Replacement Camera"));
     }
 
     #[test]
@@ -1288,6 +1429,7 @@ mod tests {
         let details = ImageDetails::load(Path::new("missing-viewr-image.jpg"));
         assert_eq!(details.file_bytes, None);
         assert_eq!(details.camera, None);
+        assert_eq!(details.exif_tag_count, 0);
         assert!(!details.has_location);
         assert_eq!(clean_text("\0  \0"), None);
         assert_eq!(

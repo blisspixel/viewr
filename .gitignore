@@ -4,6 +4,7 @@
 *.pdb
 __pycache__/
 *.py[cod]
+/.ruff_cache/
 .DS_Store
 *.log
 /lcov.info

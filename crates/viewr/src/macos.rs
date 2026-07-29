@@ -92,29 +92,43 @@ fn first_core_path(urls: &NSArray<NSURL>) -> Option<PathBuf> {
 
 /// Move an image to Trash and retain the exact resulting path for Undo.
 pub(crate) fn move_to_trash(path: &Path) -> Result<PathBuf, String> {
-    let source = file_url(path)?;
-    let mut resulting_url = None;
-    NSFileManager::defaultManager()
-        .trashItemAtURL_resultingItemURL_error(&source, Some(&mut resulting_url))
-        .map_err(|error| error.to_string())?;
-    let resulting_url = resulting_url.ok_or("macOS did not return the trashed item URL")?;
-    file_url_path(&resulting_url).ok_or_else(|| "macOS returned an invalid trash URL".into())
+    objc2::rc::autoreleasepool(|_| {
+        let source = file_url(path)?;
+        let mut resulting_url = None;
+        NSFileManager::defaultManager()
+            .trashItemAtURL_resultingItemURL_error(&source, Some(&mut resulting_url))
+            .map_err(|_| "macOS Trash rejected the file".to_owned())?;
+        let resulting_url = resulting_url.ok_or("macOS did not return the trashed item URL")?;
+        file_url_path(&resulting_url).ok_or_else(|| "macOS returned an invalid trash URL".into())
+    })
 }
 
 /// Restore a specific item without replacing an existing destination.
-pub(crate) fn restore_from_trash(trashed_path: &Path, original_path: &Path) -> Result<(), String> {
-    if original_path
-        .try_exists()
-        .map_err(|error| format!("could not inspect restore destination: {error}"))?
-    {
-        return Err("restore destination already exists; no file was replaced".into());
-    }
+pub(crate) fn restore_from_trash(
+    trashed_path: &Path,
+    original_path: &Path,
+) -> Result<(), crate::curate::TrashRestoreError> {
+    objc2::rc::autoreleasepool(|_| {
+        if original_path
+            .try_exists()
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    crate::curate::TrashRestoreError::AccessDenied
+                }
+                _ => crate::curate::TrashRestoreError::OperationFailed,
+            })?
+        {
+            return Err(crate::curate::TrashRestoreError::DestinationOccupied);
+        }
 
-    let source = file_url(trashed_path)?;
-    let destination = file_url(original_path)?;
-    NSFileManager::defaultManager()
-        .moveItemAtURL_toURL_error(&source, &destination)
-        .map_err(|error| error.to_string())
+        let source =
+            file_url(trashed_path).map_err(|_| crate::curate::TrashRestoreError::InvalidReceipt)?;
+        let destination = file_url(original_path)
+            .map_err(|_| crate::curate::TrashRestoreError::InvalidReceipt)?;
+        NSFileManager::defaultManager()
+            .moveItemAtURL_toURL_error(&source, &destination)
+            .map_err(|_| crate::curate::TrashRestoreError::OperationFailed)
+    })
 }
 
 fn file_url(path: &Path) -> Result<Retained<NSURL>, String> {

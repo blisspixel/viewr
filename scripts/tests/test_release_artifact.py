@@ -15,6 +15,24 @@ from scripts import release_artifact
 
 SOURCE_DATE_EPOCH = 1_788_000_000
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EXPECTED_DOCUMENTATION_PATHS = {
+    "README.md",
+    "SECURITY.md",
+    "docs/ACCESSIBILITY.md",
+    "docs/ARCHITECTURE.md",
+    "docs/DESIGN.md",
+    "docs/FORMATS.md",
+    "docs/INSTALL.md",
+    "docs/LOCAL-INTELLIGENCE.md",
+    "docs/PERFORMANCE.md",
+    "docs/PRIVACY.md",
+    "docs/RATINGS.md",
+    "docs/ROADMAP.md",
+    "docs/SANDBOX_PLAN.md",
+    "docs/STACK.md",
+    "docs/STANDARDS.md",
+    "docs/VERIFY.md",
+}
 
 
 class ReleaseArtifactTests(unittest.TestCase):
@@ -31,7 +49,22 @@ class ReleaseArtifactTests(unittest.TestCase):
             '[toolchain]\nchannel = "1.96.0"\n',
             encoding="utf-8",
         )
-        (self.repository / "README.md").write_bytes(b"# viewr\n")
+        for relative_path in EXPECTED_DOCUMENTATION_PATHS:
+            documentation = self.repository / relative_path
+            documentation.parent.mkdir(parents=True, exist_ok=True)
+            documentation.write_text(
+                (
+                    "# viewr\n\n"
+                    "[Security](SECURITY.md)\n"
+                    "[Design](docs/DESIGN.md)\n"
+                    "[License](LICENSE)\n"
+                    "[Section](#supported)\n"
+                    "[Website](https://example.invalid/viewr)\n"
+                    if relative_path == "README.md"
+                    else f"# {documentation.stem}\n"
+                ),
+                encoding="utf-8",
+            )
         (self.repository / "LICENSE").write_bytes(b"license\n")
 
     def write_binaries(self, target: str) -> Path:
@@ -140,15 +173,24 @@ class ReleaseArtifactTests(unittest.TestCase):
                 set(archive_file.namelist()),
                 {
                     f"{prefix}/LICENSE",
-                    f"{prefix}/README.md",
                     f"{prefix}/bin/viewr-decode.exe",
                     f"{prefix}/bin/viewr.exe",
                     f"{prefix}/release-manifest.json",
+                    *(f"{prefix}/{path}" for path in EXPECTED_DOCUMENTATION_PATHS),
                 },
             )
             manifest_bytes = archive_file.read(f"{prefix}/release-manifest.json")
             self.assertTrue(manifest_bytes.endswith(b"\n"))
             self.assertEqual(json.loads(manifest_bytes), manifest)
+
+    def test_build_rejects_an_unresolved_local_readme_link(self) -> None:
+        (self.repository / "README.md").write_text(
+            "# viewr\n\n[Missing](docs/MISSING.md)\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            release_artifact.ReleaseError, "unresolved local link"
+        ):
+            self.build()
 
     def test_build_rejects_missing_worker_and_mismatched_tag(self) -> None:
         binary_directory = self.repository / "target" / "release"

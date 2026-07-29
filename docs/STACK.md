@@ -158,9 +158,15 @@ text. Console switches interface type to monospace. Black, neutral gray, and whi
 remain independent image-inspection background overrides.
 
 The explicit choice is persisted as one validated lower-case word in the platform
-configuration directory using only the standard library. Reads are capped at 32
-bytes and unknown values fall back to System. This adds no settings framework,
-serialization dependency, photo history, or background service.
+configuration directory. Reads are capped at 32 bytes. Saves sync a complete
+same-directory temporary file before atomic replacement. Missing state quietly
+uses System; invalid, oversized, unreadable, or unavailable state uses System and
+produces one path-free recovery status plus a fixed opt-in diagnostic category.
+If an explicit save fails, the selected mode remains active for the session,
+the interface gives fixed recovery guidance, and opt-in diagnostics expose only
+the failed persistence phase. Startup never rewrites unusable state. This adds
+no settings framework, serialization dependency, photo history, or background
+service.
 
 ## Decision 6: Deletes: the `trash` crate + sandbox
 
@@ -199,7 +205,7 @@ users who explicitly want it.
 | Input ICC conversion | `moxcms` | bounded pure-Rust RGB profile transform into the current sRGB path |
 | Trash / recycle | `trash` | recoverable deletes |
 | OS theme | `winit` window theme | default image background only; no extra dependency |
-| File dialogs | `rfd` | native open/save dialogs |
+| File dialogs | `rfd` | native open, folder, save, and warning dialogs; OS-managed recent-item history is documented as a platform boundary |
 | EXIF retain (opt-in) | `little_exif` | Save As strips by default; retain is session-only |
 | Spot heal | no additional crate | pure-Rust bounded patch matching and in-memory undo |
 | Error handling | `thiserror` / `anyhow` | app-level ergonomics |

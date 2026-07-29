@@ -15,7 +15,8 @@ viewer launches never collect these measurements.
 - **First pixel:** process entry to the first successfully presented image frame.
 - **Navigation:** the slowest request-to-present interval across distinct sampled
   positions in the folder.
-- **Idle redraws:** redraw requests during a settled 500 ms observation window.
+- **Idle redraws:** delivered redraw events during a settled 500 ms observation
+  window.
 - **Peak resident memory:** the process peak resident set after decode, thumbnail,
   and navigation work has settled.
 - **Folder scaling:** resident-memory growth between 16-image and 50,000-image
@@ -39,9 +40,34 @@ The work remains asynchronous and cancellable. A ground-truth repair corpus and
 dedicated heal latency gate are tracked in `ROADMAP.md`; the GUI navigation probe
 does not claim to measure repair quality or latency.
 
-The probe emits one path-free JSON record to its caller and exits. It has a
-one-minute internal deadline, and the outer harness has a 90-second process
-timeout. A hang therefore fails with a bounded diagnostic instead of stalling CI.
+The probe emits one path-free JSON record to its caller and exits. Alongside the
+enforced delivered-redraw count, that record carries fixed diagnostic counts for
+non-redraw window events, event-driven egui repaint requests, and scheduled egui
+repaints, plus final window-focus and pointer-inside booleans. These fields identify
+correlation, not causation, and carry no event payload, coordinate, path, or input.
+The harness preserves every completed run in order when `--idle-diagnostics` is
+requested and automatically prints the same fixed evidence when completed reports
+violate a gate. Normal viewer launches never emit it. The probe has a one-minute
+internal deadline, and the outer harness has a 90-second process timeout. A hang
+therefore fails with a bounded diagnostic instead of stalling CI.
+
+## Local Trash timing evidence
+
+Current-image Trash and Undo use native platform services and are not part of the
+GUI performance probe. Trash is a synchronous user-triggered call. Restore runs
+through a typed worker, allowing the event loop to repaint a fixed operation
+status and non-mutating view controls while conflicting playlist, edit, and
+destructive actions wait.
+
+When a developer explicitly enables `RUST_LOG=viewr=info` or
+`VIEWR_LOG=info`, Undo reports submitted, restored, failed, and total native
+restore values from the local monotonic clock. Fixed worker lifecycle records add
+only operation category and submitted count. Normal launches remain silent. These
+records are not retained and contain no path, filename, receipt identifier, native
+identity, or raw platform error. They are local diagnostic evidence, not telemetry
+or a cross-platform latency claim. The active restore state makes no percentage,
+estimate, or cancellation claim. No Trash or restore latency release budget is
+currently claimed.
 
 ## CI budgets
 
@@ -86,8 +112,9 @@ python -B scripts/performance_gate.py --binary target/release/viewr
 ```
 
 On Windows, pass `--no-xvfb` and use `target/debug/viewr.exe` when console output
-is needed from a local developer build. The normal release GUI remains a
-windowed application without a console.
+is needed from a local developer build. Add `--idle-diagnostics` to retain the
+fixed per-run attribution above even when the gate is green. The normal release
+GUI remains a windowed application without a console.
 
 Decode-only measurements remain available separately:
 
@@ -102,20 +129,48 @@ measurement surface small and auditable.
 
 ## Current local evidence
 
-On the Windows development host on 2026-07-25, the latest three-run optimized GUI
-probe passed the 50,000-file contract with a 754.55 ms median first frame and
-first image, 28.58 ms slowest sampled navigation, one settled redraw, 229.62 MiB
-small-folder peak resident set, and 240.18 MiB large-folder peak resident set. The
-conservative highest-large minus lowest-small growth check passed its 96 MiB
-budget. The idle-aware gate first exposed and then verified removal of a
-self-sustaining egui event-loop repaint cycle, paint-dependent background-work
-starvation, cursor-position-dependent hover repaint noise, and a Windows probe
-starvation case where a scheduled egui repaint prevented its own idle observation
-from completing.
+On the Windows development host on 2026-07-29, the current three-run optimized
+probe met every startup, navigation, memory, folder-scaling, cache, and idle budget:
+857.93 ms median first frame, 901.16 ms median first image, 77.19 ms slowest sampled
+navigation, 253.20 MiB small-folder peak resident set, 256.40 MiB large-folder peak
+resident set, four decoded cache entries at the exact 256 MiB byte budget, and at
+most one delivered redraw in every measured idle window. All completed idle
+windows reported zero non-redraw events, zero event-driven repaint requests, and
+zero scheduled egui repaints. Five of the six small and large folder windows were
+focused at completion, three had the pointer inside, and those states did not
+change the result.
 
-Those numbers validate the local harness and provide a reference observation.
-Only the release-mode Ubuntu job enforces the canonical CI result. No hosted run
-is claimed until a Git remote and runner are available.
+The probe now treats an outstanding egui repaint deadline as unsettled UI work. A
+500 ms idle observation starts or restarts only after delayed hover and activation
+work is quiet. This preserves the limit of two delivered redraws and the existing
+hard timeout. It does not hide a continuous repaint loop: one prevents the idle
+window from settling and fails at the deadline.
+
+A later PID-bound controlled release run used only synthetic images, established
+focus and a stationary pointer inside each spawned probe window, then stopped
+injecting input and sampled state passively. All seven windows completed focused
+and pointer-inside, and all 11 passive controller samples confirmed that state.
+Six windows recorded one delivered redraw, no non-redraw events, no event-driven
+repaint requests, and zero or one scheduled egui repaint. The first small-folder
+window recorded four redraws, two non-redraw events, two event-driven repaint
+requests, and three scheduled repaints, so the overall controlled gate correctly
+failed its limit of two. That outlier correlates with initial window activation;
+the passive samples do not establish causation or prove continuous state between
+samples. In the six windows without non-redraw or event-driven repaint traffic,
+the sampled and final focused-pointer observations did not coincide with elevated
+redraws under these test conditions.
+
+An earlier optimized run recorded 23 and 30 idle redraws after another run had
+recorded one. A separate Cycle 25 reduced 19-process run also stayed at one, but it
+shared the same uncontrolled window conditions. The later controlled result
+narrows the steady focused-pointer case but does not explain those higher counts.
+The historical Windows variance therefore remains unresolved.
+
+The historical outliers established the missing settled-state precondition. The
+focused and pointer-inside rerun above passed after that condition was enforced,
+without changing application repaint scheduling or the budget. Only the
+release-mode Ubuntu job enforces the canonical CI result. No hosted run is claimed
+until a Git remote and runner are available.
 
 ## Decode reference
 
@@ -134,6 +189,16 @@ Prefetched navigation can avoid decode latency entirely. A cold cache miss still
 depends on storage, decoder, image dimensions, GPU initialization, display stack,
 and host load, so viewr does not turn these reference numbers into a blanket
 "instant" guarantee.
+
+Focused unit tests cover the immediate reverse decision and shared cache identity.
+If the requested pristine source frame is still presented, the runtime path
+cancels the abandoned generation and settles without another decode or texture
+upload. After a move within two positions completes, the just-left pristine decode
+can share its allocation with the existing LRU; its RGBA length still counts
+against the same entry and 256 MiB limits. Larger jumps, derived edit results,
+animation playback frames, explicit-Reload state, and over-budget or evicted
+images use the normal loading path. This is not a measured end-to-end latency
+claim.
 
 Save As borrows RGBA pixels directly for alpha-capable encoders. Formats that
 require RGB allocate one fallible output buffer rather than cloning RGBA first.

@@ -30,6 +30,14 @@ using System.Text;
 public static class ViewrAccessibilityNativeMethods {
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Rect {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
@@ -44,6 +52,17 @@ public static class ViewrAccessibilityNativeMethods {
 
     [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
+
+    public static int[] ClientSize(IntPtr hwnd) {
+        Rect rect;
+        if (!GetClientRect(hwnd, out rect)) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        return new[] { rect.Right - rect.Left, rect.Bottom - rect.Top };
+    }
 
     public static IntPtr[] WindowsForProcess(uint processId) {
         var result = new List<IntPtr>();
@@ -81,6 +100,14 @@ function Get-ApplicationWindow {
         }
     }
     return [IntPtr]::Zero
+}
+
+function Get-ApplicationClientSize {
+    $size = [ViewrAccessibilityNativeMethods]::ClientSize($script:Window)
+    return [pscustomobject]@{
+        Width = $size[0]
+        Height = $size[1]
+    }
 }
 
 function Wait-ForResult {
@@ -160,11 +187,12 @@ function Get-Element {
     )
     for ($index = 0; $index -lt $nodes.Count; $index++) {
         $node = $nodes.Item($index)
+        $currentName = [string]$node.Current.Name
         $nameMatches = if ($Prefix) {
-            $node.Current.Name.StartsWith($Name, [StringComparison]::Ordinal)
+            $currentName.StartsWith($Name, [StringComparison]::Ordinal)
         }
         else {
-            $node.Current.Name -eq $Name
+            $currentName -eq $Name
         }
         $typeMatches = $null -eq $ControlType -or $node.Current.ControlType -eq $ControlType
         if ($nameMatches -and $typeMatches) {
@@ -191,11 +219,12 @@ function Wait-ForElementAbsent {
     param(
         [Parameter(Mandatory)]
         [string]$Name,
-        [System.Windows.Automation.ControlType]$ControlType
+        [System.Windows.Automation.ControlType]$ControlType,
+        [switch]$Prefix
     )
 
     return Wait-ForResult -Description "accessible element '$Name' to disappear" -Probe {
-        $element = Get-Element -Name $Name -ControlType $ControlType
+        $element = Get-Element -Name $Name -ControlType $ControlType -Prefix:$Prefix
         if ($null -eq $element) {
             return [IntPtr]1
         }
@@ -266,10 +295,19 @@ function Wait-ForToggleState {
     )
 
     return Wait-ForResult -Description "'$Name' toggle state $State" -Probe {
-        $element = Get-Element -Name $Name -ControlType (
-            [System.Windows.Automation.ControlType]::CheckBox
-        )
-        if ($null -ne $element -and (Get-ToggleState -Element $element) -eq $State) {
+        $element = Get-Element -Name $Name
+        if ($null -eq $element) {
+            return $null
+        }
+        $rawPattern = $null
+        if (-not $element.TryGetCurrentPattern(
+            [System.Windows.Automation.TogglePattern]::Pattern,
+            [ref]$rawPattern
+        )) {
+            return $null
+        }
+        $pattern = [System.Windows.Automation.TogglePattern]$rawPattern
+        if ($pattern.Current.ToggleState -eq $State) {
             return $element
         }
         return $null
@@ -305,11 +343,12 @@ function Wait-ForSelectionState {
         [Parameter(Mandatory)]
         [string]$Name,
         [Parameter(Mandatory)]
-        [bool]$Selected
+        [bool]$Selected,
+        [switch]$Prefix
     )
 
     return Wait-ForResult -Description "'$Name' selected state $Selected" -Probe {
-        $element = Get-Element -Name $Name -ControlType (
+        $element = Get-Element -Name $Name -Prefix:$Prefix -ControlType (
             [System.Windows.Automation.ControlType]::RadioButton
         )
         if ($null -ne $element -and (Get-SelectionState -Element $element) -eq $Selected) {
@@ -365,10 +404,14 @@ function Stop-TestApplication {
 }
 
 function Start-TestApplication {
+    param([string]$ImagePath)
+
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $binaryPath
     $startInfo.UseShellExecute = $false
-    $startInfo.ArgumentList.Add($firstImage)
+    if (-not [string]::IsNullOrWhiteSpace($ImagePath)) {
+        $startInfo.ArgumentList.Add($ImagePath)
+    }
     $startInfo.Environment["APPDATA"] = $testDirectory
     $script:Process = [Diagnostics.Process]::Start($startInfo)
     if ($null -eq $script:Process) {
@@ -380,6 +423,14 @@ function Start-TestApplication {
 }
 
 $binaryPath = (Resolve-Path -LiteralPath $Binary).Path
+$versionMatch = [regex]::Match(
+    (& $binaryPath --version | Out-String).Trim(),
+    '^viewr (?<Version>\S+)$'
+)
+if (-not $versionMatch.Success) {
+    throw "viewr --version did not return the expected local version contract"
+}
+$currentVersionText = "Current version: $($versionMatch.Groups['Version'].Value)"
 $testDirectory = Join-Path (
     [IO.Path]::GetFullPath((Join-Path (Get-Location) "target"))
 ) "accessibility-smoke-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -414,6 +465,7 @@ try {
     if (-not $root.Current.IsKeyboardFocusable) {
         throw "the native accessibility root is not keyboard-focusable"
     }
+    $emptyWindowClientSize = Get-ApplicationClientSize
 
     foreach ($menu in @("File", "Edit", "Tools", "View", "Help")) {
         $element = Wait-ForElement -Name $menu -ControlType (
@@ -423,14 +475,101 @@ try {
             throw "the '$menu' menu is not keyboard-focusable"
         }
     }
+    Wait-ForElement `
+        -Name "Open a file to start. Its folder is browsed when access allows. Open Folder selects it explicitly for this session." `
+        -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-ForElement -Name "Open File" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
+    Wait-ForElement -Name "Open Folder" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
+    Wait-ForElement -Name "Local only. No cloud or viewr activity log." -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Stop-TestApplication
+    Start-TestApplication -ImagePath $firstImage
+
+    $fileMenu = Wait-ForElement -Name "File" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $fileMenu
+    $undoTrash = Wait-ForElement -Name "Undo Trash" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    if ($undoTrash.Current.Name -ne "Undo Trash") {
+        throw "Undo Trash exposed a receipt count before a recoverable action existed"
+    }
+    if ($undoTrash.Current.IsEnabled) {
+        throw "Undo Trash was enabled without a recoverable trash receipt"
+    }
+    $moveToTrash = Wait-ForElement -Name "Move to Trash" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    if (-not $moveToTrash.Current.IsEnabled) {
+        throw "Move to Trash was disabled for a loaded image"
+    }
+    foreach ($obsoleteCullingAction in @(
+        "Mark for batch trash",
+        "Review next marked image",
+        "Move 1 marked image",
+        "Remove batch-trash mark"
+    )) {
+        Wait-ForElementAbsent `
+            -Name $obsoleteCullingAction `
+            -Prefix `
+            -ControlType ([System.Windows.Automation.ControlType]::Button) | Out-Null
+    }
+    Activate-Element -Element $fileMenu
     Wait-ForElement -Name "first.png" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
     Wait-ForElement -Name "1 × 1" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
+    $imageWindowClientSize = Get-ApplicationClientSize
+    if (
+        $imageWindowClientSize.Width -ne $emptyWindowClientSize.Width -or
+        $imageWindowClientSize.Height -ne $emptyWindowClientSize.Height
+    ) {
+        throw (
+            "opening the initial image resized the client area from " +
+            "$($emptyWindowClientSize.Width)x$($emptyWindowClientSize.Height) to " +
+            "$($imageWindowClientSize.Width)x$($imageWindowClientSize.Height)"
+        )
+    }
     Wait-ForElement -Name "1 / 2" -ControlType (
         [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    $help = Wait-ForElement -Name "Help" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $help
+    $updateViewr = Wait-ForElement -Name "Update viewr..." -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $updateViewr
+    Wait-ForElement -Name "Update viewr." -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
+    ) | Out-Null
+    foreach ($updateText in @(
+        $currentVersionText,
+        "viewr does not check, download, or install updates.",
+        "No verified public update source is configured for this build.",
+        "cargo build --release --workspace --locked"
+    )) {
+        Wait-ForElement -Name $updateText -ControlType (
+            [System.Windows.Automation.ControlType]::Text
+        ) | Out-Null
+    }
+    $closeUpdate = Wait-ForElement -Name "Close" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $closeUpdate
+    Wait-ForElementAbsent -Name "Close" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
 
     $help = Wait-ForElement -Name "Help" -ControlType (
@@ -452,12 +591,34 @@ try {
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
 
-    Open-ViewSubmenu -Name "Appearance"
-    Wait-ForSelectionState -Name "System" -Selected $true | Out-Null
-    $consoleTheme = Wait-ForSelectionState -Name "Console" -Selected $false
+    Open-ViewSubmenu -Name "Appearance: System"
+    Wait-ForElement `
+        -Name "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately." `
+        -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-ForSelectionState -Name "System:" -Prefix -Selected $true | Out-Null
+    $lightTheme = Wait-ForSelectionState -Name "Light:" -Prefix -Selected $false
+    Select-Element -Element $lightTheme
+    Open-ViewSubmenu -Name "Appearance: Light"
+    Wait-ForSelectionState -Name "Light:" -Prefix -Selected $true | Out-Null
+    $darkTheme = Wait-ForSelectionState -Name "Dark:" -Prefix -Selected $false
+    Select-Element -Element $darkTheme
+    Open-ViewSubmenu -Name "Appearance: Dark"
+    Wait-ForSelectionState -Name "Dark:" -Prefix -Selected $true | Out-Null
+    $consoleTheme = Wait-ForSelectionState -Name "Console:" -Prefix -Selected $false
     Select-Element -Element $consoleTheme
-    Open-ViewSubmenu -Name "Appearance"
-    Wait-ForSelectionState -Name "Console" -Selected $true | Out-Null
+    Open-ViewSubmenu -Name "Appearance: Console"
+    Wait-ForSelectionState -Name "Console:" -Prefix -Selected $true | Out-Null
+    $systemTheme = Wait-ForSelectionState -Name "System:" -Prefix -Selected $false
+    Select-Element -Element $systemTheme
+    Open-ViewSubmenu -Name "Appearance: System"
+    Wait-ForSelectionState `
+        -Name "System: Follows your operating system. Currently " `
+        -Prefix `
+        -Selected $true | Out-Null
+    $consoleTheme = Wait-ForSelectionState -Name "Console:" -Prefix -Selected $false
+    Select-Element -Element $consoleTheme
+    Open-ViewSubmenu -Name "Appearance: Console"
+    Wait-ForSelectionState -Name "Console:" -Prefix -Selected $true | Out-Null
     if (-not [IO.File]::Exists($appearanceFile)) {
         throw "selecting Console did not persist the isolated appearance preference"
     }
@@ -467,26 +628,32 @@ try {
     }
 
     Stop-TestApplication
-    Start-TestApplication
+    Start-TestApplication -ImagePath $firstImage
     Wait-ForElement -Name "first.png" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
-    Open-ViewSubmenu -Name "Appearance"
-    Wait-ForSelectionState -Name "Console" -Selected $true | Out-Null
-    $view = Wait-ForElement -Name "View" -ControlType (
+    Open-ViewSubmenu -Name "Appearance: Console"
+    Wait-ForSelectionState -Name "Console:" -Prefix -Selected $true | Out-Null
+    $fileMenu = Wait-ForElement -Name "File" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
-    Activate-Element -Element $view
+    Activate-Element -Element $fileMenu
+    $openWith = Wait-ForElement -Name "Open With..." -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    if (-not $openWith.Current.IsEnabled) {
+        throw "Open With was not enabled for the accepted current image"
+    }
 
     Open-ViewSubmenu -Name "Panels"
-    foreach ($panel in @("Tools", "Folder Previews", "Image Information")) {
+    foreach ($panel in @("Tools T", "Folder Previews G", "Image Information I")) {
         Wait-ForToggleState -Name $panel -State (
             [System.Windows.Automation.ToggleState]::Off
         ) | Out-Null
     }
 
-    $tools = Get-Element -Name "Tools" -ControlType (
-        [System.Windows.Automation.ControlType]::CheckBox
+    $tools = Wait-ForToggleState -Name "Tools T" -State (
+        [System.Windows.Automation.ToggleState]::Off
     )
     Toggle-Element -Element $tools
     $collapseTools = Wait-ForElement -Name "Collapse tools panel" -ControlType (
@@ -495,6 +662,22 @@ try {
     Wait-ForElement -Name "Rotate clockwise (R)" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
+    Wait-ForElementAbsent `
+        -Name "Mark for batch trash" `
+        -Prefix `
+        -ControlType ([System.Windows.Automation.ControlType]::Button) | Out-Null
+    $editMenu = Wait-ForElement -Name "Edit" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $editMenu
+    $startCrop = Wait-ForElement -Name "Crop" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $startCrop
+    $cancelCrop = Wait-ForElement -Name "Cancel" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $cancelCrop
     $spotHeal = Wait-ForElement -Name "Spot heal (J)" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
@@ -524,13 +707,23 @@ try {
     ) | Out-Null
 
     Open-ViewSubmenu -Name "Panels"
-    Wait-ForToggleState -Name "Tools" -State (
+    Wait-ForToggleState -Name "Tools T" -State (
         [System.Windows.Automation.ToggleState]::On
     ) | Out-Null
-    $information = Get-Element -Name "Image Information" -ControlType (
-        [System.Windows.Automation.ControlType]::CheckBox
+    $information = Wait-ForToggleState -Name "Image Information I" -State (
+        [System.Windows.Automation.ToggleState]::Off
     )
     Toggle-Element -Element $information
+
+    Wait-ForElement -Name "Source Privacy" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Wait-ForElement -Name "No supported EXIF detected." -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Wait-ForElement `
+        -Name "Limited EXIF scan. Other metadata or hidden pixel data may still exist." `
+        -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
 
     $metadata = Wait-ForToggleState -Name "Keep camera metadata when saving" -State (
         [System.Windows.Automation.ToggleState]::Off
@@ -562,7 +755,7 @@ try {
     Activate-Element -Element $view
 
     Open-ViewSubmenu -Name "Panels"
-    $previews = Wait-ForToggleState -Name "Folder Previews" -State (
+    $previews = Wait-ForToggleState -Name "Folder Previews G" -State (
         [System.Windows.Automation.ToggleState]::Off
     )
     Toggle-Element -Element $previews
@@ -582,8 +775,10 @@ try {
 
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
-        "actions, About, appearance restart, Spot Heal, dock positions, metadata " +
-        "state, previews, and navigation verified"
+        "actions, first-run scope, stable initial window size, conventional Trash " +
+        "controls, local update guidance, About, current appearance and restart, " +
+        "Spot Heal, source privacy, native Open With discovery, panel shortcuts, dock positions, " +
+        "metadata state, disabled trash recovery, previews, and navigation verified"
     )
 }
 finally {

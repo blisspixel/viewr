@@ -15,13 +15,17 @@ ignore = [
     "RUSTSEC-2026-0192",
 
     # quick-xml DoS advisories (quadratic attribute check; unbounded namespace
-    # allocation). Reviewed and not reachable in viewr: quick-xml is used only by
-    # winit's `wayland-scanner`, a BUILD-TIME proc-macro that parses the fixed,
-    # trusted Wayland protocol XML bundled with the crate. It never parses user,
-    # file, or network input, does not run in the shipped app, and is Linux-only.
-    # wayland-scanner pins quick-xml 0.39, so the fix (0.41) is not yet reachable.
-    # Tracked for removal when winit/wayland-scanner update. Runtime-reachable
-    # vulnerabilities are never ignored; see docs/STANDARDS.md.
+    # allocation). Two reviewed paths exist. winit's `wayland-scanner` uses 0.39
+    # only in a BUILD-TIME proc-macro on fixed bundled Wayland XML. little_exif
+    # uses 0.37's plain Reader, not the namespace-resolving NsReader affected by
+    # 0195. Its attribute iterator affected by 0194 is used only when rewriting
+    # XMP in an existing PNG. viewr invokes little_exif writes only on a freshly
+    # pixel-encoded private temporary with no text or XMP chunks; untrusted source
+    # metadata crosses viewr's bounded TIFF parser into typed Metadata and is
+    # never supplied as raw XML. Neither affected parser sees user XML. Both
+    # dependents pin pre-0.41 APIs, so no compatible patched upgrade exists yet.
+    # Tracked for removal when little_exif and wayland-scanner update.
+    # Runtime-reachable vulnerabilities are never ignored; see docs/STANDARDS.md.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 

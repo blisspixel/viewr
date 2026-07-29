@@ -174,7 +174,11 @@ pub(crate) fn default_crop_rect(image_size: (u32, u32), ratio: CropRatio) -> [f3
     )
 }
 
-pub(crate) fn fit_crop_rect_to_ratio(bounds: [f32; 4], image_size: (u32, u32), ratio: CropRatio) -> [f32; 4] {
+pub(crate) fn fit_crop_rect_to_ratio(
+    bounds: [f32; 4],
+    image_size: (u32, u32),
+    ratio: CropRatio,
+) -> [f32; 4] {
     let left = bounds[0].min(bounds[2]).clamp(0.0, 1.0);
     let top = bounds[1].min(bounds[3]).clamp(0.0, 1.0);
     let right = bounds[0].max(bounds[2]).clamp(left, 1.0);
@@ -551,13 +555,14 @@ fn centered_crop_origin(center: f64, extent: u32, bound: u32) -> u32 {
 /// Convert a UV crop rect into one bounded pixel rectangle. Locked ratios
 /// are quantized as whole multiples of their reduced integer components,
 /// so the exported pixel dimensions keep the ratio exactly.
+#[must_use]
 pub fn crop_pixel_rect(
     rect: [f32; 4],
     width: u32,
     height: u32,
     ratio: CropRatio,
 ) -> Option<crate::edit::Rect> {
-    if width == 0 || height == 0 {
+    if width == 0 || height == 0 || rect.iter().any(|coordinate| !coordinate.is_finite()) {
         return None;
     }
     let left = f64::from(rect[0].min(rect[2]).clamp(0.0, 1.0));
@@ -724,9 +729,19 @@ mod tests {
         let rect = default_crop_rect((101, 151), source_ratio);
         let rotated = crop_pixel_rect(rect, 101, 151, source_ratio).unwrap();
         assert_eq!(u64::from(rotated.width) * 16, u64::from(rotated.height) * 9);
-        assert!(
-            crop_pixel_rect([0.0, 0.0, 1.0, 1.0], 15, 8, CropRatio::SIXTEEN_NINE).is_none()
-        );
+        assert!(crop_pixel_rect([0.0, 0.0, 1.0, 1.0], 15, 8, CropRatio::SIXTEEN_NINE).is_none());
+    }
+
+    #[test]
+    fn crop_pixel_quantization_rejects_every_non_finite_coordinate() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for index in 0..4 {
+                let mut rect = [0.1, 0.2, 0.8, 0.9];
+                rect[index] = value;
+                assert!(crop_pixel_rect(rect, 800, 600, CropRatio::Free).is_none());
+                assert!(crop_pixel_rect(rect, 800, 600, CropRatio::SQUARE).is_none());
+            }
+        }
     }
 
     #[test]

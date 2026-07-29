@@ -76,8 +76,9 @@ with intent, not as though it was assembled from plausible fragments.
 - `anyhow` (or equivalent) only at the application boundary where a human-readable
   chain is what matters.
 - No `unwrap`, `expect`, or `panic!` on any path that can be reached by user input
-  or a hostile file. Panicking is reserved for genuine invariant violations, and
-  those are rare and documented. A viewer must never crash because a file was odd.
+  or a hostile file. Panicking is reserved for genuine internal invariants, and
+  those invariants must be locally evident or documented. A viewer must never
+  crash because a file was odd.
 
 ## Testing
 

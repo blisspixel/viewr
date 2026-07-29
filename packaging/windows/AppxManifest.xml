@@ -7,7 +7,7 @@
   <Identity
     Name="com.github.blisspixel.viewr"
     Publisher="CN=Viewr Local Development"
-    Version="0.0.0.0"
+    Version="0.1.0.0"
     ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>viewr</DisplayName>

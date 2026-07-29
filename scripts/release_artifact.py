@@ -37,12 +37,32 @@ MANIFEST_SCHEMA_VERSION = 1
 ARCHIVE_FORMAT = "zip-store-v1"
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_BINARY_HEADER_BYTES = 1024 * 1024 + 512
+MAX_README_BYTES = 512 * 1024
+ARCHIVE_DOCUMENTATION_PATHS = (
+    "README.md",
+    "SECURITY.md",
+    "docs/ACCESSIBILITY.md",
+    "docs/ARCHITECTURE.md",
+    "docs/DESIGN.md",
+    "docs/FORMATS.md",
+    "docs/INSTALL.md",
+    "docs/LOCAL-INTELLIGENCE.md",
+    "docs/PERFORMANCE.md",
+    "docs/PRIVACY.md",
+    "docs/RATINGS.md",
+    "docs/ROADMAP.md",
+    "docs/SANDBOX_PLAN.md",
+    "docs/STACK.md",
+    "docs/STANDARDS.md",
+    "docs/VERIFY.md",
+)
 ZIP_END_RECORD = struct.Struct("<4s4H2LH")
 VERSION_PATTERN = re.compile(
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?"
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 TOOLCHAIN_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+README_LINK_PATTERN = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 
 
 class ReleaseError(ValueError):
@@ -440,6 +460,34 @@ def _validate_member_name(name: str) -> None:
         raise ReleaseError(f"archive member has an unsafe path: {name}")
 
 
+def _require_resolved_readme_links(
+    archive: zipfile.ZipFile, prefix: str, names: set[str]
+) -> None:
+    readme_member = f"{prefix}/README.md"
+    readme_info = archive.getinfo(readme_member)
+    if readme_info.file_size > MAX_README_BYTES:
+        raise ReleaseError("release README exceeds its safety limit")
+    try:
+        readme = archive.read(readme_info).decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ReleaseError("release README is not valid UTF-8") from error
+
+    for raw_target in README_LINK_PATTERN.findall(readme):
+        target = raw_target.strip()
+        if not target or target.startswith("#"):
+            continue
+        if target.lower().startswith(("http://", "https://", "mailto:")):
+            continue
+        relative_target = target.partition("#")[0]
+        target_path = PurePosixPath(relative_target)
+        member_name = f"{prefix}/{target_path.as_posix()}"
+        _validate_member_name(member_name)
+        if member_name not in names:
+            raise ReleaseError(
+                f"release README contains an unresolved local link: {target}"
+            )
+
+
 def _require_canonical_zip_envelope(archive_path: Path) -> None:
     size = archive_path.stat().st_size
     if size < ZIP_END_RECORD.size:
@@ -566,14 +614,15 @@ def _validated_manifest(
     main_binary, worker_binary = _binary_names(target)
     expected_paths = {
         "LICENSE",
-        "README.md",
         f"bin/{main_binary}",
         f"bin/{worker_binary}",
     }
+    expected_paths.update(ARCHIVE_DOCUMENTATION_PATHS)
     expected_members = {f"{prefix}/{path}" for path in expected_paths}
     expected_members.add(f"{prefix}/{MANIFEST_NAME}")
     if set(names) != expected_members:
         raise ReleaseError("archive member set does not match the release contract")
+    _require_resolved_readme_links(archive, prefix, set(names))
     expected_timestamp = _zip_timestamp(source_date_epoch)
     for info in infos:
         if info.date_time != expected_timestamp:
@@ -689,10 +738,16 @@ def build_release_artifact(
             0o644,
             _canonical_text(repository_root / "LICENSE", "license"),
         ),
-        ArchiveEntry(
-            "README.md",
-            0o644,
-            _canonical_text(repository_root / "README.md", "readme"),
+        *(
+            ArchiveEntry(
+                relative_path,
+                0o644,
+                _canonical_text(
+                    repository_root / relative_path,
+                    f"documentation file {relative_path}",
+                ),
+            )
+            for relative_path in ARCHIVE_DOCUMENTATION_PATHS
         ),
         ArchiveEntry(f"bin/{main_binary}", 0o755, main_path),
         ArchiveEntry(f"bin/{worker_binary}", 0o755, worker_path),

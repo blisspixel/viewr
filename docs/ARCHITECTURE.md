@@ -7,8 +7,9 @@ current implementation and names the seams that still need simplification.
 
 1. **Instant.** The first frame of an image must appear as fast as the disk and
    decoder allow, never blocked on anything else.
-2. **Never janky.** The UI thread never decodes, never touches the disk for a big
-   read, never blocks. Heavy work is off-thread; the UI only ever swaps in results.
+2. **Never janky.** The UI thread never decodes or performs a bulk image read.
+   Heavy image work is off-thread; narrow native dialogs and Trash calls remain
+   synchronous user-triggered boundaries and are tracked explicitly below.
 3. **Safe with hostile input.** Untrusted bytes are decoded in isolation, away from
    the filesystem and network.
 4. **Auditable surface.** Clear ownership, bounded work, and no framework we
@@ -40,27 +41,33 @@ Image decoding and folder scanning run off the event thread. Their results retur
 through channels, wake the event loop through a typed `UserEvent`, request a
 redraw, and are applied only if they still match the current path or generation.
 The initial decode and folder scan start before renderer initialization, so GPU
-setup does not unnecessarily serialize first-pixel work. Native dialogs and trash operations are short,
-user-triggered platform calls; the performance gate measures them rather than
-assuming they are free.
+setup does not unnecessarily serialize first-pixel work. Native dialogs and Trash
+or permanent-delete calls for one current file remain synchronous,
+user-triggered platform calls. Trash restore uses one typed worker, a one-result
+channel, and `EventLoopProxy` wake; only the event thread reconciles receipts,
+playlist scope, and visible results. The general performance probe does not
+exercise native Trash operations, so their latency is not claimed by that gate.
 
 An explicit developer/CI probe uses the same application loop, records the first
 successfully presented window frame and image, samples bounded folder positions,
 observes a settled idle interval, reads the process peak resident set, and exits.
 Normal GUI launches do not construct this probe or collect performance data.
 
-## Core state (sketch)
-
 ```rust
 struct App {
-    // Selected source plus the naturally sorted, session-scoped folder view.
-    image_path: Option<PathBuf>,
-    playlist: Option<Playlist>,
+    // Session state handles the selected path, presented path, load errors,
+    // and generation-tracking for foreground decode supersession.
+    session: crate::session::Session,
+
+    // File list state tracking.
+    playlist: Option<crate::playlist::Playlist>,
 
     // Exact source/pixel match on screen plus a bounded neighbor cache.
     current_image: Option<Arc<DecodedImage>>,
-    loaded_image_path: Option<PathBuf>,
+    current_source: Option<Arc<ImageSource>>,
+    current_image_reuse: ImageReuseEligibility,
     prefetch: PrefetchCache,
+    prefetch_sources: HashMap<PathBuf, Arc<ImageSource>>,
 
     // View, crop, animation, details, and in-memory pixel edit state.
     transform: Transform,
@@ -68,11 +75,12 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // At most one foreground operation of each kind, with generation/path
-    // checks before a result can replace current state.
-    image_loader_rx: Option<Receiver<ImageLoadResult>>,
+    // At most one foreground operation of each kind, with generation, path,
+    // and exact decoded-allocation checks before a result can replace state.
+    // CropWorker also owns cooperative cancellation and a recovery snapshot.
     crop_worker: Option<CropWorker>,
     save_worker: Option<SaveWorker>,
+    preview_worker: Option<PreviewWorker>,
 
     // Docked chrome and the session-only export-privacy choice.
     show_tools_panel: bool,
@@ -84,17 +92,17 @@ struct App {
     image_info_side: DockSide,
     retain_exif: bool,
 
-    // Curation.
-    flags: FlagSet,
+    // Latest safely recoverable Trash action.
     last_trashed: Vec<TrashedFile>,
 }
 ```
 
 There is no document database, plugin registry, or scene graph. The state is
-intentionally centralized so the winit event loop has one owner, but the current
-`app` and `ui` modules have grown beyond the original "flat and small" sketch.
-The next architectural milestone extracts pure session/load, crop, job, and dock
-state without introducing a second mutable store. See `ROADMAP.md`.
+intentionally centralized so the winit event loop has one owner. The `session`,
+`crop`, `playlist`, and `performance` modules establish smaller state and logic
+seams without introducing a second mutable store. `App` remains a large
+orchestrator, and bounded job coordination plus dock/menu view models are still
+explicit roadmap work.
 
 ## Modules
 
@@ -123,9 +131,12 @@ Shipped:
   decoder result from entering the old upload path until a compatible output
   transform exists. Preview generation, thumbnail upload, and export enforce the
   same boundary rather than silently reinterpreting unfamiliar pixels.
-- **`decode`**: turns a path into RGBA pixels. Pure-Rust formats are decoded on
-  background threads via the `image` crate. For complex C-backed formats, the
-  main process opens the selected file and delegates bounded encoded bytes to an
+- **`decode`**: opens one source object and turns that exact handle into RGBA
+  pixels. The live handle and native object identity travel with every accepted
+  foreground or speculative result instead of being reconstructed from its path.
+  Pure-Rust formats decode the duplicated handle on background threads via the
+  `image` crate. For complex C-backed formats, the main process reads bounded
+  encoded bytes from the same handle and delegates them to an
   isolated `viewr-decode` helper using versioned request frames and a
   length-validated RGBA8 stream. Each V2 response also carries a bounded ICC
   profile, typed H.273 CICP values, or an explicit unknown color-space state.
@@ -167,10 +178,16 @@ Shipped:
   deadline, pause/resume, and finite/infinite loop state. It is current-image-only
   RAM state and never a disk cache. Containers are identified by content after
   any misleading rename, APNG receives allocation limits at decoder construction,
-  and superseded work exits between frames.
+  superseded work exits between frames, and replacement frames duplicate the
+  already accepted source handle rather than reopening its path.
 - **`image_info`**: best-effort local format, size, camera, lens, exposure,
-  aperture, ISO, focal length, date, and GPS-presence inspection. It publishes GPS
-  presence without exposing coordinates in the UI. Container extraction, TIFF
+  aperture, ISO, focal length, date, and privacy-category inspection. Auxiliary
+  work duplicates the retained `ImageSource` handle that supplied accepted pixels
+  instead of reopening the pathname. The UI publishes bounded supported-EXIF tag
+  count plus location, authorship, unique identifier, description, software,
+  thumbnail, and maker-data presence without retaining or exposing the raw values
+  behind those presence-only categories. It also states that this is not proof against other metadata or hidden
+  pixel data. Container extraction, TIFF
   directory count, component sizes, offsets, recursion, thumbnails, and aggregate
   allocations are preflighted under fixed limits before EXIF decoding. TIFF IFDs
   may live anywhere in the source file: the reader seeks only bounded metadata,
@@ -195,23 +212,47 @@ Shipped:
   the latest result without creating another undo step, and never retains the
   full decoded image. A path-free worker shares immutable decoded pixels just
   long enough to copy the bounded working region, drops the full image, and then
-  computes the repair. Apply, refresh, undo, and redo upload only the changed
-  base-texture rectangle before dependent mips are regenerated. The tool is
+  computes the repair. Apply, refresh, undo, and redo treat decoded pixels,
+  bounded history, GPU presentation, and success copy as one transaction. They
+  upload only the changed base-texture rectangle before dependent mips are
+  regenerated, fall back to full-texture presentation, and restore exact pixels
+  plus history when presentation fails. The tool is
   unavailable if the adapter cannot
   represent the complete decoded image in one texture, preventing an ambiguous
   source-to-display coordinate mapping.
 - **`curate`**: move to the OS trash or recycle bin and restore for undo. On
   macOS, a native receipt retains the exact resulting trash URL so restoration
-  does not depend on an unsupported global trash listing.
+  does not depend on an unsupported global trash listing. Windows and Linux take
+  an in-memory snapshot of existing Trash identifiers before moving, then accept
+  exactly one new same-origin identifier only when the Trash object's native file
+  identity matches the retained accepted-source handle. The receipt keeps that
+  handle open to prevent identity reuse, and restore repeats the identity check
+  before selecting the identifier. A Windows or Linux batch restore enumerates
+  Trash once and consumes each exact identifier from that shared snapshot. It
+  never falls back to pathname matching.
+  External platform errors are mapped to fixed path-free user categories and
+  retry dispositions before they leave this boundary. Identifiers are not logged
+  or persisted.
 - **`macos`**: the narrow native bridge for Finder and Open With requests plus
   recoverable `NSFileManager` trash operations. It is absent from other builds.
+- **Windows Open With boundary**: the File and image context actions verify that
+  the current pathname still resolves to the retained accepted source, then call
+  `SHOpenWithDialog` with `OAIF_EXEC`, a parent HWND, and one NUL-terminated UTF-16
+  path. No shell command, editor preference, path log, or completion inference is
+  introduced. Successful delegation sets only a session-local, path-free `F5`
+  reminder that clears when a new load starts.
 - **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; Job Object or
   process-group lifetime controls, one-process policies, memory limits, hard
   deadlines, and generation cancellation for helpers.
-- **`fs`**: recognizing image files (core and worker extensions) and natural-sort
-  ordering (`img2` before `img10`).
+- **`fs`**: recognizing regular image files (core and worker extensions), excluding
+  symlinks from automatic scans, and natural-sort ordering (`img2` before `img10`).
 - **`prefetch`**: an in-memory LRU bounded to five decoded neighbors and 256 MiB,
-  whichever limit is reached first. Entries are never persisted.
+  whichever limit is reached first, plus generation-tagged scheduling that makes
+  failed or uncacheable outcomes terminal for the current playlist. Entries use
+  shared immutable decoded ownership plus its paired source handle so a nearby
+  just-left pristine frame can
+  enter the cache without copying pixels. Entries and scheduling state are never
+  persisted.
 - **`thumbs`**: bounded folder-preview decoding and at most nine retained GPU
   thumbnail textures for the visible filmstrip window.
 - **`theme`**: resolves System, Light, Dark, or Console against winit's native
@@ -249,16 +290,38 @@ treatment.
    the user to choose **Open Folder** for explicit, session-scoped sibling access.
 2. **Decode is prioritized:** the *current* image is decoded at highest priority.
    Async image decoding runs on background work using `std::sync::mpsc`, so file
-   reads and decode do not freeze navigation. As soon as a result is ready, it is
-   uploaded to a GPU texture and drawn. First pixels appear as fast as decode
-   allows.
+   reads and decode do not freeze navigation. When navigation reaches a neighbor
+   already decoding speculatively, the first valid selected-path completion is
+   uploaded and the redundant request is cancelled. First pixels appear as fast
+   as either accepted path allows.
 3. **The last good frame stays presented.** A cache miss, explicit reload, or
    decode failure does not clear the current GPU texture. Results replace it only
    after successful decode and only when their path/generation still matches the
-   selected source. Load errors remain actionable through Retry.
+   selected source. If navigation returns to that still-presented frame while it
+   remains a pristine source decode, the abandoned generation is cancelled and
+   the session settles without decode or upload. Load errors remain actionable
+   through Retry. The UI derives a genuine-open signal separately from its broader
+   image-preparation busy state. Its target status uses a bounded, path-free
+   filename from the current selection, while displayed metadata continues to
+   identify the presented pixels; derived crop preview work is labeled separately.
+   Crop commands independently require a settled successful source load, including
+   keyboard entry points, so retained last-good pixels after a failed Reload cannot
+   be edited as if they belonged to the selected generation.
+   Source-load preview queue, preparation, upload, and channel failures enter the
+   durable selected-file error state. Crop compute, preview, channel, or renderer
+   failure stays edit-specific, leaves the original presentation unchanged, and
+   restores its exact current-source selection. Crop recovery requires matching
+   generation, selected and presented paths, and decoded Arc identity.
 4. **Neighbors are prefetched.** After the current image, `decode` speculatively
    decodes nearby entries in the background and parks a bounded set of RGBA
-   results in RAM. Navigation can upload an already-decoded frame immediately.
+   results in RAM. A terminal outcome is attempted once until the speculative
+   generation changes or a successful foreground open makes the path eligible
+   again. Per-job cancellation stops superseded reads after playlist replacement,
+   explicit Reload, or a same-path foreground win; old-generation completions are
+   ignored. After moves within two positions, a just-left pristine source decode
+   is shared into this same LRU after replacement, while larger jumps, edits,
+   playback frames, explicit-Reload state, and oversized images remain excluded.
+   Navigation can upload an already-decoded frame immediately.
 5. **Caches are bounded.** Full decoded neighbors are capped by both count and
    decoded bytes, thumbnail work has an in-flight bound, and the renderer owns one
    current image texture plus its mip levels. Image-cache memory does not grow with
@@ -280,26 +343,81 @@ the underlying decode/edit logic. The repository coverage command excludes most
 native application and rendering glue, so keeping product state inside those
 files also hides meaningful logic from the gate.
 
+Trash restore retains an explicit event-loop ownership boundary. The worker owns
+cloned exact receipts; the event loop owns captured playlist scope, indices, prior
+Undo state, and the only commit. Active or indeterminate restore ownership
+suppresses settled UI claims, so the interface cannot become a second recovery
+state owner. Conflicting mutations wait while zoom, pan, panels, and appearance
+remain responsive. Normal close defers through terminal reconciliation and join.
+The UI exposes an indeterminate worker-loss route instead of cancellation or
+fractional progress. An indeterminate restore retains its receipt and blocks the
+new Trash action that could replace it. `U` remains the typed reconciliation path;
+permanent delete does not create a second Undo owner.
+
 The correction is not a framework rewrite. Extract pure state transitions with
 explicit inputs and outputs, keep `App` as the sole runtime owner, and make winit,
 wgpu, dialogs, and native accessibility thin adapters. Each extraction must land
 with behavior-preserving tests and no second source of truth.
 
-## The cull workflow (why deleting feels right)
+## The Trash workflow
 
-Two modes, because two kinds of users:
-
-- **Instant delete:** `Delete` moves the current file to the OS trash through the
-  supported native integration, records an `UndoAction`, and shows a non-blocking
-  toast ("Moved to Trash · Undo"),
-  and **advances to the image that took its place** (new `current`, not a jump to
-  the top). Normal trash has no modal. `U` restores the latest trash action.
-- **Flag then batch**: tap a key to *flag* the current image (photographers'
-  preferred flow), keep moving, then delete all flagged at the end in one action
-  (still to trash, still undoable). Non-destructive until you commit.
+- `Delete` moves the current file to the OS Trash through the supported native
+  integration, records an exact recoverable receipt when the platform exposes one,
+  shows a non-blocking result toast, and **advances to the image that took its
+  place** rather than jumping to the top. Normal Trash has no modal. `U` restores
+  the latest safely recoverable action. A receiptless successful move routes
+  recovery to system Trash and preserves an older valid `U` action.
+- There is no bare-letter Trash shortcut and no mark, review, or batch mode. The
+  destructive target is always the currently visible image. The accepted-source
+  handle supplies an identity proof immediately before the pathname Trash sink.
+  Missing, replaced, linked, and identity-unavailable entries never reach that
+  sink. The comparison narrows accidental replacement risk but remains a
+  documented non-atomic boundary because desktop Trash integrations consume a
+  pathname.
+- Each successful Trash action retains its exact in-memory playlist identity, so
+  Undo after a folder change restores on disk without inserting a source-folder
+  path into the unrelated current view. Restore work runs on the typed worker. A
+  fixed top status names the operation; the event loop reconciles the result once
+  against the captured playlist scope. Normal close waits for reconciliation, and
+  worker loss preserves the receipt with durable polite recovery guidance.
 
 `Shift+Delete` is the only permanent delete, and it's the only action that shows a
-confirmation. Everything else is fast and reversible.
+confirmation. The dialog names only a bounded, quote-safe filename and exposes
+Delete permanently and Cancel as its two actions. Single Trash and permanent
+delete reuse the retained source handle that supplied accepted pixels. Single
+Trash performs an immediate no-follow native-identity comparison. Permanent
+delete performs the comparison before opening confirmation and repeats it after
+confirmation immediately before `remove_file`. Entries detected as changed,
+missing, linked, or identity-unavailable do not reach either sink. The final
+platform calls still consume a pathname, so the narrower post-comparison race
+remains explicit.
+Successful permanent deletion preserves an older valid Trash receipt and reports
+that `U` refers only to that prior action. Restore failures are typed as immediate
+retry, resolve-then-retry, manual system Trash review, or terminal. Only the first
+two retain in-app retry ownership. Restore repeats the source-identity check and
+then asks the platform to move the checked identifier on Windows and Linux or the
+checked Trash URL on macOS in a later call. This remains a narrow non-atomic
+boundary, not a handle-bound restore transaction.
+Foreground load or preview work, crop, Save As, an active heal stroke, and a heal
+worker own current state, so delete and restore shortcuts wait with a specific
+reason instead of racing them. Windows embeds the Common Controls v6 activation
+manifest required by the native custom-button dialog and requests only the
+caller's current privilege. Windows and Linux receipt capture synchronously list
+Trash once before the move and once afterward. The moved item receives one fixed
+path-private capture result: bound, baseline
+listing failed, final listing failed, no new same-origin candidate, ambiguous
+identity-bound candidates, or retained-source identity mismatch. The matcher
+still accepts exactly one new same-origin item only after native identity matches;
+classification adds evidence, not a fallback.
+
+With opt-in `viewr=info` logging, Undo reports submitted, restored, failure, and
+total native restore values. Fixed
+start, deferred-close, reconciliation, and disconnect records identify only the
+operation category and submitted count. These records contain no paths,
+filenames, Trash identifiers, native identities, or raw platform errors, and they
+are neither persisted nor sent off-machine. The timing is local diagnostic
+evidence, not a CI budget or cross-platform latency claim. The active state
+deliberately has no percentage, estimate, or cancellation claim.
 
 Index preservation, trash-not-unlink, and undo are the three details that separate
 a viewer that "feels broken" from one that feels trustworthy. They are core, not

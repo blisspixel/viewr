@@ -3956,7 +3956,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viewr"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "accesskit_winit",
  "anyhow",
@@ -4004,11 +4004,11 @@ dependencies = [
 
 [[package]]
 name = "viewr-protocol"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "viewr-seccomp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libc",
  "seccompiler",

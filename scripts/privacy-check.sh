@@ -42,13 +42,11 @@ for crate in reqwest hyper rustls native-tls; do
   fi
 done
 
-echo "== source must not write activity side-files or always-on logging =="
+echo "== narrow source privacy tripwires + ephemeral contracts =="
+# This orchestration check is a regression tripwire, not a complete Rust
+# write-path analyzer. Default logger behavior is covered by Rust tests.
 if grep -q 'OpenOptions' crates/viewr/src/app.rs; then
-  echo "app.rs must not use OpenOptions (activity side-files are forbidden)" >&2
-  exit 1
-fi
-if grep -q 'default_filter_or' crates/viewr/src/main.rs; then
-  echo "main.rs must not enable env_logger by default (opt-in only via RUST_LOG/VIEWR_LOG)" >&2
+  echo "app.rs must not acquire direct OpenOptions persistence capability" >&2
   exit 1
 fi
 test -f crates/viewr/src/ephemeral.rs

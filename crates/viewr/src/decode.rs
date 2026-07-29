@@ -8,6 +8,7 @@
 
 use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::color::WorkingColorEncoding;
@@ -402,6 +403,12 @@ pub struct DecodedImage {
     pub working_color: WorkingColorEncoding,
 }
 
+/// Pixels plus live ownership of the exact source object used to decode them.
+pub(crate) struct LoadedImage {
+    pub(crate) image: Arc<DecodedImage>,
+    pub(crate) source: Arc<crate::fs::ImageSource>,
+}
+
 /// Color-management result attached to decoded pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorProfileStatus {
@@ -594,12 +601,25 @@ impl DecodedImage {
         Self::load_file(path)
     }
 
+    /// Speculatively decode only while its per-job cancellation generation is current.
+    pub(crate) fn load_background_if_current(
+        path: &Path,
+        current_generation: &AtomicU64,
+        generation: u64,
+    ) -> Result<Option<LoadedImage>, Error> {
+        let _permit = acquire_decode_permit(DecodePriority::Background);
+        Self::load_file_if_current(
+            path,
+            DecodeGeneration::tracked(current_generation, generation),
+        )
+    }
+
     /// Decode only if `generation` still identifies the latest foreground request.
     pub(crate) fn load_if_current(
         path: &Path,
         current_generation: &AtomicU64,
         generation: u64,
-    ) -> Result<Option<Self>, Error> {
+    ) -> Result<Option<LoadedImage>, Error> {
         let _permit = acquire_decode_permit(DecodePriority::Foreground);
         Self::load_file_if_current(
             path,
@@ -608,15 +628,18 @@ impl DecodedImage {
     }
 
     fn load_file(path: &Path) -> Result<Self, Error> {
-        Self::load_file_if_current(path, DecodeGeneration::unconditional())?.ok_or_else(|| {
-            Error::Decode("unconditional image decode stopped before completion".into())
-        })
+        let loaded = Self::load_file_if_current(path, DecodeGeneration::unconditional())?
+            .ok_or_else(|| {
+                Error::Decode("unconditional image decode stopped before completion".into())
+            })?;
+        Arc::try_unwrap(loaded.image)
+            .map_err(|_| Error::Decode("decoded image ownership was unexpectedly shared".into()))
     }
 
     fn load_file_if_current(
         path: &Path,
         generation: DecodeGeneration<'_>,
-    ) -> Result<Option<Self>, Error> {
+    ) -> Result<Option<LoadedImage>, Error> {
         if !generation.is_current() {
             return Ok(None);
         }
@@ -626,25 +649,40 @@ impl DecodedImage {
             .unwrap_or("")
             .to_lowercase();
 
+        let source = Arc::new(
+            crate::fs::ImageSource::open(path)
+                .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?,
+        );
+        let file = source
+            .clone_for_decode()
+            .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+
         let result = if crate::fs::is_worker_format(path) {
-            crate::sandbox::load_via_worker(path, generation)
+            crate::sandbox::load_via_worker(path, file, generation)
         } else if ext == "jxl" {
-            Self::load_jxl(path, generation)
+            Self::load_jxl(file, generation)
         } else if ext == "svg" {
-            Self::load_svg(path, generation)
+            Self::load_svg(file, generation)
         } else {
-            Self::load_core_image(path, generation)
+            Self::load_core_image(path, file, generation)
         };
 
         if !generation.is_current() {
             return Ok(None);
         }
-        result.map(Some)
+        result.map(|image| {
+            Some(LoadedImage {
+                image: Arc::new(image),
+                source,
+            })
+        })
     }
 
-    fn load_core_image(path: &Path, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
-        let file = std::fs::File::open(path)
-            .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+    fn load_core_image(
+        path: &Path,
+        file: std::fs::File,
+        generation: DecodeGeneration<'_>,
+    ) -> Result<Self, Error> {
         let mut reader = GenerationReader::new(BufReader::new(file), generation);
         enforce_embedded_metadata_limits(&mut reader)?;
         reader
@@ -759,8 +797,7 @@ impl DecodedImage {
             .map_err(|error| Error::Decode(error.to_string()))
     }
 
-    fn load_jxl(path: &Path, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
-        let file = std::fs::File::open(path).map_err(|e| Error::Decode(e.to_string()))?;
+    fn load_jxl(file: std::fs::File, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
         Self::decode_jxl(
             GenerationReader::new(BufReader::new(file), generation),
             generation,
@@ -780,8 +817,7 @@ impl DecodedImage {
     }
 
     /// Render an SVG to RGBA8 with pure-Rust `resvg` / `usvg`.
-    fn load_svg(path: &Path, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
-        let file = std::fs::File::open(path).map_err(|e| Error::Decode(e.to_string()))?;
+    fn load_svg(file: std::fs::File, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
         let reader = GenerationReader::new(BufReader::new(file), generation);
         let mut data = Vec::new();
         reader
@@ -1570,6 +1606,48 @@ mod tests {
     fn superseded_load_is_cancelled_before_file_access() {
         let generation = AtomicU64::new(2);
         let result = DecodedImage::load_if_current(
+            std::path::Path::new("path-that-must-not-be-opened.png"),
+            &generation,
+            1,
+        )
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn foreground_decode_retains_the_exact_source_object() {
+        let workspace = TempWorkspace::new("decode_source_identity").unwrap();
+        let path = workspace.path().join("source.png");
+        let original = workspace.path().join("original.png");
+        image::RgbImage::from_pixel(2, 2, image::Rgb([7, 8, 9]))
+            .save(&path)
+            .unwrap();
+        let generation = AtomicU64::new(1);
+
+        let loaded = DecodedImage::load_if_current(&path, &generation, 1)
+            .unwrap()
+            .expect("current decode must complete");
+        assert_eq!(&loaded.image.rgba[..4], &[7, 8, 9, 255]);
+        assert_eq!(
+            loaded.source.matches_path(&path),
+            crate::fs::ImageSourceMatch::Same
+        );
+
+        std::fs::rename(&path, &original).unwrap();
+        image::RgbImage::from_pixel(2, 2, image::Rgb([7, 8, 9]))
+            .save(&path)
+            .unwrap();
+        assert_eq!(
+            loaded.source.matches_path(&path),
+            crate::fs::ImageSourceMatch::Changed,
+            "identical bytes in a replacement object must not inherit intent"
+        );
+    }
+
+    #[test]
+    fn superseded_background_load_is_cancelled_before_file_access() {
+        let generation = AtomicU64::new(2);
+        let result = DecodedImage::load_background_if_current(
             std::path::Path::new("path-that-must-not-be-opened.png"),
             &generation,
             1,

@@ -134,7 +134,7 @@ fn lossless_save_preserves_pixels_exactly() {
             .into_raw()
             .chunks(3)
             .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect(),
+            .collect::<Vec<u8>>(),
         width: 64,
         height: 48,
         color_profile: viewr::decode::ColorProfileStatus::AssumedSrgb,

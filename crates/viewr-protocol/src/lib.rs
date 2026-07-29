@@ -447,7 +447,9 @@ fn parse_pixel_stream(mut payload: Vec<u8>) -> io::Result<WorkerResponse> {
     if metadata_length != payload.len() - PIXEL_STREAM_FIXED_BYTES {
         return Err(invalid_data("invalid worker color metadata length"));
     }
-    let metadata = &payload[PIXEL_STREAM_FIXED_BYTES..];
+    let metadata = payload
+        .get(PIXEL_STREAM_FIXED_BYTES..)
+        .ok_or_else(|| invalid_data("invalid payload length"))?;
     let color_profile = match profile_tag {
         COLOR_PROFILE_UNKNOWN if metadata.is_empty() => WorkerColorProfile::Unknown,
         COLOR_PROFILE_ICC if !metadata.is_empty() && metadata.len() <= MAX_COLOR_PROFILE_BYTES => {
@@ -467,15 +469,18 @@ fn parse_pixel_stream(mut payload: Vec<u8>) -> io::Result<WorkerResponse> {
 }
 
 fn parse_cicp(metadata: &[u8]) -> io::Result<CicpColor> {
-    let full_range = match metadata[6] {
+    let data: &[u8; 7] = metadata
+        .try_into()
+        .map_err(|_| invalid_data("invalid CICP length"))?;
+    let full_range = match data[6] {
         0 => false,
         1 => true,
         _ => return Err(invalid_data("invalid CICP full-range flag")),
     };
     Ok(CicpColor {
-        color_primaries: u16::from_le_bytes([metadata[0], metadata[1]]),
-        transfer_characteristics: u16::from_le_bytes([metadata[2], metadata[3]]),
-        matrix_coefficients: u16::from_le_bytes([metadata[4], metadata[5]]),
+        color_primaries: u16::from_le_bytes([data[0], data[1]]),
+        transfer_characteristics: u16::from_le_bytes([data[2], data[3]]),
+        matrix_coefficients: u16::from_le_bytes([data[4], data[5]]),
         full_range,
     })
 }

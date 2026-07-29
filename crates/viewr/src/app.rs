@@ -7,11 +7,21 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::crop::*;
+use crate::crop::{
+    CropRatio, adjust_crop_rect, crop_handle_from_uv, crop_keyboard_delta, crop_pixel_aspect,
+    crop_ratio_for_source, default_crop_rect, fit_crop_rect_to_ratio, reduced_crop_ratio,
+    resize_crop_rect_from_pointer,
+};
+use crate::performance::{
+    PERFORMANCE_IDLE_OBSERVATION, PERFORMANCE_PROBE_TIMEOUT, PerformanceProbe,
+    schedule_performance_wake,
+};
+use crate::playlist::{Playlist, ScanPurpose};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
@@ -19,12 +29,12 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
-use crate::curate::{FlagSet, TrashedFile};
-use crate::decode::DecodedImage;
+use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
+use crate::decode::{DecodedImage, LoadedImage};
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::prefetch::{self, PrefetchCache};
-use crate::theme::Preference;
+use crate::theme::{Preference, PreferenceRecovery};
 use crate::thumbs::{self, ThumbRgba};
 use crate::ui::FilmstripItem;
 
@@ -63,6 +73,10 @@ pub fn run_performance_probe(
     .ok_or_else(|| Error::Platform("performance probe ended without a report".into()))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "startup assembles the complete explicit application state in one place"
+)]
 fn run_internal(
     image_path: Option<PathBuf>,
     performance_probe: Option<PerformanceProbe>,
@@ -82,23 +96,41 @@ fn run_internal(
     let (prefetch_result_tx, prefetch_rx) = mpsc::channel();
     let image_path = image_path.map(|path| crate::fs::canonical_file_path(&path).unwrap_or(path));
     let probe_enabled = performance_probe.is_some();
+    let appearance = crate::theme::load_preference();
+    let appearance_recovery = appearance.recovery();
+    if let Some(recovery) = appearance_recovery {
+        log::warn!(
+            "appearance preference fallback: {}",
+            recovery.diagnostic_name()
+        );
+    }
     let mut app = App {
-        session: crate::session::Session { selected_path: image_path, ..Default::default() },
+        session: crate::session::Session {
+            selected_path: image_path,
+            ..Default::default()
+        },
         renderer: None,
         playlist: None,
+        playlist_scope: None,
         scanner_rx: None,
         transform: Transform::default(),
         custom_crop_ratio: (3, 5),
         heal: HealTool::default(),
         is_fullscreen: false,
         last_trashed: Vec::new(),
+        last_trashed_scope: None,
         current_image: None,
+        current_source: None,
+        current_image_reuse: ImageReuseEligibility::Ineligible,
         animation: None,
         image_details: None,
         auxiliary_loader_rx: None,
         save_worker: None,
         crop_worker: None,
         preview_worker: None,
+        curation_worker: None,
+        close_after_curation: false,
+        curation_recovery: CurationRecovery::default(),
         show_image_info: false,
         show_tools_panel: false,
         tools_panel_open: true,
@@ -109,10 +141,11 @@ fn run_internal(
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
         bg_override: None,
-        theme_preference: crate::theme::load_preference(),
+        theme_preference: appearance.preference(),
+        appearance_recovery,
         show_about: false,
-        resize_on_load: None,
-        flags: FlagSet::new(),
+        show_update: false,
+        external_edit_pending: false,
         modifiers: ModifiersState::default(),
         toast: None,
         toast_until: None,
@@ -133,7 +166,8 @@ fn run_internal(
             prefetch::DEFAULT_CAPACITY,
             prefetch::DEFAULT_MAX_BYTES,
         ),
-        prefetch_in_flight: HashSet::new(),
+        prefetch_sources: HashMap::new(),
+        prefetch_schedule: prefetch::PrefetchSchedule::default(),
         prefetch_result_tx,
         prefetch_rx,
         event_proxy,
@@ -153,88 +187,8 @@ fn run_internal(
         .map_err(Error::Platform)
 }
 
-struct Playlist {
-    files: Vec<PathBuf>,
-    index: usize,
-}
-
-enum ScanPurpose {
-    SelectedFile(PathBuf),
-    OpenFolder,
-}
-
-const PERFORMANCE_PROBE_TIMEOUT: Duration = Duration::from_mins(1);
-const PERFORMANCE_IDLE_OBSERVATION: Duration = Duration::from_millis(500);
-
-struct PerformanceProbe {
-    started_at: Instant,
-    deadline: Instant,
-    window_ready: Option<Duration>,
-    first_pixel: Option<Duration>,
-    max_navigation: Duration,
-    navigation_started: Option<Instant>,
-    navigation_target: Option<PathBuf>,
-    navigation_targets: Option<VecDeque<usize>>,
-    last_presented_path: Option<PathBuf>,
-    idle_until: Option<Instant>,
-    idle_redraws: u64,
-    peak_resident_bytes: u64,
-    outcome: Option<Result<crate::performance::PerformanceReport, String>>,
-}
-
-impl PerformanceProbe {
-    fn new(started_at: Instant) -> Self {
-        Self {
-            started_at,
-            deadline: started_at + PERFORMANCE_PROBE_TIMEOUT,
-            window_ready: None,
-            first_pixel: None,
-            max_navigation: Duration::ZERO,
-            navigation_started: None,
-            navigation_target: None,
-            navigation_targets: None,
-            last_presented_path: None,
-            idle_until: None,
-            idle_redraws: 0,
-            peak_resident_bytes: 0,
-            outcome: None,
-        }
-    }
-
-    fn record_window_ready(&mut self, now: Instant) {
-        self.window_ready.get_or_insert(now - self.started_at);
-    }
-
-    fn record_presented_image(&mut self, path: &Path, now: Instant) {
-        self.first_pixel.get_or_insert(now - self.started_at);
-        self.last_presented_path = Some(path.to_owned());
-        if self.navigation_target.as_deref() == Some(path)
-            && let Some(started) = self.navigation_started.take()
-        {
-            self.max_navigation = self.max_navigation.max(now - started);
-            self.navigation_target = None;
-        }
-    }
-
-    fn reset_idle_observation(&mut self) {
-        self.idle_until = None;
-        self.idle_redraws = 0;
-    }
-}
-
-fn schedule_performance_wake(
-    event_proxy: EventLoopProxy<UserEvent>,
-    thread_name: &str,
-    deadline: Instant,
-) -> Result<(), String> {
-    std::thread::Builder::new()
-        .name(thread_name.into())
-        .spawn(move || {
-            std::thread::park_timeout(deadline.saturating_duration_since(Instant::now()));
-            let _ = event_proxy.send_event(UserEvent::Wake);
-        })
-        .map(|_| ())
-        .map_err(|error| format!("could not start performance timer: {error}"))
+fn appearance_save_failure_message() -> &'static str {
+    "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
 }
 
 /// Application-level events delivered from native platform integrations.
@@ -268,25 +222,167 @@ struct FolderScan {
     files: std::io::Result<Vec<PathBuf>>,
 }
 
+/// Exact identity of one installed playlist. Restores may rejoin only this view.
+#[derive(Debug)]
+struct PlaylistScope;
+
 struct SaveWorker {
     result_rx: Receiver<Result<crate::edit::MetadataDisposition, String>>,
 }
 
 struct CropWorker {
-    source_path: PathBuf,
+    recovery: CropRecovery,
+    cancel: Arc<AtomicBool>,
     result_rx: Receiver<Result<DecodedImage, String>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PresentationKind {
     Loaded,
     Cropped,
 }
 
+impl PresentationKind {
+    const fn image_reuse(self) -> ImageReuseEligibility {
+        match self {
+            Self::Loaded => ImageReuseEligibility::PristineSource,
+            Self::Cropped => ImageReuseEligibility::Ineligible,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImageReuseEligibility {
+    Ineligible,
+    PristineSource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NavigationImagePlan {
+    ReusePresented,
+    RetainPresented,
+    LoadOnly,
+}
+
 struct PreviewWorker {
     path: PathBuf,
     kind: PresentationKind,
+    source: Option<Arc<crate::fs::ImageSource>>,
+    crop_recovery: Option<CropRecovery>,
     result_rx: Receiver<Result<(Arc<DecodedImage>, ImagePreview), String>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CurationKind {
+    Restore,
+}
+
+#[derive(Default)]
+struct CurationRecovery {
+    restore: bool,
+}
+
+impl CurationRecovery {
+    fn record(&mut self, kind: CurationKind) {
+        match kind {
+            CurationKind::Restore => self.restore = true,
+        }
+    }
+
+    fn clear(&mut self, kind: CurationKind) {
+        match kind {
+            CurationKind::Restore => self.restore = false,
+        }
+    }
+
+    fn contains(&self, kind: CurationKind) -> bool {
+        match kind {
+            CurationKind::Restore => self.restore,
+        }
+    }
+
+    fn status(&self) -> Option<String> {
+        self.restore
+            .then(|| curation_recovery_message(CurationKind::Restore).to_owned())
+    }
+}
+
+fn trash_replacement_preflight(recovery: &CurationRecovery) -> Option<&'static str> {
+    recovery.contains(CurationKind::Restore).then_some(
+        "Review the folder and system Trash, then retry U before moving more files to Trash.",
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CloseDisposition {
+    Exit,
+    WaitForCuration,
+}
+
+const fn close_disposition(curation_active: bool) -> CloseDisposition {
+    if curation_active {
+        CloseDisposition::WaitForCuration
+    } else {
+        CloseDisposition::Exit
+    }
+}
+
+impl CurationKind {
+    const fn work(self) -> CurrentWork {
+        match self {
+            Self::Restore => CurrentWork::TrashRestore,
+        }
+    }
+}
+
+const fn curation_recovery_message(kind: CurationKind) -> &'static str {
+    match kind {
+        CurationKind::Restore => {
+            "Trash restore stopped unexpectedly. Some files may have restored. Undo receipts were kept; review the folder and system Trash, then retry U before moving more files to Trash."
+        }
+    }
+}
+
+struct RestoreContext {
+    submitted: usize,
+    scope: Option<Arc<PlaylistScope>>,
+}
+
+enum CurationContext {
+    Restore(RestoreContext),
+}
+
+impl CurationContext {
+    const fn kind(&self) -> CurationKind {
+        match self {
+            Self::Restore(_) => CurationKind::Restore,
+        }
+    }
+
+    const fn submitted(&self) -> usize {
+        match self {
+            Self::Restore(context) => context.submitted,
+        }
+    }
+}
+
+enum CurationCompletion {
+    Restore {
+        outcome: crate::curate::TrashRestoreOutcome,
+        elapsed: Duration,
+    },
+}
+
+struct CurationWorker {
+    context: CurationContext,
+    result_rx: Receiver<CurationCompletion>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl CurationWorker {
+    fn status(&self, closing: bool) -> String {
+        curation_status(self.context.kind(), self.context.submitted(), closing)
+    }
 }
 
 type AuxiliaryLoadResult = (
@@ -295,6 +391,28 @@ type AuxiliaryLoadResult = (
     crate::image_info::ImageDetails,
 );
 
+struct CropRecovery {
+    source_path: PathBuf,
+    source_generation: u64,
+    source_image: Arc<DecodedImage>,
+    transform: Transform,
+    animation: Option<crate::animated::AnimationPlayback>,
+    auxiliary_loader_rx: Option<Receiver<AuxiliaryLoadResult>>,
+}
+
+enum WorkerPoll<T> {
+    Pending,
+    Ready(T),
+    Disconnected,
+}
+
+fn poll_worker<T>(receiver: &Receiver<T>) -> WorkerPoll<T> {
+    match receiver.try_recv() {
+        Ok(result) => WorkerPoll::Ready(result),
+        Err(mpsc::TryRecvError::Empty) => WorkerPoll::Pending,
+        Err(mpsc::TryRecvError::Disconnected) => WorkerPoll::Disconnected,
+    }
+}
 
 #[derive(Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)] // independent mode flags for view/crop tools
@@ -334,6 +452,7 @@ impl Default for Transform {
 
 const EDIT_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_HEAL_BRUSH_RADIUS: u32 = 18;
+const PERMANENT_DELETE_ACTION: &str = "Delete permanently";
 
 struct HealTool {
     active: bool,
@@ -351,7 +470,6 @@ struct HealWorker {
     cancel: Arc<AtomicBool>,
     apply_result: bool,
     replacing_latest: bool,
-    previous_candidate_index: usize,
 }
 
 struct HealWorkerOutput {
@@ -371,6 +489,322 @@ enum HealStrokeUpdate {
     Unchanged,
     LeftImage,
     TooManyPoints,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CurrentWork {
+    TrashRestore,
+    FolderScan,
+    ImagePreparation,
+    Crop,
+    Save,
+    SpotHeal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GuardedActionKind {
+    Trash,
+    PermanentDelete,
+}
+
+fn guarded_action_failure_message(action: GuardedActionKind, error: &GuardedActionError) -> String {
+    match (action, error) {
+        (GuardedActionKind::Trash, GuardedActionError::Changed) =>
+            "This file changed after it was displayed. Reload it before moving it to Trash. Nothing was moved."
+                .to_owned(),
+        (GuardedActionKind::PermanentDelete, GuardedActionError::Changed) =>
+            "This file changed after it was displayed. Reload it before deleting it. Nothing was deleted."
+                .to_owned(),
+        (GuardedActionKind::Trash, GuardedActionError::Missing) =>
+            "This file is no longer available. Nothing was moved.".to_owned(),
+        (GuardedActionKind::PermanentDelete, GuardedActionError::Missing) =>
+            "This file is no longer available. Nothing was deleted.".to_owned(),
+        (GuardedActionKind::Trash, GuardedActionError::Unsupported) =>
+            "This filesystem entry cannot be safely moved from the displayed source. Nothing was moved."
+                .to_owned(),
+        (GuardedActionKind::PermanentDelete, GuardedActionError::Unsupported) =>
+            "This filesystem entry cannot be safely deleted from the displayed source. Nothing was deleted."
+                .to_owned(),
+        (GuardedActionKind::Trash, GuardedActionError::Unavailable) =>
+            "Safe file identity could not be verified. Nothing was moved.".to_owned(),
+        (GuardedActionKind::PermanentDelete, GuardedActionError::Unavailable) =>
+            "Safe file identity could not be verified. Nothing was deleted.".to_owned(),
+        (GuardedActionKind::Trash, GuardedActionError::OperationFailed(error)) => {
+            format!("Trash failed: {error}. Nothing was moved.")
+        }
+        (GuardedActionKind::PermanentDelete, GuardedActionError::OperationFailed(error)) => {
+            format!("Delete failed: {error}. Nothing was deleted.")
+        }
+    }
+}
+
+fn log_guarded_action_failure(action: GuardedActionKind, error: &GuardedActionError) {
+    let action = match action {
+        GuardedActionKind::Trash => "trash",
+        GuardedActionKind::PermanentDelete => "permanent_delete",
+    };
+    if matches!(error, GuardedActionError::OperationFailed(_)) {
+        log::error!(
+            "source-bound file action failed: action={action}, category={}",
+            error.category()
+        );
+    } else {
+        log::warn!(
+            "source-bound file action rejected: action={action}, category={}",
+            error.category()
+        );
+    }
+}
+
+fn image_preparation_work(foreground_load: bool, preview_preparation: bool) -> Option<CurrentWork> {
+    (foreground_load || preview_preparation).then_some(CurrentWork::ImagePreparation)
+}
+
+fn crop_work(selection_active: bool, worker_active: bool) -> Option<CurrentWork> {
+    (selection_active || worker_active).then_some(CurrentWork::Crop)
+}
+
+fn current_work_blocker(work: [Option<CurrentWork>; 6]) -> Option<CurrentWork> {
+    work.into_iter().flatten().next()
+}
+
+fn blocked_action_message(action: &str, blocker: CurrentWork) -> String {
+    let work = match blocker {
+        CurrentWork::TrashRestore => "the Trash restore",
+        CurrentWork::FolderScan => "the folder scan",
+        CurrentWork::ImagePreparation => "image preparation",
+        CurrentWork::Crop => "the crop",
+        CurrentWork::Save => "Save As",
+        CurrentWork::SpotHeal => "Spot Heal",
+    };
+    format!("Wait for {work} to finish before {action}")
+}
+
+fn curation_action_preflight(
+    active: Option<CurationKind>,
+    has_work: bool,
+    action: &str,
+    empty_message: &str,
+) -> Option<String> {
+    if let Some(kind) = active {
+        Some(blocked_action_message(action, kind.work()))
+    } else if has_work {
+        None
+    } else {
+        Some(empty_message.to_owned())
+    }
+}
+
+fn curation_status(kind: CurationKind, submitted: usize, closing: bool) -> String {
+    let count = file_count(submitted);
+    match (kind, closing) {
+        (CurationKind::Restore, false) => format!("Restoring {count} from Trash..."),
+        (CurationKind::Restore, true) => {
+            format!("Finishing Trash restore for {count} before closing...")
+        }
+    }
+}
+
+fn spawn_curation_thread<T: Send + 'static>(
+    name: &'static str,
+    work: impl FnOnce() -> T + Send + 'static,
+    wake: impl FnOnce() + Send + 'static,
+) -> Result<(Receiver<T>, JoinHandle<()>), ()> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .spawn(move || {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+            match outcome {
+                Ok(result) => {
+                    let _ = sender.send(result);
+                    drop(sender);
+                    wake();
+                }
+                Err(payload) => {
+                    drop(sender);
+                    wake();
+                    std::panic::resume_unwind(payload);
+                }
+            }
+        })
+        .map(|join| (receiver, join))
+        .map_err(|_| ())
+}
+
+fn edit_transaction_failure_message<E>(
+    action: &str,
+    error: &crate::heal::PatchPresentationError<E>,
+    reloading_source: bool,
+) -> String {
+    match error {
+        crate::heal::PatchPresentationError::Edit(_) => {
+            format!("{action} could not be applied. The image and edit history are unchanged.")
+        }
+        crate::heal::PatchPresentationError::Presentation(_) => {
+            format!("{action} was not applied because the display could not update. Try again.")
+        }
+        crate::heal::PatchPresentationError::Rollback { .. } if reloading_source => format!(
+            "{action} failed. Disk source unchanged; reloading it and clearing edit history."
+        ),
+        crate::heal::PatchPresentationError::Rollback { .. } => {
+            format!("{action} failed. Disk source unchanged; reopen it. Edit history was cleared.")
+        }
+    }
+}
+
+fn file_count(count: usize) -> String {
+    format!("{count} {}", file_noun(count))
+}
+
+fn file_noun(count: usize) -> &'static str {
+    if count == 1 { "file" } else { "files" }
+}
+
+fn single_trash_result_message(has_receipt: bool, previous_undo_preserved: bool) -> &'static str {
+    if has_receipt {
+        "Moved to Trash. Undo with U."
+    } else if previous_undo_preserved {
+        "Moved to Trash, but U is unavailable for this move. Use the system Trash; U still restores the previous Trash action."
+    } else {
+        "Moved to Trash, but U is unavailable for this move. Use the system Trash for recovery."
+    }
+}
+
+fn permanent_delete_success_message(path: &Path, previous_trash_undo: bool) -> String {
+    let name = prefetch::privacy_safe_file_name(path).replace('"', "?");
+    if previous_trash_undo {
+        format!(
+            "Permanently deleted \"{name}\". This cannot be undone; U still restores the previous Trash action."
+        )
+    } else {
+        format!("Permanently deleted \"{name}\". This cannot be undone.")
+    }
+}
+
+fn single_restore_failure_message(error: crate::curate::TrashRestoreError) -> String {
+    match error {
+        crate::curate::TrashRestoreError::DestinationOccupied =>
+            "Restore blocked: The original folder already contains an item with that name. Move or rename it, then retry with U."
+                .to_owned(),
+        crate::curate::TrashRestoreError::AccessDenied =>
+            "Restore blocked: Access was denied. Check permissions, then retry with U."
+                .to_owned(),
+        crate::curate::TrashRestoreError::OperationFailed =>
+            "Restore failed: The operating system could not restore the file. Retry with U."
+                .to_owned(),
+        crate::curate::TrashRestoreError::MissingFromTrash =>
+            "The exact item is no longer in the system Trash. No retry remains in viewr."
+                .to_owned(),
+        crate::curate::TrashRestoreError::AmbiguousReceipt =>
+            "The exact Trash receipt is ambiguous. Use the system Trash; no retry remains in viewr."
+                .to_owned(),
+        crate::curate::TrashRestoreError::Unsupported =>
+            "In-app restore is unsupported on this platform. Use the system Trash; no retry remains in viewr."
+                .to_owned(),
+        crate::curate::TrashRestoreError::InvalidReceipt =>
+            "The exact Trash receipt is unavailable. Use the system Trash; no retry remains in viewr."
+                .to_owned(),
+    }
+}
+
+fn restore_result_message(
+    restored: usize,
+    retry_now: usize,
+    resolve_then_retry: usize,
+    manual_review: usize,
+    terminal: usize,
+    first_failure: Option<crate::curate::TrashRestoreError>,
+    active_playlist: bool,
+) -> String {
+    let failure_total = retry_now + resolve_then_retry + manual_review + terminal;
+    if failure_total == 0 {
+        let suffix = if active_playlist {
+            ""
+        } else {
+            "; reopen the source folder to refresh its view"
+        };
+        return format!("Restored {}{suffix}", file_count(restored));
+    }
+    if restored == 0 && failure_total == 1 {
+        return first_failure.map_or_else(
+            || "Restore failed. No retry remains in viewr.".to_owned(),
+            single_restore_failure_message,
+        );
+    }
+
+    let mut clauses = if restored == 0 {
+        vec!["Nothing restored".to_owned()]
+    } else {
+        vec![format!("Restored {}", file_count(restored))]
+    };
+    if retry_now > 0 {
+        clauses.push(format!("{} can retry with U", file_count(retry_now)));
+    }
+    if resolve_then_retry > 0 {
+        let verb = if resolve_then_retry == 1 {
+            "needs"
+        } else {
+            "need"
+        };
+        clauses.push(format!(
+            "{} {verb} the blocking condition resolved, then U can retry",
+            file_count(resolve_then_retry),
+        ));
+    }
+    if manual_review > 0 {
+        let verb = if manual_review == 1 {
+            "requires"
+        } else {
+            "require"
+        };
+        clauses.push(format!(
+            "{} {verb} system Trash review",
+            file_count(manual_review),
+        ));
+    }
+    if terminal > 0 {
+        let verb = if terminal == 1 { "is" } else { "are" };
+        clauses.push(format!(
+            "{} {verb} no longer available for in-app restore",
+            file_count(terminal),
+        ));
+    }
+    if !active_playlist && restored > 0 {
+        clauses.push("reopen the source folder to refresh its view".to_owned());
+    }
+    format!("{}.", clauses.join("; "))
+}
+
+fn commit_presented_heal<E>(
+    image: &mut DecodedImage,
+    history: &mut crate::heal::PatchHistory,
+    refresh: &mut Option<HealRefresh>,
+    result: &crate::heal::SpotHealResult,
+    job: Option<crate::heal::SpotHealJob>,
+    replacing_latest: bool,
+    present: impl FnOnce(&DecodedImage, &crate::heal::ImagePatch) -> Result<(), E>,
+) -> Result<String, crate::heal::PatchPresentationError<E>> {
+    let inverse = crate::heal::apply_presented_patch(image, &result.patch, present)?;
+    if !replacing_latest {
+        history.record(inverse);
+    }
+    *refresh = job.and_then(|job| {
+        (result.candidate_count > 1).then_some(HealRefresh {
+            job,
+            candidate_index: result.candidate_index,
+            candidate_count: result.candidate_count,
+        })
+    });
+    Ok(if replacing_latest {
+        format!(
+            "Heal source {} of {}",
+            result.candidate_index + 1,
+            result.candidate_count
+        )
+    } else {
+        "Spot healed. Undo is available.".to_owned()
+    })
 }
 
 fn append_heal_stroke_point(
@@ -437,6 +871,7 @@ struct App {
     renderer: Option<Renderer>,
     session: crate::session::Session,
     playlist: Option<Playlist>,
+    playlist_scope: Option<Arc<PlaylistScope>>,
     scanner_rx: Option<Receiver<FolderScan>>,
     transform: Transform,
     /// Last custom crop ratio entered during this process session.
@@ -444,7 +879,12 @@ struct App {
     heal: HealTool,
     is_fullscreen: bool,
     last_trashed: Vec<TrashedFile>,
+    last_trashed_scope: Option<Arc<PlaylistScope>>,
     current_image: Option<Arc<DecodedImage>>,
+    /// Live handle for the exact source object that supplied the displayed pixels.
+    current_source: Option<Arc<crate::fs::ImageSource>>,
+    /// Whether the displayed pixels are a pristine source decode safe to cache.
+    current_image_reuse: ImageReuseEligibility,
     /// Timed frames for the current GIF, WebP, or APNG.
     animation: Option<crate::animated::AnimationPlayback>,
     /// Best-effort facts for the current Image Information panel.
@@ -457,6 +897,12 @@ struct App {
     crop_worker: Option<CropWorker>,
     /// Replace-latest over-limit preview prepared outside the event thread.
     preview_worker: Option<PreviewWorker>,
+    /// At most one native restore operation running off-thread.
+    curation_worker: Option<CurationWorker>,
+    /// A normal close request waiting for destructive work to reconcile.
+    close_after_curation: bool,
+    /// Durable, operation-bound guidance after indeterminate worker loss.
+    curation_recovery: CurationRecovery,
     show_image_info: bool,
     /// Whether the tools dock reserves any viewport space.
     show_tools_panel: bool,
@@ -475,12 +921,14 @@ struct App {
     bg_override: Option<[f64; 4]>,
     /// Persisted application-chrome and default-canvas appearance.
     theme_preference: Preference,
+    /// Abnormal startup fallback to announce once the first window is ready.
+    appearance_recovery: Option<PreferenceRecovery>,
     /// Whether the accessible About window is open.
     show_about: bool,
-    /// The explicitly opened image whose first completed load should size the window.
-    resize_on_load: Option<PathBuf>,
-    /// Paths flagged for batch cull (photographer workflow).
-    flags: FlagSet,
+    /// Whether the accessible local update-instructions window is open.
+    show_update: bool,
+    /// Whether another app may have changed the source since the last accepted decode.
+    external_edit_pending: bool,
     /// Latest keyboard modifiers (for Shift+Delete, etc.).
     modifiers: ModifiersState,
     /// Bottom toast message.
@@ -515,12 +963,14 @@ struct App {
     thumb_textures: HashMap<PathBuf, egui::TextureHandle>,
     /// In-memory neighbor full-decode cache (never written to disk).
     prefetch: PrefetchCache,
-    /// Paths currently being prefetched in the background.
-    prefetch_in_flight: HashSet<PathBuf>,
+    /// Source handles paired with every path retained by the decoded-image cache.
+    prefetch_sources: HashMap<PathBuf, Arc<crate::fs::ImageSource>>,
+    /// Generation, in-flight, and terminal speculative decode state.
+    prefetch_schedule: prefetch::PrefetchSchedule,
     /// Sender shared by bounded speculative decode jobs.
-    prefetch_result_tx: Sender<(PathBuf, Result<DecodedImage, String>)>,
-    /// Completed prefetch jobs: `(path, result)`.
-    prefetch_rx: Receiver<(PathBuf, Result<DecodedImage, String>)>,
+    prefetch_result_tx: Sender<(u64, PathBuf, Result<Option<LoadedImage>, String>)>,
+    /// Completed prefetch jobs: `(speculative generation, path, result)`.
+    prefetch_rx: Receiver<(u64, PathBuf, Result<Option<LoadedImage>, String>)>,
     /// Wakes the event loop when background work finishes before a window exists.
     event_proxy: EventLoopProxy<UserEvent>,
     /// Explicit developer/CI performance probe; absent from normal launches.
@@ -542,6 +992,34 @@ fn single_key_shortcut_allowed(modifiers: ModifiersState) -> bool {
     !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
 }
 
+fn restore_targets_active_playlist(
+    playlist: Option<&Playlist>,
+    active: Option<&Arc<PlaylistScope>>,
+    trashed: Option<&Arc<PlaylistScope>>,
+) -> bool {
+    playlist.is_some() && same_playlist_scope(active, trashed)
+}
+
+fn same_playlist_scope(
+    active: Option<&Arc<PlaylistScope>>,
+    trashed: Option<&Arc<PlaylistScope>>,
+) -> bool {
+    active
+        .zip(trashed)
+        .is_some_and(|(active, trashed)| Arc::ptr_eq(active, trashed))
+}
+
+fn rebase_preserved_trash_action(
+    records: &mut [TrashedFile],
+    active: Option<&Arc<PlaylistScope>>,
+    trashed: Option<&Arc<PlaylistScope>>,
+    removed_indices: &[usize],
+) {
+    if same_playlist_scope(active, trashed) {
+        crate::curate::rebase_trashed_file_indices_after_current_removals(records, removed_indices);
+    }
+}
+
 fn route_consumed_keyboard_key(
     key: &winit::keyboard::Key,
     is_cropping: bool,
@@ -554,17 +1032,32 @@ fn route_consumed_keyboard_key(
             let character = character.as_str();
             matches!(character, "0" | "1" | "+" | "=" | "-" | "_" | "/")
                 || [
-                    "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "x", "b", "f", "z",
-                    "y",
+                    "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "f", "z", "y",
                 ]
                 .iter()
                 .any(|shortcut| character.eq_ignore_ascii_case(shortcut))
+                || (is_cropping && character.eq_ignore_ascii_case("x"))
         }
-        Key::Named(NamedKey::ArrowRight | NamedKey::ArrowLeft | NamedKey::F5) => true,
+        Key::Named(
+            NamedKey::ArrowRight
+            | NamedKey::ArrowLeft
+            | NamedKey::Home
+            | NamedKey::End
+            | NamedKey::PageUp
+            | NamedKey::PageDown
+            | NamedKey::F5,
+        ) => true,
         Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp) => is_cropping,
         Key::Named(NamedKey::Escape) => is_cropping || is_healing,
         _ => false,
     }
+}
+
+fn is_trash_shortcut_key(key: &winit::keyboard::Key) -> bool {
+    use winit::keyboard::{Key, NamedKey};
+
+    matches!(key, Key::Named(NamedKey::Delete))
+        || (cfg!(target_os = "macos") && matches!(key, Key::Named(NamedKey::Backspace)))
 }
 
 fn image_is_fully_displayed(source: Option<(u32, u32)>, displayed: Option<(u32, u32)>) -> bool {
@@ -597,15 +1090,63 @@ fn validate_performance_report(
     Ok(report)
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenWithOutcome {
+    Launched,
+    Cancelled,
+    InvalidPath,
+    Failed(u32),
+}
+
+#[cfg(target_os = "windows")]
+fn classify_open_with_hresult(result: i32) -> OpenWithOutcome {
+    const HRESULT_CANCELLED: u32 = 0x8007_04c7;
+    match result {
+        0 => OpenWithOutcome::Launched,
+        value if value.cast_unsigned() == HRESULT_CANCELLED => OpenWithOutcome::Cancelled,
+        value => OpenWithOutcome::Failed(value.cast_unsigned()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn show_windows_open_with_dialog(
+    path: &Path,
+    parent: windows_sys::Win32::Foundation::HWND,
+) -> OpenWithOutcome {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{OAIF_EXEC, OPENASINFO, SHOpenWithDialog};
+
+    let mut path_wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    if path_wide.contains(&0) {
+        return OpenWithOutcome::InvalidPath;
+    }
+    path_wide.push(0);
+    let request = OPENASINFO {
+        pcszFile: path_wide.as_ptr(),
+        pcszClass: std::ptr::null(),
+        oaifInFlags: OAIF_EXEC,
+    };
+    // SAFETY: `path_wide` remains alive and NUL-terminated for the synchronous
+    // call, `request` contains valid pointers, and `parent` is either viewr's
+    // live HWND or null as explicitly accepted by the Windows API.
+    classify_open_with_hresult(unsafe { SHOpenWithDialog(parent, &raw const request) })
+}
+
 impl App {
     fn open_file_request(&mut self, path: PathBuf) {
         self.load_and_scan(path);
     }
 
     fn load_and_scan(&mut self, path: PathBuf) {
+        if self.block_action_while_curating("opening another image") {
+            return;
+        }
         let path = crate::fs::canonical_file_path(&path).unwrap_or(path);
+        self.reset_prefetch_for_playlist_change();
         self.playlist = None;
-        self.begin_image_load(path.clone(), true);
+        self.playlist_scope = None;
+        self.begin_image_load(path.clone());
         let directory = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -614,10 +1155,10 @@ impl App {
         self.start_folder_scan(directory, ScanPurpose::SelectedFile(path));
     }
 
-    fn begin_image_load(&mut self, path: PathBuf, resize_to_image: bool) {
+    fn begin_image_load(&mut self, path: PathBuf) {
+        self.external_edit_pending = false;
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
-        self.resize_on_load = resize_to_image.then_some(path.clone());
         self.spawn_image_load(path);
         if let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
@@ -625,6 +1166,9 @@ impl App {
     }
 
     fn open_image_dialog(&mut self) {
+        if self.block_action_while_curating("opening another image") {
+            return;
+        }
         let extensions = crate::fs::supported_extensions().collect::<Vec<_>>();
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Images", &extensions)
@@ -635,6 +1179,9 @@ impl App {
     }
 
     fn open_folder_dialog(&mut self) {
+        if self.block_action_while_curating("opening another folder") {
+            return;
+        }
         if let Some(directory) = rfd::FileDialog::new().pick_folder() {
             self.start_folder_scan(directory, ScanPurpose::OpenFolder);
         }
@@ -660,10 +1207,41 @@ impl App {
         }
     }
 
-    fn replace_playlist(&mut self, files: Vec<PathBuf>, index: usize) {
+    fn reset_prefetch_for_playlist_change(&mut self) {
         self.prefetch.clear();
-        self.prefetch_in_flight.clear();
+        self.prefetch_sources.clear();
+        self.prefetch_schedule.reset();
+    }
+
+    fn take_prefetched_image(&mut self, path: &Path) -> Option<LoadedImage> {
+        let image = self.prefetch.take(path)?;
+        let Some(source) = self.prefetch_sources.remove(path) else {
+            log::error!("prefetch source invariant failed");
+            return None;
+        };
+        Some(LoadedImage { image, source })
+    }
+
+    fn remove_prefetched_image(&mut self, path: &Path) {
+        let _ = self.prefetch.take(path);
+        self.prefetch_sources.remove(path);
+    }
+
+    fn insert_prefetched_image(&mut self, path: PathBuf, loaded: LoadedImage) -> bool {
+        let retained = self.prefetch.insert(path.clone(), loaded.image);
+        if retained {
+            self.prefetch_sources.insert(path, loaded.source);
+        }
+        let prefetch = &self.prefetch;
+        self.prefetch_sources
+            .retain(|cached_path, _| prefetch.contains(cached_path));
+        retained
+    }
+
+    fn replace_playlist(&mut self, files: Vec<PathBuf>, index: usize) {
+        self.reset_prefetch_for_playlist_change();
         self.thumb_textures.clear();
+        self.playlist_scope = Some(Arc::new(PlaylistScope));
         self.playlist = Some(Playlist { files, index });
     }
 
@@ -693,7 +1271,7 @@ impl App {
             (ScanPurpose::OpenFolder, Ok(files)) => {
                 let first = files[0].clone();
                 self.replace_playlist(files, 0);
-                self.begin_image_load(first, true);
+                self.begin_image_load(first);
                 self.kick_prefetch();
             }
             (ScanPurpose::OpenFolder, Err(error)) => {
@@ -704,17 +1282,62 @@ impl App {
         true
     }
 
-    fn display_loaded_image(&mut self, path: &Path, image: DecodedImage) {
-        self.present_image(path, Arc::new(image), PresentationKind::Loaded);
+    fn display_loaded_image(&mut self, path: &Path, loaded: LoadedImage) {
+        self.present_image(
+            path,
+            loaded.image,
+            Some(loaded.source),
+            PresentationKind::Loaded,
+        );
     }
 
-    fn present_image(&mut self, path: &Path, image: Arc<DecodedImage>, kind: PresentationKind) {
+    fn present_image(
+        &mut self,
+        path: &Path,
+        image: Arc<DecodedImage>,
+        source: Option<Arc<crate::fs::ImageSource>>,
+        kind: PresentationKind,
+    ) {
+        self.present_image_with_crop_recovery(path, image, source, kind, None);
+    }
+
+    fn present_cropped_image(
+        &mut self,
+        path: &Path,
+        image: Arc<DecodedImage>,
+        recovery: CropRecovery,
+    ) {
+        let source = self.current_source.clone();
+        self.present_image_with_crop_recovery(
+            path,
+            image,
+            source,
+            PresentationKind::Cropped,
+            Some(recovery),
+        );
+    }
+
+    fn present_image_with_crop_recovery(
+        &mut self,
+        path: &Path,
+        image: Arc<DecodedImage>,
+        source: Option<Arc<crate::fs::ImageSource>>,
+        kind: PresentationKind,
+        crop_recovery: Option<CropRecovery>,
+    ) {
+        if crop_recovery
+            .as_ref()
+            .is_some_and(|recovery| !self.crop_recovery_is_current(recovery))
+        {
+            log::debug!("discarded stale crop before preview preparation");
+            return;
+        }
         let required = self
             .renderer
             .as_ref()
             .and_then(|renderer| renderer.required_preview(&image));
         let Some(spec) = required else {
-            self.finish_image_presentation(path, image, None, kind);
+            self.finish_image_presentation(path, image, source, None, kind, crop_recovery);
             return;
         };
 
@@ -745,50 +1368,89 @@ impl App {
                 self.preview_worker = Some(PreviewWorker {
                     path: worker_path,
                     kind,
+                    source,
+                    crop_recovery,
                     result_rx: receiver,
                 });
                 self.show_toast("Preparing a display-sized preview in the background");
             }
             Err(error) => {
-                log::error!("failed to queue image preview");
-                self.show_toast(format!("Could not prepare image preview: {error}"));
+                if kind == PresentationKind::Cropped {
+                    log::error!("crop preview queue failed: {error}");
+                } else {
+                    log::error!("failed to queue image preview: {error}");
+                }
+                self.report_presentation_failure(
+                    kind,
+                    format!("Could not prepare image preview: {error}"),
+                    crop_recovery,
+                );
             }
         }
+    }
+
+    fn report_presentation_failure(
+        &mut self,
+        kind: PresentationKind,
+        message: String,
+        crop_recovery: Option<CropRecovery>,
+    ) {
+        if kind == PresentationKind::Cropped {
+            let restored = crop_recovery.is_some_and(|recovery| self.restore_failed_crop(recovery));
+            self.show_toast(crop_failure_message(restored));
+            return;
+        }
+        if let Some(load_error) = durable_presentation_error(kind, &message) {
+            self.session.load_error = Some(load_error);
+        }
+        self.show_toast(message);
     }
 
     fn finish_image_presentation(
         &mut self,
         path: &Path,
         image: Arc<DecodedImage>,
+        source: Option<Arc<crate::fs::ImageSource>>,
         preview: Option<&ImagePreview>,
         kind: PresentationKind,
+        crop_recovery: Option<CropRecovery>,
     ) {
-        let should_resize = self.resize_on_load.as_deref() == Some(path);
+        if crop_recovery
+            .as_ref()
+            .is_some_and(|recovery| !self.crop_recovery_is_current(recovery))
+        {
+            log::debug!("discarded stale crop before renderer presentation");
+            return;
+        }
         let full_resolution = if let Some(renderer) = self.renderer.as_mut() {
             match renderer.set_image(&image, preview) {
-                Ok(full_resolution) => {
-                    if should_resize {
-                        resize_window_to_image(renderer);
-                    }
-                    full_resolution
-                }
+                Ok(full_resolution) => full_resolution,
                 Err(error) => {
-                    log::error!("failed to upload prepared image");
-                    self.show_toast(format!("Could not display image: {error}"));
+                    if kind == PresentationKind::Cropped {
+                        log::error!("crop renderer presentation failed: {error}");
+                    } else {
+                        log::error!("failed to upload prepared image: {error}");
+                    }
+                    self.report_presentation_failure(
+                        kind,
+                        format!("Could not display image: {error}"),
+                        crop_recovery,
+                    );
                     return;
                 }
             }
         } else {
             true
         };
-        if should_resize && self.renderer.is_some() {
-            self.resize_on_load = None;
-        }
         self.current_image = Some(image);
-        self.session.presented_path = Some(path.to_owned());
-        self.session.load_error = None;
+        self.current_source = source;
+        self.current_image_reuse = kind.image_reuse();
+        self.session.set_presented(path.to_owned());
         match kind {
-            PresentationKind::Loaded => self.start_auxiliary_load(path),
+            PresentationKind::Loaded => {
+                self.prefetch_schedule.allow(path);
+                self.start_auxiliary_load(path);
+            }
             PresentationKind::Cropped => {
                 self.heal.reset_for_image();
                 self.show_toast("Crop applied");
@@ -802,38 +1464,81 @@ impl App {
     }
 
     fn poll_preview_result(&mut self) {
-        let completed = self.preview_worker.as_ref().and_then(|worker| {
-            worker
-                .result_rx
-                .try_recv()
-                .ok()
-                .map(|result| (worker.path.clone(), worker.kind, result))
-        });
-        let Some((path, kind, result)) = completed else {
+        let Some(worker) = self.preview_worker.as_ref() else {
             return;
         };
-        self.preview_worker = None;
-        if self.session.selected_path.as_ref() != Some(&path) {
+        let polled = poll_worker(&worker.result_rx);
+        if matches!(&polled, WorkerPoll::Pending) {
             return;
         }
-        match result {
-            Ok((image, preview)) => {
-                self.finish_image_presentation(&path, image, Some(&preview), kind);
+        let worker = self
+            .preview_worker
+            .take()
+            .expect("preview worker exists after polling it");
+        let PreviewWorker {
+            path,
+            kind,
+            source,
+            crop_recovery,
+            ..
+        } = worker;
+        if self.session.selected_path.as_ref() != Some(&path) {
+            if kind == PresentationKind::Cropped {
+                log::debug!("discarded stale crop preview result");
+            }
+            return;
+        }
+        match polled {
+            WorkerPoll::Ready(Ok((image, preview))) => {
+                self.finish_image_presentation(
+                    &path,
+                    image,
+                    source,
+                    Some(&preview),
+                    kind,
+                    crop_recovery,
+                );
                 self.request_redraw();
             }
-            Err(error) => self.show_toast(format!("Could not prepare image preview: {error}")),
+            WorkerPoll::Ready(Err(error)) => {
+                if kind == PresentationKind::Cropped {
+                    log::error!("crop preview preparation failed: {error}");
+                } else {
+                    log::error!("image preview preparation failed: {error}");
+                }
+                self.report_presentation_failure(
+                    kind,
+                    format!("Could not prepare image preview: {error}"),
+                    crop_recovery,
+                );
+            }
+            WorkerPoll::Disconnected => {
+                if kind == PresentationKind::Cropped {
+                    log::error!("crop preview worker disconnected");
+                } else {
+                    log::error!("image preview worker disconnected");
+                }
+                self.report_presentation_failure(
+                    kind,
+                    "Image preview stopped unexpectedly".to_owned(),
+                    crop_recovery,
+                );
+            }
+            WorkerPoll::Pending => unreachable!("pending preview result returned early"),
         }
     }
 
     fn invalidate_displayed_image(&mut self) {
         self.heal.reset_for_image();
-        self.crop_worker = None;
+        self.cancel_crop_work();
         self.preview_worker = None;
         self.animation = None;
         self.image_details = None;
         self.auxiliary_loader_rx = None;
         self.session.load_error = None;
         self.current_image = None;
+        self.current_source = None;
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
         self.session.presented_path = None;
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.clear_image();
@@ -844,11 +1549,11 @@ impl App {
     /// good pixels on screen until a replacement has decoded successfully.
     fn prepare_for_image_load(&mut self) {
         self.heal.reset_for_image();
-        self.crop_worker = None;
+        self.cancel_crop_work();
         self.preview_worker = None;
         self.animation = None;
         self.auxiliary_loader_rx = None;
-        self.session.load_error = None;
+        self.session.prepare_for_load();
     }
 
     fn start_auxiliary_load(&mut self, path: &Path) {
@@ -861,20 +1566,27 @@ impl App {
         let event_proxy = self.event_proxy.clone();
         let current_generation = Arc::clone(&self.session.generation);
         let generation = current_generation.load(Ordering::Acquire);
+        let source = self.current_source.clone();
         let scheduled = crate::decode::schedule_current_image_details(move || {
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
-            let animation = crate::animated::DecodedAnimation::load_background_if_current(
-                &job_path,
-                &current_generation,
-                generation,
-            )
-            .map_err(|error| error.to_string());
+            let animation = source.as_ref().map_or(Ok(None), |source| {
+                crate::animated::DecodedAnimation::load_background_if_current(
+                    &job_path,
+                    source,
+                    &current_generation,
+                    generation,
+                )
+            });
+            let animation = animation.map_err(|error| error.to_string());
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
-            let details = crate::image_info::ImageDetails::load(&job_path);
+            let details = source.as_ref().map_or_else(
+                || crate::image_info::ImageDetails::load(&job_path),
+                |source| crate::image_info::ImageDetails::load_from_source(&job_path, source),
+            );
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
@@ -899,7 +1611,8 @@ impl App {
             return;
         };
         self.auxiliary_loader_rx = None;
-        if self.session.presented_path.as_ref() != Some(&path) || self.session.selected_path.as_ref() != Some(&path)
+        if self.session.presented_path.as_ref() != Some(&path)
+            || self.session.selected_path.as_ref() != Some(&path)
         {
             return;
         }
@@ -919,6 +1632,7 @@ impl App {
                     return;
                 }
                 self.current_image = Some(image);
+                self.current_image_reuse = ImageReuseEligibility::Ineligible;
                 self.animation = Some(playback);
             }
             Ok(None) => {}
@@ -946,6 +1660,7 @@ impl App {
             return;
         }
         self.current_image = Some(image);
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
     }
 
     fn toggle_animation_playback(&mut self) {
@@ -962,6 +1677,7 @@ impl App {
             return;
         }
         self.current_image = Some(image);
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
     }
 
     fn upload_realtime_image(&mut self, image: &DecodedImage) -> Result<(), String> {
@@ -990,14 +1706,14 @@ impl App {
     }
 
     fn cancel_pending_image_load(&mut self) {
-        self.session.generation.fetch_add(1, Ordering::AcqRel);
-        self.session.receiver = None;
+        self.session.cancel_pending_load();
         self.preview_worker = None;
-        self.resize_on_load = None;
-        self.session.load_error = None;
     }
 
     fn retry_current_image_load(&mut self) {
+        if self.block_action_while_curating("retrying the image load") {
+            return;
+        }
         let Some(path) = self.session.selected_path.clone() else {
             return;
         };
@@ -1006,6 +1722,9 @@ impl App {
     }
 
     fn reload_current_image(&mut self) {
+        if self.block_action_while_curating("reloading this file") {
+            return;
+        }
         if self.heal.is_busy() || self.heal.painting {
             self.show_toast("Wait for spot heal to finish before reloading");
             return;
@@ -1018,7 +1737,7 @@ impl App {
             self.show_toast("Wait for Save As to finish before reloading");
             return;
         }
-        if self.session.receiver.is_some() || self.preview_worker.is_some() {
+        if self.session.is_loading() || self.preview_worker.is_some() {
             self.show_toast("An image is already loading");
             return;
         }
@@ -1026,15 +1745,85 @@ impl App {
             return;
         };
 
-        // A reload is an explicit disk refresh. Drop any speculative copy and
-        // stale filmstrip texture, then keep the last good pixels presented
-        // while the replacement decodes in the foreground.
-        let _ = self.prefetch.take(&path);
+        // A reload is an explicit disk refresh. Drop any speculative copy,
+        // invalidate older speculative work, and remove the stale filmstrip
+        // texture. Keep the last good pixels presented while the replacement
+        // decodes in the foreground.
+        self.remove_prefetched_image(&path);
+        self.prefetch_schedule.reset();
         self.thumb_textures.remove(&path);
         self.transform = Transform::default();
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
         self.spawn_image_load(path);
         self.show_toast("Reloading file from disk");
         self.request_redraw();
+    }
+
+    #[cfg(target_os = "windows")]
+    fn open_current_with(&mut self) {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        if self.block_action_while_busy("opening the source in another app", true) {
+            return;
+        }
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+            self.show_toast("Open With requires the current image to finish loading");
+            return;
+        };
+        let Some(source) = self.current_source.as_ref() else {
+            self.show_toast("Could not verify the current source for Open With");
+            return;
+        };
+        match source.matches_path(&path) {
+            crate::fs::ImageSourceMatch::Same => {}
+            crate::fs::ImageSourceMatch::Changed | crate::fs::ImageSourceMatch::Missing => {
+                self.show_toast("Source changed on disk. Press F5 before Open With");
+                return;
+            }
+            crate::fs::ImageSourceMatch::Unsupported => {
+                self.show_toast("Open With is unavailable for this linked or unsupported source");
+                return;
+            }
+            crate::fs::ImageSourceMatch::Unavailable => {
+                self.show_toast("Could not verify the current source for Open With");
+                return;
+            }
+        }
+
+        let parent = self
+            .renderer
+            .as_ref()
+            .and_then(|renderer| renderer.window().window_handle().ok())
+            .and_then(|handle| match handle.as_raw() {
+                RawWindowHandle::Win32(handle) => {
+                    Some(handle.hwnd.get() as windows_sys::Win32::Foundation::HWND)
+                }
+                _ => None,
+            })
+            .unwrap_or(std::ptr::null_mut());
+        self.context_menu_pos = None;
+        match show_windows_open_with_dialog(&path, parent) {
+            OpenWithOutcome::Launched => {
+                self.external_edit_pending = true;
+                self.show_toast(
+                    "Source opened in another app. Press F5 to reload possible changes",
+                );
+            }
+            OpenWithOutcome::Cancelled => self.show_toast("Open With canceled"),
+            OpenWithOutcome::InvalidPath => {
+                log::error!("Windows Open With rejected an invalid path");
+                self.show_toast("Could not open the Windows app chooser");
+            }
+            OpenWithOutcome::Failed(code) => {
+                log::error!("Windows Open With failed with HRESULT {code:#010x}");
+                self.show_toast("Could not open the Windows app chooser");
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn open_current_with(&mut self) {
+        self.show_toast("Open With is currently available on Windows");
     }
 
     fn current_loaded_path(&self) -> Option<&Path> {
@@ -1145,10 +1934,10 @@ impl App {
     }
 
     fn rotate_current(&mut self, quarter_turns: i32) {
-        if self.current_loaded_path().is_some()
-            && self.crop_worker.is_none()
-            && self.save_worker.is_none()
-        {
+        if self.block_action_while_busy("rotating the image", true) {
+            return;
+        }
+        if self.current_loaded_path().is_some() {
             self.transform.rotation_steps += quarter_turns;
             if self.transform.is_cropping
                 && let Some(image_size) = self.renderer.as_ref().and_then(Renderer::image_size)
@@ -1166,20 +1955,20 @@ impl App {
     }
 
     fn flip_current_horizontally(&mut self) {
-        if self.current_loaded_path().is_some()
-            && self.crop_worker.is_none()
-            && self.save_worker.is_none()
-        {
+        if self.block_action_while_busy("flipping the image", true) {
+            return;
+        }
+        if self.current_loaded_path().is_some() {
             self.transform.flip_h = !self.transform.flip_h;
             self.request_redraw();
         }
     }
 
     fn flip_current_vertically(&mut self) {
-        if self.current_loaded_path().is_some()
-            && self.crop_worker.is_none()
-            && self.save_worker.is_none()
-        {
+        if self.block_action_while_busy("flipping the image", true) {
+            return;
+        }
+        if self.current_loaded_path().is_some() {
             self.transform.flip_v = !self.transform.flip_v;
             self.request_redraw();
         }
@@ -1222,8 +2011,6 @@ impl App {
             "/" if self.heal.active => self.refresh_heal_source(),
             "u" | "U" => self.undo_trash(),
             "x" | "X" if self.transform.is_cropping => self.swap_crop_ratio(),
-            "x" | "X" => self.toggle_flag_current(),
-            "b" | "B" => self.trash_flagged(),
             "f" | "F" => self.toggle_fullscreen(),
             "0" => self.fit_to_view(),
             "1" => self.set_actual_size(),
@@ -1249,19 +2036,69 @@ impl App {
     }
 
     fn go_to_index(&mut self, new_index: usize) {
-        let Some(playlist) = &mut self.playlist else {
+        if self.block_action_while_curating("browsing to another image") {
+            return;
+        }
+        let Some(playlist) = &self.playlist else {
             return;
         };
         if playlist.files.is_empty() || new_index >= playlist.files.len() {
             return;
         }
-        playlist.index = new_index;
         let next_path = playlist.files[new_index].clone();
+        let Some(current_path) = playlist.files.get(playlist.index) else {
+            return;
+        };
+        let plan = navigation_image_plan(
+            playlist.index,
+            new_index,
+            current_path,
+            &next_path,
+            self.session.presented_path.as_deref(),
+            self.current_image.is_some(),
+            self.current_image_reuse,
+        );
+        let retained_image = if plan == NavigationImagePlan::RetainPresented {
+            self.current_image.as_ref().and_then(|image| {
+                self.current_source
+                    .as_ref()
+                    .map(|source| (current_path.clone(), Arc::clone(image), Arc::clone(source)))
+            })
+        } else {
+            None
+        };
+
+        let Some(playlist) = self.playlist.as_mut() else {
+            return;
+        };
+        playlist.index = new_index;
         self.session.selected_path = Some(next_path.clone());
         self.transform = Transform::default();
-        self.resize_on_load = None;
 
-        self.spawn_image_load(next_path);
+        if plan == NavigationImagePlan::ReusePresented {
+            self.cancel_pending_image_load();
+            // A retained alias must leave the cache before pixel editing can
+            // regain unique ownership of the displayed decode.
+            self.remove_prefetched_image(&next_path);
+            self.prefetch_schedule.allow(&next_path);
+            self.session.set_presented(next_path.clone());
+            self.start_auxiliary_load(&next_path);
+            self.kick_prefetch();
+            self.request_redraw();
+            return;
+        }
+
+        // Reserve the requested cache entry before retaining the outgoing
+        // image, so cache pressure cannot evict the image the user selected.
+        let cached_target = self.take_prefetched_image(&next_path);
+        if let Some((path, image, source)) = retained_image
+            && self.insert_prefetched_image(path.clone(), LoadedImage { image, source })
+        {
+            // Cancel any speculative decode that could replace the exact
+            // trusted pixels retained above.
+            self.prefetch_schedule.allow(&path);
+        }
+        self.spawn_image_load_with_cached(next_path, cached_target);
         self.kick_prefetch();
     }
 
@@ -1274,44 +2111,94 @@ impl App {
             prefetch::neighbor_indices(playlist.index, playlist.files.len(), 2)
                 .into_iter()
                 .map(|i| playlist.files[i].clone())
-                .filter(|p| !self.prefetch.contains(p) && !self.prefetch_in_flight.contains(p))
+                .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))
                 .collect();
         if targets.is_empty() {
             return;
         }
 
         for path in targets {
+            let Some(ticket) = self.prefetch_schedule.start(path.clone()) else {
+                continue;
+            };
+            let generation = ticket.generation();
             let job_path = path.clone();
             let tx = self.prefetch_result_tx.clone();
             let event_proxy = self.event_proxy.clone();
             let scheduled = crate::decode::schedule_background_decode(move || {
-                let res = DecodedImage::load_background(&job_path).map_err(|e| e.to_string());
-                let _ = tx.send((job_path, res));
+                let res = DecodedImage::load_background_if_current(
+                    &job_path,
+                    ticket.cancellation_generation(),
+                    0,
+                )
+                .map_err(|error| error.to_string());
+                let _ = tx.send((generation, job_path, res));
                 let _ = event_proxy.send_event(UserEvent::Wake);
             });
-            if scheduled {
-                self.prefetch_in_flight.insert(path);
+            if !scheduled {
+                let _ = self.prefetch_schedule.finish(generation, &path, false);
             }
         }
     }
 
     fn poll_prefetch(&mut self) {
         let mut completed = false;
-        while let Ok((path, result)) = self.prefetch_rx.try_recv() {
+        let mut presented = false;
+        while let Ok((generation, path, result)) = self.prefetch_rx.try_recv() {
             completed = true;
-            self.prefetch_in_flight.remove(&path);
-            if let Ok(image) = result {
-                // Do not cache the currently displayed path as a neighbor entry;
-                // it already lives in `current_image`. Also discard results from
-                // a folder that was replaced while this decode was queued.
-                if self.session.selected_path.as_ref() != Some(&path)
-                    && self
-                        .playlist
-                        .as_ref()
-                        .is_some_and(|playlist| playlist.files.contains(&path))
-                {
-                    self.prefetch.insert(path, image);
+            if !self.prefetch_schedule.accepts_result(generation, &path) {
+                continue;
+            }
+            let superseded = self
+                .prefetch_schedule
+                .result_was_superseded(generation, &path);
+            let selected_with_foreground = self.session.selected_path.as_deref()
+                == Some(path.as_path())
+                && self.session.is_loading();
+            let destination = prefetch_destination(
+                self.session.selected_path.as_deref(),
+                self.session.is_loading() || self.session.load_error.is_some(),
+                self.playlist.as_ref(),
+                &path,
+            );
+            let mut diagnostic = None;
+            let terminal = match result {
+                Ok(Some(_)) if superseded => false,
+                Ok(Some(image)) => match destination {
+                    PrefetchDestination::PresentSelected => {
+                        self.session.cancel_pending_load();
+                        self.display_loaded_image(&path, image);
+                        presented = true;
+                        false
+                    }
+                    PrefetchDestination::CacheNeighbor => {
+                        let retained = self.insert_prefetched_image(path.clone(), image);
+                        if !retained {
+                            diagnostic = Some(format!(
+                                "neighbor prefetch skipped for {} because it exceeds the cache budget",
+                                prefetch::privacy_safe_file_name(&path)
+                            ));
+                        }
+                        !retained
+                    }
+                    PrefetchDestination::Ignore => false,
+                },
+                Ok(None) => false,
+                Err(_) if selected_with_foreground => false,
+                Err(error) => {
+                    diagnostic = Some(format!(
+                        "neighbor prefetch failed for {}: {error}",
+                        prefetch::privacy_safe_file_name(&path)
+                    ));
+                    true
                 }
+            };
+            let effective_terminal = self
+                .prefetch_schedule
+                .finish(generation, &path, terminal)
+                .unwrap_or(false);
+            if effective_terminal && let Some(diagnostic) = diagnostic {
+                log::warn!("{diagnostic}");
             }
         }
         if completed {
@@ -1320,119 +2207,102 @@ impl App {
                 self.request_thumbs_for_filmstrip();
             }
         }
-    }
-
-    fn toggle_flag_current(&mut self) {
-        if self.crop_worker.is_some() || self.save_worker.is_some() || self.preview_worker.is_some()
-        {
-            return;
-        }
-        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
-            return;
-        };
-        let flagged = self.flags.toggle(&path);
-        // Session-only memory; never write flag state to disk.
-        self.show_toast(if flagged {
-            format!("Flagged · {} total", self.flags.len())
-        } else {
-            format!("Unflagged · {} remaining", self.flags.len())
-        });
-        if let Some(r) = self.renderer.as_mut() {
-            r.window().request_redraw();
+        if presented && let Some(renderer) = self.renderer.as_ref() {
+            renderer.window().request_redraw();
         }
     }
 
     fn trash_current(&mut self) {
-        if self.crop_worker.is_some() || self.save_worker.is_some() || self.preview_worker.is_some()
-        {
-            return;
-        }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
+        if self.block_action_while_busy("moving this file to Trash", true) {
+            return;
+        }
+        if let Some(message) = trash_replacement_preflight(&self.curation_recovery) {
+            self.show_toast(message);
+            return;
+        }
 
-        let receipt = match crate::curate::move_to_trash(&path) {
+        let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
+            let error = GuardedActionError::Unavailable;
+            log_guarded_action_failure(GuardedActionKind::Trash, &error);
+            self.show_toast(guarded_action_failure_message(
+                GuardedActionKind::Trash,
+                &error,
+            ));
+            return;
+        };
+
+        let receipt = match crate::curate::move_source_to_trash(&path, &source) {
             Ok(receipt) => receipt,
-            Err(e) => {
-                log::error!("failed to move file to trash");
-                self.show_toast(format!("Trash failed: {e}"));
+            Err(error) => {
+                log_guarded_action_failure(GuardedActionKind::Trash, &error);
+                self.show_toast(guarded_action_failure_message(
+                    GuardedActionKind::Trash,
+                    &error,
+                ));
                 return;
             }
         };
 
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        self.last_trashed = vec![TrashedFile {
-            receipt,
-            playlist_index,
-        }];
-        self.flags.remove(&path);
-        self.show_toast("Moved to trash · Undo with U");
+        let has_receipt = receipt.can_restore_in_app();
+        if !has_receipt {
+            log::warn!(
+                "trash receipt unavailable: category={}",
+                receipt.capture_status().category()
+            );
+        }
+        let previous_undo_preserved = !has_receipt && !self.last_trashed.is_empty();
+        if has_receipt {
+            self.last_trashed = vec![TrashedFile {
+                receipt,
+                playlist_index,
+            }];
+            self.last_trashed_scope.clone_from(&self.playlist_scope);
+        } else if previous_undo_preserved {
+            rebase_preserved_trash_action(
+                &mut self.last_trashed,
+                self.playlist_scope.as_ref(),
+                self.last_trashed_scope.as_ref(),
+                &[playlist_index],
+            );
+        }
         self.after_paths_removed(&[path], playlist_index);
+        self.show_toast(single_trash_result_message(
+            has_receipt,
+            previous_undo_preserved,
+        ));
     }
 
-    fn trash_flagged(&mut self) {
-        if self.crop_worker.is_some()
-            || self.save_worker.is_some()
-            || self.preview_worker.is_some()
-            || self.heal.is_busy()
-        {
-            return;
+    fn block_action_while_busy(&mut self, action: &str, include_spot_heal: bool) -> bool {
+        let blocker = current_work_blocker([
+            self.curation_worker
+                .as_ref()
+                .map(|worker| worker.context.kind().work()),
+            self.scanner_rx.is_some().then_some(CurrentWork::FolderScan),
+            image_preparation_work(self.session.is_loading(), self.preview_worker.is_some()),
+            crop_work(self.transform.is_cropping, self.crop_worker.is_some()),
+            self.save_worker.is_some().then_some(CurrentWork::Save),
+            (include_spot_heal && (self.heal.active || self.heal.is_busy() || self.heal.painting))
+                .then_some(CurrentWork::SpotHeal),
+        ]);
+        if let Some(blocker) = blocker {
+            self.show_toast(blocked_action_message(action, blocker));
+            true
+        } else {
+            false
         }
-        let flagged = self.flags.take_all_sorted();
-        if flagged.is_empty() {
-            return;
-        }
-        let current_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        let playlist_indices = self
-            .playlist
-            .as_ref()
-            .map_or_else(HashMap::new, |playlist| {
-                playlist
-                    .files
-                    .iter()
-                    .enumerate()
-                    .map(|(index, path)| (path.clone(), index))
-                    .collect()
-            });
-        let (ok, failed) = crate::curate::trash_many(&flagged);
-        if !failed.is_empty() {
-            log::error!("batch trash partial failure");
-            for (path, _) in &failed {
-                self.flags.insert(path.clone());
-            }
-        }
-        if !ok.is_empty() {
-            self.last_trashed = ok
-                .into_iter()
-                .map(|receipt| {
-                    let playlist_index = playlist_indices
-                        .get(receipt.original_path())
-                        .copied()
-                        .unwrap_or(current_index);
-                    TrashedFile {
-                        receipt,
-                        playlist_index,
-                    }
-                })
-                .collect();
-            let removed = self
-                .last_trashed
-                .iter()
-                .map(|record| record.receipt.original_path().to_owned())
-                .collect::<Vec<_>>();
-            if failed.is_empty() {
-                self.show_toast(format!("Trashed {} file(s) · Undo with U", removed.len()));
-            } else {
-                self.show_toast(format!(
-                    "Trashed {}; {} failed · Undo with U",
-                    removed.len(),
-                    failed.len()
-                ));
-            }
-            self.after_paths_removed(&removed, current_index);
-        } else if let Some((_, error)) = failed.first() {
-            self.show_toast(format!("Trash failed: {error}"));
-        }
+    }
+
+    fn block_action_while_curating(&mut self, action: &str) -> bool {
+        let Some(worker) = self.curation_worker.as_ref() else {
+            return false;
+        };
+        let blocker = worker.context.kind().work();
+        self.show_toast(blocked_action_message(action, blocker));
+        true
     }
 
     fn show_toast(&mut self, msg: impl Into<String>) {
@@ -1452,7 +2322,52 @@ impl App {
         }
     }
 
+    fn cancel_crop_work(&mut self) {
+        if let Some(worker) = self.crop_worker.take() {
+            worker.cancel.store(true, Ordering::Release);
+            log::debug!("crop work cancelled after source change");
+        }
+    }
+
+    fn crop_recovery_is_current(&self, recovery: &CropRecovery) -> bool {
+        crop_recovery_matches(
+            recovery,
+            self.session.generation.load(Ordering::Acquire),
+            self.session.selected_path.as_deref(),
+            self.session.presented_path.as_deref(),
+            self.current_image.as_ref(),
+        )
+    }
+
+    fn restore_failed_crop(&mut self, recovery: CropRecovery) -> bool {
+        if !self.crop_recovery_is_current(&recovery) {
+            log::debug!("discarded stale crop recovery state");
+            return false;
+        }
+        let CropRecovery {
+            mut transform,
+            animation,
+            auxiliary_loader_rx,
+            ..
+        } = recovery;
+        transform.crop_start = None;
+        self.transform = transform;
+        self.animation = animation;
+        self.auxiliary_loader_rx = auxiliary_loader_rx;
+        self.request_redraw();
+        true
+    }
+
     fn toggle_crop_mode(&mut self) {
+        if self.block_action_while_curating("changing Crop") {
+            return;
+        }
+        if let Some(message) =
+            crop_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
+        {
+            self.show_toast(message);
+            return;
+        }
         if self.preview_worker.is_some() {
             self.show_toast("Wait for the image preview to finish before cropping");
             return;
@@ -1608,6 +2523,9 @@ impl App {
     }
 
     fn toggle_heal_mode(&mut self) {
+        if self.block_action_while_curating("changing Spot Heal") {
+            return;
+        }
         if self.current_loaded_path().is_none() {
             return;
         }
@@ -1691,8 +2609,7 @@ impl App {
         if refresh.candidate_count < 2 {
             return;
         }
-        let previous_candidate_index = refresh.candidate_index;
-        let candidate_index = (previous_candidate_index + 1) % refresh.candidate_count;
+        let candidate_index = (refresh.candidate_index + 1) % refresh.candidate_count;
         let job = refresh.job.clone();
         let (sender, receiver) = mpsc::channel();
         let event_proxy = self.event_proxy.clone();
@@ -1717,7 +2634,6 @@ impl App {
                     cancel,
                     apply_result: true,
                     replacing_latest: true,
-                    previous_candidate_index,
                 });
                 self.request_redraw();
             }
@@ -1854,7 +2770,6 @@ impl App {
                     cancel,
                     apply_result: true,
                     replacing_latest: false,
-                    previous_candidate_index: 0,
                 });
                 self.request_redraw();
             }
@@ -1873,17 +2788,13 @@ impl App {
                 worker.result_rx.try_recv(),
                 worker.apply_result,
                 worker.replacing_latest,
-                worker.previous_candidate_index,
             )
         });
-        let (output, apply_result, replacing_latest, previous_candidate_index) = match polled {
-            Some((Ok(output), apply_result, replacing_latest, previous_candidate_index)) => (
-                Some(output),
-                apply_result,
-                replacing_latest,
-                previous_candidate_index,
-            ),
-            Some((Err(TryRecvError::Disconnected), apply_result, _, _)) => {
+        let (output, apply_result, replacing_latest) = match polled {
+            Some((Ok(output), apply_result, replacing_latest)) => {
+                (Some(output), apply_result, replacing_latest)
+            }
+            Some((Err(TryRecvError::Disconnected), apply_result, _)) => {
                 self.heal.worker = None;
                 self.heal.stroke.clear();
                 if apply_result {
@@ -1891,7 +2802,7 @@ impl App {
                 }
                 return;
             }
-            Some((Err(TryRecvError::Empty), _, _, _)) | None => (None, false, false, 0),
+            Some((Err(TryRecvError::Empty), _, _)) | None => (None, false, false),
         };
         let Some(output) = output else {
             return;
@@ -1904,48 +2815,40 @@ impl App {
         }
         match output.result {
             Ok(result) => {
-                let patch = result.patch;
-                let apply_result = self
-                    .current_image
-                    .as_mut()
-                    .and_then(Arc::get_mut)
-                    .ok_or(crate::heal::HealError::InvalidImageBuffer)
-                    .and_then(|image| crate::heal::apply_patch(image, &patch));
-                match apply_result {
-                    Ok(inverse) => {
-                        if !replacing_latest {
-                            self.heal.history.record(inverse);
-                        }
-                        self.heal.refresh = output.job.and_then(|job| {
-                            (result.candidate_count > 1).then_some(HealRefresh {
-                                job,
-                                candidate_index: result.candidate_index,
-                                candidate_count: result.candidate_count,
-                            })
-                        });
-                        self.update_rendered_patch(&patch);
-                        self.show_toast(if replacing_latest {
-                            format!(
-                                "Heal source {} of {}",
-                                result.candidate_index + 1,
-                                result.candidate_count
+                let apply_result = {
+                    let (current_image, renderer, history, refresh) = (
+                        &mut self.current_image,
+                        &mut self.renderer,
+                        &mut self.heal.history,
+                        &mut self.heal.refresh,
+                    );
+                    current_image
+                        .as_mut()
+                        .and_then(Arc::get_mut)
+                        .ok_or(crate::heal::PatchPresentationError::Edit(
+                            crate::heal::HealError::InvalidImageBuffer,
+                        ))
+                        .and_then(|image| {
+                            commit_presented_heal(
+                                image,
+                                history,
+                                refresh,
+                                &result,
+                                output.job,
+                                replacing_latest,
+                                |image, patch| present_image_patch(renderer.as_mut(), image, patch),
                             )
-                        } else {
-                            "Spot healed. Undo is available.".to_owned()
-                        });
+                        })
+                };
+                match apply_result {
+                    Ok(message) => {
+                        self.current_image_reuse = ImageReuseEligibility::Ineligible;
+                        self.show_toast(message);
                     }
-                    Err(error) => {
-                        if replacing_latest && let Some(refresh) = self.heal.refresh.as_mut() {
-                            refresh.candidate_index = previous_candidate_index;
-                        }
-                        self.show_toast(format!("Spot heal failed: {error}"));
-                    }
+                    Err(error) => self.report_edit_transaction_failure("Spot heal", &error),
                 }
             }
             Err(error) => {
-                if replacing_latest && let Some(refresh) = self.heal.refresh.as_mut() {
-                    refresh.candidate_index = previous_candidate_index;
-                }
                 self.show_toast(format!("Spot heal failed: {error}"));
             }
         }
@@ -1953,64 +2856,93 @@ impl App {
     }
 
     fn undo_edit(&mut self) {
-        if self.heal.is_busy()
-            || self.crop_worker.is_some()
-            || self.save_worker.is_some()
-            || self.preview_worker.is_some()
-        {
+        if !self.heal.history.can_undo() {
             return;
         }
-        let result = self
-            .current_image
-            .as_mut()
-            .and_then(Arc::get_mut)
-            .map(|image| self.heal.history.undo_patch(image));
+        if self.block_action_while_busy("undoing an edit", true) {
+            return;
+        }
+        let result = {
+            let (current_image, renderer, history) = (
+                &mut self.current_image,
+                &mut self.renderer,
+                &mut self.heal.history,
+            );
+            current_image
+                .as_mut()
+                .and_then(Arc::get_mut)
+                .ok_or(crate::heal::PatchPresentationError::Edit(
+                    crate::heal::HealError::InvalidImageBuffer,
+                ))
+                .and_then(|image| {
+                    history.undo_presented(image, |image, patch| {
+                        present_image_patch(renderer.as_mut(), image, patch)
+                    })
+                })
+        };
         match result {
-            Some(Ok(Some(patch))) => {
+            Ok(true) => {
+                self.current_image_reuse = ImageReuseEligibility::Ineligible;
                 self.heal.refresh = None;
-                self.update_rendered_patch(&patch);
                 self.show_toast("Undid spot heal");
             }
-            Some(Err(error)) => self.show_toast(format!("Could not undo edit: {error}")),
-            Some(Ok(None)) | None => {}
+            Err(error) => self.report_edit_transaction_failure("Undo", &error),
+            Ok(false) => {}
         }
     }
 
     fn redo_edit(&mut self) {
-        if self.heal.is_busy()
-            || self.crop_worker.is_some()
-            || self.save_worker.is_some()
-            || self.preview_worker.is_some()
-        {
+        if !self.heal.history.can_redo() {
             return;
         }
-        let result = self
-            .current_image
-            .as_mut()
-            .and_then(Arc::get_mut)
-            .map(|image| self.heal.history.redo_patch(image));
+        if self.block_action_while_busy("redoing an edit", true) {
+            return;
+        }
+        let result = {
+            let (current_image, renderer, history) = (
+                &mut self.current_image,
+                &mut self.renderer,
+                &mut self.heal.history,
+            );
+            current_image
+                .as_mut()
+                .and_then(Arc::get_mut)
+                .ok_or(crate::heal::PatchPresentationError::Edit(
+                    crate::heal::HealError::InvalidImageBuffer,
+                ))
+                .and_then(|image| {
+                    history.redo_presented(image, |image, patch| {
+                        present_image_patch(renderer.as_mut(), image, patch)
+                    })
+                })
+        };
         match result {
-            Some(Ok(Some(patch))) => {
+            Ok(true) => {
+                self.current_image_reuse = ImageReuseEligibility::Ineligible;
                 self.heal.refresh = None;
-                self.update_rendered_patch(&patch);
                 self.show_toast("Redid spot heal");
             }
-            Some(Err(error)) => self.show_toast(format!("Could not redo edit: {error}")),
-            Some(Ok(None)) | None => {}
+            Err(error) => self.report_edit_transaction_failure("Redo", &error),
+            Ok(false) => {}
         }
     }
 
-    fn update_rendered_patch(&mut self, patch: &crate::heal::ImagePatch) {
-        let updated = self
-            .renderer
-            .as_ref()
-            .is_some_and(|renderer| renderer.update_image_patch(patch));
-        if !updated
-            && let (Some(image), Some(renderer)) =
-                (self.current_image.as_ref(), self.renderer.as_mut())
-            && let Err(error) = renderer.set_image(image, None)
-        {
-            log::error!("failed to restore complete image texture: {error}");
+    fn report_edit_transaction_failure(
+        &mut self,
+        action: &str,
+        error: &crate::heal::PatchPresentationError<String>,
+    ) {
+        log::error!("edit presentation transaction failed during {action}: {error}");
+        if error.rollback_failed() {
+            if let Some(path) = self.session.selected_path.clone() {
+                self.spawn_image_load(path);
+                self.show_toast(edit_transaction_failure_message(action, error, true));
+            } else {
+                self.invalidate_displayed_image();
+                self.show_toast(edit_transaction_failure_message(action, error, false));
+            }
+        } else {
+            self.show_toast(edit_transaction_failure_message(action, error, false));
         }
     }
 
@@ -2241,12 +3173,10 @@ impl App {
                     || path.display().to_string(),
                     |s| s.to_string_lossy().into_owned(),
                 );
-                let flagged = self.flags.contains(path);
                 let texture = self.thumb_textures.get(path).cloned();
                 FilmstripItem {
                     index: i,
                     name,
-                    flagged,
                     texture,
                 }
             })
@@ -2379,40 +3309,65 @@ impl App {
     }
 
     fn permanent_delete_current(&mut self) {
-        if self.crop_worker.is_some() || self.save_worker.is_some() || self.preview_worker.is_some()
-        {
-            return;
-        }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        let name = path.file_name().map_or_else(
-            || path.display().to_string(),
-            |s| s.to_string_lossy().into_owned(),
-        );
+        if self.block_action_while_busy("permanently deleting this file", true) {
+            return;
+        }
+        let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
+            let error = GuardedActionError::Unavailable;
+            log_guarded_action_failure(GuardedActionKind::PermanentDelete, &error);
+            self.show_toast(guarded_action_failure_message(
+                GuardedActionKind::PermanentDelete,
+                &error,
+            ));
+            return;
+        };
+        if let Err(error) = crate::curate::verify_accepted_source(&path, &source) {
+            log_guarded_action_failure(GuardedActionKind::PermanentDelete, &error);
+            self.show_toast(guarded_action_failure_message(
+                GuardedActionKind::PermanentDelete,
+                &error,
+            ));
+            return;
+        }
         let confirmed = rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Warning)
             .set_title("Permanently delete?")
-            .set_description(format!(
-                "Delete \"{name}\" forever?\n\nThis skips the Recycle Bin and cannot be undone from viewr."
+            .set_description(permanent_delete_description(&path))
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                PERMANENT_DELETE_ACTION.to_owned(),
+                "Cancel".to_owned(),
             ))
-            .set_buttons(rfd::MessageButtons::OkCancel)
             .show();
-        if confirmed != rfd::MessageDialogResult::Ok {
+        if !permanent_delete_confirmed(&confirmed) {
             return;
         }
-        if let Err(e) = crate::curate::permanent_delete(&path) {
-            log::error!("permanent delete failed");
-            self.show_toast(format!("Delete failed: {e}"));
+        if let Err(error) = crate::curate::permanent_delete_source(&path, &source) {
+            log_guarded_action_failure(GuardedActionKind::PermanentDelete, &error);
+            self.show_toast(guarded_action_failure_message(
+                GuardedActionKind::PermanentDelete,
+                &error,
+            ));
             return;
         }
-        self.flags.remove(&path);
+        let previous_trash_undo = !self.last_trashed.is_empty();
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        self.last_trashed.clear(); // not restorable
-        self.after_paths_removed(&[path], playlist_index);
+        if previous_trash_undo {
+            rebase_preserved_trash_action(
+                &mut self.last_trashed,
+                self.playlist_scope.as_ref(),
+                self.last_trashed_scope.as_ref(),
+                &[playlist_index],
+            );
+        }
+        self.after_paths_removed(std::slice::from_ref(&path), playlist_index);
+        self.show_toast(permanent_delete_success_message(&path, previous_trash_undo));
     }
 
     fn after_paths_removed(&mut self, removed: &[PathBuf], old_index: usize) {
+        self.reset_prefetch_for_playlist_change();
         if let Some(playlist) = &mut self.playlist {
             crate::curate::remove_from_playlist(&mut playlist.files, removed);
             if playlist.files.is_empty() {
@@ -2435,24 +3390,89 @@ impl App {
     }
 
     fn undo_trash(&mut self) {
-        if self.last_trashed.is_empty() {
+        let active = self
+            .curation_worker
+            .as_ref()
+            .map(|worker| worker.context.kind());
+        if let Some(message) = curation_action_preflight(
+            active,
+            !self.last_trashed.is_empty(),
+            "restoring files from Trash",
+            "Nothing to restore from Trash",
+        ) {
+            self.show_toast(message);
+            return;
+        }
+        if self.block_action_while_busy("restoring files from Trash", true) {
             return;
         }
 
-        let records = std::mem::take(&mut self.last_trashed);
-        let mut outcome = crate::curate::restore_trash_batch(records);
+        let records = self.last_trashed.clone();
+        let restore_submitted = records.len();
+        let context = CurationContext::Restore(RestoreContext {
+            submitted: restore_submitted,
+            scope: self.last_trashed_scope.clone(),
+        });
+        let event_proxy = self.event_proxy.clone();
+        let spawn = spawn_curation_thread(
+            "viewr-trash-restore",
+            move || {
+                let restore_started = Instant::now();
+                let outcome = crate::curate::restore_trash_batch(records);
+                CurationCompletion::Restore {
+                    outcome,
+                    elapsed: restore_started.elapsed(),
+                }
+            },
+            move || {
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            },
+        );
+        let Ok((result_rx, join)) = spawn else {
+            log::error!("trash restore worker spawn failed: submitted={restore_submitted}");
+            self.show_toast(
+                "Could not start Trash restore. Undo receipts are unchanged; retry with U.",
+            );
+            return;
+        };
+        log::info!("trash restore worker started: submitted={restore_submitted}");
+        self.curation_worker = Some(CurationWorker {
+            context,
+            result_rx,
+            join: Some(join),
+        });
+        self.request_redraw();
+    }
+
+    fn finish_trash_restore(
+        &mut self,
+        context: RestoreContext,
+        mut outcome: crate::curate::TrashRestoreOutcome,
+        restore_elapsed: Duration,
+    ) {
+        let restores_active_playlist = restore_targets_active_playlist(
+            self.playlist.as_ref(),
+            self.playlist_scope.as_ref(),
+            context.scope.as_ref(),
+        );
         outcome.restored.sort_by_key(|record| record.playlist_index);
         let restored_count = outcome.restored.len();
-        let first_restored_path = outcome
-            .restored
-            .first()
-            .map(|record| record.receipt.original_path().to_owned());
-        if let Some(playlist) = &mut self.playlist {
+        let first_restored_path = restores_active_playlist.then(|| {
+            outcome
+                .restored
+                .first()
+                .map(|record| record.receipt.original_path().to_owned())
+        });
+        let first_restored_path = first_restored_path.flatten();
+        if restored_count > 0 && restores_active_playlist {
+            self.reset_prefetch_for_playlist_change();
+        }
+        if restores_active_playlist && let Some(playlist) = &mut self.playlist {
             let mut focused_index = None;
             for record in &outcome.restored {
-                let index =
-                    crate::curate::restored_playlist_index(record.playlist_index, &outcome.failed)
-                        .min(playlist.files.len());
+                let index = outcome
+                    .restored_playlist_index(record.playlist_index)
+                    .min(playlist.files.len());
                 focused_index.get_or_insert(index);
                 playlist
                     .files
@@ -2462,7 +3482,29 @@ impl App {
                 playlist.index = index.min(playlist.files.len().saturating_sub(1));
             }
         }
-        self.last_trashed = outcome.failed;
+        let retry_now = outcome.failure_count(TrashRestoreDisposition::RetryNow);
+        let resolve_then_retry = outcome.failure_count(TrashRestoreDisposition::ResolveThenRetry);
+        let manual_review = outcome.failure_count(TrashRestoreDisposition::ManualReview);
+        let terminal = outcome.failure_count(TrashRestoreDisposition::Terminal);
+        let first_failure = outcome.first_failure();
+        let failure_total = retry_now + resolve_then_retry + manual_review + terminal;
+        log::info!(
+            "trash restore timing: submitted={}, restored={restored_count}, failures={failure_total}, total_ms={}",
+            context.submitted,
+            restore_elapsed.as_millis()
+        );
+        if failure_total > 0 {
+            let first_failure_category = first_failure.map_or("none", |error| error.category());
+            log::warn!(
+                "trash restore guarded result: restored={restored_count}, retry_now={retry_now}, resolve_then_retry={resolve_then_retry}, manual_review={manual_review}, terminal={terminal}, first_failure_category={first_failure_category}"
+            );
+        }
+        self.last_trashed = outcome.take_retryable_records();
+        if self.last_trashed.is_empty() {
+            self.last_trashed_scope = None;
+        } else {
+            self.last_trashed_scope = context.scope;
+        }
 
         if let Some(original_path) = first_restored_path {
             self.session.selected_path = Some(original_path.clone());
@@ -2470,32 +3512,32 @@ impl App {
             self.spawn_image_load(original_path);
         }
 
-        if self.last_trashed.is_empty() {
-            self.show_toast(format!("Restored {restored_count} file(s)"));
-        } else if restored_count == 0 {
-            log::error!("failed to restore from trash");
-            self.show_toast(format!(
-                "Restore failed: {}",
-                outcome.first_error.as_deref().unwrap_or("unknown error")
-            ));
-        } else {
-            log::error!("batch restore partial failure");
-            self.show_toast(format!(
-                "Restored {restored_count}; {} failed",
-                self.last_trashed.len()
-            ));
-        }
+        self.show_toast(restore_result_message(
+            restored_count,
+            retry_now,
+            resolve_then_retry,
+            manual_review,
+            terminal,
+            first_failure,
+            restores_active_playlist,
+        ));
     }
 
     fn spawn_image_load(&mut self, path: PathBuf) {
+        let cached_image = self.take_prefetched_image(&path);
+        self.spawn_image_load_with_cached(path, cached_image);
+    }
+
+    fn spawn_image_load_with_cached(&mut self, path: PathBuf, cached_image: Option<LoadedImage>) {
         let generation = self
-            .session.generation
+            .session
+            .generation
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
         self.prepare_for_image_load();
 
         // Prefer RAM cache even for non-navigate loads (undo, filmstrip jump).
-        if let Some(image) = self.prefetch.take(&path) {
+        if let Some(image) = cached_image {
             self.display_loaded_image(&path, image);
             self.session.receiver = None;
             self.kick_prefetch();
@@ -2527,6 +3569,9 @@ impl App {
     }
 
     fn save_as(&mut self) {
+        if self.block_action_while_curating("saving a copy") {
+            return;
+        }
         if self.preview_worker.is_some() {
             self.show_toast("Wait for the image preview to finish before saving");
             return;
@@ -2637,11 +3682,75 @@ impl App {
         }
     }
 
+    fn poll_curation_result(&mut self, event_loop: &ActiveEventLoop) {
+        let poll = self
+            .curation_worker
+            .as_ref()
+            .map(|worker| poll_worker(&worker.result_rx));
+        let Some(poll) = poll else {
+            return;
+        };
+        if matches!(poll, WorkerPoll::Pending) {
+            return;
+        }
+
+        let mut worker = self
+            .curation_worker
+            .take()
+            .expect("a completed curation poll retains its worker");
+        let kind = worker.context.kind();
+        let submitted = worker.context.submitted();
+        if let Some(join) = worker.join.take()
+            && join.join().is_err()
+        {
+            log::error!(
+                "curation worker panicked after terminal channel state: operation={kind:?}, submitted={submitted}"
+            );
+        }
+
+        match poll {
+            WorkerPoll::Ready(completion) => {
+                match (worker.context, completion) {
+                    (
+                        CurationContext::Restore(context),
+                        CurationCompletion::Restore { outcome, elapsed },
+                    ) => {
+                        self.curation_recovery.clear(CurationKind::Restore);
+                        self.finish_trash_restore(context, outcome, elapsed);
+                    }
+                }
+                log::info!("curation worker reconciled: operation={kind:?}, submitted={submitted}");
+                self.request_redraw();
+                if std::mem::take(&mut self.close_after_curation) {
+                    event_loop.exit();
+                }
+            }
+            WorkerPoll::Disconnected => {
+                self.close_after_curation = false;
+                log::error!(
+                    "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}"
+                );
+                let message = curation_recovery_message(kind);
+                self.curation_recovery.record(kind);
+                self.show_toast(message);
+            }
+            WorkerPoll::Pending => unreachable!("pending workers return before being taken"),
+        }
+    }
+
     /// Convert a UV crop rect into one bounded pixel rectangle. Locked ratios
     /// are quantized as whole multiples of their reduced integer components,
     /// so the exported pixel dimensions keep the ratio exactly.
-
     fn apply_crop_rect(&mut self) {
+        if self.block_action_while_curating("applying the crop") {
+            return;
+        }
+        if let Some(message) =
+            crop_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
+        {
+            self.show_toast(message);
+            return;
+        }
         let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
@@ -2668,27 +3777,51 @@ impl App {
             return;
         };
         let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
-        let Some(pixel_rect) = crate::crop::crop_pixel_rect(rect, image.width, image.height, ratio) else {
+        let Some(pixel_rect) = crate::crop::crop_pixel_rect(rect, image.width, image.height, ratio)
+        else {
             self.show_toast("The selected ratio is too large for this image");
             return;
         };
 
+        let source_generation = self.session.generation.load(Ordering::Acquire);
+        let source_image = Arc::clone(&image);
+        let source_transform = self.transform;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
         let (sender, receiver) = mpsc::channel();
         let event_proxy = self.event_proxy.clone();
         let spawn = std::thread::Builder::new()
             .name("viewr-crop".into())
             .spawn(move || {
-                let cropped = crate::edit::crop(image.as_ref(), pixel_rect)
-                    .map_err(|error| error.to_string());
-                let _ = sender.send(cropped);
-                let _ = event_proxy.send_event(UserEvent::Wake);
+                let cropped =
+                    crate::edit::crop_cancellable(image.as_ref(), pixel_rect, &worker_cancel)
+                        .map_err(|error| error.to_string());
+                let delivered = match cropped {
+                    Ok(Some(cropped)) => sender.send(Ok(cropped)).is_ok(),
+                    Ok(None) => {
+                        log::debug!("crop worker stopped after cancellation");
+                        false
+                    }
+                    Err(error) => sender.send(Err(error)).is_ok(),
+                };
+                if delivered {
+                    let _ = event_proxy.send_event(UserEvent::Wake);
+                }
             });
         if let Err(error) = spawn {
-            self.show_toast(format!("Could not start crop: {error}"));
+            log::error!("crop worker spawn failed: {error}");
+            self.show_toast("Could not start crop. Selection kept; press Enter to try again.");
             return;
         }
 
-        self.discard_animation_for_pixel_edit();
+        let recovery = CropRecovery {
+            source_path,
+            source_generation,
+            source_image,
+            transform: source_transform,
+            animation: self.animation.take(),
+            auxiliary_loader_rx: self.auxiliary_loader_rx.take(),
+        };
         self.transform.zoom = 1.0;
         self.transform.offset_x = 0.0;
         self.transform.offset_y = 0.0;
@@ -2698,7 +3831,8 @@ impl App {
         self.transform.is_cropping = false;
         self.transform.crop_start = None;
         self.crop_worker = Some(CropWorker {
-            source_path,
+            recovery,
+            cancel,
             result_rx: receiver,
         });
         self.show_toast("Applying crop in the background");
@@ -2706,32 +3840,41 @@ impl App {
     }
 
     fn poll_crop_result(&mut self) {
-        let polled = self
-            .crop_worker
-            .as_ref()
-            .map(|worker| (worker.source_path.clone(), worker.result_rx.try_recv()));
-        let (source_path, cropped) = match polled {
-            Some((source_path, Ok(Ok(cropped)))) => (source_path, cropped),
-            Some((_, Ok(Err(error)))) => {
-                self.crop_worker = None;
-                self.show_toast(format!("Crop failed: {error}"));
-                return;
-            }
-            Some((_, Err(mpsc::TryRecvError::Disconnected))) => {
-                self.crop_worker = None;
-                self.show_toast("Crop stopped unexpectedly");
-                return;
-            }
-            Some((_, Err(mpsc::TryRecvError::Empty))) | None => return,
+        let Some(worker) = self.crop_worker.as_ref() else {
+            return;
         };
-        self.crop_worker = None;
-
-        if self.session.selected_path.as_ref() != Some(&source_path)
-            || self.session.presented_path.as_ref() != Some(&source_path)
-        {
+        let polled = poll_worker(&worker.result_rx);
+        if matches!(&polled, WorkerPoll::Pending) {
             return;
         }
-        self.present_image(&source_path, Arc::new(cropped), PresentationKind::Cropped);
+        let worker = self
+            .crop_worker
+            .take()
+            .expect("crop worker exists after polling it");
+        let recovery = worker.recovery;
+        let cropped = match polled {
+            WorkerPoll::Ready(Ok(cropped)) => cropped,
+            WorkerPoll::Ready(Err(error)) => {
+                log::error!("crop computation failed: {error}");
+                let restored = self.restore_failed_crop(recovery);
+                self.show_toast(crop_failure_message(restored));
+                return;
+            }
+            WorkerPoll::Disconnected => {
+                log::error!("crop worker disconnected");
+                let restored = self.restore_failed_crop(recovery);
+                self.show_toast(crop_failure_message(restored));
+                return;
+            }
+            WorkerPoll::Pending => unreachable!("pending crop result returned early"),
+        };
+
+        if !self.crop_recovery_is_current(&recovery) {
+            log::debug!("discarded stale crop computation result");
+            return;
+        }
+        let source_path = recovery.source_path.clone();
+        self.present_cropped_image(&source_path, Arc::new(cropped), recovery);
         self.request_redraw();
     }
 
@@ -2757,15 +3900,16 @@ impl App {
 
     fn performance_probe_is_settled(&self) -> bool {
         if !self.performance_probe_has_presented_current()
-            || !self.prefetch_in_flight.is_empty()
+            || !self.prefetch_schedule.is_idle()
             || !self.thumbs_in_flight.is_empty()
             || self.auxiliary_loader_rx.is_some()
+            || !performance_ui_is_settled(self.egui_repaint_at)
         {
             return false;
         }
-        // A scheduled egui repaint is exactly what the idle observation window
-        // is meant to measure. Treating it as background work can starve the
-        // probe when hover or accessibility state keeps requesting frames.
+        // The filmstrip is the final asynchronous presentation surface. The
+        // idle observation begins only after its visible textures are ready and
+        // egui has no delayed hover or activation repaint outstanding.
         self.visible_filmstrip_paths()
             .iter()
             .all(|path| self.thumb_textures.contains_key(path))
@@ -2814,7 +3958,7 @@ impl App {
             self.performance_probe
                 .as_ref()
                 .is_some_and(|probe| probe.idle_until.is_some()),
-            self.prefetch_in_flight.len(),
+            self.prefetch_schedule.in_flight_len(),
             self.thumbs_in_flight.len(),
             ready_thumbnails,
             visible.len(),
@@ -2912,11 +4056,17 @@ impl App {
             self.fail_performance_probe(event_loop, "probe never presented an image frame".into());
             return;
         };
+        let (idle_window_focused, idle_pointer_inside) = idle_window_state(self.renderer.as_ref());
         let report = crate::performance::PerformanceReport {
             window_ready_us: crate::performance::duration_us(window_ready),
             first_pixel_us: crate::performance::duration_us(first_pixel),
             max_navigation_us: crate::performance::duration_us(probe.max_navigation),
             idle_redraws: probe.idle_redraws,
+            idle_non_redraw_events: probe.idle_non_redraw_events,
+            idle_event_repaint_requests: probe.idle_event_repaint_requests,
+            idle_scheduled_egui_repaints: probe.idle_scheduled_egui_repaints,
+            idle_window_focused,
+            idle_pointer_inside,
             peak_resident_bytes: probe.peak_resident_bytes,
             playlist_entries: playlist_len,
             decoded_cache_entries: self.prefetch.len(),
@@ -2928,43 +4078,6 @@ impl App {
         event_loop.exit();
     }
 }
-
-const DEFAULT_CROP_MARGIN: f32 = 0.1;
-const MINIMUM_CROP_SPAN: f32 = 0.02;
-
-
-/// Resize the window to fit the loaded image within the current monitor.
-fn resize_window_to_image(renderer: &Renderer) {
-    let Some(monitor) = renderer.window().current_monitor() else {
-        return;
-    };
-    let Some((width, height)) = renderer.image_size() else {
-        return;
-    };
-    let monitor_scale = monitor.scale_factor();
-    let available_width = f64::from(monitor.size().width) / monitor_scale;
-    let available_height = f64::from(monitor.size().height) / monitor_scale;
-    let image_width = f64::from(width);
-    let image_height = f64::from(height);
-    let chrome_width = f64::from(crate::ui::TOOLS_RAIL_WIDTH);
-    let chrome_height = f64::from(crate::ui::TOP_BAR_HEIGHT + crate::ui::FILMSTRIP_RAIL_HEIGHT);
-    let maximum_width = available_width * 0.88;
-    let maximum_height = available_height * 0.86;
-    let fit_scale = ((maximum_width - chrome_width) / image_width)
-        .min((maximum_height - chrome_height) / image_height)
-        .clamp(0.0, 1.0);
-    let minimum_width = 840.0_f64.min(maximum_width);
-    let minimum_height = 620.0_f64.min(maximum_height);
-    let desired_width = (image_width * fit_scale + chrome_width)
-        .max(minimum_width)
-        .min(maximum_width);
-    let desired_height = (image_height * fit_scale + chrome_height)
-        .max(minimum_height)
-        .min(maximum_height);
-    let size = LogicalSize::new(desired_width, desired_height);
-    let _ = renderer.window().request_inner_size(size);
-}
-
 
 fn load_icon() -> Option<winit::window::Icon> {
     let bytes = include_bytes!("../../../assets/icon.ico");
@@ -3015,12 +4128,9 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 renderer.init_accessibility(event_loop, self.event_proxy.clone());
                 self.renderer = Some(renderer);
-                let should_resize = self
-                    .session.presented_path
-                    .as_deref()
-                    .is_some_and(|path| self.resize_on_load.as_deref() == Some(path));
                 if let Some(image) = self.current_image.as_ref() {
                     let image = Arc::clone(image);
+                    let source = self.current_source.clone();
                     let path = self.session.presented_path.clone();
                     if let Some(path) = path
                         && self
@@ -3028,17 +4138,15 @@ impl ApplicationHandler<UserEvent> for App {
                             .as_ref()
                             .is_some_and(|renderer| renderer.required_preview(&image).is_some())
                     {
-                        self.present_image(&path, image, PresentationKind::Loaded);
-                    } else if let Some(renderer) = self.renderer.as_mut() {
-                        if let Err(error) = renderer.set_image(&image, None) {
-                            log::error!("failed to upload initial image: {error}");
-                        } else if should_resize {
-                            resize_window_to_image(renderer);
-                        }
+                        self.present_image(&path, image, source, PresentationKind::Loaded);
+                    } else if let Some(renderer) = self.renderer.as_mut()
+                        && let Err(error) = renderer.set_image(&image, None)
+                    {
+                        log::error!("failed to upload initial image: {error}");
                     }
                 }
-                if should_resize && self.preview_worker.is_none() {
-                    self.resize_on_load = None;
+                if let Some(recovery) = self.appearance_recovery.take() {
+                    self.show_toast(recovery.notice());
                 }
                 let _ = self.renderer.as_mut().unwrap().render(None, None, |_| {});
                 let window = self.renderer.as_ref().unwrap().window();
@@ -3063,8 +4171,15 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
 
+        let is_redraw_event = matches!(&event, WindowEvent::RedrawRequested);
+        let is_own_window = self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.window().id() == window_id);
+
         let mut egui_consumed = false;
         let mut egui_popup_open = false;
+        let mut egui_requested_repaint = false;
         if let Some(renderer) = &mut self.renderer
             && renderer.window().id() == window_id
         {
@@ -3075,12 +4190,19 @@ impl ApplicationHandler<UserEvent> for App {
             // egui reports that RedrawRequested itself wants repainting. The
             // current event already satisfies that request, so scheduling it
             // again here would create a permanent redraw loop.
-            if response.repaint && !matches!(event, WindowEvent::RedrawRequested) {
+            if response.repaint && !is_redraw_event {
+                egui_requested_repaint = true;
                 window.request_redraw();
             }
             egui_consumed = response.consumed;
             egui_popup_open = egui::Popup::is_any_open(&renderer.egui_ctx);
         }
+        record_idle_event_attribution(
+            self.performance_probe.as_mut(),
+            is_own_window,
+            is_redraw_event,
+            egui_requested_repaint,
+        );
 
         if egui_consumed {
             let application_must_handle = match &event {
@@ -3099,6 +4221,7 @@ impl ApplicationHandler<UserEvent> for App {
                 WindowEvent::CursorMoved { .. } if self.heal.painting => true,
                 WindowEvent::KeyboardInput { event, .. } => {
                     !self.show_about
+                        && !self.show_update
                         && !egui_popup_open
                         && route_consumed_keyboard_key(
                             &event.logical_key,
@@ -3135,7 +4258,26 @@ impl ApplicationHandler<UserEvent> for App {
                 self.transform.is_panning = false;
                 self.transform.crop_start = None;
             }
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                match close_disposition(self.curation_worker.is_some()) {
+                    CloseDisposition::Exit => event_loop.exit(),
+                    CloseDisposition::WaitForCuration => {
+                        if !self.close_after_curation {
+                            let worker = self
+                                .curation_worker
+                                .as_ref()
+                                .expect("active close disposition retains curation worker");
+                            log::info!(
+                                "close deferred for curation: operation={:?}, submitted={}",
+                                worker.context.kind(),
+                                worker.context.submitted()
+                            );
+                        }
+                        self.close_after_curation = true;
+                        self.request_redraw();
+                    }
+                }
+            }
             WindowEvent::DroppedFile(path) => {
                 self.load_and_scan(path);
             }
@@ -3319,7 +4461,7 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 use winit::keyboard::{Key, NamedKey};
-                if self.show_about {
+                if self.show_about || self.show_update {
                     return;
                 }
                 let pressed = state == winit::event::ElementState::Pressed;
@@ -3425,11 +4567,11 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Named(NamedKey::ArrowUp) if self.transform.is_cropping => {
                         self.adjust_crop_from_keyboard(0.0, -1.0);
                     }
-                    Key::Named(NamedKey::ArrowRight) => self.navigate(1),
-                    Key::Named(NamedKey::ArrowLeft) => self.navigate(-1),
+                    Key::Named(NamedKey::ArrowRight | NamedKey::PageDown) => self.navigate(1),
+                    Key::Named(NamedKey::ArrowLeft | NamedKey::PageUp) => self.navigate(-1),
                     Key::Named(NamedKey::Home) => self.navigate(-999_999),
                     Key::Named(NamedKey::End) => self.navigate(999_999),
-                    Key::Named(NamedKey::Delete | NamedKey::Backspace) => {
+                    key if is_trash_shortcut_key(&key) => {
                         if self.modifiers.shift_key() {
                             // Only permanent delete asks for confirmation (modal).
                             self.permanent_delete_current();
@@ -3489,21 +4631,33 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
-                let is_flagged = self
-                    .session.presented_path
-                    .as_ref()
-                    .is_some_and(|p| self.flags.contains(p));
-                let flag_count = self.flags.len();
                 let toast = self.toast.clone();
-                let is_loading = self.session.receiver.is_some() || self.preview_worker.is_some();
+                let preview_kind = self.preview_worker.as_ref().map(|worker| worker.kind);
+                let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
+                let is_loading = self.session.is_loading() || preview_kind.is_some();
                 let load_error = self.session.load_error.clone();
                 let save_busy = self.save_worker.is_some();
                 let crop_busy = self.crop_worker.is_some();
+                let curation_status = self
+                    .curation_worker
+                    .as_ref()
+                    .map(|worker| worker.status(self.close_after_curation));
+                let curation_recovery_status = self.curation_recovery.status();
+                let restore_recovery_unsettled =
+                    self.curation_recovery.contains(CurationKind::Restore);
+                let curation_busy = curation_status.is_some();
+                let folder_scan_busy = self.scanner_rx.is_some();
                 let path_str = self
-                    .session.presented_path
+                    .session
+                    .presented_path
                     .as_ref()
                     .or(self.session.selected_path.as_ref())
                     .map(|p| p.to_string_lossy().into_owned());
+                let selected_file_name = self
+                    .session
+                    .selected_path
+                    .as_deref()
+                    .map(prefetch::privacy_safe_file_name);
                 let show_image_info = self.show_image_info;
                 let show_tools_panel = self.show_tools_panel;
                 let tools_panel_open = self.tools_panel_open;
@@ -3514,6 +4668,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let retain_exif = self.retain_exif;
                 let theme_preference = self.theme_preference;
                 let show_about = self.show_about;
+                let show_update = self.show_update;
+                let external_edit_pending = self.external_edit_pending;
                 let source_image_size = self
                     .current_image
                     .as_ref()
@@ -3540,10 +4696,25 @@ impl ApplicationHandler<UserEvent> for App {
                     .refresh
                     .as_ref()
                     .map(|refresh| (refresh.candidate_index, refresh.candidate_count));
-                let can_undo_edit =
-                    !heal_busy && !crop_busy && !save_busy && self.heal.history.can_undo();
-                let can_redo_edit =
-                    !heal_busy && !crop_busy && !save_busy && self.heal.history.can_redo();
+                let can_undo_edit = !is_loading
+                    && !heal_busy
+                    && !crop_busy
+                    && !save_busy
+                    && !curation_busy
+                    && self.heal.history.can_undo();
+                let can_redo_edit = !is_loading
+                    && !heal_busy
+                    && !crop_busy
+                    && !save_busy
+                    && !curation_busy
+                    && self.heal.history.can_redo();
+                let can_undo_trash = !self.last_trashed.is_empty()
+                    && !is_loading
+                    && !crop_busy
+                    && !save_busy
+                    && !heal_busy
+                    && !self.heal.painting
+                    && !curation_busy;
                 let is_panning =
                     self.transform.is_panning || (self.space_held && self.mouse_left_down);
                 let bg_override = self.bg_override;
@@ -3622,6 +4793,7 @@ impl ApplicationHandler<UserEvent> for App {
                     && load_error.is_none()
                     && !crop_busy
                     && !save_busy
+                    && !curation_busy
                     && image_is_fully_displayed(source_image_size, renderer.image_texture_size());
                 let frame = crate::ui::UiFrameOwned {
                     show_image_info,
@@ -3630,6 +4802,8 @@ impl ApplicationHandler<UserEvent> for App {
                     theme_preference,
                     theme_mode,
                     show_about,
+                    show_update,
+                    external_edit_pending,
                     show_tools_panel,
                     tools_panel_open,
                     tools_panel_side,
@@ -3637,6 +4811,7 @@ impl ApplicationHandler<UserEvent> for App {
                     filmstrip_panel_open,
                     image_info_side,
                     file_path: path_str,
+                    selected_file_name,
                     img_size,
                     animation,
                     details,
@@ -3652,14 +4827,18 @@ impl ApplicationHandler<UserEvent> for App {
                     heal_source,
                     can_undo_edit,
                     can_redo_edit,
+                    can_undo_trash,
+                    restore_recovery_unsettled,
                     is_panning,
-                    is_flagged,
-                    flag_count,
                     has_image: img_size.is_some(),
                     is_loading,
+                    is_opening,
                     load_error,
                     save_busy,
                     crop_busy,
+                    curation_status,
+                    curation_recovery_status,
+                    folder_scan_busy,
                     playlist_pos,
                     pixel_scale: pixel_scale.unwrap_or(0.0),
                     toast,
@@ -3702,16 +4881,10 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         crate::ui::UiAction::OpenFolder => self.open_folder_dialog(),
                         crate::ui::UiAction::Reload => self.reload_current_image(),
+                        crate::ui::UiAction::OpenWith => self.open_current_with(),
                         crate::ui::UiAction::SaveAs => self.save_as(),
                         crate::ui::UiAction::Trash => {
                             self.trash_current();
-                            if let Some(r) = self.renderer.as_mut() {
-                                r.window().request_redraw();
-                            }
-                        }
-                        crate::ui::UiAction::ToggleFlag => self.toggle_flag_current(),
-                        crate::ui::UiAction::TrashFlagged => {
-                            self.trash_flagged();
                             if let Some(r) = self.renderer.as_mut() {
                                 r.window().request_redraw();
                             }
@@ -3744,17 +4917,29 @@ impl ApplicationHandler<UserEvent> for App {
                                 renderer.window().request_redraw();
                             }
                             if let Some(error) = save_error {
-                                self.show_toast(format!(
-                                    "Appearance changed for this session but could not be remembered: {error}"
-                                ));
+                                log::warn!(
+                                    "appearance preference save failed: {}",
+                                    error.diagnostic_name()
+                                );
+                                self.show_toast(appearance_save_failure_message());
                             }
                         }
                         crate::ui::UiAction::ShowAbout => {
                             self.show_about = true;
+                            self.show_update = false;
                             self.request_redraw();
                         }
                         crate::ui::UiAction::CloseAbout => {
                             self.show_about = false;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::ShowUpdate => {
+                            self.show_update = true;
+                            self.show_about = false;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::CloseUpdate => {
+                            self.show_update = false;
                             self.request_redraw();
                         }
                         crate::ui::UiAction::ToggleImageInfo => {
@@ -3931,6 +5116,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_curation_result(event_loop);
         self.poll_thumbnails();
         self.poll_prefetch();
         self.poll_heal_result();
@@ -3951,14 +5137,7 @@ impl ApplicationHandler<UserEvent> for App {
                         r.window().request_redraw();
                     }
                 }
-                Ok(image) => {
-                    // Late load that is no longer current still seeds the RAM cache.
-                    self.prefetch.insert(path, image);
-                }
                 Err(e) if is_current => {
-                    if self.resize_on_load.as_ref() == Some(&path) {
-                        self.resize_on_load = None;
-                    }
                     log::error!("decode failed");
                     let message = format!("Could not decode: {e}");
                     self.session.load_error = Some(message.clone());
@@ -3969,7 +5148,7 @@ impl ApplicationHandler<UserEvent> for App {
                         r.window().request_redraw();
                     }
                 }
-                Err(_) => {}
+                Ok(_) | Err(_) => {}
             }
         }
 
@@ -4014,8 +5193,15 @@ impl ApplicationHandler<UserEvent> for App {
         .min();
         match next_repaint {
             Some(deadline) if deadline <= Instant::now() => {
-                if self.egui_repaint_at.is_some_and(|at| at <= deadline) {
+                let egui_repaint_due = self.egui_repaint_at.is_some_and(|at| at <= deadline);
+                if egui_repaint_due {
                     self.egui_repaint_at = None;
+                    if let Some(probe) = self.performance_probe.as_mut()
+                        && probe.idle_until.is_some()
+                    {
+                        probe.idle_scheduled_egui_repaints =
+                            probe.idle_scheduled_egui_repaints.saturating_add(1);
+                    }
                 }
                 if let Some(renderer) = self.renderer.as_ref() {
                     renderer.window().request_redraw();
@@ -4025,6 +5211,32 @@ impl ApplicationHandler<UserEvent> for App {
             Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PrefetchDestination {
+    PresentSelected,
+    CacheNeighbor,
+    Ignore,
+}
+
+fn prefetch_destination(
+    selected: Option<&Path>,
+    selected_is_pending_or_failed: bool,
+    playlist: Option<&Playlist>,
+    path: &Path,
+) -> PrefetchDestination {
+    if selected == Some(path) {
+        if selected_is_pending_or_failed {
+            PrefetchDestination::PresentSelected
+        } else {
+            PrefetchDestination::Ignore
+        }
+    } else if playlist.is_some_and(|playlist| playlist.files.iter().any(|item| item == path)) {
+        PrefetchDestination::CacheNeighbor
+    } else {
+        PrefetchDestination::Ignore
     }
 }
 
@@ -4071,22 +5283,715 @@ fn repaint_deadline(now: Instant, repaint_after: Duration) -> Option<Instant> {
     }
 }
 
+fn performance_ui_is_settled(egui_repaint_at: Option<Instant>) -> bool {
+    egui_repaint_at.is_none()
+}
+
+fn idle_window_state(renderer: Option<&Renderer>) -> (bool, bool) {
+    renderer.map_or((false, false), |renderer| {
+        (
+            renderer.window().has_focus(),
+            renderer
+                .egui_ctx
+                .input(|input| input.pointer.hover_pos().is_some()),
+        )
+    })
+}
+
+fn record_idle_event_attribution(
+    probe: Option<&mut PerformanceProbe>,
+    is_own_window: bool,
+    is_redraw_event: bool,
+    event_requested_repaint: bool,
+) {
+    if !is_own_window || is_redraw_event {
+        return;
+    }
+    let Some(probe) = probe else {
+        return;
+    };
+    if probe.idle_until.is_none() {
+        return;
+    }
+    probe.idle_non_redraw_events = probe.idle_non_redraw_events.saturating_add(1);
+    if event_requested_repaint {
+        probe.idle_event_repaint_requests = probe.idle_event_repaint_requests.saturating_add(1);
+    }
+}
+
+fn navigation_image_plan(
+    current_index: usize,
+    target_index: usize,
+    current_path: &Path,
+    target_path: &Path,
+    presented_path: Option<&Path>,
+    has_image: bool,
+    reuse: ImageReuseEligibility,
+) -> NavigationImagePlan {
+    if !has_image || reuse != ImageReuseEligibility::PristineSource {
+        return NavigationImagePlan::LoadOnly;
+    }
+    if presented_path == Some(target_path) {
+        return NavigationImagePlan::ReusePresented;
+    }
+    if presented_path == Some(current_path) && current_index.abs_diff(target_index) <= 2 {
+        NavigationImagePlan::RetainPresented
+    } else {
+        NavigationImagePlan::LoadOnly
+    }
+}
+
+const fn image_open_in_progress(
+    foreground_decode_pending: bool,
+    preview_kind: Option<PresentationKind>,
+) -> bool {
+    foreground_decode_pending || matches!(preview_kind, Some(PresentationKind::Loaded))
+}
+
+fn durable_presentation_error(kind: PresentationKind, message: &str) -> Option<String> {
+    matches!(kind, PresentationKind::Loaded).then(|| message.to_owned())
+}
+
+fn crop_recovery_matches(
+    recovery: &CropRecovery,
+    current_generation: u64,
+    selected_path: Option<&Path>,
+    presented_path: Option<&Path>,
+    current_image: Option<&Arc<DecodedImage>>,
+) -> bool {
+    recovery.source_generation == current_generation
+        && selected_path == Some(recovery.source_path.as_path())
+        && presented_path == Some(recovery.source_path.as_path())
+        && current_image.is_some_and(|image| Arc::ptr_eq(image, &recovery.source_image))
+}
+
+const fn crop_failure_message(selection_restored: bool) -> &'static str {
+    if selection_restored {
+        "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
+    } else {
+        "Crop was not applied because the image changed."
+    }
+}
+
+const fn crop_source_blocker(
+    image_open_in_progress: bool,
+    image_open_failed: bool,
+) -> Option<&'static str> {
+    if image_open_in_progress {
+        Some("Wait for the image to finish opening before cropping")
+    } else if image_open_failed {
+        Some("Retry the failed image load before cropping")
+    } else {
+        None
+    }
+}
+
+fn present_image_patch(
+    renderer: Option<&mut Renderer>,
+    image: &DecodedImage,
+    patch: &crate::heal::ImagePatch,
+) -> Result<(), String> {
+    let renderer = renderer.ok_or_else(|| "renderer is unavailable".to_owned())?;
+    let patch_presented = renderer.update_image_patch(patch);
+    complete_patch_presentation(patch_presented, || {
+        renderer
+            .set_image(image, None)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
+}
+
+fn complete_patch_presentation<E>(
+    patch_presented: bool,
+    full_image_fallback: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    if patch_presented {
+        Ok(())
+    } else {
+        full_image_fallback()
+    }
+}
+
+fn permanent_delete_description(path: &Path) -> String {
+    let name = prefetch::privacy_safe_file_name(path).replace('"', "?");
+    format!(
+        "Delete \"{name}\" forever?\n\nThis skips the system Trash and cannot be undone from viewr."
+    )
+}
+
+fn permanent_delete_confirmed(result: &rfd::MessageDialogResult) -> bool {
+    matches!(
+        result,
+        rfd::MessageDialogResult::Custom(label) if label == PERMANENT_DELETE_ACTION
+    )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
-    fn assert_rect_close(actual: [f32; 4], expected: [f32; 4]) {
-        for (actual, expected) in actual.into_iter().zip(expected) {
-            assert!(
-                (actual - expected).abs() < 1e-5,
-                "expected {expected}, got {actual}"
-            );
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_open_with_hresult_is_classified_without_path_details() {
+        assert_eq!(classify_open_with_hresult(0), OpenWithOutcome::Launched);
+        assert_eq!(
+            classify_open_with_hresult(0x8007_04c7_u32.cast_signed()),
+            OpenWithOutcome::Cancelled
+        );
+        assert_eq!(
+            classify_open_with_hresult(0x8000_4005_u32.cast_signed()),
+            OpenWithOutcome::Failed(0x8000_4005)
+        );
+    }
+
+    #[test]
+    fn busy_action_copy_is_specific_and_prioritized() {
+        assert_eq!(crop_work(true, false), Some(CurrentWork::Crop));
+        assert_eq!(crop_work(false, true), Some(CurrentWork::Crop));
+        assert_eq!(crop_work(false, false), None);
+        assert_eq!(
+            current_work_blocker([
+                None,
+                None,
+                image_preparation_work(true, false),
+                Some(CurrentWork::Crop),
+                Some(CurrentWork::Save),
+                Some(CurrentWork::SpotHeal),
+            ]),
+            Some(CurrentWork::ImagePreparation)
+        );
+        assert_eq!(
+            current_work_blocker([
+                None,
+                None,
+                image_preparation_work(false, true),
+                Some(CurrentWork::Crop),
+                Some(CurrentWork::Save),
+                Some(CurrentWork::SpotHeal),
+            ]),
+            Some(CurrentWork::ImagePreparation)
+        );
+        assert_eq!(
+            current_work_blocker([
+                None,
+                None,
+                None,
+                Some(CurrentWork::Crop),
+                Some(CurrentWork::Save),
+                Some(CurrentWork::SpotHeal),
+            ]),
+            Some(CurrentWork::Crop)
+        );
+        assert_eq!(
+            current_work_blocker([
+                None,
+                None,
+                None,
+                None,
+                Some(CurrentWork::Save),
+                Some(CurrentWork::SpotHeal),
+            ]),
+            Some(CurrentWork::Save)
+        );
+        assert_eq!(
+            current_work_blocker([None, None, None, None, None, Some(CurrentWork::SpotHeal)]),
+            Some(CurrentWork::SpotHeal)
+        );
+        assert_eq!(
+            current_work_blocker([
+                Some(CurrentWork::TrashRestore),
+                Some(CurrentWork::FolderScan),
+                None,
+                None,
+                None,
+                None,
+            ]),
+            Some(CurrentWork::TrashRestore)
+        );
+        assert_eq!(
+            current_work_blocker([None, Some(CurrentWork::FolderScan), None, None, None, None,]),
+            Some(CurrentWork::FolderScan)
+        );
+        assert_eq!(
+            current_work_blocker([None, None, None, None, None, None]),
+            None
+        );
+        assert_eq!(
+            blocked_action_message("moving this file to Trash", CurrentWork::SpotHeal),
+            "Wait for Spot Heal to finish before moving this file to Trash"
+        );
+    }
+
+    #[test]
+    fn curation_worker_dispatches_without_waiting_and_wakes_once() {
+        let (started_sender, started_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::sync_channel(1);
+        let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
+        let (result_receiver, join) = spawn_curation_thread(
+            "viewr-test-curation",
+            move || {
+                started_sender.send(()).unwrap();
+                release_receiver.recv().unwrap();
+                17_u8
+            },
+            move || wake_sender.send(()).unwrap(),
+        )
+        .expect("test worker should spawn");
+
+        started_receiver.recv().unwrap();
+        assert!(matches!(poll_worker(&result_receiver), WorkerPoll::Pending));
+        release_sender.send(()).unwrap();
+        wake_receiver.recv().unwrap();
+        assert!(matches!(
+            poll_worker(&result_receiver),
+            WorkerPoll::Ready(17)
+        ));
+        join.join().unwrap();
+        assert!(matches!(
+            wake_receiver.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn curation_worker_panic_disconnects_and_wakes_once() {
+        let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
+        let (wake_release_sender, wake_release_receiver) = mpsc::sync_channel(1);
+        let (result_receiver, join) = spawn_curation_thread::<u8>(
+            "viewr-test-curation-panic",
+            || panic!("controlled curation worker panic"),
+            move || {
+                wake_sender.send(()).unwrap();
+                wake_release_receiver.recv().unwrap();
+            },
+        )
+        .expect("test worker should spawn");
+
+        wake_receiver.recv().unwrap();
+        assert!(matches!(
+            poll_worker(&result_receiver),
+            WorkerPoll::Disconnected
+        ));
+        wake_release_sender.send(()).unwrap();
+        assert!(join.join().is_err());
+        assert!(matches!(
+            wake_receiver.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn curation_status_and_close_decisions_are_truthful() {
+        assert_eq!(
+            curation_status(CurationKind::Restore, 1, false),
+            "Restoring 1 file from Trash..."
+        );
+        assert_eq!(
+            curation_status(CurationKind::Restore, 3, true),
+            "Finishing Trash restore for 3 files before closing..."
+        );
+        assert_eq!(close_disposition(false), CloseDisposition::Exit);
+        assert_eq!(close_disposition(true), CloseDisposition::WaitForCuration);
+        assert_eq!(
+            curation_action_preflight(
+                Some(CurationKind::Restore),
+                false,
+                "restoring files from Trash",
+                "Nothing to restore from Trash",
+            ),
+            Some(
+                "Wait for the Trash restore to finish before restoring files from Trash".to_owned()
+            )
+        );
+        assert_eq!(
+            curation_action_preflight(
+                None,
+                false,
+                "restoring files from Trash",
+                "Nothing to restore from Trash",
+            ),
+            Some("Nothing to restore from Trash".to_owned())
+        );
+    }
+
+    #[test]
+    fn unresolved_restore_blocks_only_receipt_replacing_trash_actions() {
+        let mut recovery = CurationRecovery::default();
+        assert_eq!(trash_replacement_preflight(&recovery), None);
+
+        recovery.record(CurationKind::Restore);
+        assert_eq!(
+            trash_replacement_preflight(&recovery),
+            Some(
+                "Review the folder and system Trash, then retry U before moving more files to Trash."
+            )
+        );
+
+        recovery.clear(CurationKind::Restore);
+        assert_eq!(trash_replacement_preflight(&recovery), None);
+    }
+
+    #[test]
+    fn curation_recovery_clears_after_restore_reconciliation() {
+        let mut recovery = CurationRecovery::default();
+        recovery.record(CurationKind::Restore);
+        assert_eq!(
+            recovery.status().as_deref(),
+            Some(curation_recovery_message(CurationKind::Restore))
+        );
+        recovery.clear(CurationKind::Restore);
+        assert!(recovery.status().is_none());
+    }
+
+    #[test]
+    fn permanent_delete_confirmation_is_bounded_path_free_and_control_safe() {
+        let path = PathBuf::from("private")
+            .join("album")
+            .join("bad\n\u{202e}\"gpj");
+        let description = permanent_delete_description(&path);
+        assert!(description.starts_with("Delete \"bad???gpj\" forever?"));
+        assert!(!description.contains("private"));
+        assert!(!description.contains("album"));
+        assert!(!description.contains('\u{202e}'));
+        assert_eq!(description.matches('\n').count(), 2);
+        assert!(description.contains("system Trash"));
+
+        let long_name = format!("{}.png", "a".repeat(140));
+        let description = permanent_delete_description(Path::new(&long_name));
+        let quoted = description
+            .strip_prefix("Delete \"")
+            .and_then(|value| value.split_once("\" forever?"))
+            .map(|(name, _)| name)
+            .expect("fixed confirmation structure");
+        assert_eq!(quoted.chars().count(), 96);
+    }
+
+    #[test]
+    fn permanent_delete_requires_the_explicit_destructive_action() {
+        assert!(permanent_delete_confirmed(
+            &rfd::MessageDialogResult::Custom(PERMANENT_DELETE_ACTION.to_owned())
+        ));
+        assert!(!permanent_delete_confirmed(&rfd::MessageDialogResult::Ok));
+        assert!(!permanent_delete_confirmed(
+            &rfd::MessageDialogResult::Custom("Cancel".to_owned())
+        ));
+    }
+
+    #[test]
+    fn source_bound_destructive_copy_is_exhaustive_and_path_free() {
+        let trash_cases = [
+            (
+                GuardedActionError::Changed,
+                "This file changed after it was displayed. Reload it before moving it to Trash. Nothing was moved.",
+            ),
+            (
+                GuardedActionError::Missing,
+                "This file is no longer available. Nothing was moved.",
+            ),
+            (
+                GuardedActionError::Unsupported,
+                "This filesystem entry cannot be safely moved from the displayed source. Nothing was moved.",
+            ),
+            (
+                GuardedActionError::Unavailable,
+                "Safe file identity could not be verified. Nothing was moved.",
+            ),
+            (
+                GuardedActionError::OperationFailed("access denied".to_owned()),
+                "Trash failed: access denied. Nothing was moved.",
+            ),
+        ];
+        for (error, expected) in trash_cases {
+            let message = guarded_action_failure_message(GuardedActionKind::Trash, &error);
+            assert_eq!(message, expected);
+            assert!(!message.contains("private"));
+            assert!(!message.contains("album"));
+        }
+
+        let permanent_delete_cases = [
+            (
+                GuardedActionError::Changed,
+                "This file changed after it was displayed. Reload it before deleting it. Nothing was deleted.",
+            ),
+            (
+                GuardedActionError::Missing,
+                "This file is no longer available. Nothing was deleted.",
+            ),
+            (
+                GuardedActionError::Unsupported,
+                "This filesystem entry cannot be safely deleted from the displayed source. Nothing was deleted.",
+            ),
+            (
+                GuardedActionError::Unavailable,
+                "Safe file identity could not be verified. Nothing was deleted.",
+            ),
+            (
+                GuardedActionError::OperationFailed("access denied".to_owned()),
+                "Delete failed: access denied. Nothing was deleted.",
+            ),
+        ];
+        for (error, expected) in permanent_delete_cases {
+            let message =
+                guarded_action_failure_message(GuardedActionKind::PermanentDelete, &error);
+            assert_eq!(message, expected);
+            assert!(!message.contains("private"));
+            assert!(!message.contains("album"));
         }
     }
 
-    fn assert_pair_close(actual: (f32, f32), expected: (f32, f32)) {
-        assert!((actual.0 - expected.0).abs() < 1e-5);
-        assert!((actual.1 - expected.1).abs() < 1e-5);
+    #[test]
+    fn file_counts_use_plain_singular_and_plural_copy() {
+        assert_eq!(file_count(0), "0 files");
+        assert_eq!(file_count(1), "1 file");
+        assert_eq!(file_count(2), "2 files");
+    }
+
+    #[test]
+    fn appearance_save_failure_copy_is_fixed_and_path_private() {
+        let message = appearance_save_failure_message();
+        assert_eq!(
+            message,
+            "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
+        );
+        for private_fragment in ["C:\\Users\\private", "/home/private", "access denied"] {
+            assert!(!message.contains(private_fragment));
+        }
+    }
+
+    #[test]
+    fn single_trash_copy_routes_every_move_to_a_real_recovery_path() {
+        assert_eq!(
+            single_trash_result_message(true, false),
+            "Moved to Trash. Undo with U."
+        );
+        assert_eq!(
+            single_trash_result_message(false, true),
+            "Moved to Trash, but U is unavailable for this move. Use the system Trash; U still restores the previous Trash action."
+        );
+        assert_eq!(
+            single_trash_result_message(false, false),
+            "Moved to Trash, but U is unavailable for this move. Use the system Trash for recovery."
+        );
+    }
+
+    #[test]
+    fn permanent_delete_success_copy_disambiguates_prior_trash_undo() {
+        let path = PathBuf::from("private")
+            .join("album")
+            .join("bad\n\u{202e}\"gpj");
+        let with_prior = permanent_delete_success_message(&path, true);
+        assert_eq!(
+            with_prior,
+            "Permanently deleted \"bad???gpj\". This cannot be undone; U still restores the previous Trash action."
+        );
+        assert!(!with_prior.contains("private"));
+        assert!(!with_prior.contains("album"));
+        assert!(!with_prior.contains('\n'));
+        assert!(!with_prior.contains('\u{202e}'));
+
+        assert_eq!(
+            permanent_delete_success_message(&path, false),
+            "Permanently deleted \"bad???gpj\". This cannot be undone."
+        );
+    }
+
+    #[test]
+    fn restore_copy_exposes_only_valid_retry_routes() {
+        use crate::curate::TrashRestoreError as Error;
+
+        let cases = [
+            (
+                Error::DestinationOccupied,
+                "Restore blocked: The original folder already contains an item with that name. Move or rename it, then retry with U.",
+            ),
+            (
+                Error::AccessDenied,
+                "Restore blocked: Access was denied. Check permissions, then retry with U.",
+            ),
+            (
+                Error::OperationFailed,
+                "Restore failed: The operating system could not restore the file. Retry with U.",
+            ),
+            (
+                Error::MissingFromTrash,
+                "The exact item is no longer in the system Trash. No retry remains in viewr.",
+            ),
+            (
+                Error::AmbiguousReceipt,
+                "The exact Trash receipt is ambiguous. Use the system Trash; no retry remains in viewr.",
+            ),
+            (
+                Error::Unsupported,
+                "In-app restore is unsupported on this platform. Use the system Trash; no retry remains in viewr.",
+            ),
+            (
+                Error::InvalidReceipt,
+                "The exact Trash receipt is unavailable. Use the system Trash; no retry remains in viewr.",
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(single_restore_failure_message(error), expected);
+        }
+
+        assert_eq!(
+            restore_result_message(1, 0, 0, 0, 0, None, true),
+            "Restored 1 file"
+        );
+        assert_eq!(
+            restore_result_message(2, 0, 0, 0, 0, None, false),
+            "Restored 2 files; reopen the source folder to refresh its view"
+        );
+        assert_eq!(
+            restore_result_message(1, 1, 1, 1, 1, Some(Error::OperationFailed), true),
+            "Restored 1 file; 1 file can retry with U; 1 file needs the blocking condition resolved, then U can retry; 1 file requires system Trash review; 1 file is no longer available for in-app restore."
+        );
+        let manual_only =
+            restore_result_message(0, 0, 0, 1, 1, Some(Error::AmbiguousReceipt), true);
+        assert_eq!(
+            manual_only,
+            "Nothing restored; 1 file requires system Trash review; 1 file is no longer available for in-app restore."
+        );
+        assert!(!manual_only.contains('U'));
+    }
+
+    #[test]
+    fn preserved_undo_indices_follow_same_scope_nonundoable_removals() {
+        let workspace = crate::ephemeral::TempWorkspace::new("preserved_undo_indices").unwrap();
+        let source_path = workspace.path().join("source.png");
+        std::fs::write(&source_path, b"source").unwrap();
+        let source = Arc::new(crate::fs::ImageSource::open(&source_path).unwrap());
+        let record = |name: &str, playlist_index| TrashedFile {
+            receipt: crate::curate::TrashReceipt::for_test(
+                PathBuf::from(name),
+                Arc::clone(&source),
+            ),
+            playlist_index,
+        };
+        let scope = Arc::new(PlaylistScope);
+        let other_scope = Arc::new(PlaylistScope);
+        let mut records = vec![record("b.png", 1), record("d.png", 3)];
+
+        rebase_preserved_trash_action(&mut records, Some(&scope), Some(&scope), &[0]);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.playlist_index)
+                .collect::<Vec<_>>(),
+            vec![0, 2],
+            "a permanent delete before the pending action shifts both receipts"
+        );
+        rebase_preserved_trash_action(&mut records, Some(&scope), Some(&scope), &[0]);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.playlist_index)
+                .collect::<Vec<_>>(),
+            vec![0, 1],
+            "a later receiptless Trash move before the trailing receipt shifts it"
+        );
+
+        let mut simultaneous = vec![record("b.png", 1), record("d.png", 3)];
+        rebase_preserved_trash_action(&mut simultaneous, Some(&scope), Some(&scope), &[0, 2]);
+        assert_eq!(
+            simultaneous
+                .iter()
+                .map(|record| record.playlist_index)
+                .collect::<Vec<_>>(),
+            vec![0, 2],
+            "a trailing current item remains after the pending trailing receipt"
+        );
+
+        let mut unrelated = vec![record("b.png", 1)];
+        rebase_preserved_trash_action(&mut unrelated, Some(&scope), Some(&other_scope), &[0]);
+        assert_eq!(unrelated[0].playlist_index, 1);
+    }
+
+    #[test]
+    fn heal_presentation_failure_keeps_app_state_and_routes_safe_retry_copy() {
+        let mut image = DecodedImage {
+            rgba: [18, 36, 54, 255].repeat(16 * 16),
+            width: 16,
+            height: 16,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        };
+        let job = crate::heal::SpotHealJob::prepare(
+            &image,
+            &[crate::heal::StrokePoint { x: 8.0, y: 8.0 }],
+            crate::heal::MIN_BRUSH_RADIUS,
+        )
+        .unwrap()
+        .unwrap();
+        let mut refresh = Some(HealRefresh {
+            job,
+            candidate_index: 1,
+            candidate_count: 3,
+        });
+        let mut history = crate::heal::PatchHistory::new(64);
+        let original_pixels = image.rgba.clone();
+        let secret = "C:\\private\\album\\bad\n\u{202e}.png";
+        let error = commit_presented_heal(
+            &mut image,
+            &mut history,
+            &mut refresh,
+            &crate::heal::SpotHealResult {
+                patch: crate::heal::ImagePatch {
+                    bounds: crate::edit::Rect {
+                        x: 2,
+                        y: 3,
+                        width: 1,
+                        height: 1,
+                    },
+                    rgba: vec![250, 1, 2, 255],
+                },
+                candidate_index: 2,
+                candidate_count: 4,
+            },
+            None,
+            true,
+            |_, _| complete_patch_presentation(false, || Err(secret)),
+        )
+        .expect_err("the injected full-image fallback must fail");
+
+        assert_eq!(image.rgba, original_pixels);
+        assert!(!history.can_undo());
+        assert!(!history.can_redo());
+        let refresh = refresh.expect("the previous refresh must remain available");
+        assert_eq!(refresh.candidate_index, 1);
+        assert_eq!(refresh.candidate_count, 3);
+
+        let message = edit_transaction_failure_message("Spot heal", &error, false);
+        assert!(message.ends_with("Try again."));
+        assert!(!message.contains("Spot healed"));
+        assert!(!message.contains("private"));
+        assert!(!message.contains('\n'));
+        assert!(!message.contains('\u{202e}'));
+    }
+
+    #[test]
+    fn edit_transaction_copy_is_truthful_and_hides_internal_errors() {
+        let edit_error = crate::heal::PatchPresentationError::<&str>::Edit(
+            crate::heal::HealError::InvalidImageBuffer,
+        );
+        let edit_message = edit_transaction_failure_message("Undo", &edit_error, false);
+        assert_eq!(
+            edit_message,
+            "Undo could not be applied. The image and edit history are unchanged."
+        );
+        assert!(!edit_message.contains("RGBA"));
+
+        let rollback_error = crate::heal::PatchPresentationError::Rollback {
+            presentation: "adapter rejected the update",
+            rollback: crate::heal::HealError::InvalidPatch,
+        };
+        assert_eq!(
+            edit_transaction_failure_message("Spot heal", &rollback_error, true),
+            "Spot heal failed. Disk source unchanged; reloading it and clearing edit history."
+        );
+        assert_eq!(
+            edit_transaction_failure_message("Spot heal", &rollback_error, false),
+            "Spot heal failed. Disk source unchanged; reopen it. Edit history was cleared."
+        );
     }
 
     #[test]
@@ -4112,6 +6017,216 @@ mod test {
     }
 
     #[test]
+    fn reverse_navigation_reuses_only_pristine_presented_pixels() {
+        let a = Path::new("a.png");
+        let b = Path::new("b.png");
+        let c = Path::new("c.png");
+
+        assert_eq!(
+            navigation_image_plan(
+                1,
+                0,
+                b,
+                a,
+                Some(a),
+                true,
+                ImageReuseEligibility::PristineSource,
+            ),
+            NavigationImagePlan::ReusePresented
+        );
+        assert_eq!(
+            navigation_image_plan(
+                0,
+                1,
+                a,
+                b,
+                Some(a),
+                true,
+                ImageReuseEligibility::PristineSource,
+            ),
+            NavigationImagePlan::RetainPresented
+        );
+        for (has_image, reuse) in [
+            (false, ImageReuseEligibility::PristineSource),
+            (true, ImageReuseEligibility::Ineligible),
+        ] {
+            assert_eq!(
+                navigation_image_plan(1, 0, b, a, Some(a), has_image, reuse),
+                NavigationImagePlan::LoadOnly
+            );
+        }
+        assert_eq!(
+            navigation_image_plan(
+                0,
+                3,
+                a,
+                c,
+                Some(a),
+                true,
+                ImageReuseEligibility::PristineSource,
+            ),
+            NavigationImagePlan::LoadOnly
+        );
+        assert_eq!(
+            navigation_image_plan(
+                0,
+                1,
+                a,
+                b,
+                Some(c),
+                true,
+                ImageReuseEligibility::PristineSource,
+            ),
+            NavigationImagePlan::LoadOnly
+        );
+        assert_eq!(
+            PresentationKind::Loaded.image_reuse(),
+            ImageReuseEligibility::PristineSource
+        );
+        assert_eq!(
+            PresentationKind::Cropped.image_reuse(),
+            ImageReuseEligibility::Ineligible
+        );
+    }
+
+    #[test]
+    fn opening_state_excludes_derived_preview_preparation() {
+        assert!(image_open_in_progress(true, None));
+        assert!(image_open_in_progress(
+            false,
+            Some(PresentationKind::Loaded)
+        ));
+        assert!(!image_open_in_progress(
+            false,
+            Some(PresentationKind::Cropped)
+        ));
+        assert!(!image_open_in_progress(false, None));
+    }
+
+    #[test]
+    fn loaded_presentation_failures_are_retryable_but_crop_failures_are_not() {
+        let message = "Could not prepare image preview";
+        assert_eq!(
+            durable_presentation_error(PresentationKind::Loaded, message).as_deref(),
+            Some(message)
+        );
+        assert_eq!(
+            durable_presentation_error(PresentationKind::Cropped, message),
+            None
+        );
+    }
+
+    #[test]
+    fn crop_recovery_requires_generation_path_and_exact_source_allocation() {
+        let path = PathBuf::from("album").join("source.png");
+        let source_image = Arc::new(DecodedImage {
+            rgba: vec![10, 20, 30, 255],
+            width: 1,
+            height: 1,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        });
+        let same_pixels_different_allocation = Arc::new(DecodedImage {
+            rgba: source_image.rgba.clone(),
+            width: source_image.width,
+            height: source_image.height,
+            color_profile: source_image.color_profile,
+            working_color: source_image.working_color,
+        });
+        let transform = Transform {
+            zoom: 2.5,
+            offset_x: 0.2,
+            offset_y: -0.1,
+            rotation_steps: 1,
+            flip_h: true,
+            is_cropping: true,
+            crop_rect: Some([0.2, 0.3, 0.8, 0.9]),
+            ..Transform::default()
+        };
+        let recovery = CropRecovery {
+            source_path: path.clone(),
+            source_generation: 42,
+            source_image: Arc::clone(&source_image),
+            transform,
+            animation: None,
+            auxiliary_loader_rx: None,
+        };
+
+        assert!(crop_recovery_matches(
+            &recovery,
+            42,
+            Some(&path),
+            Some(&path),
+            Some(&source_image),
+        ));
+        assert!(!crop_recovery_matches(
+            &recovery,
+            43,
+            Some(&path),
+            Some(&path),
+            Some(&source_image),
+        ));
+        assert!(!crop_recovery_matches(
+            &recovery,
+            42,
+            Some(Path::new("album/other.png")),
+            Some(&path),
+            Some(&source_image),
+        ));
+        assert!(!crop_recovery_matches(
+            &recovery,
+            42,
+            Some(&path),
+            Some(&path),
+            Some(&same_pixels_different_allocation),
+        ));
+        assert_eq!(recovery.transform.crop_rect, Some([0.2, 0.3, 0.8, 0.9]));
+        assert_eq!(recovery.transform.rotation_steps, 1);
+    }
+
+    #[test]
+    fn worker_poll_distinguishes_pending_ready_and_disconnected() {
+        let (sender, receiver) = mpsc::channel();
+        assert!(matches!(poll_worker::<u8>(&receiver), WorkerPoll::Pending));
+        sender.send(7).unwrap();
+        assert!(matches!(poll_worker(&receiver), WorkerPoll::Ready(7)));
+        drop(sender);
+        assert!(matches!(
+            poll_worker::<u8>(&receiver),
+            WorkerPoll::Disconnected
+        ));
+    }
+
+    #[test]
+    fn crop_failure_copy_states_safe_state_and_direct_retry() {
+        assert_eq!(
+            crop_failure_message(true),
+            "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
+        );
+        assert_eq!(
+            crop_failure_message(false),
+            "Crop was not applied because the image changed."
+        );
+    }
+
+    #[test]
+    fn crop_source_requires_a_settled_successful_image_load() {
+        assert_eq!(
+            crop_source_blocker(true, false),
+            Some("Wait for the image to finish opening before cropping")
+        );
+        assert_eq!(
+            crop_source_blocker(false, true),
+            Some("Retry the failed image load before cropping")
+        );
+        assert_eq!(
+            crop_source_blocker(true, true),
+            Some("Wait for the image to finish opening before cropping")
+        );
+        assert_eq!(crop_source_blocker(false, false), None);
+    }
+
+    #[test]
     fn canceling_a_heal_retains_and_invalidates_the_single_worker() {
         let (_sender, result_rx) = mpsc::channel::<HealWorkerOutput>();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -4121,7 +6236,6 @@ mod test {
                 cancel: cancel.clone(),
                 apply_result: true,
                 replacing_latest: false,
-                previous_candidate_index: 0,
             }),
             ..HealTool::default()
         };
@@ -4157,6 +6271,22 @@ mod test {
             false,
             false,
         ));
+        for key in ["b", "B", "m", "M", "x", "X"] {
+            assert!(
+                !route_consumed_keyboard_key(&Key::Character(key.into()), false, false),
+                "unused culling key {key} must not be intercepted"
+            );
+        }
+        assert!(route_consumed_keyboard_key(
+            &Key::Character("x".into()),
+            true,
+            false,
+        ));
+        assert!(is_trash_shortcut_key(&Key::Named(NamedKey::Delete)));
+        assert_eq!(
+            is_trash_shortcut_key(&Key::Named(NamedKey::Backspace)),
+            cfg!(target_os = "macos")
+        );
         assert!(route_consumed_keyboard_key(
             &Key::Character("z".into()),
             false,
@@ -4187,6 +6317,14 @@ mod test {
             false,
             false,
         ));
+        for key in [
+            NamedKey::Home,
+            NamedKey::End,
+            NamedKey::PageUp,
+            NamedKey::PageDown,
+        ] {
+            assert!(route_consumed_keyboard_key(&Key::Named(key), false, false,));
+        }
         assert!(!route_consumed_keyboard_key(
             &Key::Named(NamedKey::ArrowDown),
             false,
@@ -4207,6 +6345,43 @@ mod test {
         assert!(!single_key_shortcut_allowed(ModifiersState::CONTROL));
         assert!(!single_key_shortcut_allowed(ModifiersState::ALT));
         assert!(!single_key_shortcut_allowed(ModifiersState::SUPER));
+    }
+
+    #[test]
+    fn trash_undo_scope_requires_the_exact_playlist_instance() {
+        let original = Arc::new(PlaylistScope);
+        let same = Arc::clone(&original);
+        let replacement = Arc::new(PlaylistScope);
+        let playlist = Playlist {
+            files: vec![PathBuf::from("active.jpg")],
+            index: 0,
+        };
+
+        assert!(restore_targets_active_playlist(
+            Some(&playlist),
+            Some(&same),
+            Some(&original)
+        ));
+        assert!(!restore_targets_active_playlist(
+            Some(&playlist),
+            Some(&replacement),
+            Some(&original)
+        ));
+        assert!(!restore_targets_active_playlist(
+            Some(&playlist),
+            Some(&original),
+            None
+        ));
+        assert!(!restore_targets_active_playlist(
+            Some(&playlist),
+            None,
+            Some(&original)
+        ));
+        assert!(!restore_targets_active_playlist(
+            None,
+            Some(&same),
+            Some(&original)
+        ));
     }
 
     #[test]
@@ -4260,6 +6435,32 @@ mod test {
     }
 
     #[test]
+    fn delayed_egui_repaint_is_not_settled_idle() {
+        assert!(!performance_ui_is_settled(Some(Instant::now())));
+        assert!(performance_ui_is_settled(None));
+    }
+
+    #[test]
+    fn idle_event_attribution_counts_only_own_non_redraw_events() {
+        let mut probe = PerformanceProbe::new(Instant::now());
+        probe.idle_until = Some(Instant::now());
+
+        record_idle_event_attribution(Some(&mut probe), true, false, false);
+        record_idle_event_attribution(Some(&mut probe), true, false, true);
+        record_idle_event_attribution(Some(&mut probe), true, true, true);
+        record_idle_event_attribution(Some(&mut probe), false, false, true);
+        record_idle_event_attribution(None, true, false, true);
+
+        assert_eq!(probe.idle_non_redraw_events, 2);
+        assert_eq!(probe.idle_event_repaint_requests, 1);
+
+        probe.idle_until = None;
+        record_idle_event_attribution(Some(&mut probe), true, false, true);
+        assert_eq!(probe.idle_non_redraw_events, 2);
+        assert_eq!(probe.idle_event_repaint_requests, 1);
+    }
+
+    #[test]
     fn egui_repaint_delay_becomes_an_event_loop_deadline() {
         let now = Instant::now();
         assert_eq!(repaint_deadline(now, Duration::MAX), None);
@@ -4288,4 +6489,45 @@ mod test {
         ));
     }
 
+    #[test]
+    fn selected_prefetch_result_presents_only_while_pending_or_failed() {
+        let selected = Path::new("selected.png");
+        let playlist = Playlist {
+            files: vec![selected.to_owned(), PathBuf::from("neighbor.png")],
+            index: 0,
+        };
+
+        assert_eq!(
+            prefetch_destination(Some(selected), true, Some(&playlist), selected),
+            PrefetchDestination::PresentSelected
+        );
+        assert_eq!(
+            prefetch_destination(Some(selected), false, Some(&playlist), selected),
+            PrefetchDestination::Ignore
+        );
+    }
+
+    #[test]
+    fn prefetch_result_caches_only_current_playlist_neighbors() {
+        let selected = Path::new("selected.png");
+        let neighbor = Path::new("neighbor.png");
+        let playlist = Playlist {
+            files: vec![selected.to_owned(), neighbor.to_owned()],
+            index: 0,
+        };
+
+        assert_eq!(
+            prefetch_destination(Some(selected), false, Some(&playlist), neighbor),
+            PrefetchDestination::CacheNeighbor
+        );
+        assert_eq!(
+            prefetch_destination(
+                Some(selected),
+                true,
+                Some(&playlist),
+                Path::new("stale.png")
+            ),
+            PrefetchDestination::Ignore
+        );
+    }
 }

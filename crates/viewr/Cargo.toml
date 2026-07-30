@@ -69,7 +69,7 @@ moxcms = "0.8.1"
 # Windows Job Object limits for the decode worker (kill-on-close with parent).
 [target.'cfg(windows)'.dependencies]
 accesskit_winit = { version = "0.32", default-features = false, features = ["rwh_06"] }
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Security",

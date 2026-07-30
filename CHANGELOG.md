@@ -18,11 +18,16 @@ and organized by user-visible concern.
   accessibility-tree refresh can no longer produce an unhelpful null-parameter
   failure, while a missing or wrongly selected control still reaches the existing
   bounded diagnostic timeout.
-- The durable-rating product contract is now explicit. Future ratings use standard
-  embedded `xmp:Rating` and the compatible 0-to-5 `0x4746` mirror where proven,
-  never a sidecar, database, alternate stream, timestamp, or session-only fake.
-  Source-writing UI remains absent until a patched bounded XMP path and atomic
-  metadata-preservation evidence satisfy `docs/RATINGS.md`.
+- Windows JPEGs now support disclosed 0-to-5 ratings through standard embedded
+  `xmp:Rating`; a valid existing `0x4746` SimpleRating value is kept in agreement.
+  Bare `1` through `5` assign and `0` clears in normal viewing mode. Edit exposes
+  the same radio choices, View filters the current folder to a minimum rating, and
+  navigation, previews, counters, Trash, Undo, and restart all preserve canonical
+  folder ownership. The bounded parser and failure-atomic writer reject ambiguous
+  or stale sources, preserve unrelated bytes, create no catalog, sidecar, alternate
+  stream, metadata timestamp, or activity history, and fail closed with persistent
+  recovery guidance if replacement cannot be proven settled. Other formats and
+  platforms remain visibly read-only.
 - Image Information now reads metadata through the retained source handle used for
   the displayed pixels and reports a bounded Source Privacy summary. It counts
   supported EXIF tags and identifies location, ownership, unique identifiers,

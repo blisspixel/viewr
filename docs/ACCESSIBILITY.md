@@ -22,6 +22,11 @@ The minimum contract is:
   `T`, `G`, and `I` shortcuts are visible in View > Panels and included in the
   accessible menu names. Tools and Folder Previews also expose collapse and expansion
   actions.
+- Edit > Rating exposes Unrated and ratings 1 through 5 as a selected radio group
+  with `0` through `5` shortcut text. View > Rating Filter exposes All images and
+  minimum ratings 1 through 5 as a separate selected radio group. Current rating,
+  active threshold, filtered position, no-match state, and write outcomes are
+  textual. The first-write modal focuses Cancel once and blocks background input.
 - The metadata-retention checkbox is named plainly and starts unchecked.
 - Source Privacy exposes supported EXIF count, privacy-risk presence categories,
   and the limited-scan caveat as text. Sensitive raw metadata is not used as an
@@ -33,8 +38,9 @@ The minimum contract is:
   work is identified as preview preparation rather than a new file open. Loading,
   failure, and preview-preparation labels use polite AccessKit live-region
   semantics; long target text remains bounded and discoverable when visually
-  elided. Transient toasts remain semantic but non-live, so a coexisting visual
-  toast is not a second polite announcement source.
+  elided. Completed or failed rating-write toasts are polite because they are the
+  outcome source. `Saving rating...` and ordinary transient toasts remain semantic
+  but non-live, so a coexisting visual toast is not a second announcement source.
 - The empty state exposes the file-versus-folder session scope as visible text,
   followed by separately named Open File and Open Folder actions.
 - Crop exposes exact source-pixel origin, output dimensions, ratio, eight resize
@@ -93,9 +99,11 @@ pwsh -NoProfile -File scripts/accessibility-smoke.ps1 `
   -Binary target/debug/viewr.exe
 ```
 
-The script uses only the operating system's UI Automation client. It creates two
-small disposable images beneath `target/`, launches the real app, discovers the
-out-of-process AccessKit tree, and verifies:
+UI interaction uses the operating system's UI Automation client against the real
+out-of-process AccessKit tree. The script also uses local Win32 window and keyboard
+messages, WPF only to encode a disposable JPEG, Shell Property System and
+filesystem APIs for metadata and alternate-stream checks, and an optional GExiv2
+probe. It creates three small disposable images beneath `target/` and verifies:
 
 - the application root and menu focusability;
 - the visible first-run file-versus-folder session scope and both open actions;
@@ -114,17 +122,24 @@ out-of-process AccessKit tree, and verifies:
   mark, review, and batch-trash controls;
 - the exact disabled `Undo Trash` label before a recoverable receipt exists;
 - showing Folder Previews and discovering both thumbnail buttons; and
-- accessible thumbnail activation and resulting image navigation.
+- accessible thumbnail activation and resulting image navigation;
+- first-write rating disclosure and safe initial focus, native `0`, `4`, and `5`
+  key handling, minimum-rating radio state, filtered-empty recovery, and rating
+  persistence across a real process restart; and
+- the resulting JPEG through Windows Shell Property System `System.SimpleRating`,
+  with an additional GExiv2 read through a supplied `-GExiv2Python` executable or
+  the default GIMP 3 Python when present. The result reports checked or skipped.
 
 In-process semantic regressions separately cover settled Undo Trash ownership,
 its path-free other-folder guidance, menu bounds, and generic copy while restore
 ownership is active or uncertain. Native dynamic-state and announcement timing
 remain in the manual target-OS matrix.
 
-It closes the exact process it launched and removes only its two known fixtures
-and empty unique directory. The Windows CI job runs the same script against the
-debug binary. Every wait is bounded both per operation and by one absolute
-three-minute suite deadline, so a sequence of individually successful waits cannot
+It closes the exact process it launched and removes its three known fixtures, the
+isolated `viewr/appearance` preference tree, and the empty unique directory. The
+Windows CI job runs the same script against the debug binary. Every wait is bounded
+both per operation and by one absolute five-minute suite deadline, which reports
+the active probe and accessible tree if reached, so successful earlier waits cannot
 extend the job indefinitely.
 
 This test proves that the native provider and action path work. It does not prove
@@ -162,6 +177,7 @@ Run the same workflow on every platform:
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
 | Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, and the pointer-only brush overlay is not the sole source of state |
 | Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
+| Ratings | On disposable JPEG copies, use Edit > Rating and `0` through `5`; confirm and cancel the first-write disclosure; apply All, 3+, 4+, and 5+ filters; navigate into and recover from no matches; then restart | Rating and filter radio state, shortcut ownership, current rating, filtered position, outside-filter state, write outcome, and Show all images are announced without color or star-glyph dependence; Cancel initially owns modal focus; unsupported files remain untouched; the embedded rating survives restart |
 | Update | Open Help > Update viewr; read its contents; close with its button and Escape | A modal named Update viewr exposes the running version, no-check/no-download behavior, absence of a verified public source, trusted-channel guidance, and the locked source-build command; it exposes no network action, background controls cannot activate, and focus returns predictably |
 | About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, shortcuts, and privacy; background controls cannot activate while it is open; focus returns predictably |
 | Animation | Open GIF, WebP, and APNG fixtures and toggle playback from Image Information | Frame position and play/pause state are announced without flooding speech on every timed frame |

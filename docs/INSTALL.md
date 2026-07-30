@@ -178,8 +178,10 @@ pwsh -NoProfile -File scripts/accessibility-smoke.ps1 `
 
 A passing result verifies native tree discovery, focusable menus, first-run access
 scope, disabled Trash recovery without a receipt, panel state and actions,
-distinct left/right docking state, metadata state, folder previews, and accessible
-navigation. It does not replace human testing with Narrator,
+distinct left/right docking state, metadata state, folder previews, accessible
+navigation, rating disclosure and numeric assignment, rating filters and no-match
+recovery, restart persistence, and Windows Shell Property System interoperability.
+It does not replace human testing with Narrator,
 VoiceOver, or Orca. The complete release matrix and evidence requirements are in
 `docs/ACCESSIBILITY.md`.
 

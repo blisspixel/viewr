@@ -40,6 +40,24 @@ struct FileIdentity {
     file_id: [u8; 16],
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileVersion {
+    length: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileVersion {
+    length: u64,
+    last_write_time: i64,
+    change_time: i64,
+}
+
 /// Live ownership of the filesystem object used to produce accepted image pixels.
 ///
 /// The open handle prevents object-identifier reuse while the source is presented,
@@ -47,6 +65,7 @@ struct FileIdentity {
 pub(crate) struct ImageSource {
     file: std::fs::File,
     identity: Option<FileIdentity>,
+    version: Option<FileVersion>,
     markable: bool,
 }
 
@@ -97,9 +116,11 @@ impl ImageSource {
             ));
         }
         let identity = file_identity(&file, &opened).ok();
+        let version = file_version(&file, &opened).ok();
         Ok(Self {
             file,
             identity,
+            version,
             markable,
         })
     }
@@ -115,6 +136,7 @@ impl ImageSource {
     pub(crate) fn open_without_identity_for_test(path: &Path) -> io::Result<Self> {
         let mut source = Self::open(path)?;
         source.identity = None;
+        source.version = None;
         Ok(source)
     }
 
@@ -126,6 +148,9 @@ impl ImageSource {
             return ImageSourceMatch::Unsupported;
         }
         let Some(expected_identity) = self.identity else {
+            return ImageSourceMatch::Unavailable;
+        };
+        let Some(expected_version) = self.version else {
             return ImageSourceMatch::Unavailable;
         };
         let entry = match std::fs::symlink_metadata(path) {
@@ -150,11 +175,44 @@ impl ImageSource {
             Ok(_) => return ImageSourceMatch::Unsupported,
             Err(_) => return ImageSourceMatch::Unavailable,
         };
-        match file_identity(&file, &opened) {
-            Ok(identity) if identity == expected_identity => ImageSourceMatch::Same,
-            Ok(_) => ImageSourceMatch::Changed,
-            Err(_) => ImageSourceMatch::Unavailable,
+        match (file_identity(&file, &opened), file_version(&file, &opened)) {
+            (Ok(identity), Ok(version))
+                if identity == expected_identity && version == expected_version =>
+            {
+                ImageSourceMatch::Same
+            }
+            (Ok(_), Ok(_)) => ImageSourceMatch::Changed,
+            _ => ImageSourceMatch::Unavailable,
         }
+    }
+
+    /// Whether `path` currently names the retained filesystem object, ignoring
+    /// version fields that can legitimately change when that object is renamed.
+    ///
+    /// Rating replacement uses this only for the backup pathname created by
+    /// `ReplaceFileW`; source-path decisions continue to require `matches_path`.
+    #[must_use]
+    pub(crate) fn same_object_at_path(&self, path: &Path) -> bool {
+        if !self.markable {
+            return false;
+        }
+        let Some(expected_identity) = self.identity else {
+            return false;
+        };
+        let Ok(entry) = std::fs::symlink_metadata(path) else {
+            return false;
+        };
+        if !metadata_is_markable_regular(&entry) {
+            return false;
+        }
+        let Ok(file) = open_regular_no_follow(path) else {
+            return false;
+        };
+        let Ok(opened) = file.metadata() else {
+            return false;
+        };
+        metadata_is_markable_regular(&opened)
+            && file_identity(&file, &opened).is_ok_and(|identity| identity == expected_identity)
     }
 }
 
@@ -258,6 +316,57 @@ fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Res
     Ok(FileIdentity {
         volume: info.VolumeSerialNumber,
         file_id: info.FileId.Identifier,
+    })
+}
+
+#[cfg(unix)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "shared platform version boundary is fallible on Windows and callers handle one Result contract"
+)]
+fn file_version(_file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Result<FileVersion> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(FileVersion {
+        length: metadata.len(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // one audited read-only Win32 file-version query
+fn file_version(file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Result<FileVersion> {
+    use std::mem::{MaybeUninit, size_of};
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandleEx,
+    };
+
+    let mut info = MaybeUninit::<FILE_BASIC_INFO>::uninit();
+    let size = u32::try_from(size_of::<FILE_BASIC_INFO>())
+        .map_err(|_| io::Error::other("file version structure is too large"))?;
+    // SAFETY: `file` owns a valid handle for the call. `info` provides exactly
+    // `size` writable bytes, and the API retains no pointer.
+    let succeeded = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileBasicInfo,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if succeeded == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: A successful call initialized the complete FILE_BASIC_INFO value.
+    let info = unsafe { info.assume_init() };
+    Ok(FileVersion {
+        length: metadata.len(),
+        last_write_time: info.LastWriteTime,
+        change_time: info.ChangeTime,
     })
 }
 

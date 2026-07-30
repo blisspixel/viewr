@@ -170,16 +170,30 @@ A promise you can verify beats a promise you have to trust.
   identity used for guarded Trash and permanent-delete checks is never persisted,
   displayed, or logged. Replacement, missing, unsupported, unavailable, and
   platform Trash outcomes enter diagnostics only as fixed categories.
-- viewr **does not** create companion files next to your photos (no `_picks.txt`,
-  no sidecar caches).
-- Durable ratings are an approved but unimplemented exception to the current
-  no-source-mutation viewer behavior. The contract in `docs/RATINGS.md` stores
-  only a disclosed 0-to-5 preference in standard embedded image metadata. It
-  never creates a database, companion file, alternate stream, timestamp, or
-  viewing-history record. Rating an image will intentionally modify that source
-  file and make the small preference value visible to other metadata-aware apps.
-  No control ships until bounded parsing, atomic replacement, rollback, and
-  unrelated-metadata preservation are proven.
+- viewr **does not use companion files as product state** (no `_picks.txt`, XMP
+  sidecar, or thumbnail cache). Explicit Save As and Windows JPEG rating writes
+  do use private same-directory transaction files so the destination can be
+  replaced atomically. They are not an index or durable metadata store.
+- Durable ratings are the one narrow, explicit exception to the normal
+  no-source-mutation viewer behavior. On Windows, ordinary identity-bound JPEGs
+  with supported metadata can store a disclosed 0-to-5 preference in standard
+  embedded `xmp:Rating`. Other formats and platforms remain read-only. viewr
+  never creates a rating database, companion file, alternate stream, metadata
+  timestamp field, separate timestamp record, or viewing-history record. Rating
+  an image intentionally replaces that source
+  file after exact-source checks, bounded parsing, same-directory staging,
+  verification, and failure reconciliation. The small preference becomes visible
+  to metadata-aware apps, but it records no user identity, assignment time, or
+  viewing history. Consent is requested before the first write in each session
+  and is never persisted.
+- Windows rating snapshots and candidates receive the accepted source's owner,
+  group, and discretionary access-control list at creation. The pristine snapshot
+  is delete-on-close and immediately unlinked. Normal completion removes the work
+  file and retained original. A process or power loss in the narrow interval after
+  replacement can leave a source-protected `.viewr-rating-backup-*` original; an
+  unreconciled failure can retain a protected work copy for manual recovery.
+  viewr does not broadly delete these names on startup because another process may
+  own one and a random file must never be mistaken for safe debris.
 - Spot-heal strokes, repair regions, and undo/redo pixel patches exist only in
   bounded RAM. Navigation clears them. Decoded pixels, bounded history, and GPU
   presentation commit together; presentation failure restores exact pixels and

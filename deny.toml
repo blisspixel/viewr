@@ -24,7 +24,9 @@ ignore = [
     # metadata crosses viewr's bounded TIFF parser into typed Metadata and is
     # never supplied as raw XML. Neither affected parser sees user XML. Both
     # dependents pin pre-0.41 APIs, so no compatible patched upgrade exists yet.
-    # Tracked for removal when little_exif and wayland-scanner update.
+    # The bounded rating path depends directly on patched quick-xml 0.41 and does
+    # not broaden either exception. Tracked for removal when little_exif and
+    # wayland-scanner update.
     # Runtime-reachable vulnerabilities are never ignored; see docs/STANDARDS.md.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",

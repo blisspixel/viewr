@@ -85,6 +85,10 @@ const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
 const EXTERNAL_EDIT_STATUS: &str =
     "External app opened source. Press F5 to reload possible changes.";
+pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
+// Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
+const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
+const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
 
 /// Horizontal edge used by a docked side panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,6 +195,16 @@ pub enum UiAction {
     ShowUpdate,
     /// Close the local update-instructions surface.
     CloseUpdate,
+    /// Assign or clear the current image's embedded rating.
+    AssignRating(crate::ratings::RatingAssignment),
+    /// Change the session-only folder rating threshold.
+    SetRatingFilter(crate::ratings::RatingFilter),
+    /// Confirm the first embedded-metadata write in this process session.
+    ConfirmRatingDisclosure,
+    /// Cancel the pending embedded-metadata write.
+    CancelRatingDisclosure,
+    /// Clear the active threshold and return to the retained folder position.
+    ShowAllRatings,
     /// Toggle the Image Info panel.
     ToggleImageInfo,
     /// Show or fully hide the docked tools panel.
@@ -294,6 +308,8 @@ pub struct UiFrameOwned {
     pub show_about: bool,
     /// Whether the local update-instructions surface is open.
     pub show_update: bool,
+    /// Current embedded rating, folder filter, and write state.
+    pub rating: RatingUiState,
     /// Whether an external handoff may have made the displayed pixels stale.
     pub external_edit_pending: bool,
     /// Whether the docked tools panel is visible at all.
@@ -392,6 +408,55 @@ pub struct UiFrameOwned {
     pub context_menu_pos: Option<[f32; 2]>,
 }
 
+/// Immutable rating and folder-filter state for one rendered frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // independent write, discovery, filter, and recovery states
+pub struct RatingUiState {
+    /// Rating attached to the presented source.
+    pub state: crate::ratings::RatingState,
+    /// Whether source mutation is proven safe for this image.
+    pub capability: crate::ratings::RatingWriteCapability,
+    /// Active session-only folder threshold.
+    pub filter: crate::ratings::RatingFilter,
+    /// A rating replacement transaction is in progress.
+    pub write_busy: bool,
+    /// A prior rating replacement left the source mutation indeterminate.
+    pub recovery_unsettled: bool,
+    /// Folder rating discovery is in progress.
+    pub discovery_busy: bool,
+    /// The current image was retained after falling below the threshold.
+    pub outside_filter: bool,
+    /// One-based position and number of matching images.
+    pub visible_position: Option<(usize, usize)>,
+    /// Number of entries in the active projection.
+    pub match_count: usize,
+    /// Canonical zero-based index used by Trash receipts and filmstrip cells.
+    pub current_catalog_index: Option<usize>,
+    /// Total images in the canonical folder catalog.
+    pub folder_count: usize,
+    /// First-write assignment awaiting explicit disclosure confirmation.
+    pub pending_disclosure: Option<crate::ratings::RatingAssignment>,
+}
+
+impl Default for RatingUiState {
+    fn default() -> Self {
+        Self {
+            state: crate::ratings::RatingState::Loading,
+            capability: crate::ratings::RatingWriteCapability::UnsafeSource,
+            filter: crate::ratings::RatingFilter::All,
+            write_busy: false,
+            recovery_unsettled: false,
+            discovery_busy: false,
+            outside_filter: false,
+            visible_position: None,
+            match_count: 0,
+            current_catalog_index: None,
+            folder_count: 0,
+            pending_disclosure: None,
+        }
+    }
+}
+
 /// Animation state shown in Image Information.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AnimationUiInfo {
@@ -416,6 +481,7 @@ impl UiFrameOwned {
             && !self.save_busy
             && !self.heal_busy
             && !self.curation_busy()
+            && !self.rating.write_busy
     }
 
     fn curation_action_ready(&self) -> bool {
@@ -441,8 +507,10 @@ impl UiFrameOwned {
 /// One cell in the progressive bottom filmstrip.
 #[derive(Clone)]
 pub struct FilmstripItem {
-    /// Playlist index.
+    /// Canonical playlist index used for navigation.
     pub index: usize,
+    /// One-based position in the active rating-filter projection.
+    pub position: usize,
     /// File basename for tooltip / fallback label.
     pub name: String,
     /// Thumbnail texture when ready.
@@ -456,10 +524,25 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let colors = chrome_colors(ui);
 
     render_top_menu(ui, &mut actions, frame);
-    if frame.show_update {
-        render_update(ui, &mut actions);
-    } else if frame.show_about {
-        render_about(ui, &mut actions);
+    if frame.rating.pending_disclosure.is_some() {
+        render_rating_disclosure(ui, &mut actions, frame);
+    } else {
+        ui.ctx().data_mut(|data| {
+            data.remove_temp::<bool>(egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE));
+        });
+        if frame.show_update {
+            render_update(ui, &mut actions);
+        } else if frame.show_about {
+            render_about(ui, &mut actions);
+        }
+    }
+
+    if rating_filter_is_empty(frame) {
+        render_filtered_empty_state(ui, &mut actions, frame);
+        if let Some(msg) = &frame.toast {
+            render_toast(ui, msg, frame);
+        }
+        return actions;
     }
 
     if !frame.has_image {
@@ -657,6 +740,10 @@ fn configure_top_menu_widgets(ui: &mut egui::Ui, colors: ChromeColors) {
     ui.visuals_mut().widgets.active.bg_fill = colors.active;
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the menu bar keeps its ordered menus and responsive status strip together"
+)]
 fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     Panel::top("top_panel")
@@ -673,90 +760,153 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
                 tools_menu(ui, actions, frame);
                 help_menu(ui, actions);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(status) = frame.curation_status.as_deref() {
-                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        add_top_status(ui, status, colors);
-                    } else if frame.has_image && frame.load_error.is_some() {
-                        add_retry_button(ui, actions, frame.selected_file_name.as_deref());
-                        if let Some(status) =
-                            image_open_status(false, true, frame.selected_file_name.as_deref())
-                        {
-                            add_top_status(ui, &status, colors);
-                        }
-                    } else if frame.has_image && frame.is_opening {
-                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        if let Some(status) =
-                            image_open_status(true, false, frame.selected_file_name.as_deref())
-                        {
-                            add_top_status(ui, &status, colors);
-                        }
-                    } else if frame.has_image && frame.is_loading {
-                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        add_top_status(ui, "Preparing preview...", colors);
-                    } else if frame.has_image && frame.save_busy {
-                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        add_top_status(ui, "Saving...", colors);
-                    } else if frame.has_image && frame.crop_busy {
-                        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-                        add_top_status(ui, "Applying crop...", colors);
-                    } else if let Some(status) = frame.curation_recovery_status.as_deref() {
-                        add_top_status(ui, status, colors);
-                    } else if frame.external_edit_pending {
-                        add_top_status(ui, EXTERNAL_EDIT_STATUS, colors);
-                    }
-                    if let Some((i, n)) = frame.playlist_pos {
-                        Frame::new()
-                            .fill(colors.raised)
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(egui::Margin::symmetric(8, 3))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new(format!("{i} / {n}"))
-                                        .size(12.5)
-                                        .color(colors.muted),
-                                );
-                            });
-                    }
-                    let show_details = ui.ctx().content_rect().width() >= 720.0;
-                    let mut has_detail = false;
-                    if show_details && frame.has_image {
-                        ui.label(
-                            RichText::new(format!("{:.0}%", frame.pixel_scale * 100.0))
-                                .size(12.5)
-                                .color(colors.muted),
-                        );
-                        has_detail = true;
-                    }
-                    if show_details && let Some((w, h)) = frame.img_size {
-                        if has_detail {
-                            ui.add_space(TOP_METADATA_GAP);
-                        }
-                        ui.label(
-                            RichText::new(format!("{w} × {h}"))
-                                .size(12.5)
-                                .color(colors.muted),
-                        );
-                        has_detail = true;
-                    }
-                    if show_details
-                        && let Some(name) = frame.file_path.as_ref().and_then(|path| {
-                            std::path::Path::new(path)
-                                .file_name()
-                                .map(|name| name.to_string_lossy().into_owned())
-                        })
-                    {
-                        if has_detail {
-                            ui.add_space(TOP_METADATA_GAP);
-                        }
-                        let response = ui.add(
-                            egui::Label::new(RichText::new(&name).size(12.5).color(colors.text))
-                                .truncate(),
-                        );
-                        let _ = response.on_hover_text(name);
-                    }
+                    render_top_operation_status(ui, actions, frame, colors);
+                    render_top_rating_position(ui, frame, colors);
+                    render_top_image_facts(ui, frame, colors);
                 });
             });
         });
+}
+
+fn render_top_operation_status(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
+    if let Some(status) = frame.curation_status.as_deref() {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_top_status(ui, status, colors);
+    } else if frame.rating.write_busy {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_top_status(ui, "Saving rating...", colors);
+    } else if frame.rating.discovery_busy {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_top_status(ui, "Reading folder ratings...", colors);
+    } else if frame.has_image && frame.load_error.is_some() {
+        add_retry_button(ui, actions, frame.selected_file_name.as_deref());
+        if frame.rating.recovery_unsettled {
+            add_top_status(ui, RATING_RECOVERY_STATUS, colors);
+        } else if let Some(status) =
+            image_open_status(false, true, frame.selected_file_name.as_deref())
+        {
+            add_top_status(ui, &status, colors);
+        }
+    } else if frame.has_image && frame.is_opening {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        if let Some(status) = image_open_status(true, false, frame.selected_file_name.as_deref()) {
+            add_top_status(ui, &status, colors);
+        }
+    } else if frame.has_image && frame.is_loading {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_top_status(ui, "Preparing preview...", colors);
+    } else if frame.has_image && frame.save_busy {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_top_status(ui, "Saving...", colors);
+    } else if frame.has_image && frame.crop_busy {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_top_status(ui, "Applying crop...", colors);
+    } else if frame.rating.recovery_unsettled {
+        add_top_status(ui, RATING_RECOVERY_STATUS, colors);
+    } else if let Some(status) = frame.curation_recovery_status.as_deref() {
+        add_top_status(ui, status, colors);
+    } else if frame.external_edit_pending {
+        add_top_status(ui, EXTERNAL_EDIT_STATUS, colors);
+    } else if frame.rating.outside_filter {
+        add_top_status(
+            ui,
+            "Outside current filter. Next or Previous returns to matching images.",
+            colors,
+        );
+    }
+}
+
+fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    let displayed_position = match frame.rating.filter {
+        crate::ratings::RatingFilter::All => frame.playlist_pos,
+        crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
+    };
+    let label = if let Some((index, total)) = displayed_position {
+        Some(match frame.rating.filter {
+            crate::ratings::RatingFilter::All => format!("{index} / {total}"),
+            crate::ratings::RatingFilter::AtLeast(minimum) => format!(
+                "{index} / {total} rated {}+ · {} total",
+                minimum.get(),
+                frame.rating.folder_count
+            ),
+        })
+    } else if !matches!(frame.rating.filter, crate::ratings::RatingFilter::All)
+        && frame.rating.match_count > 0
+    {
+        Some(format!(
+            "{} matching · {} total",
+            frame.rating.match_count, frame.rating.folder_count
+        ))
+    } else {
+        None
+    };
+    if let Some(label) = label {
+        Frame::new()
+            .fill(colors.raised)
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.label(RichText::new(label).size(12.5).color(colors.muted));
+            });
+        ui.add_space(TOP_METADATA_GAP);
+    }
+}
+
+fn render_top_image_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    if frame.has_image {
+        Frame::new()
+            .fill(colors.raised)
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(rating_status_label(frame.rating.state))
+                        .size(12.5)
+                        .color(colors.muted),
+                );
+            });
+        ui.add_space(TOP_METADATA_GAP);
+    }
+    if ui.ctx().content_rect().width() < 720.0 {
+        return;
+    }
+    let mut has_detail = false;
+    if frame.has_image {
+        ui.label(
+            RichText::new(format!("{:.0}%", frame.pixel_scale * 100.0))
+                .size(12.5)
+                .color(colors.muted),
+        );
+        has_detail = true;
+    }
+    if let Some((width, height)) = frame.img_size {
+        if has_detail {
+            ui.add_space(TOP_METADATA_GAP);
+        }
+        ui.label(
+            RichText::new(format!("{width} × {height}"))
+                .size(12.5)
+                .color(colors.muted),
+        );
+        has_detail = true;
+    }
+    if let Some(name) = frame.file_path.as_ref().and_then(|path| {
+        std::path::Path::new(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+    }) {
+        if has_detail {
+            ui.add_space(TOP_METADATA_GAP);
+        }
+        let response =
+            ui.add(egui::Label::new(RichText::new(&name).size(12.5).color(colors.text)).truncate());
+        let _ = response.on_hover_text(name);
+    }
 }
 
 fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -927,7 +1077,73 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             actions.push(UiAction::FlipV);
             ui.close();
         }
+        ui.separator();
+        let label = rating_menu_label(frame);
+        ui.add_enabled_ui(!frame.rating.write_busy, |ui| {
+            ui.menu_button(label, |ui| rating_menu(ui, actions, frame));
+        });
     });
+}
+
+fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    ui.set_min_width(220.0);
+    let writable = frame.current_selection_ready()
+        && !frame.rating.recovery_unsettled
+        && frame.rating.capability == crate::ratings::RatingWriteCapability::WritableJpeg;
+    let choices = std::iter::once((
+        crate::ratings::RatingAssignment::Clear,
+        "Unrated",
+        "0",
+        frame.rating.state == crate::ratings::RatingState::Unrated,
+    ))
+    .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
+        (
+            crate::ratings::RatingAssignment::Set(rating),
+            match rating.get() {
+                1 => "1 of 5",
+                2 => "2 of 5",
+                3 => "3 of 5",
+                4 => "4 of 5",
+                5 => "5 of 5",
+                _ => unreachable!("validated rating"),
+            },
+            match rating.get() {
+                1 => "1",
+                2 => "2",
+                3 => "3",
+                4 => "4",
+                5 => "5",
+                _ => unreachable!("validated rating"),
+            },
+            frame.rating.state == crate::ratings::RatingState::Rated(rating),
+        )
+    }));
+    for (assignment, label, shortcut, selected) in choices {
+        let response = ui.add_enabled(
+            writable,
+            egui::RadioButton::new(selected, format!("{label}    {shortcut}")),
+        );
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                writable,
+                selected,
+                format!("Rating {label}, shortcut {shortcut}"),
+            )
+        });
+        if response.clicked() {
+            actions.push(UiAction::AssignRating(assignment));
+            ui.close();
+        }
+    }
+    if !writable {
+        ui.separator();
+        ui.label(
+            RichText::new(rating_write_unavailable_text(frame))
+                .size(11.0)
+                .color(chrome_colors(ui).muted),
+        );
+    }
 }
 
 fn tools_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -1122,7 +1338,8 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         if ui
             .add_enabled(
                 frame.has_image,
-                egui::Button::new("Fit Image to View").shortcut_text("0"),
+                egui::Button::new("Fit Image to View")
+                    .shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
             )
             .clicked()
         {
@@ -1132,7 +1349,7 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         if ui
             .add_enabled(
                 frame.has_image,
-                egui::Button::new("Actual Size").shortcut_text("1"),
+                egui::Button::new("Actual Size").shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
             )
             .clicked()
         {
@@ -1160,6 +1377,14 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.close();
         }
         ui.separator();
+        let rating_filter_available = frame.rating.folder_count > 0;
+        let rating_filter_label = rating_filter_menu_label(frame);
+        ui.add_enabled_ui(rating_filter_available, |ui| {
+            ui.menu_button(rating_filter_label, |ui| {
+                rating_filter_menu(ui, actions, frame);
+            });
+        });
+        ui.separator();
         if ui
             .add(egui::Button::new("Fullscreen").shortcut_text("F"))
             .clicked()
@@ -1180,6 +1405,109 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
         });
     });
+}
+
+fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    ui.set_min_width(220.0);
+    let all = frame.rating.filter == crate::ratings::RatingFilter::All;
+    if ui.radio(all, "All images").clicked() {
+        actions.push(UiAction::SetRatingFilter(crate::ratings::RatingFilter::All));
+        ui.close();
+    }
+    for rating in crate::ratings::Rating::ALL {
+        let filter = crate::ratings::RatingFilter::AtLeast(rating);
+        let label = format!("At least {}", rating.get());
+        let response = ui.radio(frame.rating.filter == filter, &label);
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                frame.rating.filter == filter,
+                format!("Rating filter: {label}"),
+            )
+        });
+        if response.clicked() {
+            actions.push(UiAction::SetRatingFilter(filter));
+            ui.close();
+        }
+    }
+}
+
+fn rating_status_label(state: crate::ratings::RatingState) -> &'static str {
+    match state {
+        crate::ratings::RatingState::Loading => "Rating: Reading...",
+        crate::ratings::RatingState::Unrated => "Rating: Unrated",
+        crate::ratings::RatingState::Rated(rating) => match rating.get() {
+            1 => "Rating: 1 of 5",
+            2 => "Rating: 2 of 5",
+            3 => "Rating: 3 of 5",
+            4 => "Rating: 4 of 5",
+            5 => "Rating: 5 of 5",
+            _ => "Rating: Unsupported",
+        },
+        crate::ratings::RatingState::Rejected => "Rating: Rejected",
+        crate::ratings::RatingState::Conflict => "Rating: Conflict",
+        crate::ratings::RatingState::Unsupported => "Rating: Unsupported",
+        crate::ratings::RatingState::Unreadable => "Rating: Unreadable",
+    }
+}
+
+fn rating_menu_label(frame: &UiFrameOwned) -> &'static str {
+    if frame.has_image {
+        rating_status_label(frame.rating.state)
+    } else if frame.is_opening {
+        "Rating: Loading image"
+    } else if frame.load_error.is_some() {
+        "Rating: Image unavailable"
+    } else {
+        "Rating: Open an image"
+    }
+}
+
+fn rating_filter_label(filter: crate::ratings::RatingFilter) -> String {
+    match filter {
+        crate::ratings::RatingFilter::All => "Rating Filter: All images".to_owned(),
+        crate::ratings::RatingFilter::AtLeast(rating) => {
+            format!("Rating Filter: At least {}", rating.get())
+        }
+    }
+}
+
+fn rating_filter_menu_label(frame: &UiFrameOwned) -> String {
+    if frame.folder_scan_busy {
+        "Rating Filter: Reading folder...".to_owned()
+    } else if frame.rating.folder_count == 0 {
+        "Rating Filter: Open a folder".to_owned()
+    } else {
+        rating_filter_label(frame.rating.filter)
+    }
+}
+
+fn rating_write_unavailable_text(frame: &UiFrameOwned) -> &'static str {
+    if frame.rating.recovery_unsettled {
+        return RATING_RECOVERY_STATUS;
+    }
+    if !frame.has_image {
+        if frame.is_opening {
+            return "Wait for the selected image to finish loading.";
+        }
+        if frame.load_error.is_some() {
+            return "Reload or open another image before assigning a rating.";
+        }
+        return "Open an image to assign a rating.";
+    }
+    match frame.rating.capability {
+        crate::ratings::RatingWriteCapability::WritableJpeg => "Rating is not ready yet.",
+        crate::ratings::RatingWriteCapability::ReadOnlyFormat => {
+            "This image's rating is read-only in viewr."
+        }
+        crate::ratings::RatingWriteCapability::UnsafeSource => {
+            "Safe source identity is unavailable for rating writes."
+        }
+        crate::ratings::RatingWriteCapability::UnsupportedMetadata => {
+            "This image has unsupported rating metadata."
+        }
+    }
 }
 
 fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -1442,7 +1770,9 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("Shortcuts: O open, arrows browse, 0 fit, 1 actual size")
+                    RichText::new(format!(
+                        "Shortcuts: O open, arrows browse, 1-5 rate, 0 clear, {PRIMARY_MODIFIER}+0 fit, {PRIMARY_MODIFIER}+1 actual size"
+                    ))
                         .size(11.5)
                         .color(colors.muted),
                 );
@@ -1544,6 +1874,148 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     }
 }
 
+fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let Some(assignment) = frame.rating.pending_disclosure else {
+        return;
+    };
+    let colors = chrome_colors(ui);
+    let (title, confirm) = match assignment {
+        crate::ratings::RatingAssignment::Clear => {
+            ("Clear this rating?".to_owned(), "Clear rating")
+        }
+        crate::ratings::RatingAssignment::Set(rating) => {
+            (format!("Save rating {} of 5?", rating.get()), "Save rating")
+        }
+    };
+    let mut confirm_clicked = false;
+    let mut cancel_clicked = false;
+    let focus_state_id = egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE);
+    let focus_cancel = ui.ctx().data_mut(|data| {
+        if data.get_temp::<bool>(focus_state_id).unwrap_or(false) {
+            false
+        } else {
+            data.insert_temp(focus_state_id, true);
+            true
+        }
+    });
+    let response = egui::Modal::new(egui::Id::new("rating_write_disclosure"))
+        .backdrop_color(Color32::from_black_alpha(140))
+        .frame(
+            Frame::new()
+                .fill(colors.panel)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20)),
+        )
+        .show(ui.ctx(), |ui| {
+            ui.set_max_width(430.0);
+            ui.heading(RichText::new(&title).size(25.0).color(colors.text));
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(
+                    "Ratings are written into this image file and may be visible to other apps.",
+                )
+                .size(13.5)
+                .color(colors.text),
+            );
+            ui.label(
+                RichText::new(
+                    "viewr updates embedded metadata in the source JPEG. It does not create a database or sidecar.",
+                )
+                .size(12.5)
+                .color(colors.muted),
+            );
+            ui.add_space(14.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(confirm).clicked() {
+                    confirm_clicked = true;
+                }
+                let cancel = ui.button("Cancel");
+                if focus_cancel {
+                    cancel.request_focus();
+                }
+                if cancel.clicked() {
+                    cancel_clicked = true;
+                }
+            });
+        });
+    response.response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Window,
+            true,
+            format!(
+                "{title}. Ratings are written into this image file and may be visible to other apps."
+            ),
+        )
+    });
+    if confirm_clicked {
+        actions.push(UiAction::ConfirmRatingDisclosure);
+    } else if cancel_clicked || response.should_close() {
+        actions.push(UiAction::CancelRatingDisclosure);
+    }
+}
+
+fn rating_filter_is_empty(frame: &UiFrameOwned) -> bool {
+    !frame.rating.discovery_busy
+        && !frame.rating.outside_filter
+        && !matches!(frame.rating.filter, crate::ratings::RatingFilter::All)
+        && frame.rating.match_count == 0
+}
+
+fn render_filtered_empty_state(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+) {
+    let crate::ratings::RatingFilter::AtLeast(minimum) = frame.rating.filter else {
+        return;
+    };
+    let colors = chrome_colors(ui);
+    let screen = ui.ctx().content_rect();
+    let card_width = (screen.width() - 40.0).clamp(280.0, 430.0);
+    Area::new("rating_filter_empty_state".into())
+        .fixed_pos(screen.center())
+        .pivot(Align2::CENTER_CENTER)
+        .constrain_to(screen)
+        .movable(false)
+        .fade_in(false)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            ui.set_width(card_width);
+            let card = Frame::new()
+                .fill(colors.panel)
+                .corner_radius(CornerRadius::same(12))
+                .stroke(Stroke::new(1.0, colors.border))
+                .inner_margin(egui::Margin::symmetric(28, 24))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        let heading = format!("No images are rated {} or higher.", minimum.get());
+                        let heading_response =
+                            ui.heading(RichText::new(&heading).size(20.0).color(colors.text));
+                        heading_response
+                            .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &heading));
+                        mark_as_polite_status(&heading_response);
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "{} images remain loaded in this folder.",
+                                frame.rating.folder_count
+                            ))
+                            .size(13.0)
+                            .color(colors.muted),
+                        );
+                        ui.add_space(16.0);
+                        if ui.button("Show all images").clicked() {
+                            actions.push(UiAction::ShowAllRatings);
+                        }
+                    });
+                });
+            card.response.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Panel, true, "No images match rating filter")
+            });
+        });
+}
+
 fn render_empty_state(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let is_opening = frame.is_opening;
     let load_error = frame.load_error.as_deref();
@@ -1551,9 +2023,16 @@ fn render_empty_state(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
     let colors = chrome_colors(ui);
     let screen = ui.ctx().content_rect();
     let card_width = (screen.width() - 40.0).clamp(280.0, 420.0);
+    let minimum_card_top = screen.top() + 20.0;
+    let maximum_card_top =
+        (screen.bottom() - 20.0 - EMPTY_STATE_EXPECTED_HEIGHT).max(minimum_card_top);
+    let card_position = Pos2::new(
+        screen.center().x - card_width * 0.5,
+        (screen.center().y - EMPTY_STATE_EXPECTED_HEIGHT * 0.5)
+            .clamp(minimum_card_top, maximum_card_top),
+    );
     Area::new("empty_state".into())
-        .fixed_pos(screen.center())
-        .pivot(Align2::CENTER_CENTER)
+        .fixed_pos(card_position)
         .constrain_to(screen)
         .movable(false)
         .fade_in(false)
@@ -2366,7 +2845,7 @@ fn render_heal_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned) {
 
 fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
-    let current = frame.playlist_pos.map(|(i, _)| i.saturating_sub(1));
+    let current = frame.rating.current_catalog_index;
     let height = if frame.filmstrip_panel_open {
         FILMSTRIP_PANEL_HEIGHT
     } else {
@@ -2399,7 +2878,13 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                                     .color(colors.muted)
                                     .strong(),
                             );
-                            if let Some((index, total)) = frame.playlist_pos {
+                            let position = match frame.rating.filter {
+                                crate::ratings::RatingFilter::All => frame.playlist_pos,
+                                crate::ratings::RatingFilter::AtLeast(_) => {
+                                    frame.rating.visible_position
+                                }
+                            };
+                            if let Some((index, total)) = position {
                                 ui.label(
                                     RichText::new(format!("{index} of {total}"))
                                         .size(11.0)
@@ -2431,7 +2916,11 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                     {
                         actions.push(UiAction::ToggleFilmstripPanelExpansion);
                     }
-                    let label = frame.playlist_pos.map_or_else(
+                    let position = match frame.rating.filter {
+                        crate::ratings::RatingFilter::All => frame.playlist_pos,
+                        crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
+                    };
+                    let label = position.map_or_else(
                         || "Folder previews".to_owned(),
                         |(index, total)| format!("Folder previews  {index} of {total}"),
                     );
@@ -2462,7 +2951,7 @@ fn render_filmstrip_item(
     } else {
         colors.panel
     };
-    let accessibility_label = format!("image {}: {}", item.index + 1, item.name);
+    let accessibility_label = filmstrip_accessibility_label(item);
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::Button,
@@ -2505,7 +2994,7 @@ fn render_filmstrip_item(
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            format!("{}", item.index + 1),
+            format!("{}", item.position),
             egui::FontId::proportional(14.0),
             colors.muted,
         );
@@ -2513,6 +3002,10 @@ fn render_filmstrip_item(
     if response.clicked() {
         actions.push(UiAction::NavigateTo(item.index));
     }
+}
+
+fn filmstrip_accessibility_label(item: &FilmstripItem) -> String {
+    format!("image {}: {}", item.position, item.name)
 }
 
 fn render_toast(ui: &mut egui::Ui, msg: &str, frame: &UiFrameOwned) {
@@ -2534,9 +3027,22 @@ fn render_toast(ui: &mut egui::Ui, msg: &str, frame: &UiFrameOwned) {
                 .stroke(Stroke::new(1.0, colors.accent))
                 .inner_margin(egui::Margin::symmetric(14, 8))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(msg).size(13.0).color(colors.text));
+                    let response = ui.label(RichText::new(msg).size(13.0).color(colors.text));
+                    if !frame.rating.write_busy && rating_toast_is_status(msg) {
+                        mark_as_polite_status(&response);
+                    }
                 });
         });
+}
+
+fn rating_toast_is_status(message: &str) -> bool {
+    !matches!(
+        message,
+        "Saving rating..." | "Finishing the rating update before closing..."
+    ) && (message.contains("rating")
+        || message.contains("Rating")
+        || message
+            == "viewr could not verify this image's source safely. The file was not changed.")
 }
 
 fn render_crop_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<UiAction>) {
@@ -2978,8 +3484,9 @@ mod tests {
         LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH,
         TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, appearance_menu,
         appearance_menu_label, chrome_colors_for, crop_pixel_bounds, image_open_status,
-        panels_menu, render, retry_open_label, trash_undo_accessible_label, trash_undo_help,
-        undo_trash_menu_item, viewport_insets,
+        panels_menu, rating_filter_menu, rating_filter_menu_label, rating_menu, rating_menu_label,
+        rating_toast_is_status, render, retry_open_label, trash_undo_accessible_label,
+        trash_undo_help, undo_trash_menu_item, viewport_insets,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3016,6 +3523,20 @@ mod tests {
             theme_mode: crate::theme::Mode::Dark,
             show_about: false,
             show_update: false,
+            rating: super::RatingUiState {
+                state: crate::ratings::RatingState::Unrated,
+                capability: crate::ratings::RatingWriteCapability::WritableJpeg,
+                filter: crate::ratings::RatingFilter::All,
+                write_busy: false,
+                recovery_unsettled: false,
+                discovery_busy: false,
+                outside_filter: false,
+                visible_position: None,
+                match_count: 2,
+                current_catalog_index: Some(0),
+                folder_count: 2,
+                pending_disclosure: None,
+            },
             external_edit_pending: false,
             show_tools_panel: true,
             tools_panel_open: true,
@@ -3058,11 +3579,13 @@ mod tests {
             filmstrip: vec![
                 FilmstripItem {
                     index: 0,
+                    position: 1,
                     name: "current.png".to_owned(),
                     texture: None,
                 },
                 FilmstripItem {
                     index: 1,
+                    position: 2,
                     name: "second.png".to_owned(),
                     texture: None,
                 },
@@ -3076,6 +3599,22 @@ mod tests {
             heal_brush_screen_radius: 0.0,
             context_menu_pos: None,
         }
+    }
+
+    #[test]
+    fn filmstrip_labels_use_projection_position_but_navigation_uses_catalog_index() {
+        let item = FilmstripItem {
+            index: 8,
+            position: 2,
+            name: "rated.jpg".to_owned(),
+            texture: None,
+        };
+
+        assert_eq!(
+            super::filmstrip_accessibility_label(&item),
+            "image 2: rated.jpg"
+        );
+        assert_eq!(item.index, 8);
     }
 
     #[test]
@@ -3314,6 +3853,49 @@ mod tests {
             node.value() == Some("Could not open current.png")
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
+    }
+
+    #[test]
+    fn rating_recovery_is_persistent_polite_and_disables_rating_mutation() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.rating.recovery_unsettled = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("rating recovery AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some(super::RATING_RECOVERY_STATUS)
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+
+        let menu_context = egui::Context::default();
+        menu_context.enable_accesskit();
+        let menu_output = menu_context.run_ui(accessibility_input(), |ui| {
+            let mut actions = Vec::new();
+            rating_menu(ui, &mut actions, &frame);
+            assert!(actions.is_empty());
+        });
+        let menu_update = menu_output
+            .platform_output
+            .accesskit_update
+            .expect("rating recovery menu AccessKit update should be generated");
+        let radios = menu_update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .filter(|node| node.role() == egui::accesskit::Role::RadioButton)
+            .collect::<Vec<_>>();
+        assert_eq!(radios.len(), 6);
+        assert!(radios.iter().all(|node| node.is_disabled()));
+        assert_eq!(
+            super::rating_write_unavailable_text(&frame),
+            super::RATING_RECOVERY_STATUS
+        );
     }
 
     fn accessibility_input() -> egui::RawInput {
@@ -3800,6 +4382,304 @@ mod tests {
     }
 
     #[test]
+    fn rating_menu_exposes_all_assignments_as_descriptive_radio_buttons() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.rating.state = crate::ratings::RatingState::Rated(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        );
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let mut actions = Vec::new();
+            rating_menu(ui, &mut actions, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("rating-menu AccessKit update should be generated");
+        let radios = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .filter(|node| node.role() == egui::accesskit::Role::RadioButton)
+            .collect::<Vec<_>>();
+        assert_eq!(radios.len(), 6);
+        for (expected, selected) in [
+            ("Rating Unrated, shortcut 0", false),
+            ("Rating 1 of 5, shortcut 1", false),
+            ("Rating 2 of 5, shortcut 2", false),
+            ("Rating 3 of 5, shortcut 3", false),
+            ("Rating 4 of 5, shortcut 4", true),
+            ("Rating 5 of 5, shortcut 5", false),
+        ] {
+            let node = radios
+                .iter()
+                .find(|node| node.label() == Some(expected))
+                .unwrap_or_else(|| panic!("missing rating choice: {expected}"));
+            assert_eq!(
+                node.toggled(),
+                Some(if selected {
+                    egui::accesskit::Toggled::True
+                } else {
+                    egui::accesskit::Toggled::False
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn no_image_rating_surfaces_name_the_required_next_step() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.rating.folder_count = 0;
+        frame.rating.current_catalog_index = None;
+
+        assert_eq!(rating_menu_label(&frame), "Rating: Open an image");
+        assert_eq!(
+            rating_filter_menu_label(&frame),
+            "Rating Filter: Open a folder"
+        );
+
+        frame.is_opening = true;
+        frame.folder_scan_busy = true;
+        assert_eq!(rating_menu_label(&frame), "Rating: Loading image");
+        assert_eq!(
+            rating_filter_menu_label(&frame),
+            "Rating Filter: Reading folder..."
+        );
+        frame.is_opening = false;
+        frame.folder_scan_busy = false;
+
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let mut actions = Vec::new();
+            rating_menu(ui, &mut actions, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("unavailable-rating AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Open an image to assign a rating.")
+                || node.label() == Some("Open an image to assign a rating.")
+        }));
+        let radios = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::RadioButton)
+            .collect::<Vec<_>>();
+        assert_eq!(radios.len(), 6);
+        assert!(radios.iter().all(|(_, node)| node.is_disabled()));
+    }
+
+    #[test]
+    fn rating_filter_menu_exposes_all_thresholds_as_radio_buttons() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.rating.filter = crate::ratings::RatingFilter::AtLeast(
+            crate::ratings::Rating::new(3).expect("valid test rating"),
+        );
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let mut actions = Vec::new();
+            rating_filter_menu(ui, &mut actions, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("rating-filter AccessKit update should be generated");
+        let radios = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .filter(|node| node.role() == egui::accesskit::Role::RadioButton)
+            .collect::<Vec<_>>();
+        assert_eq!(radios.len(), 6);
+        assert!(radios.iter().any(|node| {
+            node.label() == Some("All images")
+                && node.toggled() == Some(egui::accesskit::Toggled::False)
+        }));
+        for minimum in 1..=5 {
+            let expected = format!("Rating filter: At least {minimum}");
+            let node = radios
+                .iter()
+                .find(|node| node.label() == Some(expected.as_str()))
+                .unwrap_or_else(|| panic!("missing rating filter: {expected}"));
+            assert_eq!(
+                node.toggled(),
+                Some(if minimum == 3 {
+                    egui::accesskit::Toggled::True
+                } else {
+                    egui::accesskit::Toggled::False
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn first_rating_write_discloses_file_metadata_effects_and_actions() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.rating.pending_disclosure = Some(crate::ratings::RatingAssignment::Set(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        ));
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("rating-disclosure AccessKit update should be generated");
+        let cancel_id = update
+            .nodes
+            .iter()
+            .find_map(|(id, node)| {
+                (node.role() == egui::accesskit::Role::Button && node.label() == Some("Cancel"))
+                    .then_some(*id)
+            })
+            .expect("rating disclosure Cancel button");
+        assert_eq!(
+            update.focus, cancel_id,
+            "the safe disclosure action should receive initial keyboard focus"
+        );
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Save rating 4 of 5?",
+            "Ratings are written into this image file and may be visible to other apps.",
+            "viewr updates embedded metadata in the source JPEG. It does not create a database or sidecar.",
+            "Save rating",
+            "Cancel",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing rating disclosure content: {expected}; exposed: {exposed:?}"
+            );
+        }
+
+        let mut tab_input = accessibility_input();
+        tab_input.events.push(egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let tab_output = context.run_ui(tab_input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let tab_update = tab_output
+            .platform_output
+            .accesskit_update
+            .expect("tabbed rating-disclosure AccessKit update should be generated");
+        assert_ne!(
+            tab_update.focus, cancel_id,
+            "the modal should not steal focus back to Cancel after its opening frame"
+        );
+    }
+
+    #[test]
+    fn empty_rating_filter_has_a_specific_recovery_state() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.rating.filter = crate::ratings::RatingFilter::AtLeast(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        );
+        frame.rating.match_count = 0;
+        frame.rating.visible_position = None;
+        frame.rating.folder_count = 12;
+        frame.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.filmstrip.clear();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("rating-empty-state AccessKit update should be generated");
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        assert!(nodes.iter().any(|node| {
+            node.role() == egui::accesskit::Role::Pane
+                && node.label() == Some("No images match rating filter")
+        }));
+        assert!(nodes.iter().any(|node| {
+            node.value() == Some("No images are rated 4 or higher.")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+        for expected in [
+            "No images are rated 4 or higher.",
+            "12 images remain loaded in this folder.",
+        ] {
+            assert!(nodes.iter().any(|node| node.value() == Some(expected)));
+        }
+        assert!(nodes.iter().any(|node| {
+            node.role() == egui::accesskit::Role::Button && node.label() == Some("Show all images")
+        }));
+        assert!(
+            nodes
+                .iter()
+                .all(|node| { !matches!(node.label(), Some("Open File" | "Open Folder")) })
+        );
+    }
+
+    #[test]
+    fn rating_outcome_toast_is_polite_while_ordinary_toast_stays_non_live() {
+        assert!(rating_toast_is_status("Rating 4 of 5 saved."));
+        assert!(rating_toast_is_status(
+            "Could not save the rating safely. The previous rating is unchanged."
+        ));
+        assert!(!rating_toast_is_status("Saving rating..."));
+        assert!(!rating_toast_is_status("Saved copy · EXIF retained"));
+
+        let rating_context = egui::Context::default();
+        rating_context.enable_accesskit();
+        let mut rating_frame = accessibility_test_frame();
+        rating_frame.toast = Some("Rating 4 of 5 saved.".to_owned());
+        let rating_output = rating_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &rating_frame);
+        });
+        let rating_update = rating_output
+            .platform_output
+            .accesskit_update
+            .expect("rating-toast AccessKit update should be generated");
+        assert!(rating_update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Rating 4 of 5 saved.")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+
+        let ordinary_context = egui::Context::default();
+        ordinary_context.enable_accesskit();
+        let mut ordinary_frame = accessibility_test_frame();
+        ordinary_frame.toast = Some("Saved copy · EXIF retained".to_owned());
+        let ordinary_output = ordinary_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &ordinary_frame);
+        });
+        let ordinary_update = ordinary_output
+            .platform_output
+            .accesskit_update
+            .expect("ordinary-toast AccessKit update should be generated");
+        assert!(ordinary_update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Saved copy · EXIF retained")
+                && node.live() != Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
     fn source_privacy_reports_categories_and_an_honest_scan_limit() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -4032,6 +4912,7 @@ mod tests {
     #[test]
     fn empty_state_geometry_stays_stable_across_unchanged_frames() {
         let context = egui::Context::default();
+        context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.has_image = false;
         frame.file_path = None;
@@ -4044,22 +4925,32 @@ mod tests {
         for _ in 0..8 {
             let mut input = accessibility_input();
             input.screen_rect = Some(screen_rect);
-            let _ = context.run_ui(input, |ui| {
+            let output = context.run_ui(input, |ui| {
                 let _ = render(ui, &frame);
             });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("empty-state AccessKit update should be generated");
             observed.push(
-                context
-                    .memory(|memory| memory.area_rect(egui::Id::new("empty_state")))
-                    .expect("empty-state area"),
+                update
+                    .nodes
+                    .iter()
+                    .find_map(|(_, node)| {
+                        (node.role() == egui::accesskit::Role::Pane
+                            && node.label() == Some("Open an image source"))
+                        .then(|| node.bounds())
+                        .flatten()
+                    })
+                    .expect("empty-state card bounds"),
             );
         }
 
-        let settled = &observed[1..];
-        for pair in settled.windows(2) {
+        for pair in observed.windows(2) {
             let previous = pair[0];
             let current = pair[1];
             assert!(
-                (previous.min.y - current.min.y).abs() <= 1.0
+                (previous.y0 - current.y0).abs() <= 1.0
                     && (previous.height() - current.height()).abs() <= 1.0,
                 "unchanged empty state moved between frames: {observed:?}"
             );
@@ -4089,7 +4980,12 @@ mod tests {
                 .nodes
                 .iter()
                 .map(|(_, node)| node)
-                .find(|node| node.value() == Some(value))
+                .find(|node| {
+                    node.value() == Some(value)
+                        && node.bounds().is_some_and(|bounds| {
+                            bounds.y0 >= 0.0 && bounds.y1 <= f64::from(TOP_BAR_HEIGHT)
+                        })
+                })
                 .unwrap_or_else(|| panic!("missing top-bar value: {value}"))
                 .bounds()
                 .unwrap_or_else(|| panic!("missing top-bar bounds: {value}"))
@@ -4097,6 +4993,8 @@ mod tests {
         let name = bounds_for("current.png");
         let dimensions = bounds_for("1920 × 1080");
         let zoom = bounds_for("100%");
+        let rating = bounds_for("Rating: Unrated");
+        let position = bounds_for("1 / 2");
 
         assert!(
             dimensions.x0 - name.x1 >= 8.0,
@@ -4106,6 +5004,53 @@ mod tests {
             zoom.x0 - dimensions.x1 >= 8.0,
             "dimensions and zoom are crowded: {dimensions:?}, {zoom:?}"
         );
+        assert!(
+            rating.x0 - zoom.x1 >= 8.0,
+            "zoom and rating are crowded: {zoom:?}, {rating:?}"
+        );
+        assert!(
+            position.x0 - rating.x1 >= 8.0,
+            "rating and folder position are crowded: {rating:?}, {position:?}"
+        );
+    }
+
+    #[test]
+    fn top_status_names_the_embedded_rating_and_filtered_position() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.rating.state = crate::ratings::RatingState::Rated(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        );
+        frame.rating.filter = crate::ratings::RatingFilter::AtLeast(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        );
+        frame.rating.visible_position = Some((3, 3));
+        frame.rating.match_count = 3;
+        frame.rating.folder_count = 12;
+        let mut input = accessibility_input();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(1_200.0, 800.0),
+        ));
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-status AccessKit update should be generated");
+        let values = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        for expected in ["3 / 3 rated 4+ · 12 total", "Rating: 4 of 5"] {
+            assert!(
+                values.contains(&expected),
+                "missing rating status: {expected}; values: {values:?}"
+            );
+        }
     }
 
     #[test]

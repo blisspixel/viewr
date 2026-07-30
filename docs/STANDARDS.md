@@ -99,8 +99,9 @@ testing.
 
 - `cargo nextest` as the test runner for speed and clear output.
 - Unit tests next to the code they cover.
-- Integration tests for the real flows: open, navigate, delete-and-undo, crop,
-  spot-heal and edit undo/redo, convert, strip metadata.
+- Integration tests for the real flows: open, navigate, rate and filter disposable
+  JPEGs, delete-and-undo, crop, spot-heal and edit undo/redo, convert, and strip
+  metadata.
 - External native accessibility tests must exercise the platform provider and
   action path, not only inspect an in-process semantic tree. Windows CI runs the
   dependency-free UI Automation smoke script. Manual Narrator, VoiceOver, and

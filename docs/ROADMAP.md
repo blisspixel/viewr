@@ -32,8 +32,8 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Next product-surface focus: prove the safe embedded-rating gate in
-`docs/RATINGS.md`, then add the filtered playlist projection before rating UI.
+**Next product-surface focus: keep the implemented embedded-rating and filtered
+playlist contract green across target systems, then close remaining release gates.
 Next fidelity focus: display correctness. Next reliability focus: narrower native
 Trash and restore handoff races. Next release focus: target-OS validation and
 public verifiable artifacts.** Optional model-backed description remains a gated
@@ -219,18 +219,18 @@ approved behavior and safety contract is in `docs/RATINGS.md`.
 - [x] Define first-write disclosure, bare `0` through `5` assignment guards,
   modifier-based Fit and Actual Size, visible current state, minimum filters,
   no-match recovery, and accessible names and selected state.
-- [ ] Replace the advisory-affected XMP path with a bounded parser and writer that
+- [x] Replace the advisory-affected XMP path with a bounded parser and writer that
   can consume hostile metadata without an ignored runtime vulnerability.
-- [ ] Prove failure-atomic ordinary-JPEG replacement, exact source-version checks,
+- [x] Prove failure-atomic ordinary-JPEG replacement, exact source-version checks,
   permission and security-metadata preservation, rollback, unrelated-metadata
   preservation, and cross-tool interoperability.
-- [ ] Refactor Playlist to retain one canonical catalog and a tested filtered
+- [x] Refactor Playlist to retain one canonical catalog and a tested filtered
   index projection. Prove deterministic navigation, prefetch, Trash, and Undo
   against canonical positions before adding UI state.
-- [ ] Add the write worker, session-only folder scan and cache, Edit and View
+- [x] Add the write worker, session-only folder scan and cache, Edit and View
   surfaces, numeric shortcuts, persistent active-filter status, filtered-empty
   state, and native accessibility coverage.
-- [ ] Keep the existing 85 percent logic-coverage floor and 50,000-file memory,
+- [x] Keep the existing 85 percent logic-coverage floor and 50,000-file memory,
   startup, navigation, and idle budgets green with ratings present.
 
 Definition of done: ratings survive restart and ordinary rename, other compliant

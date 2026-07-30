@@ -129,16 +129,16 @@ measurement surface small and auditable.
 
 ## Current local evidence
 
-On the Windows development host on 2026-07-29, the current three-run optimized
-probe met every startup, navigation, memory, folder-scaling, cache, and idle budget:
-857.93 ms median first frame, 901.16 ms median first image, 77.19 ms slowest sampled
-navigation, 253.20 MiB small-folder peak resident set, 256.40 MiB large-folder peak
-resident set, four decoded cache entries at the exact 256 MiB byte budget, and at
-most one delivered redraw in every measured idle window. All completed idle
-windows reported zero non-redraw events, zero event-driven repaint requests, and
-zero scheduled egui repaints. Five of the six small and large folder windows were
-focused at completion, three had the pointer inside, and those states did not
-change the result.
+On the Windows development host on 2026-07-29, the final three-run optimized
+rating-enabled probe met every startup, navigation, memory, folder-scaling, cache,
+and idle budget: 786.17 ms median first frame, 830.02 ms median first image,
+65.01 ms slowest sampled navigation, 246.88 MiB small-folder peak resident set,
+261.55 MiB large-folder peak resident set, four decoded cache entries at the exact
+256 MiB byte budget, and at most one delivered redraw in every measured idle
+window. All completed idle windows reported zero non-redraw events, zero
+event-driven repaint requests, and zero scheduled egui repaints. The synthetic
+50,000-image folder included the session rating scan and filtered-playlist state;
+those processes were unfocused with the pointer outside at measurement completion.
 
 The probe now treats an outstanding egui repaint deadline as unsettled UI work. A
 500 ms idle observation starts or restarts only after delayed hover and activation

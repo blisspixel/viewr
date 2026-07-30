@@ -1,8 +1,9 @@
 # Ratings and folder filtering
 
-Status: approved product contract, not implemented.
+Status: implemented for bounded rating discovery and filtering, with source writes
+limited to ordinary supported JPEG files on Windows.
 
-viewr will support durable integer ratings because they improve a real folder
+viewr supports durable integer ratings because they improve a real folder
 workflow: rate the image in front of you, then narrow navigation to the strongest
 images. Ratings are not a library, activity history, synchronization service, or
 reason to introduce background indexing.
@@ -12,16 +13,17 @@ reason to introduce background indexing.
 - The canonical value is `xmp:Rating`. Supported viewr ratings are integers from
   1 through 5. Missing or zero means Unrated. The external value `-1` means
   Rejected and remains distinct from Unrated.
-- JPEG, and later TIFF after dedicated multi-page preservation proof, also mirrors
-  the same integer in IFD0 tag `0x4746` as an unsigned SHORT. This is the Windows
-  `System.SimpleRating` 0-to-5 field.
+- When a writable JPEG already contains a valid IFD0 tag `0x4746`, viewr updates
+  the same unsigned SHORT in place. This is the Windows `System.SimpleRating`
+  0-to-5 field. viewr does not insert an absent TIFF entry because growing or
+  relocating an unknown IFD could invalidate MakerNote or other offset-bearing
+  metadata. `xmp:Rating` remains the canonical interoperable value.
 - viewr never writes IFD tag `0x4749` or `System.Rating`. That separate Windows
   property uses a 0-to-99 scale, where a literal value of 4 does not mean four
   stars.
-- Clearing a rating removes viewr-supported rating fields instead of writing
-  history. If `xmp:MetadataDate` already exists it may be updated consistently;
-  viewr does not add creator-tool, history, identifier, timestamp, or activity
-  fields merely to store a rating.
+- Clearing removes `xmp:Rating` and writes zero into an existing valid `0x4746`
+  mirror. viewr does not add or update creator-tool, metadata-date, history,
+  identifier, timestamp, or activity fields merely to store a rating.
 - There is no global rating database, folder manifest, companion sidecar,
   alternate data stream, extended attribute, recent-file record, or disk cache.
   The source image is the durable record. A rating therefore follows a normal
@@ -48,11 +50,13 @@ state.
   are distinct states.
 - An explicit new rating may reconcile otherwise valid conflicting rating fields,
   but only after the normal first-write disclosure and source-safety checks.
-- The initial writable scope is ordinary content-detected JPEG. TIFF remains
-  read-only until endian, BigTIFF, multi-page, strip and tile offsets, and unknown
-  metadata preservation are proven. PNG, WebP, HEIF, AVIF, JPEG XL, camera RAW,
-  GIF, SVG, BMP, and other formats remain visibly unsupported for rating writes
-  until each container has equivalent proof. There is no persistence fallback.
+- The initial writable scope is ordinary content-detected JPEG on Windows. TIFF
+  remains read-only until endian, BigTIFF, multi-page, strip and tile offsets, and
+  unknown metadata preservation are proven. PNG, WebP, HEIF, AVIF, JPEG XL,
+  camera RAW, GIF, SVG, BMP, and other formats remain visibly unsupported for
+  rating writes until each container has equivalent proof. Non-Windows builds
+  currently read supported JPEG ratings and filter in memory but do not write
+  ratings. There is no persistence fallback.
 
 Adobe defines `xmp:Rating` as `-1` for Rejected and `0` through `5` for ratings.
 Microsoft maps `System.SimpleRating` to `xmp:Rating` and IFD tag `18246`, or
@@ -82,8 +86,8 @@ Sources reviewed 2026-07-29.
 - The top status keeps filename, dimensions, zoom, rating, and folder position in
   distinct readable groups. When width is constrained it removes lower-priority
   detail instead of collapsing all values together.
-- An active filter is persistent and explicit, for example `Image 2 of 7 matching
-  rating 4 or higher; 42 images in folder`.
+- An active filter is persistent and explicit, for example
+  `3 / 3 rated 4+ · 12 total`.
 - If no image matches, the loaded-folder surface says `No images are rated 4 or
   higher.` and exposes `Show all images`. It never falls back to the first-run Open
   File card.
@@ -109,32 +113,58 @@ derived projection of indices, never a second mutable playlist.
   index. A 50,000-file folder must remain within the existing performance and
   memory budgets.
 
-## Source-write safety gate
+## Source-write safety boundary
 
-No rating UI ships until all of these conditions are proven:
+The Windows writer is enabled only for a source that passes all of these checks:
 
-1. A safe XMP reader and writer has fixed size, depth, attribute, namespace, and
-   time limits and no ignored runtime advisory on the untrusted metadata path.
-2. A write binds to the exact accepted source identity and version, rejects links
-   and unsupported filesystems, and revalidates immediately before commit.
-3. The implementation builds a private same-directory temporary, changes only the
-   rating fields, syncs it, and performs a failure-atomic platform replacement.
-   Windows uses `ReplaceFileW` without either ignore-ACL flag. Other platforms
-   must preserve their equivalent permissions, ownership, extended attributes,
-   resource forks, and security state or fail closed.
-4. Post-commit verification reopens the source, confirms both rating fields, and
-   proves image payload plus unrelated EXIF, XMP, ICC, IPTC, comments, thumbnails,
-   and unknown metadata were preserved. A failed verification restores the
-   original or exposes fixed recovery guidance if restoration itself fails.
-5. Fixtures cover absent, zero, 1 through 5, Rejected, fractional, malformed,
-   duplicate, conflicting, oversized, and permission-denied metadata. Fault
-   injection covers every transaction phase. Cross-tool JPEG checks include
-   Windows WIC and an XMP-aware application.
-6. Filter, shortcut, accessibility, prefetch, Trash, Undo, F5, external-edit,
-   privacy, coverage, and 50,000-file performance gates all pass.
+1. The rating path uses `quick-xml` 0.41 directly, outside the advisory-affected
+   transitive versions. JPEG header bytes, segment count, XMP packet size, XML
+   events, depth, attributes, namespace declarations, rating text, TIFF entry
+   count, and total encoded bytes are all bounded. DTDs, extended XMP, duplicate
+   packets, unknown namespace prefixes, ambiguous RDF subjects, nested rating
+   properties, and metadata signatures hidden after the JPEG scan start fail
+   closed.
+2. A write retains the exact source handle that supplied displayed pixels, checks
+   native identity plus file length and change timestamps, rejects links and
+   reparse points, snapshots from that handle, compares the complete snapshot,
+   and revalidates immediately before replacement.
+3. The pristine snapshot and candidate are created beside the source with its
+   owner, group, and discretionary access-control list applied at `CreateFileW`.
+   The pristine copy is delete-on-close and immediately unlinked. The complete
+   candidate is synced and verified before `ReplaceFileW` runs with neither
+   ignore-ACL flag.
+4. Replacement retains the exact original under a private transaction name.
+   Post-commit verification reopens the candidate, checks its rating and complete
+   image tail, rechecks candidate and backup path binding, and only then removes
+   the original. Verification failure restores the retained original when that can
+   still be proven. An uncertain restore keeps the application open, disables
+   further writes, and exposes fixed recovery guidance instead of claiming the
+   previous rating is safe.
+5. The rewriter changes only `xmp:Rating` and an existing valid `0x4746` value.
+   Image payload, segment order, comments, ICC, IPTC, EXIF, XMP subject, unknown
+   metadata, and all other bytes remain preserved. It never adds creator, tool,
+   date, identifier, history, or `0x4749` fields.
 
-The current `little_exif` dependency reaches `quick-xml 0.37.5`, which is covered
-by narrow advisory exceptions only because viewr does not parse or rewrite
-untrusted XMP. Those exceptions cannot be broadened to implement ratings. A
-patched bounded metadata path and the preservation evidence above are required
-before source-mutating code is acceptable.
+The old `little_exif` and build-time Wayland paths still resolve advisory-affected
+`quick-xml` versions under their existing narrow exceptions. They never receive
+raw user XMP in viewr's reviewed paths. Ratings use the separate patched 0.41
+dependency, so the new untrusted parser does not broaden either exception.
+
+## Validation contract and known boundary
+
+Every release runs malformed and oversized metadata fixtures; rating values from
+absent through 5 plus Rejected, duplicates, conflicts, and invalid values; exact
+payload and unrelated-segment preservation; actual Windows success, stale-source,
+partial replacement, rollback, path-binding, security-descriptor, and transaction-
+cleanup tests; playlist and worker race tests; native UI Automation; Windows Shell
+Property System interoperability; local GExiv2 interoperability through a supplied
+Python executable or the default GIMP 3 Python when present; privacy and dependency
+gates; meaningful coverage; and the 50,000-file performance corpus.
+
+`ReplaceFileW` is the narrow final pathname operation. Another process can still
+replace a path after the last check. Abrupt process or power loss after replacement
+but before cleanup can also leave a source-protected `.viewr-rating-backup-*`
+original, and an unreconciled failure may retain a protected work copy for manual
+recovery. viewr will not broadly delete such names at startup because it cannot
+safely infer ownership across concurrent processes. These are explicit recovery
+boundaries, not hidden rating storage.

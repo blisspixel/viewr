@@ -21,7 +21,11 @@ use crate::performance::{
     PERFORMANCE_IDLE_OBSERVATION, PERFORMANCE_PROBE_TIMEOUT, PerformanceProbe,
     schedule_performance_wake,
 };
-use crate::playlist::{Playlist, ScanPurpose};
+use crate::playlist::{FilterSelection, Playlist, ScanPurpose};
+use crate::ratings::{
+    RatingAssignment, RatingFilter, RatingObservation, RatingState, RatingWriteCapability,
+    RatingWriteError,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
@@ -113,6 +117,15 @@ fn run_internal(
         playlist: None,
         playlist_scope: None,
         scanner_rx: None,
+        rating_scan_worker: None,
+        rating_generation: 0,
+        rating_write_disclosed: false,
+        pending_rating_write: None,
+        rating_write_worker: None,
+        close_after_rating_write: false,
+        rating_recovery_unsettled: false,
+        current_rating_capability: RatingWriteCapability::UnsafeSource,
+        presented_rating: RatingState::Loading,
         transform: Transform::default(),
         custom_crop_ratio: (3, 5),
         heal: HealTool::default(),
@@ -160,7 +173,8 @@ fn run_internal(
         context_menu_pos: None,
         thumb_result_tx,
         thumb_rx,
-        thumbs_in_flight: HashSet::new(),
+        thumbnail_generation: 0,
+        thumbs_in_flight: HashMap::new(),
         thumb_textures: HashMap::new(),
         prefetch: PrefetchCache::with_limits(
             prefetch::DEFAULT_CAPACITY,
@@ -189,6 +203,35 @@ fn run_internal(
 
 fn appearance_save_failure_message() -> &'static str {
     "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
+}
+
+fn rating_write_failure_message(error: RatingWriteError) -> &'static str {
+    match error {
+        RatingWriteError::ReadOnlyFormat => {
+            "This image's rating is read-only in viewr. The file was not changed."
+        }
+        RatingWriteError::UnsupportedMetadata => {
+            "This image has unsupported rating metadata. The file was not changed."
+        }
+        RatingWriteError::UnreadableMetadata => {
+            "viewr could not read this image's rating safely. The file was not changed."
+        }
+        RatingWriteError::SourceChanged => {
+            "The image changed on disk before the rating could be saved. Press F5 to reload, then try again."
+        }
+        RatingWriteError::PermissionDenied => {
+            "Could not save the rating because the image or its folder is read-only. The previous rating is unchanged."
+        }
+        RatingWriteError::WriteFailed => {
+            "Could not save the rating safely. The previous rating is unchanged."
+        }
+        RatingWriteError::VerificationRestored => {
+            "The rating update could not be verified. The original image was restored."
+        }
+        RatingWriteError::RecoveryFailed => {
+            "The rating update could not be verified or restored. Stop editing this image and restore it from a trusted backup."
+        }
+    }
 }
 
 /// Application-level events delivered from native platform integrations.
@@ -220,6 +263,32 @@ impl From<accesskit_winit::Event> for UserEvent {
 struct FolderScan {
     purpose: ScanPurpose,
     files: std::io::Result<Vec<PathBuf>>,
+}
+
+struct RatingScanWorker {
+    generation: u64,
+    cancel: Arc<AtomicBool>,
+    result_rx: Receiver<Vec<(PathBuf, RatingState)>>,
+}
+
+struct PendingRatingWrite {
+    path: PathBuf,
+    assignment: RatingAssignment,
+}
+
+struct RatingWriteWorker {
+    path: PathBuf,
+    assignment: RatingAssignment,
+    result_rx: Receiver<Result<crate::ratings::VerifiedRatingWrite, RatingWriteError>>,
+    join: JoinHandle<()>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RatingDiscoveryTransition {
+    Apply,
+    Start,
+    KeepRunning,
+    CancelAndApply,
 }
 
 /// Exact identity of one installed playlist. Restores may rejoin only this view.
@@ -389,7 +458,24 @@ type AuxiliaryLoadResult = (
     PathBuf,
     Result<Option<crate::animated::DecodedAnimation>, String>,
     crate::image_info::ImageDetails,
+    RatingObservation,
 );
+
+type ThumbnailResult = (u64, Result<ThumbRgba, (PathBuf, String)>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PresentedRatingTransition {
+    Retain,
+    Replace(RatingState),
+    Clear,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RatingRecoveryTransition {
+    Retain,
+    MarkUnsettled,
+    AcceptSource,
+}
 
 struct CropRecovery {
     source_path: PathBuf,
@@ -499,6 +585,7 @@ enum CurrentWork {
     Crop,
     Save,
     SpotHeal,
+    RatingWrite,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -564,7 +651,7 @@ fn crop_work(selection_active: bool, worker_active: bool) -> Option<CurrentWork>
     (selection_active || worker_active).then_some(CurrentWork::Crop)
 }
 
-fn current_work_blocker(work: [Option<CurrentWork>; 6]) -> Option<CurrentWork> {
+fn current_work_blocker<const N: usize>(work: [Option<CurrentWork>; N]) -> Option<CurrentWork> {
     work.into_iter().flatten().next()
 }
 
@@ -576,6 +663,7 @@ fn blocked_action_message(action: &str, blocker: CurrentWork) -> String {
         CurrentWork::Crop => "the crop",
         CurrentWork::Save => "Save As",
         CurrentWork::SpotHeal => "Spot Heal",
+        CurrentWork::RatingWrite => "the rating update",
     };
     format!("Wait for {work} to finish before {action}")
 }
@@ -873,6 +961,24 @@ struct App {
     playlist: Option<Playlist>,
     playlist_scope: Option<Arc<PlaylistScope>>,
     scanner_rx: Option<Receiver<FolderScan>>,
+    /// Cancellable, generation-tagged in-memory rating discovery for one folder.
+    rating_scan_worker: Option<RatingScanWorker>,
+    /// Monotonic owner token for folder rating results.
+    rating_generation: u64,
+    /// Session-only acknowledgement of embedded source mutation.
+    rating_write_disclosed: bool,
+    /// First write awaiting explicit disclosure confirmation.
+    pending_rating_write: Option<PendingRatingWrite>,
+    /// At most one atomic rating replacement transaction.
+    rating_write_worker: Option<RatingWriteWorker>,
+    /// A normal close request waiting for rating replacement to reconcile.
+    close_after_rating_write: bool,
+    /// An indeterminate source mutation that requires a trusted reload boundary.
+    rating_recovery_unsettled: bool,
+    /// Write capability associated with the currently presented source.
+    current_rating_capability: RatingWriteCapability,
+    /// Rating associated with the last source whose pixels were presented.
+    presented_rating: RatingState,
     transform: Transform,
     /// Last custom crop ratio entered during this process session.
     custom_crop_ratio: (u16, u16),
@@ -953,12 +1059,14 @@ struct App {
     right_click_start: Option<(f64, f64)>,
     /// Screen position of the right-click context menu, if open.
     context_menu_pos: Option<[f32; 2]>,
-    /// Completed thumbnail results (or failures) from background jobs.
-    thumb_result_tx: Sender<Result<ThumbRgba, (PathBuf, String)>>,
-    /// Receiver for thumbnail results.
-    thumb_rx: Receiver<Result<ThumbRgba, (PathBuf, String)>>,
-    /// Paths currently decoding for the filmstrip.
-    thumbs_in_flight: HashSet<PathBuf>,
+    /// Generation-tagged thumbnail results (or failures) from background jobs.
+    thumb_result_tx: Sender<ThumbnailResult>,
+    /// Receiver for generation-tagged thumbnail results.
+    thumb_rx: Receiver<ThumbnailResult>,
+    /// Owner token for thumbnail work in the active playlist scope.
+    thumbnail_generation: u64,
+    /// Paths currently decoding, paired with their playlist generation.
+    thumbs_in_flight: HashMap<PathBuf, u64>,
     /// Uploaded egui textures for filmstrip cells.
     thumb_textures: HashMap<PathBuf, egui::TextureHandle>,
     /// In-memory neighbor full-decode cache (never written to disk).
@@ -990,6 +1098,126 @@ fn primary_modifier_pressed(modifiers: ModifiersState) -> bool {
 
 fn single_key_shortcut_allowed(modifiers: ModifiersState) -> bool {
     !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
+}
+
+fn rating_assignment_for_key(key: &str, repeat: bool) -> Option<RatingAssignment> {
+    if repeat {
+        return None;
+    }
+    match key {
+        "0" => Some(RatingAssignment::Clear),
+        "1" | "2" | "3" | "4" | "5" => {
+            crate::ratings::Rating::new(key.as_bytes()[0] - b'0').map(RatingAssignment::Set)
+        }
+        _ => None,
+    }
+}
+
+fn application_shortcuts_blocked(owners: [bool; 5]) -> bool {
+    owners.into_iter().any(|owner| owner)
+}
+
+fn is_space_key(key: &winit::keyboard::Key) -> bool {
+    use winit::keyboard::{Key, NamedKey};
+
+    matches!(key, Key::Named(NamedKey::Space))
+        || matches!(key, Key::Character(character) if character.as_str() == " ")
+}
+
+fn space_release_must_unwind(
+    key: &winit::keyboard::Key,
+    state: winit::event::ElementState,
+    space_held: bool,
+) -> bool {
+    space_held && state == winit::event::ElementState::Released && is_space_key(key)
+}
+
+const fn next_presented_rating(
+    current: RatingState,
+    transition: PresentedRatingTransition,
+) -> RatingState {
+    match transition {
+        PresentedRatingTransition::Retain => current,
+        PresentedRatingTransition::Replace(rating) => rating,
+        PresentedRatingTransition::Clear => RatingState::Loading,
+    }
+}
+
+const fn next_rating_recovery_state(current: bool, transition: RatingRecoveryTransition) -> bool {
+    match transition {
+        RatingRecoveryTransition::Retain => current,
+        RatingRecoveryTransition::MarkUnsettled => true,
+        RatingRecoveryTransition::AcceptSource => false,
+    }
+}
+
+const fn rating_recovery_blocker(unsettled: bool) -> Option<&'static str> {
+    if unsettled {
+        Some(crate::ui::RATING_RECOVERY_STATUS)
+    } else {
+        None
+    }
+}
+
+const fn rating_recovery_after_presentation(
+    kind: PresentationKind,
+    accepted_source: bool,
+) -> RatingRecoveryTransition {
+    if matches!(kind, PresentationKind::Loaded) && accepted_source {
+        RatingRecoveryTransition::AcceptSource
+    } else {
+        RatingRecoveryTransition::Retain
+    }
+}
+
+fn rating_discovery_transition(
+    filter: RatingFilter,
+    worker_active: bool,
+    has_loading_ratings: bool,
+) -> RatingDiscoveryTransition {
+    if filter == RatingFilter::All || !has_loading_ratings {
+        if worker_active {
+            RatingDiscoveryTransition::CancelAndApply
+        } else {
+            RatingDiscoveryTransition::Apply
+        }
+    } else if worker_active {
+        RatingDiscoveryTransition::KeepRunning
+    } else {
+        RatingDiscoveryTransition::Start
+    }
+}
+
+fn rating_write_completion<T>(
+    poll: WorkerPoll<Result<T, RatingWriteError>>,
+    worker_panicked: bool,
+) -> Option<Result<T, RatingWriteError>> {
+    match (poll, worker_panicked) {
+        (WorkerPoll::Pending, _) => None,
+        (WorkerPoll::Ready(result), false) => Some(result),
+        (WorkerPoll::Ready(_) | WorkerPoll::Disconnected, _) => {
+            Some(Err(RatingWriteError::RecoveryFailed))
+        }
+    }
+}
+
+const fn exit_after_rating_write(
+    close_requested: bool,
+    terminal_error: Option<RatingWriteError>,
+) -> bool {
+    close_requested && !matches!(terminal_error, Some(RatingWriteError::RecoveryFailed))
+}
+
+const fn thumbnail_result_is_current(
+    current_generation: u64,
+    result_generation: u64,
+    visible: bool,
+) -> bool {
+    current_generation == result_generation && visible
+}
+
+const fn filmstrip_is_available(projected_count: usize) -> bool {
+    projected_count > 1
 }
 
 fn restore_targets_active_playlist(
@@ -1030,7 +1258,7 @@ fn route_consumed_keyboard_key(
     match key {
         Key::Character(character) => {
             let character = character.as_str();
-            matches!(character, "0" | "1" | "+" | "=" | "-" | "_" | "/")
+            matches!(character, "+" | "=" | "-" | "_" | "/")
                 || [
                     "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "f", "z", "y",
                 ]
@@ -1239,10 +1467,16 @@ impl App {
     }
 
     fn replace_playlist(&mut self, files: Vec<PathBuf>, index: usize) {
+        if let Some(worker) = self.rating_scan_worker.take() {
+            worker.cancel.store(true, Ordering::Release);
+        }
+        self.rating_generation = self.rating_generation.wrapping_add(1);
+        self.pending_rating_write = None;
         self.reset_prefetch_for_playlist_change();
+        self.advance_thumbnail_generation();
         self.thumb_textures.clear();
         self.playlist_scope = Some(Arc::new(PlaylistScope));
-        self.playlist = Some(Playlist { files, index });
+        self.playlist = Some(Playlist::new(files, index));
     }
 
     fn finish_folder_scan(&mut self, scan: FolderScan) -> bool {
@@ -1445,7 +1679,23 @@ impl App {
         self.current_image = Some(image);
         self.current_source = source;
         self.current_image_reuse = kind.image_reuse();
+        let rating_transition = if self.session.presented_path.as_deref() == Some(path) {
+            PresentedRatingTransition::Retain
+        } else {
+            PresentedRatingTransition::Replace(
+                self.playlist
+                    .as_ref()
+                    .map_or(RatingState::Loading, |playlist| {
+                        playlist.rating_for_path(path)
+                    }),
+            )
+        };
         self.session.set_presented(path.to_owned());
+        self.presented_rating = next_presented_rating(self.presented_rating, rating_transition);
+        let recovery_transition =
+            rating_recovery_after_presentation(kind, self.current_source.is_some());
+        self.rating_recovery_unsettled =
+            next_rating_recovery_state(self.rating_recovery_unsettled, recovery_transition);
         match kind {
             PresentationKind::Loaded => {
                 self.prefetch_schedule.allow(path);
@@ -1538,6 +1788,9 @@ impl App {
         self.session.load_error = None;
         self.current_image = None;
         self.current_source = None;
+        self.current_rating_capability = RatingWriteCapability::UnsafeSource;
+        self.presented_rating =
+            next_presented_rating(self.presented_rating, PresentedRatingTransition::Clear);
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
         self.session.presented_path = None;
         if let Some(renderer) = self.renderer.as_mut() {
@@ -1553,6 +1806,13 @@ impl App {
         self.preview_worker = None;
         self.animation = None;
         self.auxiliary_loader_rx = None;
+        self.current_rating_capability = RatingWriteCapability::UnsafeSource;
+        self.presented_rating =
+            next_presented_rating(self.presented_rating, PresentedRatingTransition::Retain);
+        self.rating_recovery_unsettled = next_rating_recovery_state(
+            self.rating_recovery_unsettled,
+            RatingRecoveryTransition::Retain,
+        );
         self.session.prepare_for_load();
     }
 
@@ -1587,10 +1847,17 @@ impl App {
                 || crate::image_info::ImageDetails::load(&job_path),
                 |source| crate::image_info::ImageDetails::load_from_source(&job_path, source),
             );
+            let rating = source.as_ref().map_or(
+                RatingObservation {
+                    state: RatingState::Unreadable,
+                    capability: RatingWriteCapability::UnsafeSource,
+                },
+                |source| crate::ratings::observe_source(source, &job_path),
+            );
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
-            let _ = sender.send((job_path, animation, details));
+            let _ = sender.send((job_path, animation, details, rating));
             let _ = event_proxy.send_event(UserEvent::Wake);
         });
         match scheduled {
@@ -1607,7 +1874,7 @@ impl App {
             .auxiliary_loader_rx
             .as_ref()
             .and_then(|receiver| receiver.try_recv().ok());
-        let Some((path, result, details)) = completed else {
+        let Some((path, result, details, rating)) = completed else {
             return;
         };
         self.auxiliary_loader_rx = None;
@@ -1617,6 +1884,14 @@ impl App {
             return;
         }
         self.image_details = Some(details);
+        self.current_rating_capability = rating.capability;
+        self.presented_rating = next_presented_rating(
+            self.presented_rating,
+            PresentedRatingTransition::Replace(rating.state),
+        );
+        if let Some(playlist) = self.playlist.as_mut() {
+            playlist.set_rating(&path, rating.state);
+        }
         match result {
             Ok(Some(animation)) => {
                 let mut playback =
@@ -1700,6 +1975,328 @@ impl App {
         }
     }
 
+    fn request_rating_assignment(&mut self, assignment: RatingAssignment) {
+        if self.block_action_while_busy("changing the rating", true) {
+            return;
+        }
+        if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
+            self.show_toast(message);
+            return;
+        }
+        let Some(path) = self.session.presented_path.clone() else {
+            self.show_toast("Open an image before assigning a rating");
+            return;
+        };
+        if self.session.selected_path.as_ref() != Some(&path) || self.current_source.is_none() {
+            self.show_toast("Wait for the selected image to finish loading");
+            return;
+        }
+        if assignment.expected_state() == self.presented_rating {
+            return;
+        }
+        match self.current_rating_capability {
+            RatingWriteCapability::WritableJpeg => {}
+            RatingWriteCapability::ReadOnlyFormat => {
+                self.show_toast(
+                    "This image's rating is read-only in viewr. The file was not changed.",
+                );
+                return;
+            }
+            RatingWriteCapability::UnsupportedMetadata => {
+                self.show_toast(
+                    "This image has unsupported rating metadata. The file was not changed.",
+                );
+                return;
+            }
+            RatingWriteCapability::UnsafeSource => {
+                self.show_toast(
+                    "viewr could not verify this image's source safely. The file was not changed.",
+                );
+                return;
+            }
+        }
+        let pending = PendingRatingWrite { path, assignment };
+        if self.rating_write_disclosed {
+            self.start_rating_write(&pending);
+        } else {
+            self.pending_rating_write = Some(pending);
+            self.request_redraw();
+        }
+    }
+
+    fn confirm_rating_disclosure(&mut self) {
+        let Some(pending) = self.pending_rating_write.take() else {
+            return;
+        };
+        self.rating_write_disclosed = true;
+        self.start_rating_write(&pending);
+    }
+
+    fn cancel_rating_disclosure(&mut self) {
+        self.pending_rating_write = None;
+        self.request_redraw();
+    }
+
+    fn start_rating_write(&mut self, pending: &PendingRatingWrite) {
+        if self.rating_write_worker.is_some()
+            || self.session.presented_path.as_ref() != Some(&pending.path)
+        {
+            self.show_toast("The selected image changed before the rating could be saved");
+            return;
+        }
+        let Some(source) = self.current_source.clone() else {
+            self.show_toast("Wait for the selected image to finish loading");
+            return;
+        };
+        let path = pending.path.clone();
+        let assignment = pending.assignment;
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let job_path = path.clone();
+        let spawned = std::thread::Builder::new()
+            .name("viewr-rating-write".into())
+            .spawn(move || {
+                let result = crate::ratings::write_rating(&job_path, &source, assignment);
+                let _ = sender.send(result);
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
+        match spawned {
+            Ok(join) => {
+                self.rating_write_worker = Some(RatingWriteWorker {
+                    path,
+                    assignment,
+                    result_rx: receiver,
+                    join,
+                });
+                self.show_toast("Saving rating...");
+            }
+            Err(_) => self
+                .show_toast("Could not save the rating safely. The previous rating is unchanged."),
+        }
+    }
+
+    fn poll_rating_write(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(worker) = self.rating_write_worker.as_ref() else {
+            return;
+        };
+        let poll = poll_worker(&worker.result_rx);
+        if matches!(poll, WorkerPoll::Pending) {
+            return;
+        }
+        let worker = self
+            .rating_write_worker
+            .take()
+            .expect("rating worker exists after reaching terminal channel state");
+        let worker_panicked = worker.join.join().is_err();
+        if worker_panicked {
+            log::error!("rating write worker panicked after terminal channel state");
+        }
+        let result = rating_write_completion(poll, worker_panicked)
+            .expect("terminal rating channel state produces a completion");
+        let terminal_error = result.as_ref().err().copied();
+        let should_exit = exit_after_rating_write(
+            std::mem::take(&mut self.close_after_rating_write),
+            terminal_error,
+        );
+        match result {
+            Ok(verified) => {
+                self.remove_prefetched_image(&worker.path);
+                if let Some(playlist) = self.playlist.as_mut() {
+                    playlist.set_rating(&worker.path, verified.state);
+                }
+                if self.session.presented_path.as_ref() == Some(&worker.path) {
+                    self.presented_rating = next_presented_rating(
+                        self.presented_rating,
+                        PresentedRatingTransition::Replace(verified.state),
+                    );
+                    self.current_source = Some(Arc::new(verified.source));
+                    self.current_rating_capability = RatingWriteCapability::WritableJpeg;
+                    self.start_auxiliary_load(&worker.path);
+                }
+                match worker.assignment {
+                    RatingAssignment::Clear => self.show_toast("Rating cleared."),
+                    RatingAssignment::Set(rating) => {
+                        self.show_toast(format!("Rating {} of 5 saved.", rating.get()));
+                    }
+                }
+            }
+            Err(error) => {
+                log::warn!("rating write failed: {error}");
+                if error == RatingWriteError::RecoveryFailed {
+                    self.rating_recovery_unsettled = next_rating_recovery_state(
+                        self.rating_recovery_unsettled,
+                        RatingRecoveryTransition::MarkUnsettled,
+                    );
+                    if self.session.presented_path.as_ref() == Some(&worker.path) {
+                        self.current_source = None;
+                        self.current_rating_capability = RatingWriteCapability::UnsafeSource;
+                        self.current_image_reuse = ImageReuseEligibility::Ineligible;
+                        self.presented_rating = next_presented_rating(
+                            self.presented_rating,
+                            PresentedRatingTransition::Replace(RatingState::Unreadable),
+                        );
+                        if let Some(playlist) = self.playlist.as_mut() {
+                            playlist.set_rating(&worker.path, RatingState::Unreadable);
+                        }
+                    }
+                }
+                self.show_toast(rating_write_failure_message(error));
+            }
+        }
+        self.kick_prefetch();
+        self.request_redraw();
+        if should_exit {
+            event_loop.exit();
+        }
+    }
+
+    fn set_rating_filter(&mut self, filter: RatingFilter) {
+        if self.block_action_while_busy("changing the rating filter", true) {
+            return;
+        }
+        let worker_active = self.rating_scan_worker.is_some();
+        let selection = if let Some(playlist) = self.playlist.as_mut() {
+            if filter == RatingFilter::All {
+                playlist.show_all()
+            } else {
+                playlist.set_filter(filter)
+            }
+        } else {
+            return;
+        };
+        let has_loading_ratings = self
+            .playlist
+            .as_ref()
+            .is_some_and(Playlist::has_loading_ratings);
+        match rating_discovery_transition(filter, worker_active, has_loading_ratings) {
+            RatingDiscoveryTransition::Apply => {}
+            RatingDiscoveryTransition::Start => {
+                self.start_rating_discovery();
+                self.request_redraw();
+                return;
+            }
+            RatingDiscoveryTransition::KeepRunning => {
+                self.request_redraw();
+                return;
+            }
+            RatingDiscoveryTransition::CancelAndApply => {
+                if let Some(worker) = self.rating_scan_worker.take() {
+                    worker.cancel.store(true, Ordering::Release);
+                }
+            }
+        }
+        self.apply_filter_selection(selection);
+    }
+
+    fn start_rating_discovery(&mut self) {
+        let Some(playlist) = self.playlist.as_ref() else {
+            return;
+        };
+        let files = playlist.files.clone();
+        let generation = self.rating_generation;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("viewr-rating-scan".into())
+            .spawn(move || {
+                let mut ratings = Vec::with_capacity(files.len());
+                for path in files {
+                    if worker_cancel.load(Ordering::Acquire) {
+                        return;
+                    }
+                    ratings.push((path.clone(), crate::ratings::observe_path(&path).state));
+                }
+                if !worker_cancel.load(Ordering::Acquire) {
+                    let _ = sender.send(ratings);
+                    let _ = event_proxy.send_event(UserEvent::Wake);
+                }
+            });
+        if spawned.is_ok() {
+            self.rating_scan_worker = Some(RatingScanWorker {
+                generation,
+                cancel,
+                result_rx: receiver,
+            });
+        } else {
+            if let Some(playlist) = self.playlist.as_mut() {
+                playlist.show_all();
+            }
+            self.show_toast("Could not finish reading folder ratings. Showing all images.");
+        }
+    }
+
+    fn poll_rating_discovery(&mut self) {
+        let Some(worker) = self.rating_scan_worker.as_ref() else {
+            return;
+        };
+        let completed = match worker.result_rx.try_recv() {
+            Ok(ratings) => Some(Ok(ratings)),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(())),
+        };
+        let Some(completed) = completed else {
+            return;
+        };
+        let worker = self
+            .rating_scan_worker
+            .take()
+            .expect("rating scan exists after polling it");
+        if worker.generation != self.rating_generation {
+            return;
+        }
+        let Ok(ratings) = completed else {
+            if let Some(playlist) = self.playlist.as_mut() {
+                playlist.show_all();
+            }
+            self.show_toast("Could not finish reading folder ratings. Showing all images.");
+            return;
+        };
+        let selection = if let Some(playlist) = self.playlist.as_mut() {
+            let filter = playlist.filter();
+            playlist.set_discovered_ratings(&ratings);
+            if let Some(path) = self.session.presented_path.as_deref()
+                && let Some(rating) = playlist.rating_for_known_path(path)
+            {
+                self.presented_rating = next_presented_rating(
+                    self.presented_rating,
+                    PresentedRatingTransition::Replace(rating),
+                );
+            }
+            playlist.set_filter(filter)
+        } else {
+            return;
+        };
+        self.apply_filter_selection(selection);
+    }
+
+    fn apply_filter_selection(&mut self, selection: FilterSelection) {
+        self.reset_prefetch_for_playlist_change();
+        match selection {
+            FilterSelection::Stay => {
+                if self.current_image.is_none()
+                    && let Some(path) = self
+                        .playlist
+                        .as_ref()
+                        .and_then(|playlist| playlist.files.get(playlist.index))
+                        .cloned()
+                {
+                    self.session.selected_path = Some(path.clone());
+                    self.spawn_image_load(path);
+                }
+            }
+            FilterSelection::Select(index) => self.go_to_index(index),
+            FilterSelection::Empty => {
+                self.cancel_pending_image_load();
+                self.session.selected_path = None;
+                self.invalidate_displayed_image();
+            }
+        }
+        self.kick_prefetch();
+        self.request_redraw();
+    }
+
     fn discard_animation_for_pixel_edit(&mut self) {
         self.animation = None;
         self.auxiliary_loader_rx = None;
@@ -1751,6 +2348,7 @@ impl App {
         // decodes in the foreground.
         self.remove_prefetched_image(&path);
         self.prefetch_schedule.reset();
+        self.advance_thumbnail_generation();
         self.thumb_textures.remove(&path);
         self.transform = Transform::default();
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
@@ -1840,7 +2438,7 @@ impl App {
         let has_filmstrip = self
             .playlist
             .as_ref()
-            .is_some_and(|playlist| playlist.files.len() > 1);
+            .is_some_and(|playlist| filmstrip_is_available(playlist.visible_len()));
         let has_image = self
             .renderer
             .as_ref()
@@ -1975,6 +2573,10 @@ impl App {
     }
 
     fn handle_single_key_shortcut(&mut self, key: &str) {
+        if let Some(assignment) = rating_assignment_for_key(key, false) {
+            self.request_rating_assignment(assignment);
+            return;
+        }
         match key {
             "o" | "O" => self.open_image_dialog(),
             "t" | "T" => {
@@ -1985,7 +2587,7 @@ impl App {
                 if self
                     .playlist
                     .as_ref()
-                    .is_some_and(|playlist| playlist.files.len() > 1) =>
+                    .is_some_and(|playlist| filmstrip_is_available(playlist.visible_len())) =>
             {
                 self.show_filmstrip_panel = !self.show_filmstrip_panel;
                 self.request_redraw();
@@ -2012,8 +2614,6 @@ impl App {
             "u" | "U" => self.undo_trash(),
             "x" | "X" if self.transform.is_cropping => self.swap_crop_ratio(),
             "f" | "F" => self.toggle_fullscreen(),
-            "0" => self.fit_to_view(),
-            "1" => self.set_actual_size(),
             "+" | "=" => self.zoom_at_viewport_center(1.15),
             "-" | "_" => self.zoom_at_viewport_center(1.0 / 1.15),
             _ => {}
@@ -2021,22 +2621,27 @@ impl App {
     }
 
     fn navigate(&mut self, delta: isize) {
-        if let Some(playlist) = &self.playlist {
-            if playlist.files.is_empty() {
-                return;
+        if let Some(playlist) = &self.playlist
+            && let Some(new_index) = playlist.navigation_target(delta)
+            && new_index != playlist.index
+        {
+            self.go_to_index(new_index);
+            return;
+        }
+        let empty_outside_filter = self
+            .playlist
+            .as_ref()
+            .is_some_and(|playlist| playlist.outside_filter() && playlist.visible_len() == 0);
+        if empty_outside_filter {
+            if let Some(playlist) = self.playlist.as_mut() {
+                playlist.dismiss_outside_filter();
             }
-            let max_idx = playlist.files.len().saturating_sub(1).cast_signed();
-            let new_index = (playlist.index.cast_signed() + delta)
-                .clamp(0, max_idx)
-                .cast_unsigned();
-            if new_index != playlist.index {
-                self.go_to_index(new_index);
-            }
+            self.apply_filter_selection(FilterSelection::Empty);
         }
     }
 
     fn go_to_index(&mut self, new_index: usize) {
-        if self.block_action_while_curating("browsing to another image") {
+        if self.block_action_while_busy("browsing to another image", true) {
             return;
         }
         let Some(playlist) = &self.playlist else {
@@ -2071,7 +2676,7 @@ impl App {
         let Some(playlist) = self.playlist.as_mut() else {
             return;
         };
-        playlist.index = new_index;
+        playlist.select(new_index);
         self.session.selected_path = Some(next_path.clone());
         self.transform = Transform::default();
 
@@ -2107,12 +2712,11 @@ impl App {
         let Some(playlist) = &self.playlist else {
             return;
         };
-        let targets: Vec<PathBuf> =
-            prefetch::neighbor_indices(playlist.index, playlist.files.len(), 2)
-                .into_iter()
-                .map(|i| playlist.files[i].clone())
-                .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))
-                .collect();
+        let targets: Vec<PathBuf> = playlist
+            .visible_neighbor_paths(2)
+            .into_iter()
+            .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))
+            .collect();
         if targets.is_empty() {
             return;
         }
@@ -2285,6 +2889,9 @@ impl App {
             image_preparation_work(self.session.is_loading(), self.preview_worker.is_some()),
             crop_work(self.transform.is_cropping, self.crop_worker.is_some()),
             self.save_worker.is_some().then_some(CurrentWork::Save),
+            self.rating_write_worker
+                .is_some()
+                .then_some(CurrentWork::RatingWrite),
             (include_spot_heal && (self.heal.active || self.heal.is_busy() || self.heal.painting))
                 .then_some(CurrentWork::SpotHeal),
         ]);
@@ -3166,21 +3773,30 @@ impl App {
         if playlist.files.is_empty() {
             return Vec::new();
         }
-        filmstrip_range(playlist.index, playlist.files.len())
-            .map(|i| {
+        playlist
+            .visible_catalog_range()
+            .into_iter()
+            .filter_map(|i| {
+                let position = playlist.visible_position_for_catalog_index(i)?;
                 let path = &playlist.files[i];
                 let name = path.file_name().map_or_else(
                     || path.display().to_string(),
                     |s| s.to_string_lossy().into_owned(),
                 );
                 let texture = self.thumb_textures.get(path).cloned();
-                FilmstripItem {
+                Some(FilmstripItem {
                     index: i,
+                    position: position.saturating_add(1),
                     name,
                     texture,
-                }
+                })
             })
             .collect()
+    }
+
+    fn advance_thumbnail_generation(&mut self) {
+        self.thumbnail_generation = self.thumbnail_generation.wrapping_add(1);
+        self.thumbs_in_flight.clear();
     }
 
     fn request_thumbs_for_filmstrip(&mut self) {
@@ -3190,8 +3806,11 @@ impl App {
         }
         let visible = paths.iter().cloned().collect::<HashSet<_>>();
         self.thumb_textures.retain(|path, _| visible.contains(path));
+        let generation = self.thumbnail_generation;
         for path in paths {
-            if self.thumb_textures.contains_key(&path) || self.thumbs_in_flight.contains(&path) {
+            if self.thumb_textures.contains_key(&path)
+                || self.thumbs_in_flight.get(&path) == Some(&generation)
+            {
                 continue;
             }
             let job_path = path.clone();
@@ -3202,11 +3821,11 @@ impl App {
                     Ok(thumb) => Ok(thumb),
                     Err(err) => Err((job_path, err)),
                 };
-                let _ = tx.send(result);
+                let _ = tx.send((generation, result));
                 let _ = event_proxy.send_event(UserEvent::Wake);
             });
             if scheduled {
-                self.thumbs_in_flight.insert(path);
+                self.thumbs_in_flight.insert(path, generation);
             }
         }
     }
@@ -3215,7 +3834,11 @@ impl App {
         let Some(playlist) = &self.playlist else {
             return Vec::new();
         };
-        playlist.files[filmstrip_range(playlist.index, playlist.files.len())].to_vec()
+        playlist
+            .visible_catalog_range()
+            .into_iter()
+            .map(|index| playlist.files[index].clone())
+            .collect()
     }
 
     fn poll_thumbnails(&mut self) {
@@ -3227,14 +3850,25 @@ impl App {
             HashSet::new()
         };
         let mut got = false;
-        while let Ok(msg) = self.thumb_rx.try_recv() {
+        while let Ok((generation, msg)) = self.thumb_rx.try_recv() {
+            let path = match &msg {
+                Ok(thumb) => thumb.path.clone(),
+                Err((path, _)) => path.clone(),
+            };
+            if self.thumbs_in_flight.get(&path) == Some(&generation) {
+                self.thumbs_in_flight.remove(&path);
+            }
+            if !thumbnail_result_is_current(
+                self.thumbnail_generation,
+                generation,
+                visible.contains(&path),
+            ) {
+                continue;
+            }
             got = true;
             match msg {
                 Ok(thumb) => {
-                    self.thumbs_in_flight.remove(&thumb.path);
-                    if visible.contains(&thumb.path)
-                        && let Some(renderer) = &self.renderer
-                    {
+                    if let Some(renderer) = &self.renderer {
                         let image = egui::ColorImage::from_rgba_unmultiplied(
                             [thumb.width as usize, thumb.height as usize],
                             &thumb.rgba,
@@ -3247,8 +3881,7 @@ impl App {
                         self.thumb_textures.insert(thumb.path, handle);
                     }
                 }
-                Err((path, err)) => {
-                    self.thumbs_in_flight.remove(&path);
+                Err((_path, err)) => {
                     // Filename-only (no directory) if the user opted into RUST_LOG.
                     log::debug!("thumb failed: {err}");
                 }
@@ -3369,14 +4002,18 @@ impl App {
     fn after_paths_removed(&mut self, removed: &[PathBuf], old_index: usize) {
         self.reset_prefetch_for_playlist_change();
         if let Some(playlist) = &mut self.playlist {
-            crate::curate::remove_from_playlist(&mut playlist.files, removed);
+            playlist.remove_paths(removed, old_index);
             if playlist.files.is_empty() {
                 self.cancel_pending_image_load();
                 self.session.selected_path = None;
                 self.invalidate_displayed_image();
             } else {
-                playlist.index =
-                    crate::curate::index_after_removals(&playlist.files, old_index, removed);
+                if playlist.visible_len() == 0 {
+                    self.cancel_pending_image_load();
+                    self.session.selected_path = None;
+                    self.invalidate_displayed_image();
+                    return;
+                }
                 let next_path = playlist.files[playlist.index].clone();
                 self.session.selected_path = Some(next_path.clone());
                 self.transform = Transform::default();
@@ -3457,29 +4094,30 @@ impl App {
         );
         outcome.restored.sort_by_key(|record| record.playlist_index);
         let restored_count = outcome.restored.len();
-        let first_restored_path = restores_active_playlist.then(|| {
-            outcome
-                .restored
-                .first()
-                .map(|record| record.receipt.original_path().to_owned())
-        });
-        let first_restored_path = first_restored_path.flatten();
         if restored_count > 0 && restores_active_playlist {
             self.reset_prefetch_for_playlist_change();
         }
+        let mut restored_selection = None;
         if restores_active_playlist && let Some(playlist) = &mut self.playlist {
+            let previously_selected = playlist.index;
             let mut focused_index = None;
             for record in &outcome.restored {
                 let index = outcome
                     .restored_playlist_index(record.playlist_index)
                     .min(playlist.files.len());
                 focused_index.get_or_insert(index);
-                playlist
-                    .files
-                    .insert(index, record.receipt.original_path().to_owned());
+                let path = record.receipt.original_path().to_owned();
+                let rating = crate::ratings::observe_path(&path).state;
+                playlist.insert_path(index, path, rating);
             }
             if let Some(index) = focused_index {
                 playlist.index = index.min(playlist.files.len().saturating_sub(1));
+                let filter = playlist.filter();
+                restored_selection = Some(match playlist.set_filter(filter) {
+                    FilterSelection::Stay => FilterSelection::Select(playlist.index),
+                    selection => selection,
+                });
+                playlist.index = previously_selected.min(playlist.files.len().saturating_sub(1));
             }
         }
         let retry_now = outcome.failure_count(TrashRestoreDisposition::RetryNow);
@@ -3506,10 +4144,8 @@ impl App {
             self.last_trashed_scope = context.scope;
         }
 
-        if let Some(original_path) = first_restored_path {
-            self.session.selected_path = Some(original_path.clone());
-            self.transform = Transform::default();
-            self.spawn_image_load(original_path);
+        if let Some(selection) = restored_selection {
+            self.apply_filter_selection(selection);
         }
 
         self.show_toast(restore_result_message(
@@ -4220,14 +4856,18 @@ impl ApplicationHandler<UserEvent> for App {
                 } => true,
                 WindowEvent::CursorMoved { .. } if self.heal.painting => true,
                 WindowEvent::KeyboardInput { event, .. } => {
-                    !self.show_about
-                        && !self.show_update
-                        && !egui_popup_open
-                        && route_consumed_keyboard_key(
+                    space_release_must_unwind(&event.logical_key, event.state, self.space_held)
+                        || (!application_shortcuts_blocked([
+                            self.show_about,
+                            self.show_update,
+                            self.pending_rating_write.is_some(),
+                            egui_popup_open,
+                            self.context_menu_pos.is_some(),
+                        ]) && route_consumed_keyboard_key(
                             &event.logical_key,
                             self.transform.is_cropping,
                             self.heal.active,
-                        )
+                        ))
                 }
                 _ => false,
             };
@@ -4259,6 +4899,11 @@ impl ApplicationHandler<UserEvent> for App {
                 self.transform.crop_start = None;
             }
             WindowEvent::CloseRequested => {
+                if self.rating_write_worker.is_some() {
+                    self.close_after_rating_write = true;
+                    self.show_toast("Finishing the rating update before closing...");
+                    return;
+                }
                 match close_disposition(self.curation_worker.is_some()) {
                     CloseDisposition::Exit => event_loop.exit(),
                     CloseDisposition::WaitForCuration => {
@@ -4456,40 +5101,54 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput {
                 event:
                     winit::event::KeyEvent {
-                        state, logical_key, ..
+                        state,
+                        logical_key,
+                        repeat,
+                        ..
                     },
                 ..
             } => {
                 use winit::keyboard::{Key, NamedKey};
-                if self.show_about || self.show_update {
-                    return;
-                }
                 let pressed = state == winit::event::ElementState::Pressed;
-                // Space: hold = temporary hand tool; tap (no drag) = reset view.
-                let is_space = matches!(&logical_key, Key::Named(NamedKey::Space))
-                    || matches!(&logical_key, Key::Character(c) if c.as_str() == " ");
-                if is_space {
-                    if pressed {
-                        if self.heal.painting {
-                            self.finish_heal_stroke();
-                        }
-                        self.space_held = true;
-                        self.space_dragged = false;
-                        self.update_cursor_icon();
-                    } else {
+                let is_space = is_space_key(&logical_key);
+                if is_space && !pressed {
+                    if self.space_held {
                         self.space_held = false;
                         self.update_cursor_icon();
                         if !self.space_dragged {
                             self.transform = Transform::default();
-                            if let Some(r) = self.renderer.as_mut() {
-                                r.window().request_redraw();
+                            if let Some(renderer) = self.renderer.as_mut() {
+                                renderer.window().request_redraw();
                             }
                         }
                         self.space_dragged = false;
                     }
                     return;
                 }
+                if application_shortcuts_blocked([
+                    self.show_about,
+                    self.show_update,
+                    self.pending_rating_write.is_some(),
+                    egui_popup_open,
+                    self.context_menu_pos.is_some(),
+                ]) {
+                    return;
+                }
+                // Space: hold = temporary hand tool; tap (no drag) = reset view.
+                if is_space {
+                    if self.heal.painting {
+                        self.finish_heal_stroke();
+                    }
+                    self.space_held = true;
+                    self.space_dragged = false;
+                    self.update_cursor_icon();
+                    return;
+                }
                 if !pressed {
+                    return;
+                }
+                if matches!(&logical_key, Key::Character(value) if repeat && rating_assignment_for_key(value.as_str(), false).is_some())
+                {
                     return;
                 }
                 match logical_key {
@@ -4626,6 +5285,39 @@ impl ApplicationHandler<UserEvent> for App {
                     .playlist
                     .as_ref()
                     .map(|p| (p.index.saturating_add(1), p.files.len().max(1)));
+                let rating = self.playlist.as_ref().map_or_else(
+                    || crate::ui::RatingUiState {
+                        state: self.presented_rating,
+                        capability: self.current_rating_capability,
+                        write_busy: self.rating_write_worker.is_some(),
+                        recovery_unsettled: self.rating_recovery_unsettled,
+                        discovery_busy: self.rating_scan_worker.is_some(),
+                        pending_disclosure: self
+                            .pending_rating_write
+                            .as_ref()
+                            .map(|pending| pending.assignment),
+                        ..crate::ui::RatingUiState::default()
+                    },
+                    |playlist| crate::ui::RatingUiState {
+                        state: self.presented_rating,
+                        capability: self.current_rating_capability,
+                        filter: playlist.filter(),
+                        write_busy: self.rating_write_worker.is_some(),
+                        recovery_unsettled: self.rating_recovery_unsettled,
+                        discovery_busy: self.rating_scan_worker.is_some(),
+                        outside_filter: playlist.outside_filter(),
+                        visible_position: playlist
+                            .visible_position()
+                            .map(|position| (position.saturating_add(1), playlist.visible_len())),
+                        match_count: playlist.visible_len(),
+                        current_catalog_index: Some(playlist.index),
+                        folder_count: playlist.files.len(),
+                        pending_disclosure: self
+                            .pending_rating_write
+                            .as_ref()
+                            .map(|pending| pending.assignment),
+                    },
+                );
                 if self.show_filmstrip_panel && self.filmstrip_panel_open {
                     self.request_thumbs_for_filmstrip();
                 }
@@ -4803,6 +5495,7 @@ impl ApplicationHandler<UserEvent> for App {
                     theme_mode,
                     show_about,
                     show_update,
+                    rating,
                     external_edit_pending,
                     show_tools_panel,
                     tools_panel_open,
@@ -4941,6 +5634,21 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::CloseUpdate => {
                             self.show_update = false;
                             self.request_redraw();
+                        }
+                        crate::ui::UiAction::AssignRating(assignment) => {
+                            self.request_rating_assignment(assignment);
+                        }
+                        crate::ui::UiAction::SetRatingFilter(filter) => {
+                            self.set_rating_filter(filter);
+                        }
+                        crate::ui::UiAction::ConfirmRatingDisclosure => {
+                            self.confirm_rating_disclosure();
+                        }
+                        crate::ui::UiAction::CancelRatingDisclosure => {
+                            self.cancel_rating_disclosure();
+                        }
+                        crate::ui::UiAction::ShowAllRatings => {
+                            self.set_rating_filter(RatingFilter::All);
                         }
                         crate::ui::UiAction::ToggleImageInfo => {
                             self.show_image_info = !self.show_image_info;
@@ -5116,6 +5824,8 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_rating_write(event_loop);
+        self.poll_rating_discovery();
         self.poll_curation_result(event_loop);
         self.poll_thumbnails();
         self.poll_prefetch();
@@ -5251,14 +5961,6 @@ fn selected_file_index(files: &[PathBuf], selected: &Path) -> Option<usize> {
 
 fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
     current == Some(selected)
-}
-
-fn filmstrip_range(index: usize, len: usize) -> std::ops::Range<usize> {
-    let Some(last_index) = len.checked_sub(1) else {
-        return 0..0;
-    };
-    let current = index.min(last_index);
-    current.saturating_sub(4)..current.saturating_add(5).min(len)
 }
 
 fn performance_navigation_targets(current: usize, len: usize) -> VecDeque<usize> {
@@ -5429,6 +6131,181 @@ fn permanent_delete_confirmed(result: &rfd::MessageDialogResult) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn bare_digits_assign_ratings_and_repeat_never_writes() {
+        assert_eq!(
+            rating_assignment_for_key("0", false),
+            Some(RatingAssignment::Clear)
+        );
+        for value in 1_u8..=5 {
+            assert_eq!(
+                rating_assignment_for_key(&value.to_string(), false),
+                Some(RatingAssignment::Set(
+                    crate::ratings::Rating::new(value).unwrap()
+                ))
+            );
+            assert_eq!(rating_assignment_for_key(&value.to_string(), true), None);
+        }
+        assert_eq!(rating_assignment_for_key("6", false), None);
+        assert_eq!(rating_assignment_for_key("1", true), None);
+    }
+
+    #[test]
+    fn consumed_numeric_input_is_not_forced_into_rating_shortcuts() {
+        for key in ["0", "1", "2", "3", "4", "5"] {
+            assert!(!route_consumed_keyboard_key(
+                &winit::keyboard::Key::Character(key.into()),
+                false,
+                false,
+            ));
+        }
+    }
+
+    #[test]
+    fn menus_modals_and_popups_own_keyboard_shortcuts() {
+        assert!(!application_shortcuts_blocked([false; 5]));
+        for owner in 0..5 {
+            let mut owners = [false; 5];
+            owners[owner] = true;
+            assert!(application_shortcuts_blocked(owners));
+        }
+    }
+
+    #[test]
+    fn held_space_release_unwinds_even_when_an_overlay_takes_shortcuts() {
+        use winit::event::ElementState;
+        use winit::keyboard::{Key, NamedKey};
+
+        let space = Key::Named(NamedKey::Space);
+        assert!(space_release_must_unwind(
+            &space,
+            ElementState::Released,
+            true
+        ));
+        assert!(!space_release_must_unwind(
+            &space,
+            ElementState::Released,
+            false
+        ));
+        assert!(!space_release_must_unwind(
+            &space,
+            ElementState::Pressed,
+            true
+        ));
+    }
+
+    #[test]
+    fn failed_replacement_load_retains_the_presented_rating() {
+        let rating = RatingState::Rated(crate::ratings::Rating::new(4).unwrap());
+
+        assert_eq!(
+            next_presented_rating(rating, PresentedRatingTransition::Retain),
+            rating
+        );
+        assert_eq!(
+            next_presented_rating(rating, PresentedRatingTransition::Clear),
+            RatingState::Loading
+        );
+        assert_eq!(
+            next_presented_rating(
+                rating,
+                PresentedRatingTransition::Replace(RatingState::Unrated)
+            ),
+            RatingState::Unrated
+        );
+    }
+
+    #[test]
+    fn threshold_changes_reuse_one_active_rating_scan() {
+        let threshold = RatingFilter::AtLeast(crate::ratings::Rating::new(4).unwrap());
+
+        assert_eq!(
+            rating_discovery_transition(threshold, true, true),
+            RatingDiscoveryTransition::KeepRunning
+        );
+        assert_eq!(
+            rating_discovery_transition(threshold, false, true),
+            RatingDiscoveryTransition::Start
+        );
+        assert_eq!(
+            rating_discovery_transition(RatingFilter::All, true, true),
+            RatingDiscoveryTransition::CancelAndApply
+        );
+        assert_eq!(
+            rating_discovery_transition(threshold, true, false),
+            RatingDiscoveryTransition::CancelAndApply
+        );
+    }
+
+    #[test]
+    fn rating_worker_loss_is_indeterminate_and_blocks_deferred_exit() {
+        assert_eq!(
+            rating_write_completion(WorkerPoll::Ready(Ok(7_u8)), false),
+            Some(Ok(7))
+        );
+        assert_eq!(
+            rating_write_completion(WorkerPoll::Ready(Ok(7_u8)), true),
+            Some(Err(RatingWriteError::RecoveryFailed))
+        );
+        assert_eq!(
+            rating_write_completion::<u8>(WorkerPoll::Disconnected, false),
+            Some(Err(RatingWriteError::RecoveryFailed))
+        );
+        assert!(!exit_after_rating_write(
+            true,
+            Some(RatingWriteError::RecoveryFailed)
+        ));
+        assert!(exit_after_rating_write(
+            true,
+            Some(RatingWriteError::WriteFailed)
+        ));
+    }
+
+    #[test]
+    fn rating_recovery_clears_only_after_an_accepted_source() {
+        let unsettled = next_rating_recovery_state(false, RatingRecoveryTransition::MarkUnsettled);
+        assert!(unsettled);
+        assert!(next_rating_recovery_state(
+            unsettled,
+            RatingRecoveryTransition::Retain
+        ));
+        assert!(!next_rating_recovery_state(
+            unsettled,
+            RatingRecoveryTransition::AcceptSource
+        ));
+        assert_eq!(
+            rating_recovery_blocker(unsettled),
+            Some(crate::ui::RATING_RECOVERY_STATUS)
+        );
+        assert_eq!(rating_recovery_blocker(false), None);
+        assert_eq!(
+            rating_recovery_after_presentation(PresentationKind::Cropped, true),
+            RatingRecoveryTransition::Retain
+        );
+        assert_eq!(
+            rating_recovery_after_presentation(PresentationKind::Loaded, false),
+            RatingRecoveryTransition::Retain
+        );
+        assert_eq!(
+            rating_recovery_after_presentation(PresentationKind::Loaded, true),
+            RatingRecoveryTransition::AcceptSource
+        );
+    }
+
+    #[test]
+    fn old_thumbnail_generation_cannot_publish_for_the_same_visible_path() {
+        assert!(thumbnail_result_is_current(8, 8, true));
+        assert!(!thumbnail_result_is_current(8, 7, true));
+        assert!(!thumbnail_result_is_current(8, 8, false));
+    }
+
+    #[test]
+    fn filmstrip_layout_uses_the_projected_entry_count() {
+        assert!(!filmstrip_is_available(0));
+        assert!(!filmstrip_is_available(1));
+        assert!(filmstrip_is_available(2));
+    }
 
     #[cfg(target_os = "windows")]
     #[test]
@@ -6352,10 +7229,7 @@ mod test {
         let original = Arc::new(PlaylistScope);
         let same = Arc::clone(&original);
         let replacement = Arc::new(PlaylistScope);
-        let playlist = Playlist {
-            files: vec![PathBuf::from("active.jpg")],
-            index: 0,
-        };
+        let playlist = Playlist::new(vec![PathBuf::from("active.jpg")], 0);
 
         assert!(restore_targets_active_playlist(
             Some(&playlist),
@@ -6396,15 +7270,6 @@ mod test {
         ));
         assert!(!image_is_fully_displayed(Some((1, 1)), None));
         assert!(!image_is_fully_displayed(None, None));
-    }
-
-    #[test]
-    fn filmstrip_window_is_bounded_for_edges_and_stale_indices() {
-        assert_eq!(filmstrip_range(0, 0), 0..0);
-        assert_eq!(filmstrip_range(99, 0), 0..0);
-        assert_eq!(filmstrip_range(0, 20), 0..5);
-        assert_eq!(filmstrip_range(10, 20), 6..15);
-        assert_eq!(filmstrip_range(99, 20), 15..20);
     }
 
     #[test]
@@ -6492,10 +7357,7 @@ mod test {
     #[test]
     fn selected_prefetch_result_presents_only_while_pending_or_failed() {
         let selected = Path::new("selected.png");
-        let playlist = Playlist {
-            files: vec![selected.to_owned(), PathBuf::from("neighbor.png")],
-            index: 0,
-        };
+        let playlist = Playlist::new(vec![selected.to_owned(), PathBuf::from("neighbor.png")], 0);
 
         assert_eq!(
             prefetch_destination(Some(selected), true, Some(&playlist), selected),
@@ -6511,10 +7373,7 @@ mod test {
     fn prefetch_result_caches_only_current_playlist_neighbors() {
         let selected = Path::new("selected.png");
         let neighbor = Path::new("neighbor.png");
-        let playlist = Playlist {
-            files: vec![selected.to_owned(), neighbor.to_owned()],
-            index: 0,
-        };
+        let playlist = Playlist::new(vec![selected.to_owned(), neighbor.to_owned()], 0);
 
         assert_eq!(
             prefetch_destination(Some(selected), false, Some(&playlist), neighbor),

@@ -428,7 +428,7 @@ fn move_to_trash_unbound(
     #[cfg(target_os = "macos")]
     let (trashed_path, capture_status) = {
         let trashed_path = crate::macos::move_to_trash(&original_path)?;
-        if restore_source.matches_path(&trashed_path) == crate::fs::ImageSourceMatch::Same {
+        if restore_source.same_object_at_path(&trashed_path) {
             (Some(trashed_path), TrashReceiptCaptureStatus::Bound)
         } else {
             (None, TrashReceiptCaptureStatus::IdentityMismatch)
@@ -770,7 +770,7 @@ fn restore_from_trash_platform(receipt: &TrashReceipt) -> Result<(), TrashRestor
         .restore_source
         .as_deref()
         .ok_or(TrashRestoreError::InvalidReceipt)?;
-    if restore_source.matches_path(trashed_path) != crate::fs::ImageSourceMatch::Same {
+    if !restore_source.same_object_at_path(trashed_path) {
         return Err(TrashRestoreError::InvalidReceipt);
     }
     crate::macos::restore_from_trash(trashed_path, &receipt.original_path)
@@ -1095,7 +1095,7 @@ fn trash_item_data_path(item: &trash::TrashItem) -> PathBuf {
     )
 ))]
 fn trash_item_matches_source(item: &trash::TrashItem, source: &crate::fs::ImageSource) -> bool {
-    source.matches_path(&trash_item_data_path(item)) == crate::fs::ImageSourceMatch::Same
+    source.same_object_at_path(&trash_item_data_path(item))
 }
 
 #[cfg(not(any(

@@ -245,7 +245,22 @@ Shipped:
   process-group lifetime controls, one-process policies, memory limits, hard
   deadlines, and generation cancellation for helpers.
 - **`fs`**: recognizing regular image files (core and worker extensions), excluding
-  symlinks from automatic scans, and natural-sort ordering (`img2` before `img10`).
+  symlinks from automatic scans, natural-sort ordering (`img2` before `img10`),
+  and versioned native file identity used to bind a displayed source to guarded
+  mutation.
+- **`ratings`**: bounded JPEG header, XMP, and existing IFD0 `0x4746` parsing;
+  complete rating-state reconciliation; and the narrow Windows source-write
+  transaction. XMP is canonical. An existing valid SimpleRating mirror is updated
+  without growing or relocating the TIFF directory. The transaction snapshots the
+  retained accepted source, stages beside it under source-equivalent security,
+  revalidates identity and bytes, calls `ReplaceFileW`, reopens and verifies the
+  candidate, and either removes the retained original or reconciles it. Other
+  platforms expose the reader and remain read-only.
+- **`playlist`**: one canonical naturally ordered folder catalog plus rating state
+  and a derived minimum-rating projection. Navigation, Home and End, Folder
+  Previews, and prefetch consume projected canonical indices. Trash and Undo retain
+  canonical positions. A just-rated image can remain explicitly outside the
+  active filter until the next navigation action without creating a second list.
 - **`prefetch`**: an in-memory LRU bounded to five decoded neighbors and 256 MiB,
   whichever limit is reached first, plus generation-tagged scheduling that makes
   failed or uncacheable outcomes terminal for the current playlist. Entries use
@@ -265,7 +280,8 @@ Shipped:
 - **`ui`**: the `egui` layer for the conventional menu bar, fully hideable and
   collapsible docked tools and folder previews, left/right Image Information,
   animation controls, crop controls and handles, the temporary docked Spot Heal
-  inspector, accessible About modal, appearance picker, load/retry state, and
+  inspector, accessible rating and threshold radio groups, first-write disclosure,
+  filtered-empty recovery, About modal, appearance picker, load/retry state, and
   transient toasts.
   Visible chrome never covers the image; its
   exact edge-aware insets feed the same `view` geometry used by hit testing and

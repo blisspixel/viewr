@@ -136,8 +136,9 @@ Heal inspector that also reserves its own space; only its brush mask is drawn ov
 the photo. Its inspector exposes brush radius, feather, alternate ranked sources,
 Undo, and Redo. Image Information separates the bounded Source Privacy summary
 from the explicit session-only export-metadata choice. View also exposes Fit Image to View
-(`0`), Actual Size (`1`), Zoom In (`+`), and Zoom Out (`-`) so zoom never depends on
-a mouse or trackpad. The empty, loading, and load-error states use an opaque
+(primary modifier plus `0`), Actual Size (primary modifier plus `1`), Zoom In (`+`),
+and Zoom Out (`-`) so zoom never depends on a mouse or trackpad. The empty,
+loading, and load-error states use an opaque
 high-contrast surface, so they remain readable even when the image background is
 white. File > Reload File (`F5`) explicitly bypasses the decoded-neighbor cache
 and refreshes the current file from disk while retaining the last good frame until
@@ -153,11 +154,27 @@ displayed pixels until renderer presentation succeeds. A failure restores the
 same selection for immediate Enter-key retry, while navigation cooperatively
 cancels obsolete row-copy work.
 
-Star ratings and rating-threshold folder filters are not implemented yet. Their
-[approved contract](docs/RATINGS.md) uses standard embedded 0-to-5 metadata, never
-a sidecar, activity database, alternate stream, or session-only imitation. It is
-blocked until a patched bounded XMP path and failure-atomic preservation tests can
-prove that rating one image cannot corrupt its pixels or unrelated metadata.
+Ratings use the familiar folder workflow without turning viewr into a library.
+In normal viewing mode, `1` through `5` assign that rating and `0` clears it.
+Edit > Rating exposes the same choices, while View > Rating Filter narrows the
+current folder to All images or a minimum from 1 through 5. The filter is
+session-only, every active threshold stays visible, navigation and Folder
+Previews use only matching images, and an empty result offers Show all images.
+Fit Image to View and Actual Size therefore use the primary modifier plus `0`
+and `1`. There is no separate flag, pick, review, or batch-culling state. One
+durable rating scale covers the useful workflow without another hidden catalog.
+
+The durable record is standard embedded `xmp:Rating` inside the image, not a
+viewr database, sidecar, alternate stream, filename convention, metadata timestamp
+field, separate timestamp record, or activity history. viewr explains the
+source-file change before the first rating
+write in each session. The initial writer is deliberately narrow: ordinary,
+identity-bound JPEG files on Windows with supported metadata are writable;
+other containers and platforms remain visibly read-only. Existing valid Windows
+`0x4746` SimpleRating fields are kept in agreement without relocating TIFF
+metadata, and viewr never writes the unrelated `0x4749` 0-to-99 field. The full
+privacy, interoperability, malformed-state, and replacement contract is in
+[`docs/RATINGS.md`](docs/RATINGS.md).
 
 ### Trash and recovery
 

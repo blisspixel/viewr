@@ -164,11 +164,14 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Ratings and folder filter
 
-Ratings are approved but not implemented. `docs/RATINGS.md` owns the complete
-storage, safety, navigation, and accessibility contract.
+Ratings are implemented for the deliberately narrow writable profile defined by
+`docs/RATINGS.md`. Ordinary, identity-bound JPEG files with supported metadata
+are writable on Windows. Rating discovery and filtering work across the loaded
+folder on every platform, while unsupported containers and non-Windows builds
+remain visibly read-only.
 
-- The source image is the only durable rating record. viewr will write standard
-  embedded 0-to-5 metadata after one explicit disclosure per session and will not
+- The source image is the only durable rating record. viewr writes standard
+  embedded 0-to-5 metadata after one explicit disclosure per session and does not
   create a database, sidecar, alternate stream, timestamp, or activity record.
 - In normal viewing mode, `0` clears a rating and `1` through `5` assign it. Fit
   Image to View and Actual Size move to the primary modifier plus `0` and `1`.

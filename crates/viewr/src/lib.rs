@@ -27,6 +27,8 @@ pub mod performance;
 pub mod playlist;
 pub mod prefetch;
 pub mod privacy;
+/// Embedded image ratings and session-only rating filters.
+pub mod ratings;
 pub(crate) mod sandbox;
 /// State for the selected, loading, and presented image.
 pub mod session;

@@ -52,6 +52,9 @@ same-file = "1.0.6"
 # Save As is assembled beside the destination and persisted only after pixels
 # and optional metadata are both complete.
 tempfile = "3.27.0"
+# The rating path parses only bounded JPEG XMP packets. Version 0.41 fixes the
+# attribute and namespace denial-of-service advisories affecting earlier lines.
+quick-xml = { version = "0.41.0", default-features = false }
 # Pure-Rust bounded inspection of compressed PNG ICC metadata before image-rs
 # materializes the profile.
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }

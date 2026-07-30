@@ -6,7 +6,8 @@ param(
     [ValidateRange(5, 120)]
     [int]$TimeoutSeconds = 60,
     [ValidateRange(30, 600)]
-    [int]$SuiteTimeoutSeconds = 180
+    [int]$SuiteTimeoutSeconds = 300,
+    [string]$GExiv2Python = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +54,54 @@ public static class ViewrAccessibilityNativeMethods {
     [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput {
+        public int Dx;
+        public int Dy;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInput {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HardwareInput {
+        public uint Message;
+        public ushort ParameterLow;
+        public ushort ParameterHigh;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputValue {
+        [FieldOffset(0)] public MouseInput Mouse;
+        [FieldOffset(0)] public KeyboardInput Keyboard;
+        [FieldOffset(0)] public HardwareInput Hardware;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Input {
+        public uint Type;
+        public InputValue Value;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
 
@@ -85,6 +134,29 @@ public static class ViewrAccessibilityNativeMethods {
         var text = new StringBuilder(512);
         GetWindowText(hwnd, text, text.Capacity);
         return text.ToString();
+    }
+
+    public static bool SendKeyPress(IntPtr hwnd, ushort virtualKey) {
+        if (!SetForegroundWindow(hwnd) && GetForegroundWindow() != hwnd) return false;
+        var inputs = new[] {
+            new Input {
+                Type = 1,
+                Value = new InputValue {
+                    Keyboard = new KeyboardInput { VirtualKey = virtualKey }
+                }
+            },
+            new Input {
+                Type = 1,
+                Value = new InputValue {
+                    Keyboard = new KeyboardInput {
+                        VirtualKey = virtualKey,
+                        Flags = 0x0002
+                    }
+                }
+            }
+        };
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) ==
+            (uint)inputs.Length;
     }
 }
 "@
@@ -142,7 +214,11 @@ function Wait-ForResult {
         Start-Sleep -Milliseconds 100
     }
     if ([DateTime]::UtcNow -ge $script:SuiteDeadline) {
-        throw "accessibility smoke suite exceeded its $SuiteTimeoutSeconds second deadline"
+        $treeSummary = Get-TreeSummary
+        throw (
+            "accessibility smoke suite exceeded its $SuiteTimeoutSeconds second deadline " +
+            "while waiting for $Description; accessible tree: $treeSummary"
+        )
     }
     $treeSummary = Get-TreeSummary
     throw "timed out waiting for $Description; accessible tree: $treeSummary"
@@ -177,11 +253,23 @@ function Get-Element {
         [Parameter(Mandatory)]
         [string]$Name,
         [System.Windows.Automation.ControlType]$ControlType,
-        [switch]$Prefix
+        [switch]$Prefix,
+        [System.Windows.Automation.AutomationElement]$Root
     )
 
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:Window)
-    $nodes = $root.FindAll(
+    $applicationRoot = [System.Windows.Automation.AutomationElement]::FromHandle(
+        $script:Window
+    )
+    $scopeBounds = if ($null -ne $Root) {
+        $Root.Current.BoundingRectangle
+    }
+    else {
+        $null
+    }
+    # AccessKit exposes egui modal content and its semantic Window marker as
+    # siblings under the application root. Constrain a modal-scoped query to the
+    # marker's screen bounds instead of pretending that UIA reports parentage.
+    $nodes = $applicationRoot.FindAll(
         [System.Windows.Automation.TreeScope]::Subtree,
         [System.Windows.Automation.Condition]::TrueCondition
     )
@@ -195,7 +283,19 @@ function Get-Element {
             $currentName -eq $Name
         }
         $typeMatches = $null -eq $ControlType -or $node.Current.ControlType -eq $ControlType
-        if ($nameMatches -and $typeMatches) {
+        $withinScope = if ($null -eq $scopeBounds) {
+            $true
+        }
+        else {
+            $nodeBounds = $node.Current.BoundingRectangle
+            $nodeBounds.Width -gt 0 -and
+                $nodeBounds.Height -gt 0 -and
+                $nodeBounds.Left -ge $scopeBounds.Left -and
+                $nodeBounds.Top -ge $scopeBounds.Top -and
+                $nodeBounds.Right -le $scopeBounds.Right -and
+                $nodeBounds.Bottom -le $scopeBounds.Bottom
+        }
+        if ($nameMatches -and $typeMatches -and $withinScope) {
             return $node
         }
     }
@@ -207,11 +307,12 @@ function Wait-ForElement {
         [Parameter(Mandatory)]
         [string]$Name,
         [System.Windows.Automation.ControlType]$ControlType,
-        [switch]$Prefix
+        [switch]$Prefix,
+        [System.Windows.Automation.AutomationElement]$Root
     )
 
     return Wait-ForResult -Description "accessible element '$Name'" -Probe {
-        Get-Element -Name $Name -ControlType $ControlType -Prefix:$Prefix
+        Get-Element -Name $Name -ControlType $ControlType -Prefix:$Prefix -Root $Root
     }
 }
 
@@ -220,11 +321,12 @@ function Wait-ForElementAbsent {
         [Parameter(Mandatory)]
         [string]$Name,
         [System.Windows.Automation.ControlType]$ControlType,
-        [switch]$Prefix
+        [switch]$Prefix,
+        [System.Windows.Automation.AutomationElement]$Root
     )
 
     return Wait-ForResult -Description "accessible element '$Name' to disappear" -Probe {
-        $element = Get-Element -Name $Name -ControlType $ControlType -Prefix:$Prefix
+        $element = Get-Element -Name $Name -ControlType $ControlType -Prefix:$Prefix -Root $Root
         if ($null -eq $element) {
             return [IntPtr]1
         }
@@ -374,6 +476,42 @@ function Open-ViewSubmenu {
     Activate-Element -Element $submenu
 }
 
+function Open-EditSubmenu {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $edit = Wait-ForElement -Name "Edit" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $edit
+    $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $submenu
+}
+
+function Send-ApplicationKey {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 255)]
+        [int]$VirtualKey
+    )
+
+    $applicationRoot = [System.Windows.Automation.AutomationElement]::FromHandle(
+        $script:Window
+    )
+    $applicationRoot.SetFocus()
+    Start-Sleep -Milliseconds 50
+    if (-not [ViewrAccessibilityNativeMethods]::SendKeyPress(
+        $script:Window,
+        [uint16]$VirtualKey
+    )) {
+        throw "failed to deliver focused keyboard input for virtual key $VirtualKey"
+    }
+}
+
 function Stop-TestApplication {
     if ($null -eq $script:Process -or $script:Process.HasExited) {
         $script:Process = $null
@@ -423,6 +561,21 @@ function Start-TestApplication {
 }
 
 $binaryPath = (Resolve-Path -LiteralPath $Binary).Path
+$defaultGExiv2Python = "C:\Program Files\GIMP 3\bin\python.exe"
+$gexiv2PythonPath = if (-not [string]::IsNullOrWhiteSpace($GExiv2Python)) {
+    $resolved = Resolve-Path -LiteralPath $GExiv2Python -ErrorAction Stop
+    if (-not [IO.File]::Exists($resolved.Path)) {
+        throw "GExiv2Python must name an existing Python executable"
+    }
+    $resolved.Path
+}
+elseif ([IO.File]::Exists($defaultGExiv2Python)) {
+    $defaultGExiv2Python
+}
+else {
+    $null
+}
+$gexiv2Status = "skipped because no compatible Python was supplied or found in GIMP 3"
 $versionMatch = [regex]::Match(
     (& $binaryPath --version | Out-String).Trim(),
     '^viewr (?<Version>\S+)$'
@@ -436,6 +589,7 @@ $testDirectory = Join-Path (
 ) "accessibility-smoke-$PID-$([Guid]::NewGuid().ToString('N'))"
 $firstImage = Join-Path $testDirectory "first.png"
 $secondImage = Join-Path $testDirectory "second.png"
+$ratedImage = Join-Path $testDirectory "rated.jpg"
 $appearanceDirectory = Join-Path $testDirectory "viewr"
 $appearanceFile = Join-Path $appearanceDirectory "appearance"
 $png = [Convert]::FromBase64String(
@@ -551,25 +705,25 @@ try {
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $updateViewr
-    Wait-ForElement -Name "Update viewr." -Prefix -ControlType (
+    $updateModal = Wait-ForElement -Name "Update viewr." -Prefix -ControlType (
         [System.Windows.Automation.ControlType]::Window
-    ) | Out-Null
+    )
     foreach ($updateText in @(
         $currentVersionText,
         "viewr does not check, download, or install updates.",
         "No verified public update source is configured for this build.",
         "cargo build --release --workspace --locked"
     )) {
-        Wait-ForElement -Name $updateText -ControlType (
+        Wait-ForElement -Name $updateText -Root $updateModal -ControlType (
             [System.Windows.Automation.ControlType]::Text
         ) | Out-Null
     }
-    $closeUpdate = Wait-ForElement -Name "Close" -ControlType (
+    $closeUpdate = Wait-ForElement -Name "Close" -Root $updateModal -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $closeUpdate
-    Wait-ForElementAbsent -Name "Close" -ControlType (
-        [System.Windows.Automation.ControlType]::Button
+    Wait-ForElementAbsent -Name "Update viewr." -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
     ) | Out-Null
 
     $help = Wait-ForElement -Name "Help" -ControlType (
@@ -580,15 +734,15 @@ try {
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $about
-    Wait-ForElement -Name "About viewr" -Prefix -ControlType (
+    $aboutModal = Wait-ForElement -Name "About viewr" -Prefix -ControlType (
         [System.Windows.Automation.ControlType]::Window
-    ) | Out-Null
-    $closeAbout = Wait-ForElement -Name "Close" -ControlType (
+    )
+    $closeAbout = Wait-ForElement -Name "Close" -Root $aboutModal -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $closeAbout
-    Wait-ForElementAbsent -Name "Close" -ControlType (
-        [System.Windows.Automation.ControlType]::Button
+    Wait-ForElementAbsent -Name "About viewr" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
     ) | Out-Null
 
     Open-ViewSubmenu -Name "Appearance: System"
@@ -773,17 +927,160 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
+    Stop-TestApplication
+    Add-Type -AssemblyName PresentationCore
+    $pixels = [byte[]](255, 0, 0, 255)
+    $bitmap = [System.Windows.Media.Imaging.BitmapSource]::Create(
+        1,
+        1,
+        96,
+        96,
+        [System.Windows.Media.PixelFormats]::Bgra32,
+        $null,
+        $pixels,
+        4
+    )
+    $encoder = [System.Windows.Media.Imaging.JpegBitmapEncoder]::new()
+    $encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+    $ratedStream = [IO.File]::Create($ratedImage)
+    try {
+        $encoder.Save($ratedStream)
+    }
+    finally {
+        $ratedStream.Dispose()
+    }
+    Start-TestApplication -ImagePath $ratedImage
+    Wait-ForElement -Name "rated.jpg" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Wait-ForElement -Name "Rating: Unrated" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Open-EditSubmenu -Name "Rating: Unrated"
+    $ratingFour = Wait-ForSelectionState `
+        -Name "Rating 4 of 5, shortcut 4" `
+        -Selected $false
+    Select-Element -Element $ratingFour
+    $ratingModal = Wait-ForElement -Name "Save rating 4 of 5?" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
+    )
+    $cancelRating = Wait-ForElement -Name "Cancel" -Root $ratingModal -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    if (-not $cancelRating.Current.HasKeyboardFocus) {
+        throw "the first rating-write disclosure did not focus its safe Cancel action"
+    }
+    $saveRating = Wait-ForElement -Name "Save rating" -Root $ratingModal -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $saveRating
+    Wait-ForElement -Name "Rating: 4 of 5" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Send-ApplicationKey -VirtualKey 0x35
+    Wait-ForElement -Name "Rating: 5 of 5" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x30
+    Wait-ForElement -Name "Rating: Unrated" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x34
+    Wait-ForElement -Name "Rating: 4 of 5" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Open-ViewSubmenu -Name "Rating Filter: All images"
+    $ratingFourFilter = Wait-ForSelectionState `
+        -Name "Rating filter: At least 4" `
+        -Selected $false
+    Select-Element -Element $ratingFourFilter
+    Open-ViewSubmenu -Name "Rating Filter: At least 4"
+    Wait-ForSelectionState `
+        -Name "Rating filter: At least 4" `
+        -Selected $true | Out-Null
+    Activate-Element -Element (Wait-ForElement -Name "View" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ))
+    Wait-ForElement -Name "1 / 1 rated 4+" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Open-ViewSubmenu -Name "Rating Filter: At least 4"
+    $ratingFiveFilter = Wait-ForSelectionState `
+        -Name "Rating filter: At least 5" `
+        -Selected $false
+    Select-Element -Element $ratingFiveFilter
+    Send-ApplicationKey -VirtualKey 0x27
+    Wait-ForElement -Name "No images are rated 5 or higher." -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    $showAllRatings = Wait-ForElement -Name "Show all images" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $showAllRatings
+    Wait-ForElement -Name "Rating: 4 of 5" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Stop-TestApplication
+    $shell = New-Object -ComObject Shell.Application
+    try {
+        $folder = $shell.Namespace($testDirectory)
+        $item = $folder.ParseName([IO.Path]::GetFileName($ratedImage))
+        $simpleRating = $item.ExtendedProperty("System.SimpleRating")
+        if ([int]$simpleRating -ne 4) {
+            throw "Windows Shell Property System read System.SimpleRating '$simpleRating' instead of 4"
+        }
+    }
+    finally {
+        if ($null -ne $shell) {
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+        }
+    }
+    $streams = @(Get-Item -LiteralPath $ratedImage -Stream *)
+    if ($streams.Count -ne 1 -or $streams[0].Stream -ne ':$DATA') {
+        throw "rating persistence created an unexpected alternate data stream"
+    }
+    $unexpectedFiles = @(
+        Get-ChildItem -LiteralPath $testDirectory -File |
+            Where-Object { $_.Name -notin @("first.png", "second.png", "rated.jpg") }
+    )
+    if ($unexpectedFiles.Count -ne 0) {
+        throw "rating persistence left an unexpected companion or transaction file"
+    }
+    if ($null -ne $gexiv2PythonPath) {
+        $gexivOutput = & $gexiv2PythonPath -c (
+            "import gi,sys; gi.require_version('GExiv2','0.10'); " +
+            "from gi.repository import GExiv2; metadata=GExiv2.Metadata(); " +
+            "metadata.open_path(sys.argv[1]); print(metadata.try_get_tag_string('Xmp.xmp.Rating'))"
+        ) $ratedImage
+        if ($LASTEXITCODE -ne 0 -or ($gexivOutput | Select-Object -Last 1) -ne "4") {
+            throw "GExiv2 did not read Xmp.xmp.Rating as 4"
+        }
+        $gexiv2Status = "checked with $gexiv2PythonPath"
+    }
+
+    Start-TestApplication -ImagePath $ratedImage
+    Wait-ForElement -Name "Rating: 4 of 5" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
         "actions, first-run scope, stable initial window size, conventional Trash " +
         "controls, local update guidance, About, current appearance and restart, " +
         "Spot Heal, source privacy, native Open With discovery, panel shortcuts, dock positions, " +
-        "metadata state, disabled trash recovery, previews, and navigation verified"
+        "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
+        "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
+        "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }
 finally {
     Stop-TestApplication
-    foreach ($path in @($firstImage, $secondImage)) {
+    foreach ($path in @($firstImage, $secondImage, $ratedImage)) {
         if ([IO.File]::Exists($path)) {
             [IO.File]::Delete($path)
         }

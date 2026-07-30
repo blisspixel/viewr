@@ -10,6 +10,12 @@ and organized by user-visible concern.
 - The README now includes a privacy-safe capture of the real desktop interface
   using a clear example image, with dimensions, rating, zoom, and folder-position
   status visible.
+- Third-party license drift checks now compare the locked package versions, license
+  assignments, and license text semantically. Harmless upstream repository-link,
+  section-order, and line-ending differences no longer break cross-platform CI.
+- The newest libheif compatibility check now verifies its observed output profile
+  when one is available and the decoder contract's explicit sRGB fallback when the
+  converted output is untagged.
 - Reworked the public project surface around a concise README and a linked
   documentation index. Added focused contribution guidance, structured issue and
   pull-request templates, CODEOWNERS, Dependabot configuration, a public-repository

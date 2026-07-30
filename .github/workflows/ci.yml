@@ -55,14 +55,16 @@ jobs:
         run: |
           ruff check \
             scripts/release_artifact.py scripts/performance_gate.py \
+            scripts/verify_license_inventory.py \
             scripts/tests/test_documentation.py scripts/tests/test_flatpak_sources.py \
-            scripts/tests/test_installers.py \
+            scripts/tests/test_installers.py scripts/tests/test_license_inventory.py \
             scripts/tests/test_release_artifact.py \
             scripts/tests/test_performance_gate.py
           ruff format --check \
             scripts/release_artifact.py scripts/performance_gate.py \
+            scripts/verify_license_inventory.py \
             scripts/tests/test_documentation.py scripts/tests/test_flatpak_sources.py \
-            scripts/tests/test_installers.py \
+            scripts/tests/test_installers.py scripts/tests/test_license_inventory.py \
             scripts/tests/test_release_artifact.py \
             scripts/tests/test_performance_gate.py
 
@@ -306,10 +308,8 @@ jobs:
           cargo about generate about.hbs \
             --workspace --locked --offline --fail \
             --output-file target/THIRD_PARTY_LICENSES.html
-          # cargo-about preserves upstream license line endings, while Git stores
-          # the committed inventory with repository-standard LF endings.
-          sed -i 's/\r$//' target/THIRD_PARTY_LICENSES.html
-          cmp THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
+          python -B scripts/verify_license_inventory.py \
+            THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
 
       - name: privacy-check (packaging + tree)
         run: bash scripts/privacy-check.sh

@@ -23,7 +23,9 @@ environment, and artifacts used.
 - The release-artifact verifier checks the archive's internal manifest, expected
   dual-binary contents, and checksum sidecar.
 - The committed third-party license inventory is regenerated from the locked default
-  release graph. A byte-for-byte match proves it has not drifted from that graph.
+  release graph. Its verifier compares every package/version, license assignment,
+  and license text while ignoring presentation order, line endings, and repository
+  link changes that do not alter the shipped license obligations.
 - A GitHub artifact attestation binds a published asset digest to the repository and
   workflow identity recorded by GitHub. It does not make an unsigned executable a
   platform-signed application.
@@ -57,6 +59,7 @@ cargo test --workspace --locked
 cargo deny check
 cargo audit
 cargo about generate about.hbs --workspace --locked --offline --fail --output-file target/THIRD_PARTY_LICENSES.html
+python -B scripts/verify_license_inventory.py THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
 pwsh -NoProfile -File scripts/privacy-check.ps1
 cargo check --manifest-path fuzz/Cargo.toml --locked
 ```

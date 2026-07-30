@@ -323,7 +323,7 @@ fn heic_latest_preserves_source_profile_contract() {
 
 #[cfg(feature = "heic-latest-ci")]
 #[test]
-fn heic_latest_reports_bitstream_only_nclx() {
+fn heic_latest_reports_output_encoding_or_srgb_fallback() {
     let (encoded, reference, size, expected_encoding) =
         heic_fixture(None, HeicNclxFixture::BitstreamOnly);
     let decoded = decode_in_worker("heic", &encoded, size);
@@ -332,11 +332,17 @@ fn heic_latest_reports_bitstream_only_nclx() {
     let viewr_protocol::WorkerColorProfile::Cicp(cicp) = decoded.color_profile else {
         panic!("bitstream-only color signaling must remain typed CICP evidence");
     };
-    assert_eq!(
-        (cicp.color_primaries, cicp.transfer_characteristics),
-        expected_encoding.expect("reference decoder must describe its output encoding"),
-        "the worker must report the decoder's actual output encoding"
-    );
+    match expected_encoding {
+        Some(expected) => assert_eq!(
+            (cicp.color_primaries, cicp.transfer_characteristics),
+            expected,
+            "the worker must report the decoder's actual output encoding"
+        ),
+        None => assert!(
+            cicp.is_srgb(),
+            "an untagged converted output must use the explicit sRGB fallback"
+        ),
+    }
 }
 
 #[cfg(feature = "heic-latest-ci")]

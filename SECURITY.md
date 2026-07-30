@@ -17,17 +17,15 @@ supported version.
 
 ## Report a vulnerability safely
 
-The repository URL declared in `Cargo.toml` is not currently published, and no
-verified private reporting channel is operational. Private reporting must be
-enabled and verified before a public release. Until then, do not send vulnerability
-details to a guessed address or publish them in an issue, discussion, pull request,
-or commit.
+Use GitHub's private vulnerability reporting form:
 
-If you received viewr from a maintainer or distributor, use that same trusted
-channel only to request a private security contact. If the repository becomes
-public before private reporting is available, a public issue may contain only that
-contact request. Do not include reproduction steps, impact details, private
-filenames, file paths, images, metadata, logs, or exploit code in the request.
+https://github.com/blisspixel/viewr/security/advisories/new
+
+Private reporting must be enabled and verified before the first public release. If
+that page is unavailable, do not publish vulnerability details in an issue,
+discussion, pull request, or commit. A public issue may contain only a request for a
+private contact. Do not include reproduction steps, impact details, private
+filenames, file paths, images, metadata, logs, or exploit code in that request.
 
 After a maintainer confirms a private channel, include the following when
 available:

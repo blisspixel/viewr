@@ -55,10 +55,36 @@ jobs:
         run: |
           ruff check \
             scripts/release_artifact.py scripts/performance_gate.py \
-            scripts/tests/test_release_artifact.py scripts/tests/test_performance_gate.py
+            scripts/tests/test_documentation.py scripts/tests/test_installers.py \
+            scripts/tests/test_release_artifact.py \
+            scripts/tests/test_performance_gate.py
           ruff format --check \
             scripts/release_artifact.py scripts/performance_gate.py \
-            scripts/tests/test_release_artifact.py scripts/tests/test_performance_gate.py
+            scripts/tests/test_documentation.py scripts/tests/test_installers.py \
+            scripts/tests/test_release_artifact.py \
+            scripts/tests/test_performance_gate.py
+
+      - name: Validate Unix installer syntax
+        if: runner.os != 'Windows'
+        run: sh -n install.sh
+
+      - name: Validate Windows installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($file in @("install.ps1", "scripts/install-windows-smoke.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error $_ }
+              exit 1
+            }
+          }
 
       - name: Test release artifact contract
         if: runner.os != 'Linux'
@@ -89,6 +115,11 @@ jobs:
 
       - name: Build workspace binaries
         run: cargo build --workspace --locked
+
+      - name: Exercise Windows installer contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/install-windows-smoke.ps1 -BinaryDirectory target/debug
 
       - name: Exercise native Windows accessibility bridge
         if: runner.os == 'Windows'
@@ -242,6 +273,10 @@ jobs:
         with:
           tool: cargo-deny,cargo-audit
 
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-about@0.9.1
+
       - name: Verify committed lockfiles
         run: |
           cargo metadata --locked --no-deps --format-version 1 > /dev/null
@@ -260,6 +295,14 @@ jobs:
 
       - name: cargo-audit (fuzz workspace)
         run: cargo audit --file fuzz/Cargo.lock
+
+      - name: Verify third-party license inventory
+        run: |
+          cargo fetch --locked
+          cargo about generate about.hbs \
+            --workspace --locked --offline --fail \
+            --output-file target/THIRD_PARTY_LICENSES.html
+          cmp THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
 
       - name: privacy-check (packaging + tree)
         run: bash scripts/privacy-check.sh

@@ -1,9 +1,9 @@
 # Build and artifact verification
 
-This guide explains what can be verified from the current repository and where
-the evidence stops. viewr does not yet publish a public release or a canonical
-checksum set. Until it does, verification is local and applies to the exact source,
-target, toolchain, dependency lockfiles, build environment, and artifacts you use.
+This guide explains what can be verified from source and published release records,
+and where the evidence stops. Before the first public release, verification is local
+and applies to the exact source, target, toolchain, dependency lockfiles, build
+environment, and artifacts used.
 
 ## What each check establishes
 
@@ -22,6 +22,11 @@ target, toolchain, dependency lockfiles, build environment, and artifacts you us
   those bytes.
 - The release-artifact verifier checks the archive's internal manifest, expected
   dual-binary contents, and checksum sidecar.
+- The committed third-party license inventory is regenerated from the locked default
+  release graph. A byte-for-byte match proves it has not drifted from that graph.
+- A GitHub artifact attestation binds a published asset digest to the repository and
+  workflow identity recorded by GitHub. It does not make an unsigned executable a
+  platform-signed application.
 
 ## 1. Pin the source and toolchain
 
@@ -51,6 +56,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 cargo deny check
 cargo audit
+cargo about generate about.hbs --workspace --locked --offline --fail --output-file target/THIRD_PARTY_LICENSES.html
 pwsh -NoProfile -File scripts/privacy-check.ps1
 cargo check --manifest-path fuzz/Cargo.toml --locked
 ```
@@ -74,10 +80,11 @@ are unchanged.
 
 Use the target-specific `scripts/release_artifact.py build` and `verify` commands
 in `docs/INSTALL.md`. The builder creates a deterministic archive from the binary
-inputs it receives, includes the security policy and canonical Markdown set, writes
-an internal manifest, and emits a SHA-256 sidecar. The verifier then checks those
-exact bytes, the declared archive structure, and local README links written in the
-repository's simple inline Markdown form with repository-relative destinations.
+inputs it receives; includes LICENSE, NOTICE, third-party licenses, desktop assets,
+the security policy, and canonical Markdown; writes an internal manifest; and emits
+a SHA-256 sidecar. The verifier then checks those exact bytes, the declared archive
+structure, and local README links written in the repository's simple inline Markdown
+form with repository-relative destinations.
 Reference-style links, Markdown images, and raw HTML destinations are not parsed
 and must not be used for the README's portable documentation navigation.
 
@@ -85,15 +92,24 @@ The archive process is deterministic for identical inputs. The repository does
 not claim that separate operating-system images or linker versions produce
 bit-identical executables.
 
-## 5. Compare published artifacts when they exist
+## 5. Verify a published release
 
-For a future public release, obtain the checksum and provenance from the release's
-canonical page, verify signatures when available, and compare the downloaded
-artifact's SHA-256 value before opening it. A matching published checksum verifies
-download integrity relative to that release record. Independent source-to-binary
-reproduction requires a documented, controlled build environment and comparison
-against the unsigned executable produced there.
+Obtain the archive and checksum only from the canonical GitHub release page. Verify
+the sidecar before extraction, then verify GitHub provenance when GitHub CLI is
+available:
 
-Current release-readiness gaps, including hosted multi-OS evidence, signing,
-notarization, public checksums, and independent reproduction, remain tracked in
+```text
+gh release verify <tag> --repo blisspixel/viewr
+gh attestation verify <archive> --repo blisspixel/viewr
+python scripts/release_artifact.py verify <archive>
+```
+
+A matching checksum verifies download integrity relative to that release record.
+The attestation identifies the GitHub repository and workflow that produced the
+asset. Independent source-to-binary reproduction still requires a documented,
+controlled build environment and comparison against the unsigned executable
+produced there.
+
+Current release-readiness gaps, including hosted evidence until the first workflow
+run, platform signing, notarization, and independent reproduction, remain tracked in
 `docs/ROADMAP.md`.

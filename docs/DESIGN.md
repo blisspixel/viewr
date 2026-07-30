@@ -316,11 +316,11 @@ generative fill, and an unbounded Poisson solve are outside this focused tool.
   closes with its Close button, backdrop click, or Escape.
 - It exposes version, platform, license, core shortcuts, and the local-only
   privacy contract. Its modal container has an explicit accessible window name.
-- Help > Update viewr opens a separate centered modal with the running version,
-  the trusted source-channel boundary, and the exact locked source-build command.
-  It does not check a network, claim that the running build is latest, download,
-  install, or open a browser. A future link or check requires a verified canonical
-  release source and signed-release policy first.
+- Help > Get latest release opens a separate centered modal with the running
+  version and one prominent Get latest release action. It does not check a network,
+  claim that the running build is latest, download, or install. The action opens
+  the official stable release in an external browser only after the user activates
+  it. Terminal installation commands remain in the install guide and CLI.
 
 ### Micro-interactions
 - Buttons use deterministic hover, active, selected, and focus colors. Custom

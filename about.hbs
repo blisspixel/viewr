@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>viewr third-party licenses</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 2rem auto; max-width: 72rem; padding: 0 1rem; line-height: 1.5; }
+    h1, h2, h3 { line-height: 1.2; }
+    pre { border: 1px solid #8888; border-radius: 0.4rem; overflow: auto; padding: 1rem; white-space: pre-wrap; }
+    .packages { margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>viewr third-party licenses</h1>
+    <p>This inventory covers third-party Rust dependencies included in the default viewr release binaries. The viewr project license is provided separately in LICENSE.</p>
+    <h2>License summary</h2>
+    <ul>
+{{#each overview}}
+      <li><a href="#{{id}}">{{name}}</a>: {{count}} packages</li>
+{{/each}}
+    </ul>
+    <h2>License texts and packages</h2>
+{{#each licenses}}
+    <section>
+{{#if first_of_kind}}
+      <h3 id="{{id}}">{{name}}</h3>
+{{/if}}
+      <div class="packages">
+        <strong>Used by:</strong>
+{{#each used_by}}
+        <a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a>{{#unless @last}},{{/unless}}
+{{/each}}
+      </div>
+      <pre>{{text}}</pre>
+    </section>
+{{/each}}
+  </main>
+</body>
+</html>

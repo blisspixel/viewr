@@ -298,11 +298,17 @@ completion from another process lifetime and does not reload automatically.
 ## Updates
 
 viewr does **not** check for updates in the background or contact any server on
-launch. The `viewr update` CLI command only prints how to rebuild or replace the
-binary locally; it never downloads anything. Updates are delivered through the
-platform's normal channels (your package manager, store, or a manual download you
-initiate). A future graphical check is eligible only after a canonical signed
-release source exists, and it must run solely on an explicit user command. The app
+launch. The `viewr update` CLI command prints the official release URL, explicit
+installer commands, and source-build guidance but never downloads anything. Help >
+Get latest release presents one explicit action. Activating it asks the operating
+system to open the official stable release in an external browser; the browser's
+network and history behavior is outside viewr.
+
+The separately downloaded installer scripts perform foreground HTTPS requests to
+`github.com`, `api.github.com`, and `raw.githubusercontent.com` only after the user
+runs them. They verify the selected release checksum and manifest, install for the
+current user, and exit. They do not grant network capability to the installed app,
+create an updater service, schedule a task, or enable background checks. The app
 closed is the app doing nothing at all.
 
 ## Freedom

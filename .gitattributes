@@ -5,3 +5,6 @@
 *.png binary
 *.ico binary
 *.icns binary
+
+# cargo-about preserves upstream license text, including upstream trailing spaces.
+THIRD_PARTY_LICENSES.html text eol=lf -whitespace

@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible problem in the current product.
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include private images, paths, metadata, or vulnerability details. Security reports belong in the private reporting channel.
+  - type: input
+    id: version
+    attributes:
+      label: viewr version or commit
+      placeholder: "0.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and installation method
+      placeholder: "Windows 11, GitHub release installer"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic, non-sensitive files whenever possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Relevant checks
+      description: Include path-free output from viewr doctor or other relevant local checks.

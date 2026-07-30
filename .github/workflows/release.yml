@@ -90,3 +90,64 @@ jobs:
           path: target/release-artifacts/
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    if: github.ref_type == 'tag'
+    name: Publish verified GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download every target artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: viewr-*
+          path: target/release-publish
+          merge-multiple: true
+
+      - name: Verify the exact release asset set
+        run: >
+          python scripts/release_artifact.py verify-set
+          target/release-publish
+          --expected-tag "${{ github.ref_name }}"
+
+      - name: Attest release archives and checksums
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-path: target/release-publish/*
+
+      - name: Assemble draft and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          mapfile -t assets < <(find target/release-publish -maxdepth 1 -type f -print | sort)
+          if [[ "${#assets[@]}" -ne 8 ]]; then
+            echo "Expected exactly eight release assets, found ${#assets[@]}" >&2
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            is_draft=$(gh release view "$tag" --json isDraft --jq .isDraft)
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Refusing to modify an already published release: $tag" >&2
+              exit 1
+            fi
+          else
+            gh release create "$tag" \
+              --verify-tag \
+              --draft \
+              --generate-notes \
+              --title "viewr ${tag#v}"
+          fi
+
+          gh release upload "$tag" "${assets[@]}" --clobber
+          gh release edit "$tag" --draft=false --latest

@@ -1,256 +1,214 @@
 # Installing viewr
 
-## Current availability
+viewr is pre-1.0. Published releases are portable, checksummed archives rather than
+code-signed Windows installers, notarized macOS applications, or store packages.
+The commands below install for the current user and never require elevation.
 
-viewr does not yet publish signed installers, GitHub Releases, Homebrew formulas,
-Flathub listings, Windows Store packages, or Arch packages. Commands that imply
-those channels exist would be unsafe and misleading, so this document only covers
-paths that can be reproduced from the current repository.
+## One-command install and update
 
-The supported paths today are a source build, a locally verified sandbox-profile
-artifact, or a checksummed dual-binary release archive. The CI release workflow
-retains the same archives as workflow artifacts; it deliberately does not create
-a public release.
+### Windows 10 or 11, x64
 
-## Build from source (any OS)
-
-With a Rust toolchain installed (see `rust-toolchain.toml`):
-
-```
-cargo build --release --workspace --locked
-# Binaries land in target/release/viewr and target/release/viewr-decode
-# Keep them side by side so C-backed formats can spawn the worker.
+```powershell
+irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 | iex
 ```
 
-### CLI (local tools, no network)
+The installer:
 
+- resolves the latest stable release through the GitHub Releases API;
+- accepts only the expected `blisspixel/viewr` asset URL;
+- verifies the archive SHA-256 sidecar, safe ZIP paths, release identity, manifest,
+  size, and per-file hashes;
+- replaces only an installer-owned directory, with rollback if activation fails;
+- installs under `%LOCALAPPDATA%\Programs\viewr`;
+- adds that directory to the user PATH and creates a Start menu shortcut.
+
+Close viewr before updating. Windows will not replace a running executable. Run the
+same command again for an explicit update. viewr itself never checks in the
+background.
+
+To install a specific version from a reviewed local copy of the script:
+
+```powershell
+irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 `
+  -OutFile $env:TEMP\viewr-install.ps1
+& $env:TEMP\viewr-install.ps1 -Version 0.1.0
 ```
-viewr help
-viewr doctor              # layout, worker, decode self-test
-viewr benchmark [dir]     # decode timings (temp corpus if dir omitted)
-viewr update              # print local update instructions only
-viewr version
-viewr path\to\image.jpg   # open GUI
+
+`-NoPath` skips the user PATH change, and `-NoShortcut` skips the Start menu
+shortcut. `-InstallDir` is accepted only inside the current user's
+`%LOCALAPPDATA%\Programs` directory.
+
+### macOS and Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh | sh
 ```
 
-`viewr update` never downloads anything; viewr does not phone home. Help > Update
-viewr exposes the same local guidance in the GUI. Both surfaces report the running
-version and direct the user back to the trusted source or package channel from
-which viewr was obtained. The repository currently has no verified public update
-source, so neither surface claims to find the latest version or opens a browser.
+The shell installer:
 
-For a source checkout, update the source using its documented process, close any
-running `viewr`, and run `cargo build --release --workspace --locked`. Keep
-`viewr` and `viewr-decode` from that same trusted build side by side. Windows
-cannot replace a running executable, so a release rebuild will fail until the open
-copy exits.
+- resolves the latest stable release through the official GitHub release redirect;
+- downloads only the archive and sidecar for the detected supported target;
+- requires HTTPS with TLS 1.2 or newer and verifies SHA-256 before extraction;
+- rejects duplicate, traversal, absolute, and unexpected archive paths;
+- installs versioned binaries under `${XDG_DATA_HOME:-$HOME/.local/share}/viewr`;
+- atomically updates an installer-owned symlink in `~/.local/bin`;
+- installs the desktop entry and icon on Linux without changing default handlers.
 
-### Performance regression gate
+Supported release targets are macOS Intel, macOS Apple Silicon, and Linux x86-64
+glibc. Linux ARM64 and musl users must build from source for now.
 
-The internal GUI probe is intentionally absent from the user-facing help surface.
-Developers and CI run the complete release-binary contract through the wrapper:
+To pin a release or override the user-local locations:
+
+```sh
+VIEWR_VERSION=0.1.0 \
+VIEWR_INSTALL_ROOT="$HOME/.local/share/viewr" \
+VIEWR_BIN_DIR="$HOME/.local/bin" \
+sh install.sh
+```
+
+If `~/.local/bin` is not already on PATH, add it through the shell's normal profile
+configuration. The installer reports this without editing profile files.
+
+## Review before running
+
+Pipe-to-shell commands are convenient but execute the current installer source.
+To review it first:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh
+less install.sh
+sh install.sh
+```
+
+On Windows, use the two-step version-pinning example above and inspect the downloaded
+file before invoking it. The installer performs foreground network requests only
+after the user runs it. The installed application has no HTTP or TLS client and
+does not inherit installer network capability.
+
+If the repository has no published release yet, the installer stops without changing
+the machine. Use a source build until the first release is available.
+
+## Manual release installation
+
+Download the archive and matching `.sha256` file from the
+[official releases page](https://github.com/blisspixel/viewr/releases). Release
+names are:
+
+- `viewr-<version>-x86_64-pc-windows-msvc.zip`
+- `viewr-<version>-x86_64-unknown-linux-gnu.zip`
+- `viewr-<version>-x86_64-apple-darwin.zip`
+- `viewr-<version>-aarch64-apple-darwin.zip`
+
+Verify the sidecar before extraction. If GitHub CLI is installed, also verify build
+provenance:
 
 ```text
+gh attestation verify <archive> --repo blisspixel/viewr
+```
+
+Extract the archive and keep `bin/viewr` and `bin/viewr-decode` side by side. The
+archive also contains the project license, notice, third-party license inventory,
+security policy, canonical documentation, and a per-file release manifest.
+
+GitHub checksums and attestations improve integrity and provenance. Current portable
+archives are not Authenticode-signed or Apple-notarized, so operating-system trust
+dialogs may still apply. Do not disable platform security controls to force a launch.
+
+## Build from source
+
+Install the Rust toolchain selected by `rust-toolchain.toml`, clone the repository,
+and run:
+
+```text
+git clone https://github.com/blisspixel/viewr.git
+cd viewr
 cargo build --release --workspace --locked
-python -B scripts/performance_gate.py --binary target/release/viewr
 ```
 
-On Windows, add `--no-xvfb` and use a console-enabled debug binary for local
-output. Budgets, corpus shape, and interpretation are in
-[`PERFORMANCE.md`](PERFORMANCE.md).
+The binaries are written to `target/release`. Keep the main executable and worker
+from the same build together. On Linux, the build also needs the normal Wayland/X11
+development packages listed in `.github/workflows/ci.yml`.
 
-Optional C-backed formats (needs system libraries):
+Optional AVIF and HEIC support requires native libheif dependencies and a separate
+worker build:
 
-```
+```text
 cargo build --release -p viewr-decode --features avif,heic
 ```
 
-On Linux, building needs the usual windowing dev packages
-(`libwayland-dev libxkbcommon-dev libx11-dev`).
-Linux startup also requires standard kernel seccomp support. Before any GUI or
-application thread starts, viewr accepts only local Unix D-Bus environment
-transports and verifies that Internet socket creation is denied. It exits with an
-error instead of running with a weakened boundary.
+Default public archives use the pure-Rust feature set. They do not claim optional
+C-backed formats or RAW support.
 
-### Inspect the network-denied package profiles
-
-The repository keeps platform package boundaries independently verifiable before
-public installers exist. Run the cross-platform exact-set test with:
-
-```
-cargo test -p viewr --test sandbox_profiles
-```
-
-Platform-native verification commands and their limits are documented in
-[`SANDBOX_PLAN.md`](SANDBOX_PLAN.md). They produce only local unsigned or ad-hoc
-signed artifacts under `target/profile-check/`; they do not publish or install
-anything.
-
-## Opt-in desktop integration
-
-Packaging declares only the formats supported by the default pure-Rust build.
-Optional AVIF, HEIC, HEIF, and RAW worker formats are not advertised until a
-future package can prove those decoders are present. None of the paths below
-changes the user's default image viewer during installation.
-
-### Linux
-
-The launcher entry and MIME associations live in `assets/linux/viewr.desktop`, and
-the app icon is `assets/icon.svg`. The Flatpak profile installs both under the
-application ID `com.github.blisspixel.viewr`. For a local source build, keep the
-two executables together and install the same desktop assets into the user's XDG
-locations:
-
-```
-install -Dm755 target/release/viewr ~/.local/bin/viewr
-install -Dm755 target/release/viewr-decode ~/.local/bin/viewr-decode
-install -Dm644 assets/linux/viewr.desktop ~/.local/share/applications/com.github.blisspixel.viewr.desktop
-install -Dm644 assets/icon.svg ~/.local/share/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg
-update-desktop-database ~/.local/share/applications
-```
-
-The desktop entry uses a single-file `%f` launch because one viewr window opens
-one selected image. Installing it only adds viewr to Open With menus. To opt in
-as the default for a format, use the desktop environment's Open With dialog and
-choose its remember or default option. The equivalent explicit command for JPEG
-is:
-
-```
-xdg-mime default com.github.blisspixel.viewr.desktop image/jpeg
-```
-
-Run that command only for MIME types the user deliberately chooses. Removing
-the two binaries and the two application-ID files above unregisters the local
-source install; it does not change or delete photos.
-
-### macOS
-
-Launch Services associations require an application bundle. Build the release
-binaries, create the locally ad-hoc-signed sandbox bundle, and copy the bundle to
-the per-user Applications folder:
-
-```
-cargo build --release --workspace --locked
-bash scripts/build-macos-sandboxed-app.sh target/release
-mkdir -p "$HOME/Applications"
-cp -R target/profile-check/macos/viewr.app "$HOME/Applications/viewr.app"
-```
-
-The bundle declares viewr as an alternate viewer for the core extension set.
-Finder delivers selected files through Launch Services, which viewr handles
-without relying on argv. To make viewr the default for a format, select a file in
-Finder, open Get Info, choose viewr under Open with, and use Change All. Remove
-the app bundle through Finder to uninstall this local build.
-
-This is a local, ad-hoc-signed development bundle. It is not notarized and is not
-presented as a public distribution artifact.
+## Platform integration
 
 ### Windows
 
-Keep `viewr.exe` and `viewr-decode.exe` side by side in a stable folder chosen by
-the user. Right-click an image, select Open with, then Choose another app and
-Choose an app on your PC, and select `viewr.exe`. Select Always only when the
-user intends to change that extension's default.
+The installer creates a Start menu shortcut but does not change file associations.
+Use an image's Open with dialog to select `viewr.exe`, and choose Always only for
+extensions you deliberately want viewr to own.
 
-The AppContainer manifest declares the same core extension set and remains
-capability-free. The repository can schema-validate an unsigned MSIX with:
+The capability-free AppContainer package remains a locally validated profile, not
+a signed public installer. Maintainers can validate it with:
 
 ```powershell
 cargo build --workspace --locked
 .\scripts\build-windows-appcontainer.ps1 -BinaryDirectory target\debug
 ```
 
-The resulting package is an inspection artifact, not an installable public
-release. It does not justify importing a signing certificate or weakening local
-Windows policy. A portable source build can be uninstalled by removing its two
-binaries after choosing another default viewer if necessary.
+### Linux
 
-## Validate native Windows accessibility
+The installer registers `com.github.blisspixel.viewr.desktop` as an available image
+viewer. It never changes a default. To opt in for JPEG explicitly:
 
-The Windows smoke test launches the real debug or release app and drives its
-out-of-process UI Automation provider. Build first, then run:
-
-```powershell
-cargo build --workspace --locked
-pwsh -NoProfile -File scripts/accessibility-smoke.ps1 `
-  -Binary target/debug/viewr.exe
+```sh
+xdg-mime default com.github.blisspixel.viewr.desktop image/jpeg
 ```
 
-A passing result verifies native tree discovery, focusable menus, first-run access
-scope, disabled Trash recovery without a receipt, panel state and actions,
-distinct left/right docking state, metadata state, folder previews, accessible
-navigation, rating disclosure and numeric assignment, rating filters and no-match
-recovery, restart persistence, and Windows Shell Property System interoperability.
-It does not replace human testing with Narrator,
-VoiceOver, or Orca. The complete release matrix and evidence requirements are in
-`docs/ACCESSIBILITY.md`.
+Run similar commands only for MIME types you deliberately choose. Linux startup
+requires standard seccomp support and local Unix D-Bus for accessibility. It exits
+rather than running with a weakened network boundary.
 
-## Build and verify a release archive
+### macOS
 
-The release archive contains the main executable and `viewr-decode` side by side,
-plus the license, README, security policy, the complete canonical Markdown set from
-`docs/`, and a canonical file manifest. The packaging tool checks
-that both executable formats match the requested target, normalizes text files,
-uses a commit-derived `SOURCE_DATE_EPOCH`, stores deterministic ZIP metadata, and
-writes a standard SHA-256 sidecar.
+The portable command launches the GUI but is not a notarized application bundle.
+Developers can build the local ad-hoc-signed sandbox bundle with:
 
-Build the locked workspace with the pinned toolchain, then package the native
-target. On Windows x86-64:
-
-```powershell
+```sh
 cargo build --release --workspace --locked
-python scripts/release_artifact.py build `
-  --target x86_64-pc-windows-msvc `
-  --binary-dir target/release
-python scripts/release_artifact.py verify `
-  target/release-artifacts/viewr-0.1.0-x86_64-pc-windows-msvc.zip
+bash scripts/build-macos-sandboxed-app.sh target/release
 ```
 
-On Linux x86-64, Intel macOS, or Apple Silicon macOS, replace the target with one
-of the following and point `--binary-dir` at the matching Cargo output:
+This local bundle is for validation only. Do not present it as a notarized public
+distribution.
 
-- `x86_64-unknown-linux-gnu`
-- `x86_64-apple-darwin`
-- `aarch64-apple-darwin`
+## Uninstall
 
-For an explicit target build, Cargo writes binaries beneath
-`target/<target>/release`. The workspace version in `Cargo.toml` determines the
-archive name; do not copy the example version blindly after it changes.
+Close viewr and change any file-type defaults first.
 
-CI archives use the workspace's default pure-Rust feature set. They do
-not claim AVIF, HEIC, or RAW support from optional C backends. AVIF/HEIC builds
-still require their native toolchain and libheif dependencies; on Linux, those
-features activate the tested default-deny policy documented in
-`packaging/linux/SECCOMP.md`.
+On Windows, remove the installer-owned
+`%LOCALAPPDATA%\Programs\viewr` directory, remove that exact directory from the user
+PATH, and remove the `viewr` Start menu shortcut. Do not delete a directory that
+lacks `.viewr-install.json` unless it is a reviewed legacy installation containing
+only the two viewr executables.
 
-The tag-triggered `.github/workflows/release.yml` repeats this contract for all
-four targets. A tag must equal `v<workspace-version>` or packaging fails closed.
-Manual workflow runs are allowed for pre-release verification. The workflow has
-read-only repository permission and retains archives for inspection; it does not
-publish, sign, notarize, install, or create a GitHub Release. Artifact jobs wait
-for the repository's complete reusable CI and short fuzz workflows, including
-coverage, supply-chain, privacy, and native package-profile checks.
+On macOS or Linux, first confirm that `~/.local/bin/viewr` points inside the
+installer-owned viewr releases directory, then remove that symlink and the
+`${XDG_DATA_HOME:-$HOME/.local/share}/viewr` directory. Linux users may also remove
+the `com.github.blisspixel.viewr.desktop` and `com.github.blisspixel.viewr.svg`
+files from their user data directories.
 
-The archive is reproducible from the same checked-out source, target, compiler,
-lockfile, and binary inputs. The internal manifest and external sidecar let the
-verifier check the archive's exact structure and bytes against its co-produced
-records. Those records do not authenticate a publisher or independently prove
-which source produced the binaries. This is not a claim that different
-operating-system images or linker versions produce identical executables.
+Uninstalling viewr never changes or deletes photos.
 
-## What current build and archive paths do not do
+## Verify an installation
 
-No account. No background service. No auto-update daemon. No telemetry opt-in
-screen. Current release archives are portable files and do not register file
-associations or modify the operating system. The source-built platform bundles
-and desktop entry make viewr an available handler, but changing a default always
-requires an explicit user choice.
+```text
+viewr --version
+viewr doctor
+```
 
-## GPU-driver overlays
+`doctor` verifies binary placement, the worker protocol, platform expectations,
+privacy boundaries, and an in-memory decode self-test. It performs no network
+request and creates no diagnostic log.
 
-viewr requests the operating system's low-power graphics adapter, but the platform
-and graphics driver make the final adapter choice. NVIDIA App, GeForce Experience,
-and similar driver software may display their own overlay when a new GPU-backed
-application starts. That overlay is not rendered by viewr, and viewr does not use
-vendor APIs or install an overlay. Disable it in the graphics vendor's own overlay
-settings if desired; viewr does not attempt unsupported suppression tricks.
+Developers and maintainers should use the complete matrix in [VERIFY.md](VERIFY.md).
+Release publication is documented separately in [PUBLISHING.md](PUBLISHING.md).

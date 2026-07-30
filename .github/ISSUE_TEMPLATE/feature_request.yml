@@ -1,0 +1,30 @@
+name: Product improvement
+description: Propose a focused improvement to the existing viewer experience.
+title: "Improvement: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Current workflow and friction
+      description: Describe the concrete user task and where it breaks down.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result, not only a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Privacy, accessibility, reliability, or compatibility constraints
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require accounts, cloud storage, telemetry, advertising, or background indexing.
+          required: true

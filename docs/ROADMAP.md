@@ -560,10 +560,16 @@ install from source or a simple GitHub-style release artifact.
   boundary before product detail, links the canonical local install and verification
   paths, and distinguishes co-produced integrity records from publisher
   authentication and independent source provenance.
-- [x] Local update guidance: Help > Update viewr and `viewr update` expose the
-  running version, trusted source-channel boundary, and locked source-build
-  command without a network check, download, browser launch, or unsupported
-  latest-version claim.
+- [x] Explicit update guidance: Help > Get latest release exposes the running
+  version and one clear browser handoff to the canonical stable GitHub release.
+  Terminal installer and locked source-build commands remain in `viewr update` and
+  the install guide. Neither surface performs an automatic network check, download,
+  or unsupported latest-version claim.
+- [x] Public release plumbing: user-local Windows and macOS/Linux installers verify
+  release checksums and manifests; the tag workflow verifies one exact four-target
+  asset set, creates GitHub provenance attestations, assembles a draft, and publishes
+  only after all local-quality workflows pass. No release is claimed until that
+  workflow completes in the public repository.
 - [ ] Publish and verify a private vulnerability-reporting channel before public
   release. `SECURITY.md` already defines current-version support, privacy-safe
   synthetic evidence, disclosure safeguards, explicit scope, and no invented

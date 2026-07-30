@@ -39,8 +39,14 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_BINARY_HEADER_BYTES = 1024 * 1024 + 512
 MAX_README_BYTES = 512 * 1024
 ARCHIVE_DOCUMENTATION_PATHS = (
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "NOTICE",
     "README.md",
     "SECURITY.md",
+    "THIRD_PARTY_LICENSES.html",
+    "assets/icon.svg",
+    "assets/linux/viewr.desktop",
     "docs/ACCESSIBILITY.md",
     "docs/ARCHITECTURE.md",
     "docs/DESIGN.md",
@@ -48,7 +54,9 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/INSTALL.md",
     "docs/LOCAL-INTELLIGENCE.md",
     "docs/PERFORMANCE.md",
+    "docs/PUBLISHING.md",
     "docs/PRIVACY.md",
+    "docs/README.md",
     "docs/RATINGS.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
@@ -849,6 +857,54 @@ def verify_release_artifact(archive_path: Path) -> dict[str, object]:
     return _verify_archive_contract(archive_path, archive_path.name)
 
 
+def verify_release_set(
+    directory: Path, expected_tag: str
+) -> dict[str, dict[str, object]]:
+    """Verify the exact supported-target asset set for one release tag."""
+    if (
+        not expected_tag.startswith("v")
+        or VERSION_PATTERN.fullmatch(expected_tag[1:]) is None
+    ):
+        raise ReleaseError(
+            "expected release tag must be v followed by a semantic version"
+        )
+    version = expected_tag[1:]
+    try:
+        directory = directory.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise ReleaseError(f"missing release set directory: {directory}") from error
+    if _is_reparse_point(directory) or not directory.is_dir():
+        raise ReleaseError("release set path must be a regular non-link directory")
+
+    expected_names = {
+        name
+        for target in SUPPORTED_TARGETS
+        for name in (
+            f"viewr-{version}-{target}.zip",
+            f"viewr-{version}-{target}.zip.sha256",
+        )
+    }
+    actual_names: set[str] = set()
+    for entry in directory.iterdir():
+        _require_regular_file(entry, "release set member")
+        actual_names.add(entry.name)
+    if actual_names != expected_names:
+        missing = sorted(expected_names - actual_names)
+        unexpected = sorted(actual_names - expected_names)
+        raise ReleaseError(
+            f"release asset set mismatch; missing={missing}, unexpected={unexpected}"
+        )
+
+    manifests: dict[str, dict[str, object]] = {}
+    for target in sorted(SUPPORTED_TARGETS):
+        archive = directory / f"viewr-{version}-{target}.zip"
+        manifest = verify_release_artifact(archive)
+        if manifest.get("version") != version or manifest.get("target") != target:
+            raise ReleaseError("release set manifest identity mismatch")
+        manifests[target] = manifest
+    return manifests
+
+
 def _resolve_source_date_epoch(repository_root: Path, explicit: int | None) -> int:
     if explicit is not None:
         return explicit
@@ -889,6 +945,11 @@ def _argument_parser() -> argparse.ArgumentParser:
         "verify", help="verify an archive and its checksum sidecar"
     )
     verify.add_argument("archive", type=Path)
+    verify_set = subparsers.add_parser(
+        "verify-set", help="verify the exact four-target release asset set"
+    )
+    verify_set.add_argument("directory", type=Path)
+    verify_set.add_argument("--expected-tag", required=True)
     return parser
 
 
@@ -913,9 +974,12 @@ def main(arguments: list[str] | None = None) -> int:
                 expected_tag=expected_tag,
             )
             print(f"created and verified {archive}")
-        else:
+        elif args.command == "verify":
             verify_release_artifact(args.archive)
             print(f"verified {args.archive}")
+        else:
+            verify_release_set(args.directory, args.expected_tag)
+            print(f"verified release set {args.directory} for {args.expected_tag}")
         return 0
     except (OSError, ReleaseError) as error:
         print(f"release-artifact: error: {error}", file=sys.stderr)

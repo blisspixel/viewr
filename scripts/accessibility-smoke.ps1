@@ -701,7 +701,7 @@ try {
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $help
-    $updateViewr = Wait-ForElement -Name "Update viewr..." -ControlType (
+    $updateViewr = Wait-ForElement -Name "Get latest release..." -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $updateViewr
@@ -710,14 +710,18 @@ try {
     )
     foreach ($updateText in @(
         $currentVersionText,
-        "viewr does not check, download, or install updates.",
-        "No verified public update source is configured for this build.",
-        "cargo build --release --workspace --locked"
+        "viewr never checks for or downloads updates by itself.",
+        "Updates are explicit and come from the official GitHub release.",
+        "Open the latest stable release in your browser, review its version and checksums, then close viewr before installing it.",
+        "This hands off only the release URL to your default browser. viewr itself does not connect to GitHub or run an updater."
     )) {
         Wait-ForElement -Name $updateText -Root $updateModal -ControlType (
             [System.Windows.Automation.ControlType]::Text
         ) | Out-Null
     }
+    Wait-ForElement -Name "Get latest release" -Root $updateModal -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
     $closeUpdate = Wait-ForElement -Name "Close" -Root $updateModal -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
@@ -1071,7 +1075,7 @@ try {
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
         "actions, first-run scope, stable initial window size, conventional Trash " +
-        "controls, local update guidance, About, current appearance and restart, " +
+        "controls, explicit update handoff, About, current appearance and restart, " +
         "Spot Heal, source privacy, native Open With discovery, panel shortcuts, dock positions, " +
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +

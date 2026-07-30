@@ -7,6 +7,25 @@ and organized by user-visible concern.
 
 ### Changed
 
+- Reworked the public project surface around a concise README and a linked
+  documentation index. Added focused contribution guidance, structured issue and
+  pull-request templates, CODEOWNERS, Dependabot configuration, a public-repository
+  checklist, and explicit current-stage claims for the planned canonical GitHub
+  home.
+- Added user-local one-command installers for Windows and macOS/Linux. They resolve
+  only official GitHub Releases, verify the SHA-256 sidecar and bounded archive
+  structure before installation, refuse to replace unowned paths, and create no
+  updater service. Running the same command performs an explicit update.
+- Release tags now assemble a verified four-target asset set, create GitHub build
+  provenance attestations, upload assets to a draft release, and publish only after
+  CI and fuzzing pass. Manual workflow runs remain non-publishing inspection builds.
+- Restored the verbatim Apache License 2.0 text, added the project NOTICE, and made a
+  generated third-party license inventory part of the release archive and CI drift
+  checks.
+- Help > Get latest release now offers one clear click to the latest official stable
+  release while retaining the no-automatic-check contract. Terminal installer
+  commands remain in `viewr update` and the install guide instead of occupying the
+  graphical Help surface.
 - The Windows performance probe now starts its strict 500 ms settled-idle window
   only after egui has no delayed hover or activation repaint outstanding. The
   two-redraw budget is unchanged; a UI that keeps scheduling frames still reaches
@@ -57,11 +76,11 @@ and organized by user-visible concern.
   state, diagnostics, automation, tests, and documentation were removed together.
 - The unchanged first-run card now stays fixed instead of drifting vertically,
   and filename, dimensions, and zoom use distinct reading gaps in the top status.
-  Help now includes an accessible local-only Update viewr modal with the running
-  version, trusted-channel guidance, and the locked source-build command. The CLI
-  guidance matches it and no longer assumes `git pull`; neither surface checks a
-  network, claims the running build is latest, downloads, installs, or opens a
-  browser while no verified public update source exists.
+  Help now includes an accessible explicit Update viewr modal with the running
+  version, trusted-channel guidance, and one explicit Get latest release action.
+  The CLI retains detailed install and source-build guidance without assuming
+  `git pull`; neither surface checks a network or claims the running build is
+  latest, and only the explicit graphical action opens a browser.
 - The explicit performance probe now preserves path-free per-run idle evidence:
   delivered redraws, non-redraw window events, event-driven and scheduled egui
   repaint requests, final focus, and pointer-inside state. The harness prints it

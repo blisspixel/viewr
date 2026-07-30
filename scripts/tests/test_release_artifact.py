@@ -16,8 +16,14 @@ from scripts import release_artifact
 SOURCE_DATE_EPOCH = 1_788_000_000
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_DOCUMENTATION_PATHS = {
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "NOTICE",
     "README.md",
     "SECURITY.md",
+    "THIRD_PARTY_LICENSES.html",
+    "assets/icon.svg",
+    "assets/linux/viewr.desktop",
     "docs/ACCESSIBILITY.md",
     "docs/ARCHITECTURE.md",
     "docs/DESIGN.md",
@@ -25,7 +31,9 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/INSTALL.md",
     "docs/LOCAL-INTELLIGENCE.md",
     "docs/PERFORMANCE.md",
+    "docs/PUBLISHING.md",
     "docs/PRIVACY.md",
+    "docs/README.md",
     "docs/RATINGS.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
@@ -191,6 +199,34 @@ class ReleaseArtifactTests(unittest.TestCase):
             release_artifact.ReleaseError, "unresolved local link"
         ):
             self.build()
+
+    def test_verify_release_set_requires_every_supported_target_and_no_extras(
+        self,
+    ) -> None:
+        for target in release_artifact.SUPPORTED_TARGETS:
+            self.build(target)
+        release_directory = self.repository / "target" / "release-artifacts"
+
+        manifests = release_artifact.verify_release_set(release_directory, "v1.2.3")
+        self.assertEqual(set(manifests), release_artifact.SUPPORTED_TARGETS)
+
+        extra = release_directory / "unexpected.txt"
+        extra.write_text("unexpected\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+            release_artifact.ReleaseError, "release asset set mismatch"
+        ):
+            release_artifact.verify_release_set(release_directory, "v1.2.3")
+        extra.unlink()
+
+        missing_sidecar = next(release_directory.glob("*.zip.sha256"))
+        missing_sidecar.unlink()
+        with self.assertRaisesRegex(
+            release_artifact.ReleaseError, "release asset set mismatch"
+        ):
+            release_artifact.verify_release_set(release_directory, "v1.2.3")
+
+        with self.assertRaisesRegex(release_artifact.ReleaseError, "semantic version"):
+            release_artifact.verify_release_set(release_directory, "1.2.3")
 
     def test_build_rejects_missing_worker_and_mismatched_tag(self) -> None:
         binary_directory = self.repository / "target" / "release"

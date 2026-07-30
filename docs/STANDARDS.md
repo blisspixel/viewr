@@ -150,6 +150,9 @@ higher standard than the rest of the app.
   duplicate or yanked crates, and the security advisory database.
 - `cargo-audit` against the RUSTSEC advisory database on every build and on a
   schedule, so a newly disclosed vulnerability in a dependency is noticed quickly.
+- `cargo-about` renders the locked default release graph into
+  `THIRD_PARTY_LICENSES.html`. CI regenerates it offline and requires an exact match,
+  and verified release archives include that inventory with LICENSE and NOTICE.
 - The privacy invariant is layered and deterministic. `cargo-deny` rejects HTTP,
   TLS, websocket, QUIC, and remote-service clients, and permits Linux's generic
   D-Bus implementation only behind AccessKit/AT-SPI. Linux startup accepts only

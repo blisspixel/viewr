@@ -5,12 +5,32 @@
 __pycache__/
 *.py[cod]
 /.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage.*
+coverage.xml
+htmlcov/
+*.profraw
+*.profdata
 .DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
 *.log
+/logs/
 /lcov.info
 /.coverage
 /fuzz/artifacts/
 /fuzz/coverage/
+
+# Local secrets and machine-specific overrides. Commit only documented examples.
+.env
+.env.*
+!.env.example
 
 /corpus
 

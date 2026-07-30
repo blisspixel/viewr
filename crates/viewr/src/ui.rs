@@ -1697,8 +1697,8 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     ui.menu_button(RichText::new("Help").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(180.0);
         if ui
-            .button("Update viewr...")
-            .on_hover_text("Show local update instructions. No network check or download.")
+            .button("Get latest release...")
+            .on_hover_text("Open the latest official GitHub release. No background check.")
             .clicked()
         {
             actions.push(UiAction::ShowUpdate);
@@ -1808,7 +1808,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                 .inner_margin(egui::Margin::same(20)),
         )
         .show(ui.ctx(), |ui| {
-            ui.set_max_width(440.0);
+            ui.set_max_width(560.0);
             ui.vertical(|ui| {
                 ui.heading(RichText::new("Update viewr").size(26.0).color(colors.text));
                 ui.label(
@@ -1818,38 +1818,45 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                 );
                 ui.add_space(12.0);
                 ui.label(
-                    RichText::new("viewr does not check, download, or install updates.")
+                    RichText::new("viewr never checks for or downloads updates by itself.")
                         .size(13.0)
                         .color(colors.text),
                 );
                 ui.label(
-                    RichText::new("No verified public update source is configured for this build.")
+                    RichText::new(
+                        "Updates are explicit and come from the official GitHub release.",
+                    )
                         .size(13.0)
                         .color(colors.muted),
                 );
-                ui.add_space(10.0);
                 ui.label(
                     RichText::new(
-                        "Return to the trusted source or package channel from which you obtained viewr. For a source checkout, close viewr and run:",
+                        "Open the latest stable release in your browser, review its version and checksums, then close viewr before installing it.",
                     )
                     .size(13.0)
                     .color(colors.text),
                 );
-                Frame::new()
-                    .fill(colors.raised)
-                    .corner_radius(CornerRadius::same(6))
-                    .inner_margin(egui::Margin::symmetric(10, 8))
-                    .show(ui, |ui| {
-                        ui.label(
-                            RichText::new("cargo build --release --workspace --locked")
-                                .monospace()
-                                .size(12.0)
-                                .color(colors.text),
-                        );
-                    });
+                ui.add_space(10.0);
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("Get latest release")
+                                .strong()
+                                .color(colors.accent_ink),
+                        )
+                        .fill(colors.accent)
+                        .min_size(Vec2::new(180.0, 36.0)),
+                    )
+                    .on_hover_text(crate::cli::OFFICIAL_LATEST_RELEASE_URL)
+                    .clicked()
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(
+                        crate::cli::OFFICIAL_LATEST_RELEASE_URL,
+                    ));
+                }
                 ui.label(
                     RichText::new(
-                        "Keep viewr and viewr-decode from the same trusted build side by side.",
+                        "This hands off only the release URL to your default browser. viewr itself does not connect to GitHub or run an updater.",
                     )
                     .size(12.0)
                     .color(colors.muted),
@@ -1866,7 +1873,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Update viewr. Local instructions only. No network check, download, or install.",
+            "Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.",
         )
     });
     if close_clicked || response.should_close() {
@@ -5101,9 +5108,10 @@ mod tests {
         for expected in [
             "Update viewr",
             concat!("Current version: ", env!("CARGO_PKG_VERSION")),
-            "viewr does not check, download, or install updates.",
-            "No verified public update source is configured for this build.",
-            "cargo build --release --workspace --locked",
+            "viewr never checks for or downloads updates by itself.",
+            "Get latest release",
+            "review its version and checksums",
+            "hands off only the release URL",
             "Close",
         ] {
             assert!(
@@ -5111,7 +5119,7 @@ mod tests {
                 "missing update guidance: {expected}; exposed text: {exposed:?}"
             );
         }
-        for forbidden in ["https://", "git pull", "latest version", "Download now"] {
+        for forbidden in ["git pull", "latest version", "Download now"] {
             assert!(
                 exposed.iter().all(|text| !text.contains(forbidden)),
                 "update surface made an unsupported claim: {forbidden}; exposed text: {exposed:?}"

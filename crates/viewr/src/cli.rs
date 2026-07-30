@@ -1,7 +1,7 @@
 //! Command-line interface for diagnostics and local tooling.
 //!
-//! Subcommands never open the network. `viewr update` only prints how to refresh
-//! a local build; it does not download anything (see product privacy rules).
+//! Subcommands never open the network. `viewr update` only prints the official
+//! release and installer locations; it does not download anything.
 
 #![allow(unsafe_code)] // Windows AttachConsole / AllocConsole for CLI under GUI subsystem
 
@@ -14,6 +14,13 @@ use std::{io, io::Write};
 use crate::decode::DecodedImage;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const OFFICIAL_RELEASES_URL: &str = "https://github.com/blisspixel/viewr/releases";
+pub(crate) const OFFICIAL_LATEST_RELEASE_URL: &str =
+    "https://github.com/blisspixel/viewr/releases/latest";
+pub(crate) const WINDOWS_INSTALL_COMMAND: &str =
+    "irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 | iex";
+pub(crate) const UNIX_INSTALL_COMMAND: &str =
+    "curl -fsSL https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh | sh";
 
 /// Parsed invocation: either a GUI launch or a CLI subcommand.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,14 +179,14 @@ Usage:
   viewr open <path>            Open the GUI on a path
   viewr doctor                 Local diagnostics (no network)
   viewr benchmark [dir]        Time decode on images in dir (or a tiny temp set)
-  viewr update                 How to update (local only; never phones home)
+  viewr update                 Manual update guidance (no network request)
   viewr help                   Show this help
   viewr version                Show version
 
 Privacy:
   No network client, no telemetry, no activity log, no log files.
   Doctor and default benchmark are fully in-memory (zero temp files).
-  `update` only prints build instructions (never downloads).
+  `update` only prints official manual install and build instructions (never downloads).
 
 Examples:
   viewr photos\\IMG_001.jpg
@@ -193,15 +200,28 @@ fn print_update(stdout: &mut impl Write) -> io::Result<()> {
     writeln!(
         stdout,
         "\
-viewr update - local only
+viewr update - manual and explicit
 
-viewr never phones home and does not download updates for you.
-That is intentional (see docs/PRIVACY.md and docs/ROADMAP.md).
+viewr never checks for or downloads updates by itself.
+Official releases:
 
-No verified public update source is configured for this build.
-Return to the trusted source or package channel from which you obtained viewr.
-For a source checkout, update that source using its documented process, close
-viewr, then run:
+  {OFFICIAL_RELEASES_URL}
+
+Run the installer again to update from a verified release archive.
+
+Windows PowerShell:
+
+  {WINDOWS_INSTALL_COMMAND}
+
+macOS or Linux:
+
+  {UNIX_INSTALL_COMMAND}
+
+The installer contacts only the official GitHub repository after you run it and
+verifies the release checksum and manifest. The viewr application remains
+network-free and creates no background updater.
+
+For a source checkout, close viewr and rebuild the updated checkout with:
 
   cargo build --release --workspace --locked
 
@@ -214,8 +234,8 @@ Optional C-backed worker formats (needs system libraries):
 
   cargo build --release -p viewr-decode --features avif,heic
 
-Replace an installation only with files from that same trusted channel.
-There is no background updater and no `viewr update --download`.
+Keep both binaries from the same trusted release or build side by side.
+There is no `viewr update --download`.
 "
     )
 }
@@ -507,7 +527,10 @@ pub fn ensure_console() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Invocation, benchmark_to, decode_self_test, median, parse_args, run_with_io};
+    use super::{
+        Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL, UNIX_INSTALL_COMMAND,
+        WINDOWS_INSTALL_COMMAND, benchmark_to, decode_self_test, median, parse_args, run_with_io,
+    };
     use crate::ephemeral::TempWorkspace;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -613,12 +636,16 @@ mod tests {
         let (code, update, error) = invoke(Invocation::Update);
         assert_eq!(code, ExitCode::SUCCESS);
         assert!(error.is_empty());
-        assert!(update.contains("never phones home"));
-        assert!(update.contains("No verified public update source"));
+        assert!(update.contains("never checks for or downloads updates"));
+        assert!(update.contains(OFFICIAL_RELEASES_URL));
+        assert!(OFFICIAL_LATEST_RELEASE_URL.starts_with(OFFICIAL_RELEASES_URL));
+        assert!(update.contains(WINDOWS_INSTALL_COMMAND));
+        assert!(update.contains(UNIX_INSTALL_COMMAND));
+        assert!(update.contains("verifies the release checksum and manifest"));
         assert!(update.contains("cargo build --release --workspace --locked"));
-        assert!(update.contains("There is no background updater"));
+        assert!(update.contains("creates no background updater"));
         assert!(!update.contains("git pull"));
-        assert!(!update.contains("https://"));
+        assert!(!update.contains("latest version"));
 
         let (code, output, error) = invoke(Invocation::Gui { image: None });
         assert_eq!(code, ExitCode::FAILURE);

@@ -1,6 +1,7 @@
 [package]
 name = "viewr"
 description = "A photo viewer that just shows your photos."
+publish = false
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -64,9 +64,10 @@ The minimum contract is:
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape.
 - Update viewr is a separate named modal window that blocks background input and
-  exposes the running version, local-only behavior, absence of a verified public
-  source, trusted-channel guidance, and the locked source-build command. It closes
-  with an explicit button or Escape and never presents a network action.
+  exposes the running version and one clearly named Get latest release button. It
+  closes with an explicit button or Escape. The application performs no automatic
+  check; only activating Get latest release asks the operating system to open the
+  official stable release in an external browser.
 - Animation exposes current frame, frame count, and pause/resume state.
 - Reload and Retry remain reachable and expose progress or failure as semantic
   text without clearing the last good image.
@@ -108,7 +109,7 @@ probe. It creates three small disposable images beneath `target/` and verifies:
 - the application root and menu focusability;
 - the visible first-run file-versus-folder session scope and both open actions;
 - the Update viewr and About modals' native window identities, action paths,
-  truthful local-only content, and close actions;
+  truthful browser-handoff and local-only application boundaries, and close actions;
 - visible Appearance scope, descriptive System, Light, Dark, and Console radio
   names, all four selected-state transitions, the exact isolated preference file,
   and Console selection after a real process restart;
@@ -178,7 +179,7 @@ Run the same workflow on every platform:
 | Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, and the pointer-only brush overlay is not the sole source of state |
 | Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
 | Ratings | On disposable JPEG copies, use Edit > Rating and `0` through `5`; confirm and cancel the first-write disclosure; apply All, 3+, 4+, and 5+ filters; navigate into and recover from no matches; then restart | Rating and filter radio state, shortcut ownership, current rating, filtered position, outside-filter state, write outcome, and Show all images are announced without color or star-glyph dependence; Cancel initially owns modal focus; unsupported files remain untouched; the embedded rating survives restart |
-| Update | Open Help > Update viewr; read its contents; close with its button and Escape | A modal named Update viewr exposes the running version, no-check/no-download behavior, absence of a verified public source, trusted-channel guidance, and the locked source-build command; it exposes no network action, background controls cannot activate, and focus returns predictably |
+| Update | Open Help > Get latest release; read its contents without activating the release action; close with its button and Escape | A modal named Update viewr exposes the running version, no-automatic-check behavior, browser handoff boundary, and one clearly named Get latest release button; background controls cannot activate and focus returns predictably |
 | About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, shortcuts, and privacy; background controls cannot activate while it is open; focus returns predictably |
 | Animation | Open GIF, WebP, and APNG fixtures and toggle playback from Image Information | Frame position and play/pause state are announced without flooding speech on every timed frame |
 | Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |

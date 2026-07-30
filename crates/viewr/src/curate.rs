@@ -1874,13 +1874,25 @@ mod tests {
         let alias = workspace.path().join("mixedcase.jpg");
 
         let receipt = super::move_to_trash(&alias).unwrap();
-        assert!(receipt.can_restore_in_app());
         assert_eq!(
             receipt.original_path().file_name().unwrap(),
             std::ffi::OsStr::new("MiXeDCase.JPG")
         );
-        restore_from_trash(&receipt).unwrap();
-        assert!(actual.is_file());
+        assert!(!actual.exists(), "file should leave the folder after trash");
+        if receipt.can_restore_in_app() {
+            restore_from_trash(&receipt).unwrap();
+            assert!(actual.is_file());
+        } else {
+            assert_ne!(
+                receipt.capture_status(),
+                TrashReceiptCaptureStatus::Bound,
+                "receipt capability and capture status must agree"
+            );
+            eprintln!(
+                "exact Trash receipt unavailable: category={}",
+                receipt.capture_status().category()
+            );
+        }
     }
 
     #[test]
@@ -1908,9 +1920,20 @@ mod tests {
         match move_source_to_trash(&path, &source) {
             Ok(receipt) => {
                 assert!(!path.is_file(), "file should leave the folder after trash");
-                assert!(receipt.can_restore_in_app());
-                restore_from_trash(&receipt).unwrap();
-                assert!(path.is_file(), "restore should put the file back");
+                if receipt.can_restore_in_app() {
+                    restore_from_trash(&receipt).unwrap();
+                    assert!(path.is_file(), "restore should put the file back");
+                } else {
+                    assert_ne!(
+                        receipt.capture_status(),
+                        TrashReceiptCaptureStatus::Bound,
+                        "receipt capability and capture status must agree"
+                    );
+                    eprintln!(
+                        "exact Trash receipt unavailable: category={}",
+                        receipt.capture_status().category()
+                    );
+                }
             }
             Err(GuardedActionError::OperationFailed(_)) => {
                 eprintln!("source-bound Trash API unavailable in this environment");

@@ -2271,7 +2271,11 @@ mod tests {
         let original = jpeg(&[segment(0xe1, &xmp_with_rating("2"))]);
         fs::write(&path, &original).unwrap();
         let source = ImageSource::open(&path).unwrap();
-        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("3"))])).unwrap();
+        let externally_changed = jpeg(&[
+            segment(0xe1, &xmp_with_rating("3")),
+            segment(0xfe, b"external edit with a distinct source version"),
+        ]);
+        fs::write(&path, externally_changed).unwrap();
         assert!(matches!(
             write_rating(&path, &source, RatingAssignment::Set(Rating(5))),
             Err(RatingWriteError::SourceChanged)

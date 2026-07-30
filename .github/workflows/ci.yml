@@ -173,7 +173,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libx11-dev libxrandr-dev libxi-dev \
             libgl1-mesa-dev mesa-vulkan-drivers xauth xvfb
 
       - name: Set up pinned Rust
@@ -299,6 +300,7 @@ jobs:
       - name: Verify third-party license inventory
         run: |
           cargo fetch --locked
+          mkdir -p target
           cargo about generate about.hbs \
             --workspace --locked --offline --fail \
             --output-file target/THIRD_PARTY_LICENSES.html

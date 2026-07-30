@@ -7,6 +7,9 @@ and organized by user-visible concern.
 
 ### Changed
 
+- The README now includes a privacy-safe capture of the real desktop interface
+  using generated test content, with rating, zoom, and folder-position status
+  visible.
 - Reworked the public project surface around a concise README and a linked
   documentation index. Added focused contribution guidance, structured issue and
   pull-request templates, CODEOWNERS, Dependabot configuration, a public-repository

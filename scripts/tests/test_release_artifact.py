@@ -37,6 +37,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/RATINGS.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
+    "docs/screenshots/viewr-console-rating.png",
     "docs/STACK.md",
     "docs/STANDARDS.md",
     "docs/VERIFY.md",
@@ -154,6 +155,36 @@ class ReleaseArtifactTests(unittest.TestCase):
             binary_directory=self.write_binaries(target),
             source_date_epoch=SOURCE_DATE_EPOCH,
         )
+
+    def make_directory_symlink(self, link: Path, target: Path) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"directory symlinks are unavailable: {error}")
+        self.addCleanup(link.unlink)
+
+    def test_binary_directory_allows_a_host_alias_above_target(self) -> None:
+        alias = self.repository.parent / f"{self.repository.name}-alias"
+        self.make_directory_symlink(alias, self.repository)
+
+        resolved = release_artifact._require_directory_below_target(
+            self.repository.resolve(), alias / "target" / "release"
+        )
+
+        self.assertEqual(resolved, (self.repository / "target" / "release").resolve())
+
+    def test_binary_directory_rejects_a_link_inside_target(self) -> None:
+        linked_release = self.repository / "target" / "linked-release"
+        self.make_directory_symlink(
+            linked_release, self.repository / "target" / "release"
+        )
+
+        with self.assertRaisesRegex(
+            release_artifact.ReleaseError, "link or reparse point"
+        ):
+            release_artifact._require_directory_below_target(
+                self.repository.resolve(), linked_release
+            )
 
     def test_build_is_deterministic_and_archive_contract_verifies(self) -> None:
         archive = self.build()

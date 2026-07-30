@@ -11,6 +11,14 @@ viewr is pre-1.0. Current releases are portable, checksummed archives. Windows
 code signing, macOS notarization, store packages, RAW depth, and final human
 screen-reader release evidence remain in progress.
 
+## Interface
+
+![viewr displaying a synthetic image with Console chrome, rating, zoom, and folder position](docs/screenshots/viewr-console-rating.png)
+
+Console appearance shown with a generated one-pixel test image, an embedded
+four-star rating, and folder position. The image contains no personal photo or
+private path.
+
 ## Install
 
 The installers download the latest published archive from the official GitHub

@@ -366,10 +366,13 @@ fn load_preference_from(path: &Path) -> PreferenceLoad {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return PreferenceLoad::Missing,
         Err(_) => return PreferenceLoad::Recovered(PreferenceRecovery::Unreadable),
     };
-    let length = match file.metadata() {
-        Ok(metadata) => metadata.len(),
-        Err(_) => return PreferenceLoad::Recovered(PreferenceRecovery::Unreadable),
+    let Ok(metadata) = file.metadata() else {
+        return PreferenceLoad::Recovered(PreferenceRecovery::Unreadable);
     };
+    if !metadata.is_file() {
+        return PreferenceLoad::Recovered(PreferenceRecovery::Unreadable);
+    }
+    let length = metadata.len();
     if length > MAX_PREFERENCE_BYTES {
         return PreferenceLoad::Recovered(PreferenceRecovery::Oversized);
     }

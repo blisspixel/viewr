@@ -206,7 +206,9 @@ else:
             "version=1.2.3\n"
             "target=x86_64-unknown-linux-gnu\n",
         )
-        self.assertEqual((self.bin_dir / "viewr").resolve(), release / "viewr")
+        self.assertEqual(
+            (self.bin_dir / "viewr").resolve(), (release / "viewr").resolve()
+        )
 
         second = self.run_installer()
         self.assertIn("Installed viewr 1.2.3", second.stdout)

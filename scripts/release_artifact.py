@@ -60,6 +60,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/RATINGS.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
+    "docs/screenshots/viewr-console-rating.png",
     "docs/STACK.md",
     "docs/STANDARDS.md",
     "docs/VERIFY.md",
@@ -130,23 +131,13 @@ def _require_regular_file(path: Path, description: str) -> None:
 
 
 def _require_directory_below_target(repository_root: Path, directory: Path) -> Path:
-    target_root = (repository_root / "target").resolve(strict=True)
+    target_path = repository_root / "target"
     candidate = directory if directory.is_absolute() else repository_root / directory
-    unresolved = candidate.absolute()
-    current = unresolved
-    while current != repository_root:
-        if current.exists() and _is_reparse_point(current):
-            raise ReleaseError(
-                f"binary directory contains a link or reparse point: {current}"
-            )
-        if current == current.parent:
-            break
-        current = current.parent
-
     try:
+        target_root = target_path.resolve(strict=True)
         resolved = candidate.resolve(strict=True)
         resolved.relative_to(target_root)
-    except (FileNotFoundError, ValueError) as error:
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         raise ReleaseError(
             "binary directory must be an existing directory below the target directory"
         ) from error
@@ -154,6 +145,29 @@ def _require_directory_below_target(repository_root: Path, directory: Path) -> P
         raise ReleaseError(
             "binary directory must be an existing directory below the target directory"
         )
+
+    # Check lexical components only until the target boundary. Hosts may expose an
+    # otherwise canonical repository through a trusted system alias, such as
+    # /var -> /private/var on macOS. Links at or below target remain forbidden.
+    current = candidate.absolute()
+    while True:
+        try:
+            if _is_reparse_point(current):
+                raise ReleaseError(
+                    f"binary directory contains a link or reparse point: {current}"
+                )
+            if current.resolve(strict=True) == target_root:
+                break
+        except (FileNotFoundError, OSError, RuntimeError) as error:
+            raise ReleaseError(
+                "binary directory must be an existing directory below the target directory"
+            ) from error
+        parent = current.parent
+        if parent == current:
+            raise ReleaseError(
+                "binary directory must be an existing directory below the target directory"
+            )
+        current = parent
     return resolved
 
 

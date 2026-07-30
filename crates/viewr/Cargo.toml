@@ -25,7 +25,7 @@ path = "src/main.rs"
 [dependencies]
 # Trusted core only. See docs/STANDARDS.md dependency policy.
 winit = "0.30"        # stable GA line; 0.31 is still beta
-wgpu = "29"
+wgpu = "30"
 pollster = "1"
 log = "0.4"
 env_logger = "0.11"

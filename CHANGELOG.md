@@ -234,13 +234,22 @@ and organized by user-visible concern.
 
 ### Fixed
 
-- macOS decode workers no longer apply a per-user process limit as though it
-  were a per-worker limit, which could reject startup on a normal logged-in
-  system. The worker retains its private session, address-space limit, bounded
-  deadline, and inherited App Sandbox boundary. Cross-platform CI now also
+- macOS decode workers no longer apply unsupported address-space or per-user
+  process limits, which could reject startup on a normal logged-in system. The
+  worker retains its private session, bounded decode protocol, hard deadline,
+  and inherited App Sandbox boundary. Cross-platform CI now also
   normalizes upstream license-file line endings, tracks the complete Flatpak
   Cargo source set, and waits for observable rating state changes in the native
   Windows accessibility smoke path.
+- Malformed JPEG XL input with an unused out-of-range LF-frame level now returns
+  through the bounded decode path instead of triggering an index panic. The
+  exact hosted fuzz discovery is retained in the permanent corpus and replayed
+  by the normal integration suite.
+- Offline Flatpak builds now resolve registry archives from their generated
+  `cargo/vendor` directory without colliding with reviewed local dependency
+  patches. Latest-libheif compatibility checks also compare the worker with the
+  decoder's observed output profile instead of inferring behavior from a
+  library version number.
 - The top status now contracts further at the 640-pixel minimum width so File,
   Edit, View, Tools, Help, and playlist position remain separate. Pointer actions
   for Trash and Undo share the same Crop, Spot Heal, folder-scan, save, load, and

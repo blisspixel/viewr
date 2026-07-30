@@ -2732,19 +2732,6 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/jxl-render/jxl-render-0.12.4.crate",
-    "sha256": "d34386bfdb6a19b5a30cc9beb4d475d537422c31ae8c39bb69640fcce3fcaf19",
-    "dest": "cargo/vendor/jxl-render-0.12.4"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"d34386bfdb6a19b5a30cc9beb4d475d537422c31ae8c39bb69640fcce3fcaf19\", \"files\": {}}",
-    "dest": "cargo/vendor/jxl-render-0.12.4",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/jxl-threadpool/jxl-threadpool-1.0.0.crate",
     "sha256": "25f15eb830aa77a7f21148d72e153562a26bfe570139bd4922eab1908dd499d3",
     "dest": "cargo/vendor/jxl-threadpool-1.0.0"
@@ -7099,7 +7086,7 @@
   },
   {
     "type": "inline",
-    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"vendor\"\n",
+    "contents": "[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n",
     "dest": "cargo",
     "dest-filename": "config.toml"
   }

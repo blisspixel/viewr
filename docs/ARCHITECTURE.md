@@ -468,13 +468,13 @@ polish.
   paths; AVIF/HEIC builds additionally allow only reviewed runtime syscalls,
   read-only plugin discovery, and same-process threads. Windows constrains the
   Job Object to one process and 1.5 GiB aggregate memory. macOS workers use a
-  private session and address-space limit, while signed helpers inherit the
-  application's network-denied App Sandbox. Supported BSD targets additionally
-  apply a one-process resource limit. All workers have containment lifetime
-  controls, typed bounded responses, a hard request deadline covering send and
-  receive, and foreground-generation cancellation that terminates stale blocked
-  requests. Pure-Rust formats remain in the main process but decode off the UI
-  thread under the same dimension, allocation, and aggregate concurrency limits.
+  private session, while signed helpers inherit the application's network-denied
+  App Sandbox. Supported BSD targets additionally apply address-space and
+  one-process resource limits. All workers have containment lifetime controls,
+  typed bounded responses, a hard request deadline covering send and receive,
+  and foreground-generation cancellation that terminates stale blocked requests.
+  Pure-Rust formats remain in the main process but decode off the UI thread under
+  the same dimension, allocation, and aggregate concurrency limits.
 - **Trash, not unlink**, by default: the filesystem is treated as precious.
 
 ## What is intentionally absent

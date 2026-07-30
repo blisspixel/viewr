@@ -12,6 +12,10 @@ members = [
 # to 256 MiB while JxlDecoder is still initializing. The reviewed local patch
 # lowers both encoded and decoded profile limits to viewr's 10 MiB ICC budget.
 jxl-color = { path = "vendor/jxl-color" }
+# jxl-render 0.12.4 indexes an unused LF-frame level before checking its flag,
+# allowing a malformed JXL stream to panic the decoder. The reviewed local
+# patch skips that lookup when no LF frame is referenced.
+jxl-render = { path = "vendor/jxl-render" }
 
 # Default `cargo test` / `cargo clippy` stay pure-Rust and need no system C libs.
 # C-backed worker backends: `cargo build -p viewr-decode --features avif,heic`

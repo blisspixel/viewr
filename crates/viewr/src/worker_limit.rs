@@ -5,8 +5,8 @@
 //!   containment-wide memory limits.
 //! - Linux: `no_new_privs`, non-dumpable, and seccomp-bpf filters that deny
 //!   networking and child-process creation while allowing decoder threads.
-//! - macOS: a private session plus an address-space limit; signed packages add
-//!   the inherited App Sandbox boundary.
+//! - macOS: a private session; signed packages add the inherited App Sandbox
+//!   boundary, while protocol limits and deadlines bound each decode request.
 //! - Other supported Unix targets: a private session plus address-space and
 //!   one-process resource limits.
 
@@ -14,6 +14,7 @@
 
 use std::process::Child;
 
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 const WORKER_MAX_ADDRESS_SPACE_BYTES: u64 = 1536 * 1024 * 1024;
 
 /// Keeps platform lifetime controls alive for as long as the worker exists.
@@ -105,11 +106,12 @@ pub(crate) fn configure_command(cmd: &mut std::process::Command) -> std::io::Res
     {
         use std::os::unix::process::CommandExt;
         // SAFETY: Linux compiles its filter in the parent. The child closure
-        // only invokes setrlimit, prctl, and seccomp syscalls, then reports any
-        // failure through Command::spawn.
+        // only invokes setsid and the target's reviewed containment syscalls,
+        // then reports any failure through Command::spawn.
         unsafe {
             cmd.pre_exec(move || {
                 unix::create_private_session()?;
+                #[cfg(not(target_os = "macos"))]
                 unix::apply_address_space_limit()?;
                 #[cfg(target_os = "linux")]
                 linux::apply_worker_sandbox(&network_filter, &clone3_filter)?;
@@ -135,6 +137,7 @@ mod unix {
         Ok(())
     }
 
+    #[cfg(not(target_os = "macos"))]
     pub(super) fn apply_address_space_limit() -> std::io::Result<()> {
         let limit = libc::rlim_t::try_from(super::WORKER_MAX_ADDRESS_SPACE_BYTES)
             .map_err(|_| std::io::Error::from_raw_os_error(libc::EOVERFLOW))?;

@@ -131,23 +131,16 @@ enum HeicNclxFixture {
     BitstreamOnly,
 }
 
-#[cfg(all(feature = "heic", feature = "heic-latest-ci"))]
-fn libde265_reads_hevc_vui() -> bool {
-    Command::new("pkg-config")
-        .args(["--atleast-version=1.0.7", "libde265"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
+#[cfg(feature = "heic")]
+type HeicFixture = (Vec<u8>, Vec<u8>, (u32, u32), Option<(u16, u16)>);
 
 #[cfg(feature = "heic")]
-fn reference_heic_pixels(
+fn reference_heic_decode(
     encoded: &[u8],
     nclx_fixture: HeicNclxFixture,
     width: u32,
     height: u32,
-) -> Vec<u8> {
+) -> (Vec<u8>, Option<(u16, u16)>) {
     use libheif_rs::{
         ColorPrimaries, ColorSpace, HeifContext, LibHeif, RgbChroma, TransferCharacteristics,
     };
@@ -184,12 +177,6 @@ fn reference_heic_pixels(
         HeicNclxFixture::Container => {
             decoding_options.set_output_image_nclx_profile(reference_handle.color_profile_nclx());
         }
-        HeicNclxFixture::BitstreamOnly if libde265_reads_hevc_vui() => {
-            let mut display_p3 =
-                libheif_rs::ColorProfileNCLX::new().expect("allocate reference P3 profile");
-            display_p3.set_color_primaries(ColorPrimaries::SMPTE_EG_432_1);
-            decoding_options.set_output_image_nclx_profile(Some(display_p3));
-        }
         HeicNclxFixture::None | HeicNclxFixture::BitstreamOnly => {}
     }
     let reference_image = lib_heif
@@ -199,6 +186,12 @@ fn reference_heic_pixels(
             Some(decoding_options),
         )
         .expect("decode HEIC reference pixels");
+    let output_encoding = reference_image.color_profile_nclx().map(|profile| {
+        (
+            profile.color_primaries() as u16,
+            profile.transfer_characteristics() as u16,
+        )
+    });
     let plane = reference_image
         .planes()
         .interleaved
@@ -208,14 +201,11 @@ fn reference_heic_pixels(
     for row in plane.data.chunks_exact(plane.stride).take(height as usize) {
         reference.extend_from_slice(&row[..row_bytes]);
     }
-    reference
+    (reference, output_encoding)
 }
 
 #[cfg(feature = "heic")]
-fn heic_fixture(
-    icc_profile: Option<&[u8]>,
-    nclx_fixture: HeicNclxFixture,
-) -> (Vec<u8>, Vec<u8>, (u32, u32)) {
+fn heic_fixture(icc_profile: Option<&[u8]>, nclx_fixture: HeicNclxFixture) -> HeicFixture {
     use libheif_rs::{
         Channel, ColorPrimaries, ColorProfileNCLX, ColorProfileRaw, ColorSpace, CompressionFormat,
         EncoderQuality, EncodingOptions, HeifContext, Image, LibHeif, RgbChroma,
@@ -280,15 +270,16 @@ fn heic_fixture(
             .expect("HEIC fixture contains an NCLX profile");
         heic_bytes[nclx + 4..nclx + 11].copy_from_slice(&[0, 12, 0, 13, 0, 1, 0x80]);
     }
-    let reference = reference_heic_pixels(&heic_bytes, nclx_fixture, width, height);
+    let (reference, output_encoding) =
+        reference_heic_decode(&heic_bytes, nclx_fixture, width, height);
 
-    (heic_bytes, reference, (width, height))
+    (heic_bytes, reference, (width, height), output_encoding)
 }
 
 #[cfg(feature = "heic")]
 #[test]
 fn heic_decodes_under_the_production_worker_policy() {
-    let (encoded, reference, size) = heic_fixture(None, HeicNclxFixture::None);
+    let (encoded, reference, size, _) = heic_fixture(None, HeicNclxFixture::None);
     let decoded = decode_in_worker("heic", &encoded, size);
     assert_eq!(decoded.pixels, reference);
     assert!(
@@ -303,7 +294,7 @@ fn heic_icc_profile_takes_precedence_over_synthesized_nclx() {
     let display_p3 = moxcms::ColorProfile::new_display_p3()
         .encode()
         .expect("encode Display P3 fixture profile");
-    let (encoded, reference, size) = heic_fixture(Some(&display_p3), HeicNclxFixture::None);
+    let (encoded, reference, size, _) = heic_fixture(Some(&display_p3), HeicNclxFixture::None);
     let decoded = decode_in_worker("heic", &encoded, size);
 
     assert_eq!(decoded.pixels, reference);
@@ -319,7 +310,7 @@ fn heic_latest_preserves_source_profile_contract() {
     let display_p3 = moxcms::ColorProfile::new_display_p3()
         .encode()
         .expect("encode Display P3 fixture profile");
-    let (encoded, reference, size) = heic_fixture(Some(&display_p3), HeicNclxFixture::Container);
+    let (encoded, reference, size, _) = heic_fixture(Some(&display_p3), HeicNclxFixture::Container);
     let decoded = decode_in_worker("heic", &encoded, size);
 
     assert_eq!(decoded.pixels, reference);
@@ -333,34 +324,28 @@ fn heic_latest_preserves_source_profile_contract() {
 #[cfg(feature = "heic-latest-ci")]
 #[test]
 fn heic_latest_reports_bitstream_only_nclx() {
-    let (encoded, reference, size) = heic_fixture(None, HeicNclxFixture::BitstreamOnly);
+    let (encoded, reference, size, expected_encoding) =
+        heic_fixture(None, HeicNclxFixture::BitstreamOnly);
     let decoded = decode_in_worker("heic", &encoded, size);
 
     assert_eq!(decoded.pixels, reference);
     let viewr_protocol::WorkerColorProfile::Cicp(cicp) = decoded.color_profile else {
         panic!("bitstream-only color signaling must remain typed CICP evidence");
     };
-    let expected_primaries = if libde265_reads_hevc_vui() { 12 } else { 1 };
     assert_eq!(
         (cicp.color_primaries, cicp.transfer_characteristics),
-        (expected_primaries, 13),
+        expected_encoding.expect("reference decoder must describe its output encoding"),
         "the worker must report the decoder's actual output encoding"
     );
 }
 
 #[cfg(feature = "heic-latest-ci")]
 #[test]
-fn heic_latest_preserves_matching_icc_for_bitstream_only_color() {
-    if !libde265_reads_hevc_vui() {
-        eprintln!(
-            "libde265 before 1.0.7 cannot expose HEVC VUI color; CI enforces the required floor"
-        );
-        return;
-    }
+fn heic_latest_preserves_icc_under_the_passthrough_contract() {
     let display_p3 = moxcms::ColorProfile::new_display_p3()
         .encode()
         .expect("encode Display P3 fixture profile");
-    let (encoded, reference, size) =
+    let (encoded, reference, size, _) =
         heic_fixture(Some(&display_p3), HeicNclxFixture::BitstreamOnly);
     let decoded = decode_in_worker("heic", &encoded, size);
 

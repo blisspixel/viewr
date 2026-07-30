@@ -55,12 +55,14 @@ jobs:
         run: |
           ruff check \
             scripts/release_artifact.py scripts/performance_gate.py \
-            scripts/tests/test_documentation.py scripts/tests/test_installers.py \
+            scripts/tests/test_documentation.py scripts/tests/test_flatpak_sources.py \
+            scripts/tests/test_installers.py \
             scripts/tests/test_release_artifact.py \
             scripts/tests/test_performance_gate.py
           ruff format --check \
             scripts/release_artifact.py scripts/performance_gate.py \
-            scripts/tests/test_documentation.py scripts/tests/test_installers.py \
+            scripts/tests/test_documentation.py scripts/tests/test_flatpak_sources.py \
+            scripts/tests/test_installers.py \
             scripts/tests/test_release_artifact.py \
             scripts/tests/test_performance_gate.py
 

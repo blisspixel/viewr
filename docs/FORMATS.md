@@ -52,7 +52,9 @@ and unit tests under `decode` / `edit`.
   unsupported profiles produce an explicit fallback status in Image Information.
   PNG and WebP containers are preflighted before decoder allocation. JPEG XL's
   locally reviewed `jxl-color` boundary rejects encoded, declared, or amplified
-  ICC output beyond the same 10 MiB ceiling.
+  ICC output beyond the same 10 MiB ceiling. The reviewed `jxl-render` boundary
+  also skips an unreferenced LF-frame level before table lookup so malformed
+  input returns through the decode path instead of panicking.
 - Source pixels, normalized working pixels, and presentation are separate typed
   stages. Successful normalization produces only validated RGBA8 sRGB working
   pixels. Crop and pixel transforms preserve that encoding; preview generation,

@@ -201,7 +201,7 @@ users who explicitly want it.
 | Text rendering | `egui` | immediate mode GUI overlay |
 | Accessibility | `accesskit` / `accesskit_winit` | semantic tree and native delivery on Windows/macOS/Linux; Linux local IPC is runtime confined |
 | Decode (common formats) | `image` | pure-Rust |
-| Decode JPEG XL | `jxl-oxide` | pure-Rust; reviewed local `jxl-color` patch enforces the 10 MiB ICC initialization ceiling |
+| Decode JPEG XL | `jxl-oxide` | pure-Rust; reviewed local `jxl-color` and `jxl-render` patches enforce the 10 MiB ICC initialization ceiling and reject a malformed unused LF-frame level without panicking |
 | Input ICC conversion | `moxcms` | bounded pure-Rust RGB profile transform into the current sRGB path |
 | Trash / recycle | `trash` | recoverable deletes |
 | OS theme | `winit` window theme | default image background only; no extra dependency |

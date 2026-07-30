@@ -65,3 +65,19 @@ fn successful_fuzz_seeds_reach_every_distinct_core_decoder() {
         "add a successful seed whenever a distinct core decoder is added"
     );
 }
+
+#[test]
+fn unused_jxl_lf_level_regression_is_rejected_without_panicking() {
+    let bytes = std::fs::read(decoder_seed_directory().join("regression-jxl-unused-lf-level"))
+        .expect("read JXL regression seed");
+    let (&selector, payload) = bytes.split_first().expect("seed has selector");
+    let extension = CORE_EXTENSIONS[usize::from(selector) % CORE_EXTENSIONS.len()];
+    assert_eq!(extension, "jxl");
+
+    for result in [
+        DecodedImage::load_from_memory_with_extension(payload, extension),
+        DecodedImage::load_from_memory(payload),
+    ] {
+        assert!(result.is_err(), "malformed JXL input was accepted");
+    }
+}

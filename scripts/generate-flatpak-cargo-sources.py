@@ -68,7 +68,7 @@ def main() -> None:
                 "[source.crates-io]\n"
                 'replace-with = "vendored-sources"\n\n'
                 "[source.vendored-sources]\n"
-                'directory = "vendor"\n'
+                'directory = "cargo/vendor"\n'
             ),
             "dest": "cargo",
             "dest-filename": "config.toml",

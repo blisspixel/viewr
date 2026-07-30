@@ -122,7 +122,7 @@ jobs:
 
       - name: Exercise Windows installer contract
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: powershell
         run: scripts/install-windows-smoke.ps1 -BinaryDirectory target/debug
 
       - name: Exercise native Windows accessibility bridge

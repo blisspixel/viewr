@@ -24,6 +24,52 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
 }
 
+function Invoke-ViewrProbe(
+    [string]$Binary,
+    [ValidateSet("--version", "doctor")][string]$Argument,
+    [string]$FailureMessage
+) {
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Binary
+    $startInfo.Arguments = $Argument
+    $startInfo.WorkingDirectory = Split-Path -Parent $Binary
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            Stop-Install $FailureMessage
+        }
+        $standardOutput = $process.StandardOutput.ReadToEndAsync()
+        $standardError = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(15000)) {
+            try {
+                $process.Kill()
+            }
+            catch {
+                # The process may have exited between the timeout and termination.
+            }
+            $process.WaitForExit()
+            $null = $standardOutput.GetAwaiter().GetResult()
+            $null = $standardError.GetAwaiter().GetResult()
+            Stop-Install "$FailureMessage within 15 seconds"
+        }
+        $output = $standardOutput.GetAwaiter().GetResult().Trim()
+        $null = $standardError.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            Stop-Install $FailureMessage
+        }
+        return $output
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 if (-not [Environment]::Is64BitOperatingSystem) {
     Stop-Install "a 64-bit Windows installation is required"
 }
@@ -280,14 +326,17 @@ try {
             [Text.UTF8Encoding]::new($false)
         )
 
-        $stagedVersion = & (Join-Path $stage "viewr.exe") --version
-        if ($LASTEXITCODE -ne 0 -or $stagedVersion -cne "viewr $releaseVersion") {
+        $stagedVersion = Invoke-ViewrProbe `
+            (Join-Path $stage "viewr.exe") `
+            "--version" `
+            "staged binary did not report its version"
+        if ($stagedVersion -cne "viewr $releaseVersion") {
             Stop-Install "staged binary version does not match the selected release"
         }
-        & (Join-Path $stage "viewr.exe") doctor | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Stop-Install "staged binaries did not pass viewr doctor"
-        }
+        $null = Invoke-ViewrProbe `
+            (Join-Path $stage "viewr.exe") `
+            "doctor" `
+            "staged binaries did not pass viewr doctor"
 
         $hadPrevious = Test-Path -LiteralPath $InstallDir
         if ($hadPrevious) {
@@ -346,8 +395,11 @@ try {
         }
     }
 
-    $installedVersion = & (Join-Path $InstallDir "viewr.exe") --version
-    if ($LASTEXITCODE -ne 0 -or $installedVersion -cne "viewr $releaseVersion") {
+    $installedVersion = Invoke-ViewrProbe `
+        (Join-Path $InstallDir "viewr.exe") `
+        "--version" `
+        "installed binary did not report its version"
+    if ($installedVersion -cne "viewr $releaseVersion") {
         Stop-Install "installed binary version does not match the selected release"
     }
     Write-Host "Installed $installedVersion in $InstallDir"

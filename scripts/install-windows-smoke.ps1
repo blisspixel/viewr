@@ -17,11 +17,45 @@ foreach ($binary in @($mainBinary, $workerBinary)) {
     }
 }
 
-$versionOutput = & $mainBinary --version
-if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^viewr (.+)$') {
+function Get-ViewrVersionLine([string]$Binary) {
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Binary
+    $startInfo.Arguments = "--version"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "viewr binary did not start for version validation"
+        }
+        $standardOutput = $process.StandardOutput.ReadToEndAsync()
+        $standardError = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(10000)) {
+            $process.Kill()
+            throw "viewr binary did not finish version validation"
+        }
+        $output = $standardOutput.GetAwaiter().GetResult().Trim()
+        $null = $standardError.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "viewr binary did not report a usable version"
+        }
+        return $output
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+$versionOutput = Get-ViewrVersionLine $mainBinary
+$versionMatch = [regex]::Match([string]$versionOutput, '^viewr (.+)$')
+if (-not $versionMatch.Success) {
     throw "viewr binary did not report a usable version"
 }
-$version = $Matches[1]
+$version = $versionMatch.Groups[1].Value
 $tag = "v$version"
 $target = "x86_64-pc-windows-msvc"
 $prefix = "viewr-$version-$target"
@@ -40,6 +74,15 @@ function Copy-FixtureFile([string]$Source, [string]$RelativePath) {
     $destination = Join-Path $sourceRoot $RelativePath
     [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
     Copy-Item -LiteralPath $Source -Destination $destination
+}
+
+function Get-FixtureRelativePath([string]$Root, [string]$Path) {
+    $rootPrefix = [IO.Path]::GetFullPath($Root).TrimEnd("\") + "\"
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not $fullPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "installer smoke file escaped its fixture root"
+    }
+    return $fullPath.Substring($rootPrefix.Length).Replace("\", "/")
 }
 
 function Invoke-RestMethod {
@@ -82,7 +125,7 @@ try {
     foreach ($file in @(
         Get-ChildItem -LiteralPath $sourceRoot -File -Recurse | Sort-Object FullName
     )) {
-        $relative = [IO.Path]::GetRelativePath($sourceRoot, $file.FullName).Replace("\", "/")
+        $relative = Get-FixtureRelativePath $sourceRoot $file.FullName
         $records.Add([ordered]@{
             mode = if ($relative.StartsWith("bin/", [StringComparison]::Ordinal)) { "0755" } else { "0644" }
             path = $relative
@@ -91,7 +134,7 @@ try {
         })
     }
     $manifest = [ordered]@{
-        archive_format = "zip-stored-v1"
+        archive_format = "zip-store-v1"
         files = $records
         package_name = "viewr"
         rust_toolchain = "1.96.0"
@@ -106,6 +149,7 @@ try {
         [Text.UTF8Encoding]::new($false)
     )
 
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archiveStream = [IO.File]::Open($archivePath, [IO.FileMode]::CreateNew)
     $archive = [IO.Compression.ZipArchive]::new(
@@ -116,7 +160,7 @@ try {
         foreach ($file in @(
             Get-ChildItem -LiteralPath $sourceRoot -File -Recurse | Sort-Object FullName
         )) {
-            $relative = [IO.Path]::GetRelativePath($sourceRoot, $file.FullName).Replace("\", "/")
+            $relative = Get-FixtureRelativePath $sourceRoot $file.FullName
             $entry = $archive.CreateEntry(
                 "$prefix/$relative",
                 [IO.Compression.CompressionLevel]::NoCompression
@@ -172,8 +216,8 @@ try {
     }
     & $installer -Version $version -InstallDir $installDir -NoPath -NoShortcut
 
-    $installedVersion = & (Join-Path $installDir "viewr.exe") --version
-    if ($LASTEXITCODE -ne 0 -or $installedVersion -cne "viewr $version") {
+    $installedVersion = Get-ViewrVersionLine (Join-Path $installDir "viewr.exe")
+    if ($installedVersion -cne "viewr $version") {
         throw "installed fixture did not report the selected version"
     }
     $marker = Get-Content -LiteralPath (Join-Path $installDir ".viewr-install.json") -Raw |
@@ -196,6 +240,17 @@ finally {
     $global:ViewrInstallerSmokeSidecar = $null
     $global:ViewrInstallerSmokeRelease = $null
     if (Test-Path -LiteralPath $testRoot) {
-        [IO.Directory]::Delete($testRoot, $true)
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            try {
+                [IO.Directory]::Delete($testRoot, $true)
+                break
+            }
+            catch [IO.IOException], [UnauthorizedAccessException] {
+                if ($attempt -eq 5) {
+                    throw
+                }
+                Start-Sleep -Milliseconds (50 * $attempt)
+            }
+        }
     }
 }

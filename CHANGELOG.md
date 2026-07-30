@@ -7,6 +7,11 @@ and organized by user-visible concern.
 
 ### Changed
 
+- Release packaging now accepts only the explicitly listed, bounded PNG interface
+  capture as binary documentation and validates its chunk structure before adding
+  it to an archive. The Windows installer smoke also parses the staged version
+  without relying on ambient PowerShell match state and now runs at the declared
+  Windows PowerShell 5.1 compatibility floor in CI.
 - The README now includes a privacy-safe capture of the real desktop interface
   using a clear example image, with dimensions, rating, zoom, and folder-position
   status visible.
@@ -18,9 +23,10 @@ and organized by user-visible concern.
 - The newest libheif compatibility check now verifies its observed output profile
   when one is available and the decoder contract's explicit sRGB fallback when the
   converted output is untagged.
-- CI uses the current checksum-pinned tool installer release. Dependabot now groups
-  only Rust patch updates, keeping GPU, accessibility, color, and platform version
-  transitions isolated for compatibility review.
+- CI uses the current checksum-pinned tool installer release. Dependabot now limits
+  each update lane to one grouped patch proposal and suppresses routine breaking
+  version proposals, keeping GPU, accessibility, color, and platform transitions
+  in deliberate compatibility work while security updates remain enabled.
 - Reworked the public project surface around a concise README and a linked
   documentation index. Added focused contribution guidance, structured issue and
   pull-request templates, CODEOWNERS, Dependabot configuration, a public-repository

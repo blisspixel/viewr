@@ -86,10 +86,11 @@ are unchanged.
 Use the target-specific `scripts/release_artifact.py build` and `verify` commands
 in `docs/INSTALL.md`. The builder creates a deterministic archive from the binary
 inputs it receives; includes LICENSE, NOTICE, third-party licenses, desktop assets,
-the security policy, and canonical Markdown; writes an internal manifest; and emits
-a SHA-256 sidecar. The verifier then checks those exact bytes, the declared archive
-structure, and local README links written in the repository's simple inline Markdown
-form with repository-relative destinations.
+the security policy, canonical Markdown, and the bounded PNG interface capture used
+by the README; writes an internal manifest; and emits a SHA-256 sidecar. The verifier
+then checks those exact bytes, the declared archive structure, and local README links
+written in the repository's simple inline Markdown form with repository-relative
+destinations.
 Reference-style links, Markdown images, and raw HTML destinations are not parsed
 and must not be used for the README's portable documentation navigation.
 

@@ -5,10 +5,12 @@ import io
 import json
 import os
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest import mock
 import zipfile
+import zlib
 
 from scripts import release_artifact
 
@@ -61,20 +63,40 @@ class ReleaseArtifactTests(unittest.TestCase):
         for relative_path in EXPECTED_DOCUMENTATION_PATHS:
             documentation = self.repository / relative_path
             documentation.parent.mkdir(parents=True, exist_ok=True)
-            documentation.write_text(
-                (
-                    "# viewr\n\n"
-                    "[Security](SECURITY.md)\n"
-                    "[Design](docs/DESIGN.md)\n"
-                    "[License](LICENSE)\n"
-                    "[Section](#supported)\n"
-                    "[Website](https://example.invalid/viewr)\n"
-                    if relative_path == "README.md"
-                    else f"# {documentation.stem}\n"
-                ),
-                encoding="utf-8",
-            )
+            if relative_path in release_artifact.BINARY_DOCUMENTATION_PATHS:
+                documentation.write_bytes(self.png_bytes())
+            else:
+                documentation.write_text(
+                    (
+                        "# viewr\n\n"
+                        "[Security](SECURITY.md)\n"
+                        "[Design](docs/DESIGN.md)\n"
+                        "[License](LICENSE)\n"
+                        "[Section](#supported)\n"
+                        "[Website](https://example.invalid/viewr)\n"
+                        if relative_path == "README.md"
+                        else f"# {documentation.stem}\n"
+                    ),
+                    encoding="utf-8",
+                )
         (self.repository / "LICENSE").write_bytes(b"license\n")
+
+    @staticmethod
+    def png_bytes() -> bytes:
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            checksum = zlib.crc32(kind + data) & 0xFFFFFFFF
+            return (
+                struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+            )
+
+        header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+        pixels = zlib.compress(b"\x00\x00\x00\x00\xff")
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", pixels)
+            + chunk(b"IEND", b"")
+        )
 
     def write_binaries(self, target: str) -> Path:
         binary_directory = self.repository / "target" / "release"
@@ -229,6 +251,28 @@ class ReleaseArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(
             release_artifact.ReleaseError, "unresolved local link"
         ):
+            self.build()
+
+    def test_build_rejects_an_invalid_documentation_asset(self) -> None:
+        screenshot = self.repository / "docs/screenshots/viewr-console-example.png"
+        screenshot.write_bytes(b"not a PNG")
+        with self.assertRaisesRegex(release_artifact.ReleaseError, "valid PNG"):
+            self.build()
+
+    def test_build_rejects_a_corrupt_documentation_asset(self) -> None:
+        screenshot = self.repository / "docs/screenshots/viewr-console-example.png"
+        corrupt = bytearray(self.png_bytes())
+        corrupt[24] ^= 1
+        screenshot.write_bytes(corrupt)
+        with self.assertRaisesRegex(release_artifact.ReleaseError, "PNG checksum"):
+            self.build()
+
+    def test_build_rejects_an_oversized_documentation_asset(self) -> None:
+        screenshot = self.repository / "docs/screenshots/viewr-console-example.png"
+        with screenshot.open("wb") as output:
+            output.seek(release_artifact.MAX_DOCUMENTATION_ASSET_BYTES)
+            output.write(b"\0")
+        with self.assertRaisesRegex(release_artifact.ReleaseError, "size limit"):
             self.build()
 
     def test_verify_release_set_requires_every_supported_target_and_no_extras(

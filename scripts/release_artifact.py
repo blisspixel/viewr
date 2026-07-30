@@ -21,6 +21,7 @@ import tempfile
 import tomllib
 from typing import BinaryIO
 import zipfile
+import zlib
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -38,6 +39,8 @@ ARCHIVE_FORMAT = "zip-store-v1"
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_BINARY_HEADER_BYTES = 1024 * 1024 + 512
 MAX_README_BYTES = 512 * 1024
+MAX_DOCUMENTATION_ASSET_BYTES = 5 * 1024 * 1024
+BINARY_DOCUMENTATION_PATHS = frozenset({"docs/screenshots/viewr-console-example.png"})
 ARCHIVE_DOCUMENTATION_PATHS = (
     "CHANGELOG.md",
     "CONTRIBUTING.md",
@@ -201,6 +204,60 @@ def _canonical_text(path: Path, description: str) -> bytes:
     except UnicodeDecodeError as error:
         raise ReleaseError(f"{description} must be UTF-8 text: {path}") from error
     return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def _bounded_png(path: Path, description: str) -> bytes:
+    _require_regular_file(path, description)
+    if path.stat().st_size > MAX_DOCUMENTATION_ASSET_BYTES:
+        raise ReleaseError(f"{description} exceeds its release size limit")
+    payload = path.read_bytes()
+    if payload[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ReleaseError(f"{description} must be a valid PNG")
+
+    offset = 8
+    chunk_index = 0
+    saw_iend = False
+    while offset < len(payload):
+        if offset + 12 > len(payload):
+            raise ReleaseError(f"{description} has a truncated PNG chunk")
+        chunk_size = int.from_bytes(payload[offset : offset + 4], "big")
+        chunk_end = offset + 12 + chunk_size
+        if chunk_size > MAX_DOCUMENTATION_ASSET_BYTES or chunk_end > len(payload):
+            raise ReleaseError(f"{description} has an invalid PNG chunk size")
+        chunk_type = payload[offset + 4 : offset + 8]
+        chunk_data = payload[offset + 8 : offset + 8 + chunk_size]
+        expected_crc = int.from_bytes(payload[chunk_end - 4 : chunk_end], "big")
+        actual_crc = zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            raise ReleaseError(f"{description} has an invalid PNG checksum")
+
+        if chunk_index == 0:
+            if chunk_type != b"IHDR" or chunk_size != 13:
+                raise ReleaseError(f"{description} must begin with a PNG header")
+            width, height = struct.unpack(">II", chunk_data[:8])
+            if width == 0 or height == 0 or width > 16_384 or height > 16_384:
+                raise ReleaseError(f"{description} has unsafe PNG dimensions")
+        if chunk_type == b"IEND":
+            if chunk_size != 0 or chunk_end != len(payload):
+                raise ReleaseError(f"{description} has an invalid PNG end marker")
+            saw_iend = True
+        elif saw_iend:
+            raise ReleaseError(f"{description} has data after its PNG end marker")
+
+        offset = chunk_end
+        chunk_index += 1
+
+    if not saw_iend:
+        raise ReleaseError(f"{description} is missing its PNG end marker")
+    return payload
+
+
+def _documentation_bytes(repository_root: Path, relative_path: str) -> bytes:
+    path = repository_root / relative_path
+    description = f"documentation file {relative_path}"
+    if relative_path in BINARY_DOCUMENTATION_PATHS:
+        return _bounded_png(path, description)
+    return _canonical_text(path, description)
 
 
 def _binary_names(target: str) -> tuple[str, str]:
@@ -764,10 +821,7 @@ def build_release_artifact(
             ArchiveEntry(
                 relative_path,
                 0o644,
-                _canonical_text(
-                    repository_root / relative_path,
-                    f"documentation file {relative_path}",
-                ),
+                _documentation_bytes(repository_root, relative_path),
             )
             for relative_path in ARCHIVE_DOCUMENTATION_PATHS
         ),

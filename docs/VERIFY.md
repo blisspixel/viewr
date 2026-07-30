@@ -25,7 +25,9 @@ environment, and artifacts used.
 - The committed third-party license inventory is regenerated from the locked default
   release graph. Its verifier compares every package/version, license assignment,
   and license text while ignoring presentation order, line endings, and repository
-  link changes that do not alter the shipped license obligations.
+  link changes that do not alter the shipped license obligations. Host-sensitive
+  license detection is resolved only through checksum-backed source-file
+  clarifications in `about.toml`.
 - A GitHub artifact attestation binds a published asset digest to the repository and
   workflow identity recorded by GitHub. It does not make an unsigned executable a
   platform-signed application.

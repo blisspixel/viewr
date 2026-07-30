@@ -13,6 +13,8 @@ and organized by user-visible concern.
 - Third-party license drift checks now compare the locked package versions, license
   assignments, and license text semantically. Harmless upstream repository-link,
   section-order, and line-ending differences no longer break cross-platform CI.
+  Two dependencies that package the same MIT file now use checksum-backed
+  clarifications so every host selects those exact license bytes.
 - The newest libheif compatibility check now verifies its observed output profile
   when one is available and the decoder contract's explicit sRGB fallback when the
   converted output is untagged.

@@ -18,6 +18,9 @@ and organized by user-visible concern.
 - The newest libheif compatibility check now verifies its observed output profile
   when one is available and the decoder contract's explicit sRGB fallback when the
   converted output is untagged.
+- CI uses the current checksum-pinned tool installer release. Dependabot now groups
+  only Rust patch updates, keeping GPU, accessibility, color, and platform version
+  transitions isolated for compatibility review.
 - Reworked the public project surface around a concise README and a linked
   documentation index. Added focused contribution guidance, structured issue and
   pull-request templates, CODEOWNERS, Dependabot configuration, a public-repository

@@ -6,8 +6,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      rust-dependencies:
+      rust-patches:
         patterns: ["*"]
+        update-types: ["patch"]
 
   - package-ecosystem: cargo
     directory: /fuzz

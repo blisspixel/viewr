@@ -5,8 +5,10 @@
 //!   containment-wide memory limits.
 //! - Linux: `no_new_privs`, non-dumpable, and seccomp-bpf filters that deny
 //!   networking and child-process creation while allowing decoder threads.
-//! - Other supported Unix targets: a private session plus address-space
-//!   and one-process resource limits.
+//! - macOS: a private session plus an address-space limit; signed packages add
+//!   the inherited App Sandbox boundary.
+//! - Other supported Unix targets: a private session plus address-space and
+//!   one-process resource limits.
 
 #![allow(unsafe_code)] // Win32 Job Object APIs, Unix process-group, Linux prctl/seccomp
 
@@ -147,10 +149,11 @@ mod unix {
         }
 
         // C decoders may create threads but never need subprocesses. On the
-        // supported non-Linux Unix targets, RLIMIT_NPROC=1 prevents a compromised
-        // worker from creating a child that escapes its process group.
+        // supported BSD targets, RLIMIT_NPROC=1 prevents a compromised worker
+        // from creating a child that escapes its process group. macOS defines
+        // RLIMIT_NPROC per user rather than per process, so lowering it to one
+        // would reject worker startup whenever the user already has a process.
         #[cfg(any(
-            target_os = "macos",
             target_os = "freebsd",
             target_os = "openbsd",
             target_os = "netbsd",
@@ -308,11 +311,18 @@ mod windows {
 #[cfg(test)]
 mod tests {
     use super::{configure_command, harden_child};
-    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
     const CHILD_FLAG: &str = "VIEWR_TEST_TIMEOUT_CHILD";
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     const PROCESS_CHILD_FLAG: &str = "VIEWR_TEST_PROCESS_CHILD";
     #[cfg(unix)]
     const GROUP_ESCAPE_CHILD_FLAG: &str = "VIEWR_TEST_GROUP_ESCAPE_CHILD";
@@ -346,13 +356,21 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     fn process_creation_child_observes_containment_denial() {
         if std::env::var_os(PROCESS_CHILD_FLAG).is_none() {
             return;
         }
 
         let mut ready = [0_u8; 1];
-        std::io::stdin().read_exact(&mut ready).unwrap();
+        std::io::Read::read_exact(&mut std::io::stdin(), &mut ready).unwrap();
         match Command::new(std::env::current_exe().unwrap())
             .arg("--list")
             .spawn()
@@ -367,6 +385,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
     fn containment_denies_descendant_process_creation() {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
@@ -379,7 +405,7 @@ mod tests {
         configure_command(&mut command).unwrap();
         let mut child = command.spawn().unwrap();
         let _guard = harden_child(&child).unwrap();
-        child.stdin.take().unwrap().write_all(&[1]).unwrap();
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), &[1]).unwrap();
         assert!(child.wait().unwrap().success());
     }
 

@@ -502,7 +502,10 @@ submission.
 - The isolated decode worker fully in place, with seccomp on Linux and reduced
   privileges elsewhere.
   - [x] Workspace worker + versioned bounded encoded-input frames + bounded pixel-stream IPC; the helper receives no filesystem path.
-  - [x] Windows one-process Job Object kill-on-close + Unix private session and one-process policy (`worker_limit`), with fail-closed setup and a 1.5 GiB containment memory ceiling.
+  - [x] Windows one-process Job Object kill-on-close + Unix private session
+    (`worker_limit`), with fail-closed setup and a 1.5 GiB containment memory
+    ceiling. Linux separately denies child-process creation with seccomp; signed
+    macOS helpers inherit the application's network-denied App Sandbox.
   - [x] Linux `no_new_privs` + post-exec `dumpable=0` + default-allow seccomp-bpf that EPERMs classic and io_uring network paths, with startup failure if hardening cannot apply (`worker_limit` + `packaging/linux/SECCOMP.md`).
   - [x] Shared 512 MiB decoded-output limit, strict dimension validation, fallible large allocations, typed bounded responses, and a hard 30-second send/receive deadline with bounded cleanup. Host file reads occur before worker reservation and outside the IPC deadline thread.
   - [x] Two-slot foreground-priority file-decode gate, generation cancellation

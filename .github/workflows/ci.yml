@@ -304,6 +304,9 @@ jobs:
           cargo about generate about.hbs \
             --workspace --locked --offline --fail \
             --output-file target/THIRD_PARTY_LICENSES.html
+          # cargo-about preserves upstream license line endings, while Git stores
+          # the committed inventory with repository-standard LF endings.
+          sed -i 's/\r$//' target/THIRD_PARTY_LICENSES.html
           cmp THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
 
       - name: privacy-check (packaging + tree)

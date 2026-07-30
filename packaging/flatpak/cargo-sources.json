@@ -4305,6 +4305,19 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/quick-xml/quick-xml-0.41.0.crate",
+    "sha256": "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1",
+    "dest": "cargo/vendor/quick-xml-0.41.0"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1\", \"files\": {}}",
+    "dest": "cargo/vendor/quick-xml-0.41.0",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/quote/quote-1.0.46.crate",
     "sha256": "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368",
     "dest": "cargo/vendor/quote-1.0.46"

@@ -241,9 +241,9 @@ Shipped:
   path. No shell command, editor preference, path log, or completion inference is
   introduced. Successful delegation sets only a session-local, path-free `F5`
   reminder that clears when a new load starts.
-- **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; Job Object or
-  process-group lifetime controls, one-process policies, memory limits, hard
-  deadlines, and generation cancellation for helpers.
+- **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; platform-specific
+  Job Object, process-group, seccomp, package-sandbox, memory, hard-deadline, and
+  generation-cancellation controls for helpers.
 - **`fs`**: recognizing regular image files (core and worker extensions), excluding
   symlinks from automatic scans, natural-sort ordering (`img2` before `img10`),
   and versioned native file identity used to bind a displayed source to guarded
@@ -467,13 +467,14 @@ polish.
   depends on a dynamic file grant. Linux denies classic and io_uring network
   paths; AVIF/HEIC builds additionally allow only reviewed runtime syscalls,
   read-only plugin discovery, and same-process threads. Windows constrains the
-  Job Object to one process and 1.5 GiB aggregate memory; supported non-Linux Unix
-  targets create a private session and apply a one-process resource limit. All
-  workers have containment lifetime controls, typed bounded responses, a hard
-  request deadline covering send and receive, and foreground-generation
-  cancellation that terminates stale blocked requests. Pure-Rust formats remain
-  in the main process but decode off the UI thread under the same dimension,
-  allocation, and aggregate concurrency limits.
+  Job Object to one process and 1.5 GiB aggregate memory. macOS workers use a
+  private session and address-space limit, while signed helpers inherit the
+  application's network-denied App Sandbox. Supported BSD targets additionally
+  apply a one-process resource limit. All workers have containment lifetime
+  controls, typed bounded responses, a hard request deadline covering send and
+  receive, and foreground-generation cancellation that terminates stale blocked
+  requests. Pure-Rust formats remain in the main process but decode off the UI
+  thread under the same dimension, allocation, and aggregate concurrency limits.
 - **Trash, not unlink**, by default: the filesystem is treated as precious.
 
 ## What is intentionally absent

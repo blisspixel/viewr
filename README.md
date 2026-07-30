@@ -13,11 +13,11 @@ screen-reader release evidence remain in progress.
 
 ## Interface
 
-![viewr displaying a synthetic image with Console chrome, rating, zoom, and folder position](docs/screenshots/viewr-console-rating.png)
+![viewr displaying an example cat image with Console chrome, dimensions, zoom, rating, and folder position](docs/screenshots/viewr-console-example.png)
 
-Console appearance shown with a generated one-pixel test image, an embedded
-four-star rating, and folder position. The image contains no personal photo or
-private path.
+Console appearance shown with an example image, current dimensions and zoom,
+rating state, and folder position. The capture contains only the application
+window, with no private path or unrelated desktop content.
 
 ## Install
 

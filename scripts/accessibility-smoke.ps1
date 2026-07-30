@@ -27,6 +27,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 public static class ViewrAccessibilityNativeMethods {
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
@@ -138,6 +139,10 @@ public static class ViewrAccessibilityNativeMethods {
 
     public static bool SendKeyPress(IntPtr hwnd, ushort virtualKey) {
         if (!SetForegroundWindow(hwnd) && GetForegroundWindow() != hwnd) return false;
+        for (var attempt = 0; attempt < 50 && GetForegroundWindow() != hwnd; attempt++) {
+            Thread.Sleep(10);
+        }
+        if (GetForegroundWindow() != hwnd) return false;
         var inputs = new[] {
             new Input {
                 Type = 1,
@@ -1001,6 +1006,9 @@ try {
         -Name "Rating filter: At least 4" `
         -Selected $false
     Select-Element -Element $ratingFourFilter
+    Wait-ForElement -Name "1 / 1 rated 4+" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
     Open-ViewSubmenu -Name "Rating Filter: At least 4"
     Wait-ForSelectionState `
         -Name "Rating filter: At least 4" `
@@ -1017,6 +1025,9 @@ try {
         -Name "Rating filter: At least 5" `
         -Selected $false
     Select-Element -Element $ratingFiveFilter
+    Wait-ForElement -Name "No images are rated 5 or higher." -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
     Send-ApplicationKey -VirtualKey 0x27
     Wait-ForElement -Name "No images are rated 5 or higher." -ControlType (
         [System.Windows.Automation.ControlType]::Text

@@ -20,7 +20,7 @@ The main `viewr` process remains pure-Rust, memory-safe, and dependency-light. W
    - Package smoke tests require an exact typed handshake response from the worker; an arbitrary decoder error does not count as protocol compatibility.
 3. **Hardened Sandbox (Phase 7):**
    - On Linux: fail-closed `no_new_privs`, a one-process seccomp policy, and denial of classic plus io_uring network paths. AVIF/HEIC builds add a default-deny syscall allowlist with read-only plugin discovery and thread-only clone; Flatpak supplies the filesystem and whole-app boundary.
-   - On macOS: a private session and one-process resource limit protect worker lifetime; the verified App Sandbox bundle omits network client/server grants and probes main-to-worker IPC.
+   - On macOS: a private session, address-space limit, and bounded parent deadline protect worker lifetime; the verified App Sandbox helper inherits the application boundary, omits network client/server grants, and is probed through main-to-worker IPC.
    - On Windows: a fail-closed, one-process Job Object supplies lifetime and aggregate memory limits; the packaged-classic AppContainer manifest grants no capabilities.
    - The main UI offers separate file and folder pickers. A file-only grant remains a one-image playlist when sibling enumeration is denied; **Open Folder** obtains explicit session-scoped consent for navigation without a broad library capability.
 
@@ -53,7 +53,7 @@ Moving optional C decoders out of the UI process materially reduces blast radius
 | macOS entitlements (no network) | Main/helper profiles; exact core-format alternate-viewer declaration; native Launch Services delivery; CI builds, ad-hoc signs, and worker-probes a local bundle |
 | Windows AppContainer profile | Empty-capability Appx manifest with exact core-format association; Windows SDK validates a local unsigned MSIX |
 | Windows Job Object (kill-on-close + one process + 1.5 GiB job memory) | Done, fail-closed and runtime-tested (`worker_limit`) |
-| Unix private session and one-process worker policy | Done; Linux seccomp is runtime-tested (`worker_limit`) |
+| Unix worker containment | Private session and address-space limit on macOS; Linux additionally denies process creation with runtime-tested seccomp; supported BSD targets apply `RLIMIT_NPROC` |
 | Linux no_new_privs + post-exec dumpable=0 | Done, fail-closed (`worker_limit` + worker startup) |
 | seccomp-bpf network deny (default-allow + EPERM list) | Done, fail-closed (`viewr-seccomp`, installed by `worker_limit`) |
 | Shared decode shape limit + hard 30-second send/receive deadline | Done and pipe-saturation tested (`viewr-protocol` + `sandbox`); bounded host reads occur before worker reservation, and both reads and blocked IPC stop on foreground-generation supersession |

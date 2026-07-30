@@ -175,7 +175,10 @@ fn reference_heic_pixels(
             "fixture must not contain an NCLX colr property"
         );
     }
+    #[cfg(feature = "heic-latest-ci")]
     let mut decoding_options = reference_heic_decoding_options();
+    #[cfg(not(feature = "heic-latest-ci"))]
+    let decoding_options = reference_heic_decoding_options();
     #[cfg(feature = "heic-latest-ci")]
     match nclx_fixture {
         HeicNclxFixture::Container => {

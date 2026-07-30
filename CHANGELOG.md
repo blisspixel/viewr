@@ -8,8 +8,8 @@ and organized by user-visible concern.
 ### Changed
 
 - The README now includes a privacy-safe capture of the real desktop interface
-  using generated test content, with rating, zoom, and folder-position status
-  visible.
+  using a clear example image, with dimensions, rating, zoom, and folder-position
+  status visible.
 - Reworked the public project surface around a concise README and a linked
   documentation index. Added focused contribution guidance, structured issue and
   pull-request templates, CODEOWNERS, Dependabot configuration, a public-repository
@@ -234,6 +234,13 @@ and organized by user-visible concern.
 
 ### Fixed
 
+- macOS decode workers no longer apply a per-user process limit as though it
+  were a per-worker limit, which could reject startup on a normal logged-in
+  system. The worker retains its private session, address-space limit, bounded
+  deadline, and inherited App Sandbox boundary. Cross-platform CI now also
+  normalizes upstream license-file line endings, tracks the complete Flatpak
+  Cargo source set, and waits for observable rating state changes in the native
+  Windows accessibility smoke path.
 - The top status now contracts further at the 640-pixel minimum width so File,
   Edit, View, Tools, Help, and playlist position remain separate. Pointer actions
   for Trash and Undo share the same Crop, Spot Heal, folder-scan, save, load, and

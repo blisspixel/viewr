@@ -468,17 +468,62 @@ function Wait-ForSelectionState {
 function Open-ViewSubmenu {
     param(
         [Parameter(Mandatory)]
-        [string]$Name
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$ExpectedChildName,
+        [System.Windows.Automation.ControlType]$ExpectedChildControlType,
+        [switch]$ExpectedChildPrefix
     )
 
-    $view = Wait-ForElement -Name "View" -ControlType (
-        [System.Windows.Automation.ControlType]::Button
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $child = Get-Element `
+            -Name $ExpectedChildName `
+            -Prefix:$ExpectedChildPrefix `
+            -ControlType $ExpectedChildControlType
+        if ($null -ne $child) {
+            return
+        }
+
+        $submenu = Get-Element -Name $Name -Prefix -ControlType (
+            [System.Windows.Automation.ControlType]::Button
+        )
+        if ($null -eq $submenu) {
+            $view = Wait-ForElement -Name "View" -ControlType (
+                [System.Windows.Automation.ControlType]::Button
+            )
+            Activate-Element -Element $view
+            $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
+                [System.Windows.Automation.ControlType]::Button
+            )
+        }
+        Activate-Element -Element $submenu
+
+        $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        while ([DateTime]::UtcNow -lt $publishDeadline) {
+            if ($script:Process.HasExited) {
+                throw "viewr exited while opening the '$Name' submenu"
+            }
+            try {
+                $child = Get-Element `
+                    -Name $ExpectedChildName `
+                    -Prefix:$ExpectedChildPrefix `
+                    -ControlType $ExpectedChildControlType
+                if ($null -ne $child) {
+                    return
+                }
+            }
+            catch [System.Windows.Automation.ElementNotAvailableException] {
+                # Retry from the current tree after an accessibility refresh.
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+
+    $treeSummary = Get-TreeSummary
+    throw (
+        "submenu '$Name' did not expose '$ExpectedChildName' after three attempts; " +
+        "accessible tree: $treeSummary"
     )
-    Activate-Element -Element $view
-    $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
-        [System.Windows.Automation.ControlType]::Button
-    )
-    Activate-Element -Element $submenu
 }
 
 function Open-EditSubmenu {
@@ -754,33 +799,57 @@ try {
         [System.Windows.Automation.ControlType]::Window
     ) | Out-Null
 
-    Open-ViewSubmenu -Name "Appearance: System"
+    Open-ViewSubmenu `
+        -Name "Appearance: System" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForElement `
         -Name "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately." `
         -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Wait-ForSelectionState -Name "System:" -Prefix -Selected $true | Out-Null
     $lightTheme = Wait-ForSelectionState -Name "Light:" -Prefix -Selected $false
     Select-Element -Element $lightTheme
-    Open-ViewSubmenu -Name "Appearance: Light"
+    Open-ViewSubmenu `
+        -Name "Appearance: Light" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Light:" -Prefix -Selected $true | Out-Null
     $darkTheme = Wait-ForSelectionState -Name "Dark:" -Prefix -Selected $false
     Select-Element -Element $darkTheme
-    Open-ViewSubmenu -Name "Appearance: Dark"
+    Open-ViewSubmenu `
+        -Name "Appearance: Dark" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Dark:" -Prefix -Selected $true | Out-Null
     $consoleTheme = Wait-ForSelectionState -Name "Console:" -Prefix -Selected $false
     Select-Element -Element $consoleTheme
-    Open-ViewSubmenu -Name "Appearance: Console"
+    Open-ViewSubmenu `
+        -Name "Appearance: Console" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Console:" -Prefix -Selected $true | Out-Null
     $systemTheme = Wait-ForSelectionState -Name "System:" -Prefix -Selected $false
     Select-Element -Element $systemTheme
-    Open-ViewSubmenu -Name "Appearance: System"
+    Open-ViewSubmenu `
+        -Name "Appearance: System" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState `
         -Name "System: Follows your operating system. Currently " `
         -Prefix `
         -Selected $true | Out-Null
     $consoleTheme = Wait-ForSelectionState -Name "Console:" -Prefix -Selected $false
     Select-Element -Element $consoleTheme
-    Open-ViewSubmenu -Name "Appearance: Console"
+    Open-ViewSubmenu `
+        -Name "Appearance: Console" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Console:" -Prefix -Selected $true | Out-Null
     if (-not [IO.File]::Exists($appearanceFile)) {
         throw "selecting Console did not persist the isolated appearance preference"
@@ -795,7 +864,11 @@ try {
     Wait-ForElement -Name "first.png" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
-    Open-ViewSubmenu -Name "Appearance: Console"
+    Open-ViewSubmenu `
+        -Name "Appearance: Console" `
+        -ExpectedChildName "System:" `
+        -ExpectedChildPrefix `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Console:" -Prefix -Selected $true | Out-Null
     $fileMenu = Wait-ForElement -Name "File" -ControlType (
         [System.Windows.Automation.ControlType]::Button
@@ -808,7 +881,7 @@ try {
         throw "Open With was not enabled for the accepted current image"
     }
 
-    Open-ViewSubmenu -Name "Panels"
+    Open-ViewSubmenu -Name "Panels" -ExpectedChildName "Tools T"
     foreach ($panel in @("Tools T", "Folder Previews G", "Image Information I")) {
         Wait-ForToggleState -Name $panel -State (
             [System.Windows.Automation.ToggleState]::Off
@@ -869,7 +942,7 @@ try {
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
 
-    Open-ViewSubmenu -Name "Panels"
+    Open-ViewSubmenu -Name "Panels" -ExpectedChildName "Tools T"
     Wait-ForToggleState -Name "Tools T" -State (
         [System.Windows.Automation.ToggleState]::On
     ) | Out-Null
@@ -896,28 +969,37 @@ try {
         [System.Windows.Automation.ToggleState]::On
     ) | Out-Null
 
-    Open-ViewSubmenu -Name "Panel Position"
+    Open-ViewSubmenu `
+        -Name "Panel Position" `
+        -ExpectedChildName "Tools: Left" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Tools: Left" -Selected $true | Out-Null
     $toolsRight = Wait-ForSelectionState -Name "Tools: Right" -Selected $false
     Wait-ForSelectionState -Name "Image Information: Left" -Selected $false | Out-Null
     Wait-ForSelectionState -Name "Image Information: Right" -Selected $true | Out-Null
     Select-Element -Element $toolsRight
 
-    Open-ViewSubmenu -Name "Panel Position"
+    Open-ViewSubmenu `
+        -Name "Panel Position" `
+        -ExpectedChildName "Tools: Left" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Tools: Right" -Selected $true | Out-Null
     $informationLeft = Wait-ForSelectionState `
         -Name "Image Information: Left" `
         -Selected $false
     Select-Element -Element $informationLeft
 
-    Open-ViewSubmenu -Name "Panel Position"
+    Open-ViewSubmenu `
+        -Name "Panel Position" `
+        -ExpectedChildName "Tools: Left" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState -Name "Image Information: Left" -Selected $true | Out-Null
     $view = Wait-ForElement -Name "View" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $view
 
-    Open-ViewSubmenu -Name "Panels"
+    Open-ViewSubmenu -Name "Panels" -ExpectedChildName "Tools T"
     $previews = Wait-ForToggleState -Name "Folder Previews G" -State (
         [System.Windows.Automation.ToggleState]::Off
     )
@@ -1001,7 +1083,10 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
-    Open-ViewSubmenu -Name "Rating Filter: All images"
+    Open-ViewSubmenu `
+        -Name "Rating Filter: All images" `
+        -ExpectedChildName "All images" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     $ratingFourFilter = Wait-ForSelectionState `
         -Name "Rating filter: At least 4" `
         -Selected $false
@@ -1009,7 +1094,10 @@ try {
     Wait-ForElement -Name "1 / 1 rated 4+" -Prefix -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
-    Open-ViewSubmenu -Name "Rating Filter: At least 4"
+    Open-ViewSubmenu `
+        -Name "Rating Filter: At least 4" `
+        -ExpectedChildName "All images" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     Wait-ForSelectionState `
         -Name "Rating filter: At least 4" `
         -Selected $true | Out-Null
@@ -1020,7 +1108,10 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
-    Open-ViewSubmenu -Name "Rating Filter: At least 4"
+    Open-ViewSubmenu `
+        -Name "Rating Filter: At least 4" `
+        -ExpectedChildName "All images" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     $ratingFiveFilter = Wait-ForSelectionState `
         -Name "Rating filter: At least 5" `
         -Selected $false

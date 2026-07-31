@@ -20,10 +20,10 @@ Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding, an
 honest capability reporting, but its original definition is not complete while
 camera RAW and multi-page viewing remain absent. Phase 8 has local install paths,
 file associations, accessibility automation, native AccessKit delivery, enforced
-GUI performance budgets, and a green hosted multi-OS workflow. It is not complete
-until the manual three-platform assistive-technology matrix, public verifiable
-artifacts, platform signing and notarization, target-hardware acceptance, and
-display fidelity are complete.
+GUI performance budgets, a green hosted multi-OS workflow, and an immutable first
+public release with verified provenance. It is not complete until the manual
+three-platform assistive-technology matrix, platform signing and notarization,
+target-hardware acceptance, and display fidelity are complete.
 
 The current viewer also has bounded GIF/WebP/APNG playback, eight-way EXIF
 orientation, input RGB ICC conversion to sRGB, a trilinear GPU mip chain,
@@ -33,10 +33,10 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Immediate focus: publish a trustworthy pre-1.0 release from a recorded green
-commit, then close the human accessibility and platform-trust gates for 1.0. Next
-product focus: per-display color correctness, followed by live external-file
-coherence. Next engineering seam: bounded background-job ownership.** Optional
+**Immediate focus: close the human accessibility and platform-trust gates for
+1.0. Next product focus: per-display color correctness, followed by live
+external-file coherence. Next engineering seam: bounded background-job
+ownership.** Optional
 model-backed description remains a gated post-1.0 candidate, not active Phase 8
 scope.
 
@@ -47,9 +47,9 @@ but completed history does not override an open gate here.
 
 | Gate | Status | Evidence or next action |
 | --- | --- | --- |
-| Public repository and hosted quality | Complete | `main` is public. [CI run 30592874307](https://github.com/blisspixel/viewr/actions/runs/30592874307) passed on `d5093aed794b1c94f464ebc0117c2b99fefc2de5`; [fuzz run 30592187060](https://github.com/blisspixel/viewr/actions/runs/30592187060) passed both targets on the immediately preceding product commit. |
+| Public repository and hosted quality | Complete | `main` is public. [CI run 30642307317](https://github.com/blisspixel/viewr/actions/runs/30642307317) passed all seven jobs and [fuzz run 30642307463](https://github.com/blisspixel/viewr/actions/runs/30642307463) passed both targets on release commit `86d3eef920ec5e523fbc6dbc286c4dcbd68e7f1b`. |
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
-| First public pre-1.0 release | Open | Create the first annotated tag from a green commit, let the release workflow build and attest the exact archive set, verify the published assets, then make the installer commands live. |
+| First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) reran CI and fuzzing, built four platform archives, published the exact 12-asset set, and attested every asset. The public installer commands use fixed-version release URLs. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. Path-filtered fuzz remains mandatory in the release workflow. |
 | Human accessibility evidence | Open | Complete Narrator, VoiceOver, and Orca records against the exact candidate artifact under `docs/release-evidence/accessibility/`. |
 | Native platform trust | Open | Sign Windows deliverables, sign and notarize the macOS application and disk image, and verify a normal Linux package on its target desktop. |
@@ -88,13 +88,14 @@ behavior, installability, and maintainable proof of correctness.
 
 ### Priority 1: a release people can actually trust and install
 
-Why first: the current product cannot become recommendable while ordinary users
-cannot obtain and authenticate a build. This work closes the gap between repository
-quality and a release that a careful non-developer can install, update, and remove.
+Why first: v0.1.0 closes the gap between repository quality and a release that a
+careful non-developer can obtain and authenticate. The remaining work raises that
+explicitly unsigned preview to the trust level required for a broad 1.0
+recommendation.
 
 - [x] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
-  commit and retain the [green CI run](https://github.com/blisspixel/viewr/actions/runs/30592874307)
-  and [green fuzz run](https://github.com/blisspixel/viewr/actions/runs/30592187060).
+  commit and retain the [green CI run](https://github.com/blisspixel/viewr/actions/runs/30642307317)
+  and [green fuzz run](https://github.com/blisspixel/viewr/actions/runs/30642307463).
 - [x] Enable private vulnerability reporting, Dependabot alerts and security
   updates, secret scanning, push protection, and immutable releases in the public
   repository.
@@ -104,8 +105,9 @@ quality and a release that a careful non-developer can install, update, and remo
 - [ ] Complete Narrator, VoiceOver, and Orca acceptance using
   `docs/ACCESSIBILITY.md`, including crop, reload, animation, errors, and busy
   states.
-- [ ] Publish checksummed dual-binary archives from the green commit with a human
-  changelog, GitHub build provenance, and clear optional file-association guidance.
+- [x] Publish [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0)
+  as checksummed dual-binary archives from the green commit with reviewed notes,
+  GitHub build provenance, and clear optional file-association guidance.
 - [ ] Produce and verify a signed Windows delivery, a Developer ID-signed and
   notarized macOS application and disk image, and a normal Linux Flatpak or
   equivalent package. Store publication remains optional.

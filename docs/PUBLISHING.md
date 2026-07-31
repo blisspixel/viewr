@@ -24,8 +24,9 @@ Status last verified on 2026-07-31:
   resolution. Force pushes and deletion are blocked. Administrators retain an
   explicit emergency bypass; path-filtered fuzz remains a release-workflow gate.
 - [x] Immutable releases are enabled before the first tag is published.
-- [ ] Publish and verify the first tag and release. No remote tag or GitHub Release
-  exists yet.
+- [x] Publish and verify annotated tag `v0.1.0`. The release is immutable, contains
+  the exact 12 expected assets, and has one GitHub release attestation covering
+  every asset.
 
 ## First public pre-1.0 release
 
@@ -79,6 +80,14 @@ Exercise a clean install, same-version reinstall, update, application launch, fi
 open, explicit uninstall, and rollback from an injected activation failure. Verify
 that the installed main executable and worker belong to the same release.
 
+For v0.1.0, [main CI run 30642307317](https://github.com/blisspixel/viewr/actions/runs/30642307317)
+passed all seven jobs and [fuzz run 30642307463](https://github.com/blisspixel/viewr/actions/runs/30642307463)
+passed both targets on commit `86d3eef920ec5e523fbc6dbc286c4dcbd68e7f1b`.
+[Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336)
+then repeated the complete gates, built all four archives, verified checksums and
+manifests, attested all 12 assets, and published the immutable
+[v0.1.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.1.0).
+
 ## Required before a broadly recommended 1.0
 
 - Complete Narrator, VoiceOver, and Orca evidence from
@@ -98,10 +107,9 @@ that the installed main executable and worker belong to the same release.
 
 ## Current limits
 
-- No public GitHub Release exists yet, so the one-command installers stop without
-  changing the machine.
-- Prepared archives are portable and checksummed, but current local artifacts are
-  not Authenticode-signed or Apple-notarized.
+- v0.1.0 is public, immutable, checksummed, and attested. Its executable archives
+  are not Authenticode-signed or Apple-notarized, so the release remains an
+  explicitly unsigned pre-1.0 preview.
 - The foreground installer tools contact only the official GitHub repository after
   the user runs them. They do not create an updater service or add network access
   to viewr.

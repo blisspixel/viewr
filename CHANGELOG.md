@@ -5,7 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
-No user-visible changes have been recorded since 0.1.0.
+### Documentation
+
+- Recorded the immutable v0.1.0 release, exact hosted CI and fuzz evidence,
+  verified 12-asset publication, and the remaining platform-trust gates in the
+  roadmap and maintainer publishing guide.
 
 ## 0.1.0 - 2026-07-31
 

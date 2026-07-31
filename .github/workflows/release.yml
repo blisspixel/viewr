@@ -117,7 +117,19 @@ jobs:
           target/release-publish
           --expected-tag "${{ github.ref_name }}"
 
-      - name: Attest release archives and checksums
+      - name: Add immutable installer bootstrap assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp install.ps1 target/release-publish/install.ps1
+          cp install.sh target/release-publish/install.sh
+          (
+            cd target/release-publish
+            sha256sum install.ps1 > install.ps1.sha256
+            sha256sum install.sh > install.sh.sha256
+          )
+
+      - name: Attest every release asset
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
           subject-path: target/release-publish/*
@@ -129,11 +141,38 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          mapfile -t assets < <(find target/release-publish -maxdepth 1 -type f -print | sort)
-          if [[ "${#assets[@]}" -ne 8 ]]; then
-            echo "Expected exactly eight release assets, found ${#assets[@]}" >&2
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag is not a supported semantic version: $tag" >&2
             exit 1
           fi
+          notes_file="docs/releases/${tag}.md"
+          if [[ ! -f "$notes_file" ]]; then
+            echo "Missing reviewed release notes: $notes_file" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          mapfile -t expected_names < <(printf '%s\n' \
+            install.ps1 \
+            install.ps1.sha256 \
+            install.sh \
+            install.sh.sha256 \
+            "viewr-${version}-aarch64-apple-darwin.zip" \
+            "viewr-${version}-aarch64-apple-darwin.zip.sha256" \
+            "viewr-${version}-x86_64-apple-darwin.zip" \
+            "viewr-${version}-x86_64-apple-darwin.zip.sha256" \
+            "viewr-${version}-x86_64-pc-windows-msvc.zip" \
+            "viewr-${version}-x86_64-pc-windows-msvc.zip.sha256" \
+            "viewr-${version}-x86_64-unknown-linux-gnu.zip" \
+            "viewr-${version}-x86_64-unknown-linux-gnu.zip.sha256" | sort)
+          mapfile -t actual_names < <(find target/release-publish -maxdepth 1 -type f -printf '%f\n' | sort)
+          if ! diff -u \
+            <(printf '%s\n' "${expected_names[@]}") \
+            <(printf '%s\n' "${actual_names[@]}"); then
+            echo "Release assets do not match the exact expected set" >&2
+            exit 1
+          fi
+          mapfile -t assets < <(find target/release-publish -maxdepth 1 -type f -print | sort)
 
           if gh release view "$tag" >/dev/null 2>&1; then
             is_draft=$(gh release view "$tag" --json isDraft --jq .isDraft)
@@ -141,11 +180,14 @@ jobs:
               echo "Refusing to modify an already published release: $tag" >&2
               exit 1
             fi
+            gh release edit "$tag" \
+              --notes-file "$notes_file" \
+              --title "viewr ${tag#v}"
           else
             gh release create "$tag" \
               --verify-tag \
               --draft \
-              --generate-notes \
+              --notes-file "$notes_file" \
               --title "viewr ${tag#v}"
           fi
 

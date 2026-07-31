@@ -12,7 +12,7 @@ elevation.
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.ps1 | iex
 ```
 
 The installer:
@@ -32,7 +32,7 @@ background.
 To install a specific version from a reviewed local copy of the script:
 
 ```powershell
-irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 `
+irm https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.ps1 `
   -OutFile $env:TEMP\viewr-install.ps1
 & $env:TEMP\viewr-install.ps1 -Version 0.1.0
 ```
@@ -44,7 +44,7 @@ shortcut. `-InstallDir` is accepted only inside the current user's
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.sh | sh
 ```
 
 The shell installer:
@@ -74,11 +74,12 @@ configuration. The installer reports this without editing profile files.
 
 ## Review before running
 
-Pipe-to-shell commands are convenient but execute the current installer source.
+Pipe-to-shell commands are convenient but execute installer code. The commands
+above are fixed to the immutable `v0.1.0` release rather than a moving branch.
 To review it first:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.sh
 less install.sh
 sh install.sh
 ```
@@ -88,8 +89,8 @@ file before invoking it. The installer performs foreground network requests only
 after the user runs it. The installed application has no HTTP or TLS client and
 does not inherit installer network capability.
 
-If the repository has no published release yet, the installer stops without changing
-the machine. Use a source build until the first release is available.
+If the requested release or its verification material cannot be resolved, the
+installer stops without changing the machine.
 
 ## Manual release installation
 

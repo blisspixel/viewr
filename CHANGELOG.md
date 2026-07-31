@@ -5,8 +5,18 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+No user-visible changes have been recorded since 0.1.0.
+
+## 0.1.0 - 2026-07-31
+
 ### Changed
 
+- Reframed the project overview around its fast, focused, cross-platform, and
+  local-only product promise; added a concise feature tour, essential controls,
+  appearance choices, preview limitations, and a direct documentation path.
+- Added reviewed release notes and durable repository instructions so product,
+  quality, privacy, documentation, and release boundaries stay explicit as the
+  project evolves.
 - Public documentation now distinguishes the source build available today, the
   first unsigned pre-1.0 release, and the stronger 1.0 trust bar. The roadmap opens
   with a concise release dashboard, puts trustworthy distribution before new
@@ -47,9 +57,10 @@ and organized by user-visible concern.
   only official GitHub Releases, verify the SHA-256 sidecar and bounded archive
   structure before installation, refuse to replace unowned paths, and create no
   updater service. Running the same command performs an explicit update.
-- Release tags now assemble a verified four-target asset set, create GitHub build
-  provenance attestations, upload assets to a draft release, and publish only after
-  CI and fuzzing pass. Manual workflow runs remain non-publishing inspection builds.
+- Release tags now assemble a verified four-target archive set plus fixed-version
+  installer scripts and checksum sidecars, attest every published asset, use
+  reviewed human release notes, and publish only after CI and fuzzing pass. Manual
+  workflow runs remain non-publishing inspection builds.
 - Restored the verbatim Apache License 2.0 text, added the project NOTICE, and made a
   generated third-party license inventory part of the release archive and CI drift
   checks.
@@ -202,6 +213,19 @@ and organized by user-visible concern.
 
 ### Security
 
+- Updated runtime-reachable `event-listener` to 5.4.2, which fixes
+  `RUSTSEC-2026-0221` unsafe cross-thread access through `StackSlot`. Root and fuzz
+  audits now fail on every unreviewed warning instead of accepting newly reported
+  unsoundness in successful CI output.
+- JPEG XL ICC parsing now rejects overflowing tag counts and ranges with a normal
+  decode error instead of allowing crafted profile arithmetic to panic the viewer.
+- The optional decode helper must be an explicit valid file or the exact colocated
+  release binary. Missing or invalid helpers now fail closed and can no longer
+  execute a same-named program from `PATH`.
+- Public one-command installation now bootstraps from immutable `v0.1.0` release
+  assets. The release workflow publishes checksum sidecars for those scripts and
+  creates provenance attestations for the complete exact asset set.
+
 - Deterministic release archives now include `SECURITY.md` and the complete
   canonical Markdown documentation set. Verification also rejects unresolved
   local README links written in the repository's simple inline Markdown form with
@@ -263,6 +287,9 @@ and organized by user-visible concern.
 
 ### Fixed
 
+- Private temporary workspaces now use atomic ownership and remove only the exact
+  directory created by the current process. Startup no longer sweeps broadly
+  named directories that could belong to another process.
 - macOS decode workers no longer apply unsupported address-space or per-user
   process limits, which could reject startup on a normal logged-in system. The
   worker retains its private session, bounded decode protocol, hard deadline,

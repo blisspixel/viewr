@@ -1,9 +1,10 @@
 # Build and artifact verification
 
 This guide explains what can be verified from source and published release records,
-and where the evidence stops. Before the first public release, verification is local
-and applies to the exact source, target, toolchain, dependency lockfiles, build
-environment, and artifacts used.
+and where the evidence stops. Local verification applies to the exact source,
+target, toolchain, dependency lockfiles, build environment, and artifacts used.
+Published checksums and attestations add release-record and workflow provenance;
+they do not replace source review or platform signing.
 
 ## What each check establishes
 
@@ -59,7 +60,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 cargo deny check
-cargo audit
+cargo audit -D warnings
 cargo about generate about.hbs --workspace --locked --offline --fail --output-file target/THIRD_PARTY_LICENSES.html
 python -B scripts/verify_license_inventory.py THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
 pwsh -NoProfile -File scripts/privacy-check.ps1
@@ -116,6 +117,6 @@ asset. Independent source-to-binary reproduction still requires a documented,
 controlled build environment and comparison against the unsigned executable
 produced there.
 
-Current release-readiness gaps, including hosted evidence until the first workflow
-run, platform signing, notarization, and independent reproduction, remain tracked in
-`docs/ROADMAP.md`.
+Current release-readiness gaps, including platform signing, notarization,
+representative-hardware acceptance, and independent reproduction, remain tracked
+in `docs/ROADMAP.md`.

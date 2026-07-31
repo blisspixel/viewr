@@ -37,6 +37,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/PRIVACY.md",
     "docs/README.md",
     "docs/RATINGS.md",
+    "docs/releases/v0.1.0.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-console-example.png",
@@ -607,6 +608,48 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("VIEWR_RELEASE_TAG: ${{ github.ref_name }}", workflow)
         self.assertIn("--expected-tag-from-env", workflow)
         self.assertNotIn("--expected-tag ${{", workflow)
+
+    def test_release_workflow_uses_reviewed_notes_and_immutable_installers(
+        self,
+    ) -> None:
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('notes_file="docs/releases/${tag}.md"', workflow)
+        self.assertIn('--notes-file "$notes_file"', workflow)
+        self.assertNotIn("--generate-notes", workflow)
+        self.assertIn("install.ps1.sha256", workflow)
+        self.assertIn("install.sh.sha256", workflow)
+        self.assertIn("Attest every release asset", workflow)
+        self.assertIn("Release assets do not match the exact expected set", workflow)
+
+    def test_public_installer_commands_never_execute_moving_branch_content(
+        self,
+    ) -> None:
+        surfaces = [
+            PROJECT_ROOT / "README.md",
+            PROJECT_ROOT / "docs" / "INSTALL.md",
+            PROJECT_ROOT / "crates" / "viewr" / "src" / "cli.rs",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in surfaces)
+        self.assertNotIn("/main/install.ps1", combined)
+        self.assertNotIn("/main/install.sh", combined)
+        self.assertNotIn("/master/install.ps1", combined)
+        self.assertNotIn("/master/install.sh", combined)
+        self.assertIn("/releases/download/v0.1.0/install.ps1", combined)
+        self.assertIn("/releases/download/v0.1.0/install.sh", combined)
+
+    def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        audit_policy = (PROJECT_ROOT / ".cargo" / "audit.toml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("cargo audit -D warnings", workflow)
+        self.assertIn("cargo audit --file fuzz/Cargo.lock -D warnings", workflow)
+        self.assertIn('"RUSTSEC-2024-0436"', audit_policy)
+        self.assertNotIn('"RUSTSEC-2026-0221"', audit_policy)
 
     def test_source_date_epoch_has_explicit_environment_and_git_fallbacks(self) -> None:
         with mock.patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "123"}, clear=True):

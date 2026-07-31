@@ -3,6 +3,7 @@
 # rationale. Runtime-reachable vulnerabilities are never ignored.
 [advisories]
 ignore = [
+    "RUSTSEC-2024-0436", # paste is unmaintained, not vulnerable; reviewed in deny.toml
     "RUSTSEC-2026-0192", # ttf-parser unmaintained; winit Linux decorations, build-time only
     "RUSTSEC-2026-0194", # affected transitive XML paths never consume user XML; ratings use patched 0.41
     "RUSTSEC-2026-0195", # affected transitive paths never use NsReader on user XML; ratings use patched 0.41

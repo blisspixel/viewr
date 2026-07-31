@@ -50,8 +50,15 @@ if grep -q 'OpenOptions' crates/viewr/src/app.rs; then
   exit 1
 fi
 test -f crates/viewr/src/ephemeral.rs
-grep -q 'scrub_stale_viewr_temps' crates/viewr/src/ephemeral.rs
+grep -Fq 'std::fs::create_dir(&path)?' crates/viewr/src/ephemeral.rs
+if grep -Eq 'scrub_stale_viewr_temps|read_dir[[:space:]]*\([[:space:]]*&?root' crates/viewr/src/ephemeral.rs; then
+  echo "ephemeral.rs must not sweep the shared system temp root" >&2
+  exit 1
+fi
 grep -q 'load_from_memory' crates/viewr/src/cli.rs
-grep -q 'scrub_stale_viewr_temps' crates/viewr/src/main.rs
+if grep -q 'scrub_stale_viewr_temps' crates/viewr/src/main.rs; then
+  echo "main.rs must not perform shared temp-root cleanup on launch" >&2
+  exit 1
+fi
 
 echo "privacy-check: OK"

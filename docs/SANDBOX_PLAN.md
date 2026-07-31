@@ -38,6 +38,10 @@ and exercises HEVC-VUI-only color as well as container metadata. Parent tests
 separately prove that received ICC data is normalized only after the cancellable
 IPC transaction has joined.
 
+The parent accepts only a canonical explicit helper override or the exact regular
+file installed beside the running viewer. A missing or invalid helper fails
+closed; helper execution never falls back to a same-named program on `PATH`.
+
 ## Why this is Exceptional
 Moving optional C decoders out of the UI process materially reduces blast radius, but process isolation is not zero risk and seccomp alone is not a complete sandbox. The defensible design layers bounded IPC, explicit resource limits, request timeouts, a network-denying process policy where implemented, and an enclosing OS package profile. Claims stay limited to controls that can be reproduced locally.
 

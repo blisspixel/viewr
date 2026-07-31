@@ -79,8 +79,12 @@ if (-not (Test-Path "crates/viewr/src/ephemeral.rs")) {
     exit 1
 }
 $eph = Get-Content "crates/viewr/src/ephemeral.rs" -Raw
-if ($eph -notmatch "scrub_stale_viewr_temps") {
-    Write-Error "ephemeral.rs must export scrub_stale_viewr_temps"
+if ($eph -notmatch [regex]::Escape('std::fs::create_dir(&path)?')) {
+    Write-Error "TempWorkspace must atomically create its exact path"
+    exit 1
+}
+if ($eph -match "scrub_stale_viewr_temps|read_dir\s*\(\s*&?root") {
+    Write-Error "ephemeral.rs must not sweep the shared system temp root"
     exit 1
 }
 $cli = Get-Content "crates/viewr/src/cli.rs" -Raw
@@ -89,8 +93,8 @@ if ($cli -notmatch "load_from_memory") {
     exit 1
 }
 $mainSrc = Get-Content "crates/viewr/src/main.rs" -Raw
-if ($mainSrc -notmatch "scrub_stale_viewr_temps") {
-    Write-Error "main.rs must scrub stale viewr temp debris on launch"
+if ($mainSrc -match "scrub_stale_viewr_temps") {
+    Write-Error "main.rs must not perform shared temp-root cleanup on launch"
     exit 1
 }
 

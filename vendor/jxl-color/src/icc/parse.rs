@@ -231,8 +231,11 @@ pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile<'_>> {
         return Err(Error::IccParseFailure("profile is too short"));
     }
 
-    let size = u32::from_be_bytes([profile[0], profile[1], profile[2], profile[3]]);
-    if profile.len() != size as usize {
+    let size = usize::try_from(u32::from_be_bytes([
+        profile[0], profile[1], profile[2], profile[3],
+    ]))
+    .map_err(|_| Error::IccParseFailure("profile size is not representable"))?;
+    if profile.len() != size {
         return Err(Error::IccParseFailure("profile size mismatch"));
     }
 
@@ -258,30 +261,50 @@ pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile<'_>> {
         });
     }
 
-    let tag_count =
-        u32::from_be_bytes([profile[0x80], profile[0x81], profile[0x82], profile[0x83]]);
-    if size < 0x84 + 12 * tag_count {
-        return Err(Error::IccParseFailure(
-            "unexpected end of profile while reading tag list",
-        ));
-    }
+    let tag_count = usize::try_from(u32::from_be_bytes([
+        profile[0x80],
+        profile[0x81],
+        profile[0x82],
+        profile[0x83],
+    ]))
+    .map_err(|_| Error::IccParseFailure("ICC tag count is not representable"))?;
+    let tag_bytes_len = 12usize
+        .checked_mul(tag_count)
+        .ok_or(Error::IccParseFailure("ICC tag table size overflow"))?;
+    let tag_list_end = 0x84usize
+        .checked_add(tag_bytes_len)
+        .ok_or(Error::IccParseFailure("ICC tag table end overflow"))?;
+    let tag_bytes = profile.get(0x84..tag_list_end).ok_or(Error::IccParseFailure(
+        "unexpected end of profile while reading tag list",
+    ))?;
 
     let mut tags = Vec::new();
-    let tag_bytes = &profile[0x84..][..12 * tag_count as usize];
     for raw_tag in tag_bytes.chunks_exact(12) {
         let tag = [raw_tag[0], raw_tag[1], raw_tag[2], raw_tag[3]];
-        let offset = u32::from_be_bytes([raw_tag[4], raw_tag[5], raw_tag[6], raw_tag[7]]);
-        let tag_size = u32::from_be_bytes([raw_tag[8], raw_tag[9], raw_tag[10], raw_tag[11]]);
-        let tag_end = offset + tag_size;
-        if size < tag_end {
-            return Err(Error::IccParseFailure(
-                "unexpected end of profile while reading tag data",
-            ));
-        }
+        let offset = usize::try_from(u32::from_be_bytes([
+            raw_tag[4],
+            raw_tag[5],
+            raw_tag[6],
+            raw_tag[7],
+        ]))
+        .map_err(|_| Error::IccParseFailure("ICC tag offset is not representable"))?;
+        let tag_size = usize::try_from(u32::from_be_bytes([
+            raw_tag[8],
+            raw_tag[9],
+            raw_tag[10],
+            raw_tag[11],
+        ]))
+        .map_err(|_| Error::IccParseFailure("ICC tag size is not representable"))?;
+        let tag_end = offset
+            .checked_add(tag_size)
+            .ok_or(Error::IccParseFailure("ICC tag data end overflow"))?;
+        let data = profile.get(offset..tag_end).ok_or(Error::IccParseFailure(
+            "unexpected end of profile while reading tag data",
+        ))?;
 
         tags.push(RawTag {
             tag,
-            data: &profile[offset as usize..tag_end as usize],
+            data,
         });
     }
 
@@ -568,6 +591,38 @@ pub fn icc_tf(profile: &[u8]) -> Option<TransferFunction> {
 mod tests {
     use super::parse_icc;
     use crate::*;
+
+    fn empty_profile(size: usize) -> Vec<u8> {
+        let mut profile = vec![0_u8; size];
+        profile[..4].copy_from_slice(&(size as u32).to_be_bytes());
+        profile[0x43] = 0;
+        profile
+    }
+
+    #[test]
+    fn rejects_overflowing_tag_count() {
+        let mut profile = empty_profile(0x84);
+        profile[0x80..0x84].copy_from_slice(&0x4000_0000_u32.to_be_bytes());
+
+        assert!(matches!(
+            parse_icc(&profile),
+            Err(Error::IccParseFailure(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_overflowing_tag_range() {
+        let mut profile = empty_profile(0x90);
+        profile[0x80..0x84].copy_from_slice(&1_u32.to_be_bytes());
+        profile[0x84..0x88].copy_from_slice(b"desc");
+        profile[0x88..0x8c].copy_from_slice(&0xffff_fff0_u32.to_be_bytes());
+        profile[0x8c..0x90].copy_from_slice(&0x20_u32.to_be_bytes());
+
+        assert!(matches!(
+            parse_icc(&profile),
+            Err(Error::IccParseFailure(_))
+        ));
+    }
 
     #[test]
     fn srgb_rel() {

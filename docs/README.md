@@ -29,6 +29,8 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, ordered quality tracks,
   implemented phases, and explicit non-goals.
+- [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
+  verification, and clearly stated platform limits.
 - [Publishing](PUBLISHING.md): public-repository controls, the first pre-1.0
   release procedure, verification, and the stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.

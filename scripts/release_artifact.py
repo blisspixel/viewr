@@ -61,6 +61,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/PRIVACY.md",
     "docs/README.md",
     "docs/RATINGS.md",
+    "docs/releases/v0.1.0.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-console-example.png",

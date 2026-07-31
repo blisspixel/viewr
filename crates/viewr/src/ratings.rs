@@ -2255,10 +2255,7 @@ mod tests {
         entries.sort();
         assert_eq!(
             entries,
-            [
-                std::ffi::OsString::from(".viewr-lock"),
-                std::ffi::OsString::from("photo.jpg"),
-            ],
+            [std::ffi::OsString::from("photo.jpg")],
             "unexpected transaction files"
         );
     }

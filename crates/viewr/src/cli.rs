@@ -18,9 +18,9 @@ pub(crate) const OFFICIAL_RELEASES_URL: &str = "https://github.com/blisspixel/vi
 pub(crate) const OFFICIAL_LATEST_RELEASE_URL: &str =
     "https://github.com/blisspixel/viewr/releases/latest";
 pub(crate) const WINDOWS_INSTALL_COMMAND: &str =
-    "irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 | iex";
+    "irm https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.ps1 | iex";
 pub(crate) const UNIX_INSTALL_COMMAND: &str =
-    "curl -fsSL https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh | sh";
+    "curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.sh | sh";
 
 /// Parsed invocation: either a GUI launch or a CLI subcommand.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -641,6 +641,10 @@ mod tests {
         assert!(OFFICIAL_LATEST_RELEASE_URL.starts_with(OFFICIAL_RELEASES_URL));
         assert!(update.contains(WINDOWS_INSTALL_COMMAND));
         assert!(update.contains(UNIX_INSTALL_COMMAND));
+        assert!(WINDOWS_INSTALL_COMMAND.contains("/releases/download/v0.1.0/"));
+        assert!(UNIX_INSTALL_COMMAND.contains("/releases/download/v0.1.0/"));
+        assert!(!WINDOWS_INSTALL_COMMAND.contains("/main/"));
+        assert!(!UNIX_INSTALL_COMMAND.contains("/main/"));
         assert!(update.contains("verifies the release checksum and manifest"));
         assert!(update.contains("cargo build --release --workspace --locked"));
         assert!(update.contains("creates no background updater"));

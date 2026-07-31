@@ -22,10 +22,6 @@ fn main() -> ExitCode {
     // payloads cannot cross viewr's path-private logging boundary.
     init_logging_opt_in();
 
-    // Clear any leftover viewr_* probe files from older builds or crashes.
-    // Product paths (doctor / default bench) no longer write temp files at all.
-    let _ = viewr::ephemeral::scrub_stale_viewr_temps();
-
     let inv = match cli::parse_args(std::env::args_os()) {
         Ok(i) => i,
         Err(msg) => {

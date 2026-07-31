@@ -305,7 +305,7 @@ system to open the official stable release in an external browser; the browser's
 network and history behavior is outside viewr.
 
 The separately downloaded installer scripts perform foreground HTTPS requests to
-`github.com`, `api.github.com`, and `raw.githubusercontent.com` only after the user
+`github.com` and `api.github.com` only after the user
 runs them. They verify the selected release checksum and manifest, install for the
 current user, and exit. They do not grant network capability to the installed app,
 create an updater service, schedule a task, or enable background checks. The app

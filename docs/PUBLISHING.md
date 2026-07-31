@@ -6,7 +6,7 @@ trust bar required before 1.0.
 
 ## Current repository state
 
-Status last verified on 2026-07-30:
+Status last verified on 2026-07-31:
 
 - [x] The repository is public with `main` as its only long-lived branch and
   Apache-2.0 detected by GitHub.
@@ -49,12 +49,12 @@ production environment.
    Use `git tag -s` when a configured signing identity is available. Do not weaken
    local Git verification merely to produce a signed tag.
 
-6. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
-   set, verify every archive and SHA-256 sidecar, create GitHub build-provenance
-   attestations, and upload the set to a draft release.
-7. Review the draft title, human changelog, asset set, platform limits, and unsigned
-   status before publication. A manual workflow run is inspection-only and must
-   never publish.
+6. Commit and review `docs/releases/v<version>.md`. It is the only release body;
+   generated notes are not accepted.
+7. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
+   set, verify every archive and SHA-256 sidecar, add the fixed-version installer
+   scripts and their sidecars, attest all 12 assets, and publish only that exact
+   set. A manual workflow run is inspection-only and must never publish.
 
 ## Release verification
 

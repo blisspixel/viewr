@@ -456,14 +456,7 @@ impl Drop for DaemonWorker {
 
 impl DaemonWorker {
     fn new() -> Result<Self, Error> {
-        let decode_exe = resolve_worker_binary();
-        // If the path is not absolute/PATH-only, verify the co-located binary exists.
-        if decode_exe.is_absolute() && !decode_exe.is_file() {
-            return Err(Error::Decode(
-                "viewr-decode worker executable not found beside viewr (build with `cargo build -p viewr-decode`)"
-                    .into(),
-            ));
-        }
+        let decode_exe = resolve_worker_binary()?;
 
         let mut cmd = Command::new(decode_exe);
         cmd.stdin(Stdio::piped())
@@ -513,33 +506,40 @@ impl DaemonWorker {
     }
 }
 
-/// Locate `viewr-decode` next to the running binary, then fall back to `PATH`.
-fn resolve_worker_binary() -> std::path::PathBuf {
-    let mut candidates = Vec::new();
+/// Locate and canonicalize the exact `viewr-decode` helper.
+fn resolve_worker_binary() -> Result<std::path::PathBuf, Error> {
+    let explicit = std::env::var_os("VIEWR_DECODE_BIN").map(std::path::PathBuf::from);
+    let current_exe = std::env::current_exe().ok();
+    select_worker_binary(explicit.as_deref(), current_exe.as_deref())
+}
 
-    if let Ok(explicit) = std::env::var("VIEWR_DECODE_BIN") {
-        candidates.push(std::path::PathBuf::from(explicit));
+fn select_worker_binary(
+    explicit: Option<&Path>,
+    current_exe: Option<&Path>,
+) -> Result<std::path::PathBuf, Error> {
+    if let Some(explicit) = explicit {
+        return canonical_worker_file(explicit).ok_or_else(|| {
+            Error::Decode("configured viewr-decode worker executable is unavailable".into())
+        });
     }
 
-    if let Ok(current) = std::env::current_exe() {
-        let mut beside = current.clone();
-        beside.set_file_name(worker_file_name());
-        candidates.push(beside);
+    let colocated = current_exe
+        .and_then(Path::parent)
+        .map(|directory| directory.join(worker_file_name()));
+    colocated
+        .as_deref()
+        .and_then(canonical_worker_file)
+        .ok_or_else(|| {
+            Error::Decode(
+                "viewr-decode worker executable not found beside viewr (build with `cargo build -p viewr-decode`)"
+                    .into(),
+            )
+        })
+}
 
-        // `cargo run` places both binaries in the same target profile dir.
-        if let Some(dir) = current.parent() {
-            candidates.push(dir.join(worker_file_name()));
-        }
-    }
-
-    for path in candidates {
-        if path.is_file() {
-            return path;
-        }
-    }
-
-    // Last resort: rely on PATH resolution at spawn time.
-    std::path::PathBuf::from(worker_file_name())
+fn canonical_worker_file(path: &Path) -> Option<std::path::PathBuf> {
+    let canonical = path.canonicalize().ok()?;
+    canonical.is_file().then_some(canonical)
 }
 
 fn worker_file_name() -> &'static str {
@@ -580,7 +580,7 @@ mod tests {
         DaemonWorker, exchange_with_worker, finish_worker_output, normalize_worker_color_profile,
         read_bounded, read_bounded_if_current, read_bounded_input, read_bounded_input_if_current,
         receive_worker_output, run_worker_operation_with_cancellation,
-        run_worker_operation_with_timeout,
+        run_worker_operation_with_timeout, select_worker_binary, worker_file_name,
     };
     use crate::decode::DecodeGeneration;
     use crate::ephemeral::TempWorkspace;
@@ -595,6 +595,55 @@ mod tests {
     const SUCCESS_CHILD_FLAG: &str = "VIEWR_TEST_SUCCESS_WORKER";
     const PIXELS_FLUSHED_MARKER: &str = "VIEWR_TEST_PIXELS_FLUSHED";
     const READY_MARKER: &str = "VIEWR_TEST_WORKER_READY";
+
+    #[test]
+    fn worker_selection_canonicalizes_explicit_file() {
+        let workspace = TempWorkspace::new("worker_explicit").unwrap();
+        let worker = workspace.path().join(worker_file_name());
+        std::fs::write(&worker, b"test worker").unwrap();
+
+        let selected = select_worker_binary(Some(&worker), None).unwrap();
+        assert!(selected.is_absolute());
+        assert_eq!(selected, worker.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn invalid_explicit_worker_does_not_fall_back() {
+        let workspace = TempWorkspace::new("worker_invalid_explicit").unwrap();
+        let current = workspace.path().join("viewr-test");
+        std::fs::write(workspace.path().join(worker_file_name()), b"colocated").unwrap();
+
+        let missing = workspace.path().join("missing");
+        let error = select_worker_binary(Some(&missing), Some(&current)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "could not open image: configured viewr-decode worker executable is unavailable"
+        );
+    }
+
+    #[test]
+    fn worker_selection_canonicalizes_colocated_file() {
+        let workspace = TempWorkspace::new("worker_colocated").unwrap();
+        let current = workspace.path().join("viewr-test");
+        let worker = workspace.path().join(worker_file_name());
+        std::fs::write(&worker, b"test worker").unwrap();
+
+        let selected = select_worker_binary(None, Some(&current)).unwrap();
+        assert!(selected.is_absolute());
+        assert_eq!(selected, worker.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn missing_worker_fails_without_path_fallback() {
+        let workspace = TempWorkspace::new("worker_missing").unwrap();
+        let current = workspace.path().join("viewr-test");
+
+        let error = select_worker_binary(None, Some(&current)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "could not open image: viewr-decode worker executable not found beside viewr (build with `cargo build -p viewr-decode`)"
+        );
+    }
 
     fn display_p3_profile() -> Vec<u8> {
         moxcms::ColorProfile::new_display_p3()

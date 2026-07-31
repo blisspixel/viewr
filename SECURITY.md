@@ -21,11 +21,11 @@ Use GitHub's private vulnerability reporting form:
 
 https://github.com/blisspixel/viewr/security/advisories/new
 
-Private reporting must be enabled and verified before the first public release. If
-that page is unavailable, do not publish vulnerability details in an issue,
-discussion, pull request, or commit. A public issue may contain only a request for a
-private contact. Do not include reproduction steps, impact details, private
-filenames, file paths, images, metadata, logs, or exploit code in that request.
+Private reporting was enabled and verified on 2026-07-30. If that page is
+unavailable, do not publish vulnerability details in an issue, discussion, pull
+request, or commit. A public issue may contain only a request for a private contact.
+Do not include reproduction steps, impact details, private filenames, file paths,
+images, metadata, logs, or exploit code in that request.
 
 After a maintainer confirms a private channel, include the following when
 available:

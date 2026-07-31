@@ -1,53 +1,60 @@
 # Publishing viewr
 
-This checklist prepares `https://github.com/blisspixel/viewr` without claiming that
-the repository, a release, signing, or hosted evidence already exists.
+This is the maintainer checklist for `https://github.com/blisspixel/viewr`. It
+separates repository readiness, the first public pre-1.0 release, and the stronger
+trust bar required before 1.0.
 
-## First publication
+## Current repository state
 
-1. Create the public GitHub repository with `main` as the default branch.
-2. Add and verify the remote:
+Status last verified on 2026-07-30:
 
-   ```text
-   git remote add origin https://github.com/blisspixel/viewr.git
-   git remote -v
-   git push -u origin main
-   ```
+- [x] The repository is public with `main` as its only long-lived branch and
+  Apache-2.0 detected by GitHub.
+- [x] The description, issue forms, pull-request template, CODEOWNERS, security
+  policy, documentation links, and focused repository topics are present.
+- [x] Private vulnerability reporting, Dependabot alerts and security updates,
+  secret scanning, and push protection are enabled.
+- [x] GitHub Actions uses read-only default token permissions. Only the final
+  tag-only publication job receives `contents: write`, `id-token: write`, and
+  `attestations: write`.
+- [x] Merged branches are deleted automatically. Dependabot limits each update lane
+  to one grouped patch proposal.
+- [x] `main` requires the seven stable CI checks, linear history, one code-owner
+  approval with stale-review dismissal and last-push approval, and conversation
+  resolution. Force pushes and deletion are blocked. Administrators retain an
+  explicit emergency bypass; path-filtered fuzz remains a release-workflow gate.
+- [x] Immutable releases are enabled before the first tag is published.
+- [ ] Publish and verify the first tag and release. No remote tag or GitHub Release
+  exists yet.
 
-3. Enable private vulnerability reporting under Settings > Security > Code security.
-4. Enable Dependabot alerts and security updates.
-5. Protect `main`. Require pull requests, dismiss stale approvals after new commits,
-   require conversation resolution, block force pushes and deletion, and require the
-   repository's CI, coverage, supply-chain, fuzz, and platform-profile checks.
-6. Keep the default GitHub Actions token read-only. The release workflow grants
-   `contents: write`, `id-token: write`, and `attestations: write` only to its final
-   tag-only publication job.
-7. Enable immutable releases. A release is assembled as a draft, receives all
-   verified assets, and is published only after provenance attestations succeed.
-8. Verify the repository description, website, topics, Apache-2.0 license detection,
-   issue forms, security policy, and documentation links on GitHub.
+## First public pre-1.0 release
 
-## Release preparation
+An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
+It must never be presented as signed, notarized, store-reviewed, or ready for every
+production environment.
 
-1. Confirm `main` is clean and synchronized with `origin/main`.
-2. Update the workspace version, CHANGELOG, current README claims, and relevant docs.
-3. Run the complete local checks in [VERIFY.md](VERIFY.md).
-4. Confirm `THIRD_PARTY_LICENSES.html` matches a fresh offline `cargo-about` render.
-5. Confirm the tag will be exactly `v<workspace-version>`.
-6. Create and push an annotated tag:
+1. Select one clean `main` commit and retain its green CI and fuzz links.
+2. Update the workspace version, CHANGELOG, README status, roadmap gate, and all
+   behavior-specific documentation.
+3. Run the complete local checks in [Verification](VERIFY.md).
+4. Confirm `THIRD_PARTY_LICENSES.html` matches a fresh offline `cargo-about`
+   render and the Flatpak source map matches the lockfile.
+5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 
    ```text
    git tag -a v0.1.0 -m "viewr 0.1.0"
    git push origin v0.1.0
    ```
 
-   Use `git tag -s` instead when a configured signing identity is available. Do not
-   weaken local Git verification merely to produce a signed tag.
+   Use `git tag -s` when a configured signing identity is available. Do not weaken
+   local Git verification merely to produce a signed tag.
 
-The tag workflow reruns CI and fuzzing, builds four target archives, verifies every
-archive and SHA-256 sidecar as one exact set, creates GitHub build-provenance
-attestations, uploads the set to a draft release, and publishes that release. A
-manual workflow run builds inspection artifacts but never publishes a release.
+6. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
+   set, verify every archive and SHA-256 sidecar, create GitHub build-provenance
+   attestations, and upload the set to a draft release.
+7. Review the draft title, human changelog, asset set, platform limits, and unsigned
+   status before publication. A manual workflow run is inspection-only and must
+   never publish.
 
 ## Release verification
 
@@ -60,16 +67,43 @@ gh attestation verify viewr-0.1.0-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
-Download at least one archive and its sidecar, run
-`python scripts/release_artifact.py verify <archive>`, and verify the installed
-binary with `viewr --version` and `viewr doctor`.
+Download at least one archive and its sidecar, then run:
+
+```text
+python scripts/release_artifact.py verify <archive>
+viewr --version
+viewr doctor
+```
+
+Exercise a clean install, same-version reinstall, update, application launch, file
+open, explicit uninstall, and rollback from an injected activation failure. Verify
+that the installed main executable and worker belong to the same release.
+
+## Required before a broadly recommended 1.0
+
+- Complete Narrator, VoiceOver, and Orca evidence from
+  [Accessibility](ACCESSIBILITY.md), bound to exact artifact hashes.
+- Authenticode-sign the Windows executables and installer through a publicly trusted
+  path described by [Microsoft's code-signing guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options),
+  then test every installed binary under Smart App Control.
+- Developer ID-sign the macOS application, enable hardened runtime, follow
+  [Apple's notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
+  staple the ticket, and test Gatekeeper installation.
+- Verify a normal Linux Flatpak or equivalent package on representative Wayland and
+  X11 desktops without weakening the network-denied sandbox contract.
+- Complete cold-launch, animation, large-image, mixed-DPI, multi-monitor,
+  profiled-display, update, and uninstall acceptance on representative hardware.
+- Close the tagged-SDR display-correctness gate in [Roadmap](ROADMAP.md). Wide-gamut
+  and HDR may remain later work if their unsupported state is explicit.
 
 ## Current limits
 
-- Release archives are portable and checksummed. They are not code-signed Windows
-  installers, notarized macOS applications, or store packages.
-- The one-command installers perform explicit foreground downloads from the official
-  GitHub release only. They do not create an updater service or enable background
-  network access in viewr.
+- No public GitHub Release exists yet, so the one-command installers stop without
+  changing the machine.
+- Prepared archives are portable and checksummed, but current local artifacts are
+  not Authenticode-signed or Apple-notarized.
+- The foreground installer tools contact only the official GitHub repository after
+  the user runs them. They do not create an updater service or add network access
+  to viewr.
 - Human Narrator, VoiceOver, and Orca evidence remains governed by
-  [ACCESSIBILITY.md](ACCESSIBILITY.md).
+  [Accessibility](ACCESSIBILITY.md).

@@ -1,8 +1,11 @@
 # Installing viewr
 
-viewr is pre-1.0. Published releases are portable, checksummed archives rather than
-code-signed Windows installers, notarized macOS applications, or store packages.
-The commands below install for the current user and never require elevation.
+viewr is pre-1.0, and no public GitHub Release exists yet. Build from source today.
+The prepared commands below become active with the first tagged release; until
+then, they stop without changing the machine. Initial releases use portable,
+checksummed archives rather than code-signed Windows installers, notarized macOS
+applications, or store packages. Installation is per user and never requires
+elevation.
 
 ## One-command install and update
 
@@ -110,9 +113,10 @@ Extract the archive and keep `bin/viewr` and `bin/viewr-decode` side by side. Th
 archive also contains the project license, notice, third-party license inventory,
 security policy, canonical documentation, and a per-file release manifest.
 
-GitHub checksums and attestations improve integrity and provenance. Current portable
-archives are not Authenticode-signed or Apple-notarized, so operating-system trust
-dialogs may still apply. Do not disable platform security controls to force a launch.
+GitHub checksums and attestations improve integrity and provenance. The planned
+first portable archives are not Authenticode-signed or Apple-notarized, so
+operating-system trust dialogs may still apply. Do not disable platform security
+controls to force a launch.
 
 ## Build from source
 

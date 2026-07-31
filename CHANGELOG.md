@@ -7,6 +7,17 @@ and organized by user-visible concern.
 
 ### Changed
 
+- Public documentation now distinguishes the source build available today, the
+  first unsigned pre-1.0 release, and the stronger 1.0 trust bar. The roadmap opens
+  with a concise release dashboard, puts trustworthy distribution before new
+  product work, links the recorded green hosted evidence, and keeps RAW, HDR,
+  advanced healing, clipboard, and touch work from obscuring actual release gates.
+- The public repository now enables private vulnerability reporting, Dependabot
+  alerts and security updates, secret scanning, push protection, focused discovery
+  topics, automatic merged-branch deletion, and immutable releases. Protected
+  `main` now requires the seven always-running CI checks, linear history, code-owner
+  review, last-push approval, and conversation resolution while blocking force
+  pushes and deletion; administrators retain explicit emergency bypass.
 - Release packaging now accepts only the explicitly listed, bounded PNG interface
   capture as binary documentation and validates its chunk structure before adding
   it to an archive. The Windows installer smoke also parses the staged version
@@ -115,7 +126,8 @@ and organized by user-visible concern.
   introduction and links directly to the supported local install and verification
   paths. Archive guidance now distinguishes structure and byte checks against
   co-produced records from publisher authentication and independent source
-  provenance. No public release, signature, or hosted evidence is claimed.
+  provenance. No public release or platform signature is claimed; exact hosted CI
+  and fuzz evidence is linked separately.
 - File > Undo Trash now exposes settled availability without retaining or showing
   a history count. Its path-free help explains that the latest recoverable action
   may belong to another folder. If a restore worker stops without a result,
@@ -523,10 +535,13 @@ and organized by user-visible concern.
 - Replaced worker-owned shared memory with exact-length pixel streaming over the existing pipe, removing mutable-mapping size races and the `shared_memory` dependency.
 - Linux seccomp and privilege setup now fail worker spawn on error; network denial covers classic socket and io_uring paths, and non-dumpable state is applied after exec. Windows Job Object creation, assignment, termination, and memory limits also fail closed.
 - Removed the unused `muda` dependency and its GTK3 dependency chain, reducing the lockfile by 41 packages and eliminating eight obsolete advisory exceptions.
-- CI now runs on pushes to both `main` and the repository's current `master` branch.
-- ROADMAP: store/notarized publish (Mac App Store, Microsoft Store, Flathub
-  listing, notarized DMG as a store path) is **out of scope for now**, maybe later.
-  Phase 7/8 stay local-first (build, sandbox profiles, simple release artifacts).
+- CI runs on pushes to `main`, pull requests, its weekly schedule, reusable workflow
+  calls, and explicit maintainer dispatch.
+- Store publication through the Mac App Store, Microsoft Store, or Flathub remains
+  outside the 1.0 gate. Trusted direct distribution does not: Windows signing and
+  macOS Developer ID signing and notarization are required before viewr is presented
+  as a broadly recommended 1.0. Local builds and explicitly unsigned pre-releases
+  remain available without those external credentials.
 - Extracted `sandbox.rs` for the `viewr-decode` worker client so process/IPC glue is separate from pure decode logic.
 - Phase 6 residuals closed in ROADMAP; next milestone is Phase 7 OS sandbox packaging.
 - `deny.toml`: allow OFL/Ubuntu font licenses for egui default fonts; retain a documented exception for the unmaintained but vulnerability-free `paste` crate while required by EXR and metadata dependencies.

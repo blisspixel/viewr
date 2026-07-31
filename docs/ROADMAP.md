@@ -19,10 +19,11 @@ Phases 0 through 5 and Phase 7 are complete for their local repository scope.
 Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding, and
 honest capability reporting, but its original definition is not complete while
 camera RAW and multi-page viewing remain absent. Phase 8 has local install paths,
-file associations, accessibility automation, native AccessKit delivery, and
-enforced GUI performance budgets. It is not complete until the manual
-three-platform assistive-technology matrix, hosted multi-OS evidence, display
-fidelity, and a public verifiable release are complete.
+file associations, accessibility automation, native AccessKit delivery, enforced
+GUI performance budgets, and a green hosted multi-OS workflow. It is not complete
+until the manual three-platform assistive-technology matrix, public verifiable
+artifacts, platform signing and notarization, target-hardware acceptance, and
+display fidelity are complete.
 
 The current viewer also has bounded GIF/WebP/APNG playback, eight-way EXIF
 orientation, input RGB ICC conversion to sRGB, a trilinear GPU mip chain,
@@ -32,12 +33,34 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Next product-surface focus: keep the implemented embedded-rating and filtered
-playlist contract green across target systems, then close remaining release gates.
-Next fidelity focus: display correctness. Next reliability focus: narrower native
-Trash and restore handoff races. Next release focus: target-OS validation and
-public verifiable artifacts.** Optional model-backed description remains a gated
-post-1.0 candidate, not active Phase 8 scope.
+**Immediate focus: publish a trustworthy pre-1.0 release from a recorded green
+commit, then close the human accessibility and platform-trust gates for 1.0. Next
+product focus: per-display color correctness, followed by live external-file
+coherence. Next engineering seam: bounded background-job ownership.** Optional
+model-backed description remains a gated post-1.0 candidate, not active Phase 8
+scope.
+
+## Release gate
+
+This table is the operational front door. Detailed phase history remains below,
+but completed history does not override an open gate here.
+
+| Gate | Status | Evidence or next action |
+| --- | --- | --- |
+| Public repository and hosted quality | Complete | `main` is public. [CI run 30592874307](https://github.com/blisspixel/viewr/actions/runs/30592874307) passed on `d5093aed794b1c94f464ebc0117c2b99fefc2de5`; [fuzz run 30592187060](https://github.com/blisspixel/viewr/actions/runs/30592187060) passed both targets on the immediately preceding product commit. |
+| Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
+| First public pre-1.0 release | Open | Create the first annotated tag from a green commit, let the release workflow build and attest the exact archive set, verify the published assets, then make the installer commands live. |
+| Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. Path-filtered fuzz remains mandatory in the release workflow. |
+| Human accessibility evidence | Open | Complete Narrator, VoiceOver, and Orca records against the exact candidate artifact under `docs/release-evidence/accessibility/`. |
+| Native platform trust | Open | Sign Windows deliverables, sign and notarize the macOS application and disk image, and verify a normal Linux package on its target desktop. |
+| Representative hardware acceptance | Open | Repeat cold launch, animation, large-image, mixed-DPI, multi-monitor, and profiled-display checks on all three platforms. |
+| Display correctness | Partial | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference-profile fixtures, wide-gamut, and HDR gates remain. |
+
+The first public pre-1.0 release may remain clearly labeled as unsigned. A broadly
+recommended 1.0 must close the human accessibility, native platform trust,
+representative-hardware, and tagged-SDR display-correctness gates. RAW, HDR,
+advanced Spot Heal controls, clipboard features, and touch gestures do not block
+that release unless evidence shows a core workflow depends on them.
 
 ## What keeps viewr from exceptional
 
@@ -63,9 +86,39 @@ viewr already has a stronger privacy and hostile-input story than those referenc
 What is missing is not another toolbar. It is end-to-end fidelity, complete edge
 behavior, installability, and maintainable proof of correctness.
 
-### Priority 1: color that is correct on the actual display
+### Priority 1: a release people can actually trust and install
 
-Why first: a viewer that renders the wrong color is failing its primary job, even
+Why first: the current product cannot become recommendable while ordinary users
+cannot obtain and authenticate a build. This work closes the gap between repository
+quality and a release that a careful non-developer can install, update, and remove.
+
+- [x] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
+  commit and retain the [green CI run](https://github.com/blisspixel/viewr/actions/runs/30592874307)
+  and [green fuzz run](https://github.com/blisspixel/viewr/actions/runs/30592187060).
+- [x] Enable private vulnerability reporting, Dependabot alerts and security
+  updates, secret scanning, push protection, and immutable releases in the public
+  repository.
+- [x] Protect `main` with the seven stable CI checks, linear history, review and
+  conversation resolution, blocked force pushes and deletion, and administrator
+  emergency bypass. Path-filtered fuzz remains mandatory in the release workflow.
+- [ ] Complete Narrator, VoiceOver, and Orca acceptance using
+  `docs/ACCESSIBILITY.md`, including crop, reload, animation, errors, and busy
+  states.
+- [ ] Publish checksummed dual-binary archives from the green commit with a human
+  changelog, GitHub build provenance, and clear optional file-association guidance.
+- [ ] Produce and verify a signed Windows delivery, a Developer ID-signed and
+  notarized macOS application and disk image, and a normal Linux Flatpak or
+  equivalent package. Store publication remains optional.
+- [ ] Repeat cold-launch, animation, large-image, mixed-DPI, multi-monitor, and
+  profiled-display smoke tests on representative hardware for all three platforms.
+
+Definition of done: a user can download, authenticate, install, exercise, update,
+and remove viewr without compiling it, changing defaults silently, or trusting an
+unrecorded manual build.
+
+### Priority 2: color that is correct on the actual display
+
+Why second: a viewer that renders the wrong color is failing its primary job, even
 when it is fast. The current RGB ICC-to-sRGB normalization prevents the most common
 embedded-profile error, but an RGBA8 sRGB working path cannot preserve wide-gamut
 or HDR source values, and the output is not transformed for the monitor that owns
@@ -119,9 +172,9 @@ window between profiled displays updates output without a restart, worker-decode
 images never lose color status silently, and HDR or wide-gamut modes cannot engage
 without an end-to-end higher-precision path.
 
-### Priority 2: file and format coherence
+### Priority 3: file and format coherence
 
-Why second: image viewers commonly sit beside editors, exporters, scanners, and
+Why third: image viewers commonly sit beside editors, exporters, scanners, and
 download tools. A stale view or a container that exposes only its first page makes
 the application feel unreliable even when the decoder technically succeeded.
 
@@ -150,31 +203,6 @@ Definition of done: external edits appear predictably, every selected page/frame
 is identifiable and bounded, and the format table distinguishes container support
 from page, animation, metadata, and color behavior.
 
-### Priority 3: a release people can actually trust and install
-
-Why third: local build scripts prove engineering intent, but a viewer cannot become
-recommendable while ordinary users cannot obtain a verified build. This work also
-closes the gap between repository claims and hosted evidence.
-
-- [ ] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
-  commit and retain links to every green job and generated checksum.
-- [ ] Complete Narrator, VoiceOver, and Orca acceptance using
-  `docs/ACCESSIBILITY.md`, including crop, reload, animation, errors, and busy
-  states.
-- [ ] Publish checksummed dual-binary archives from the green commit with a human
-  changelog, SBOM/provenance where the release platform supports it, and clear
-  optional file-association instructions.
-- [ ] Produce and locally verify a normal Windows installer, macOS disk image, and
-  Linux AppImage or Flatpak. Sign or notarize those artifacts when external
-  credentials are available. Store publication remains optional; trustworthy
-  direct installation does not.
-- [ ] Repeat cold-launch, animation, large-image, mixed-DPI, and profiled-monitor
-  smoke tests on representative hardware for all three platforms.
-
-Definition of done: a user can download, verify, install, exercise, and remove
-viewr without compiling it, changing defaults silently, or trusting an unrecorded
-manual build.
-
 ### Priority 4: make correctness easier to preserve
 
 Why now: `app.rs` and `ui.rs` own too many independent state transitions, and the
@@ -202,9 +230,9 @@ Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,
 edit, or panel state.
 
-### Priority 5: durable ratings without a photo-library database
+### Completed track: durable ratings without a photo-library database
 
-Why now: the product owner has explicitly selected the Lightroom-style workflow
+Why it shipped: the product owner selected the Lightroom-style workflow
 of rating the current image from 0 through 5 and narrowing a folder to a minimum
 rating. This is useful curation, but only if it stays local, interoperable, and
 durable without becoming an activity index or risking source corruption. The full
@@ -552,8 +580,8 @@ install from source or a simple GitHub-style release artifact.
 
 - [x] Local/CI install paths: locked source builds, verified dual-binary release
   archives (`viewr` + `viewr-decode`), native profile build commands, and
-  platform-specific local installation guidance. Optional public installers
-  remain outside the local-first requirement.
+  platform-specific local installation guidance. Signed and notarized public
+  delivery remains the separate open trust gate below.
 - [x] Sensible file-association setup that never hijacks defaults silently:
   exact core-format Linux desktop, macOS Launch Services, and Windows MSIX
   declarations; Flatpak desktop assets; native open delivery; and opt-in docs.
@@ -573,10 +601,10 @@ install from source or a simple GitHub-style release artifact.
   asset set, creates GitHub provenance attestations, assembles a draft, and publishes
   only after all local-quality workflows pass. No release is claimed until that
   workflow completes in the public repository.
-- [ ] Publish and verify a private vulnerability-reporting channel before public
-  release. `SECURITY.md` already defines current-version support, privacy-safe
-  synthetic evidence, disclosure safeguards, explicit scope, and no invented
-  response-time promise, but it does not claim an unavailable channel works.
+- [x] Publish and verify a private vulnerability-reporting channel before public
+  release. GitHub private vulnerability reporting is enabled, and `SECURITY.md`
+  defines current-version support, privacy-safe synthetic evidence, disclosure
+  safeguards, explicit scope, and no invented response-time promise.
 - [ ] Accessibility pass:
   - [x] Keyboard-complete menus, docked controls, navigation, zoom, and crop.
   - [x] Screen-reader labels and state for custom controls and exact crop bounds.
@@ -626,7 +654,7 @@ install from source or a simple GitHub-style release artifact.
   500 ms window. A focused and pointer-inside optimized rerun completed every
   window at zero or one redraw without weakening the two-redraw budget or normal
   application scheduling.
-- [ ] Display-fidelity acceptance from Priority 1: worker color metadata is
+- [ ] Display-fidelity acceptance from Priority 2: worker color metadata is
   complete; per-display output, reference-profile fixtures, and honest
   wide-gamut/HDR gates remain.
 - [ ] Public, checksummed artifacts from a recorded green multi-OS workflow, with
@@ -636,19 +664,24 @@ Definition of done: a careful user can build or download a release artifact, set
 viewr as their image viewer if they choose, and never think about bloat again.
 **Store shelves are not required for 1.0.**
 
-## Explicitly out of scope for now (maybe later)
+## Distribution scope
 
-**Not** on the active roadmap until we deliberately opt in. Tracked here so it is
-not mistaken for Phase 7/8 work:
+Trusted direct installation is active 1.0 work. Store presence is not. The product
+does not need a marketplace listing to be recommendable, but direct downloads must
+meet the operating system's normal publisher-trust path.
 
-- Apple notarized `.dmg` / Mac App Store
-- Microsoft Store MSIX / Partner Center publish
+- [ ] Authenticode-sign direct Windows deliverables through a publicly trusted
+  signing path.
+- [ ] Developer ID-sign and notarize the direct macOS application or disk image,
+  with hardened runtime and a stapled ticket.
+- Microsoft Store MSIX / Partner Center publication
+- Mac App Store publication
 - Flathub (or other store) *publication* (local Flatpak *build* sketches may still
   exist for sandbox testing)
-- Any pipeline that requires paid developer accounts, store review, or
-  third-party signing secrets as a gate for product progress
 
-Revisit only after 1.0 local distribution and privacy proof are solid.
+Signing credentials and notarization may require external accounts. They do not
+block local development or an explicitly unsigned pre-1.0 archive, but their
+absence remains visible and blocks a broadly recommended 1.0.
 
 ## Beyond 1.0, candidates held to the same bar
 

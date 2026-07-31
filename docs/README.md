@@ -4,8 +4,8 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): one-command installers, manual downloads,
-  source builds, platform integration, and uninstall steps.
+- [Install and update](INSTALL.md): current source builds, first-release
+  one-command installers, manual downloads, platform integration, and uninstall.
 - [Privacy](PRIVACY.md): the local-only product boundary and metadata behavior.
 - [Ratings](RATINGS.md): embedded ratings, filters, interoperability, and recovery.
 - [Formats](FORMATS.md): supported formats and current format-specific limits.
@@ -27,8 +27,10 @@ Start with the document that matches the task.
 
 ## Planning and release operations
 
-- [Roadmap](ROADMAP.md): implemented phases, current debt, and release gates.
-- [Publishing](PUBLISHING.md): first-publication and release checklist for maintainers.
+- [Roadmap](ROADMAP.md): the current release dashboard, ordered quality tracks,
+  implemented phases, and explicit non-goals.
+- [Publishing](PUBLISHING.md): public-repository controls, the first pre-1.0
+  release procedure, verification, and the stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.
 

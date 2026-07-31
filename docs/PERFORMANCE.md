@@ -127,7 +127,7 @@ cargo run --release --example bench_decode -- corpus
 and the GUI gate are dependency-free beyond the application itself, keeping the
 measurement surface small and auditable.
 
-## Current local evidence
+## Current evidence
 
 On the Windows development host on 2026-07-29, the final three-run optimized
 rating-enabled probe met every startup, navigation, memory, folder-scaling, cache,
@@ -146,31 +146,18 @@ work is quiet. This preserves the limit of two delivered redraws and the existin
 hard timeout. It does not hide a continuous repaint loop: one prevents the idle
 window from settling and fails at the deadline.
 
-A later PID-bound controlled release run used only synthetic images, established
-focus and a stationary pointer inside each spawned probe window, then stopped
-injecting input and sampled state passively. All seven windows completed focused
-and pointer-inside, and all 11 passive controller samples confirmed that state.
-Six windows recorded one delivered redraw, no non-redraw events, no event-driven
-repaint requests, and zero or one scheduled egui repaint. The first small-folder
-window recorded four redraws, two non-redraw events, two event-driven repaint
-requests, and three scheduled repaints, so the overall controlled gate correctly
-failed its limit of two. That outlier correlates with initial window activation;
-the passive samples do not establish causation or prove continuous state between
-samples. In the six windows without non-redraw or event-driven repaint traffic,
-the sampled and final focused-pointer observations did not coincide with elevated
-redraws under these test conditions.
+A controlled Windows release run reproduced elevated redraws during initial window
+activation and exposed an outstanding egui repaint deadline as the missing settled
+state. After the probe began waiting for that deadline to become quiet, every
+focused and pointer-inside window completed at zero or one measured redraw without
+changing application scheduling or weakening the limit of two.
 
-An earlier optimized run recorded 23 and 30 idle redraws after another run had
-recorded one. A separate Cycle 25 reduced 19-process run also stayed at one, but it
-shared the same uncontrolled window conditions. The later controlled result
-narrows the steady focused-pointer case but does not explain those higher counts.
-The historical Windows variance therefore remains unresolved.
-
-The historical outliers established the missing settled-state precondition. The
-focused and pointer-inside rerun above passed after that condition was enforced,
-without changing application repaint scheduling or the budget. Only the
-release-mode Ubuntu job enforces the canonical CI result. No hosted run is claimed
-until a Git remote and runner are available.
+The canonical release-mode Ubuntu performance job passed in
+[CI run 30592874307](https://github.com/blisspixel/viewr/actions/runs/30592874307)
+on 2026-07-30. It proves the regression budgets under the documented Ubuntu, Xvfb,
+and software-GPU environment. It does not replace the open target-hardware checks
+for Windows, macOS, representative Linux desktops, mixed-DPI displays, or profiled
+monitors.
 
 ## Decode reference
 

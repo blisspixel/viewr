@@ -2,14 +2,18 @@
 
 **A private photo viewer that just shows your photos.**
 
+[![CI](https://github.com/blisspixel/viewr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/blisspixel/viewr/actions/workflows/ci.yml)
+
 viewr is a fast, local desktop image viewer for Windows, macOS, and Linux. It has
 no account, cloud service, telemetry, advertising, background indexer, or automatic
 update check. Open a file or folder, inspect it, rate it, make a small edit, save a
 copy, or move it to the operating system Trash.
 
-viewr is pre-1.0. Current releases are portable, checksummed archives. Windows
-code signing, macOS notarization, store packages, RAW depth, and final human
-screen-reader release evidence remain in progress.
+viewr is pre-1.0. The source repository and hosted quality gates are public, but no
+tagged GitHub Release has been published yet. Build from source today. The prepared
+one-command installers become active with the first release. Windows code signing,
+macOS notarization, final human screen-reader evidence, target-hardware acceptance,
+and per-display color correctness remain before a broadly recommended 1.0.
 
 ## Interface
 
@@ -21,12 +25,25 @@ window, with no private path or unrelated desktop content.
 
 ## Install
 
-The installers download the latest published archive from the official GitHub
-release, verify its SHA-256 sidecar and internal manifest, and install it for the
-current user without elevation. They do not add an updater service. Running viewr
-still performs no network activity.
+### Build from source today
 
-### Windows 10 or 11, x64
+Install the prerequisites in [Installing viewr](docs/INSTALL.md), then run:
+
+```text
+cargo build --release --workspace --locked
+```
+
+Keep `viewr` and `viewr-decode` from the same build side by side. The application
+itself performs no network activity.
+
+### One-command installation after the first release
+
+No public binary exists yet. After the first tagged release, these commands will
+download its archive from the official repository, verify the SHA-256 sidecar and
+internal manifest, and install it for the current user without elevation. They do
+not add an updater service.
+
+#### Windows 10 or 11, x64
 
 ```powershell
 irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 | iex
@@ -35,27 +52,19 @@ irm https://raw.githubusercontent.com/blisspixel/viewr/main/install.ps1 | iex
 The app is installed under `%LOCALAPPDATA%\Programs\viewr`, added to the user PATH,
 and placed in the Start menu.
 
-### macOS or Linux
+#### macOS or Linux
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/blisspixel/viewr/main/install.sh | sh
 ```
 
 The command is installed under `~/.local`. macOS supports Intel and Apple Silicon.
-The current Linux release target is x86-64 glibc.
+The planned first Linux release target is x86-64 glibc.
 
 Run the same command again to update explicitly. To inspect a script before running
 it, download it without piping it to a shell. Manual archive installation, version
 pinning, uninstall steps, platform limits, source builds, and release verification
 are documented in [Installing viewr](docs/INSTALL.md).
-
-If no GitHub Release has been published yet, build from source:
-
-```text
-cargo build --release --workspace --locked
-```
-
-Keep `viewr` and `viewr-decode` from the same build side by side.
 
 ## What viewr does
 

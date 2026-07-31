@@ -33,12 +33,51 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Immediate focus: close the human accessibility and platform-trust gates for
-1.0. Next product focus: per-display color correctness, followed by live
-external-file coherence. Next engineering seam: bounded background-job
-ownership.** Optional
+**Immediate focus: v0.2 trusted distribution, followed by v0.3 human
+accessibility evidence and v0.4 reliability architecture. The next product gates
+are v0.5 display correctness, v0.6 file coherence, and v0.7 format-contract
+closure.** Optional
 model-backed description remains a gated post-1.0 candidate, not active Phase 8
 scope.
+
+## Version path to an exceptional 1.0
+
+The version number is a release sequence, not a percentage-complete score.
+v0.1.0 means the first public foundation release, not that the product is only ten
+percent built. Pre-1.0 minor versions close specific trust and quality gates in
+dependency order. A version is tagged only when its exit criteria are true.
+
+| Version | Role | Required outcome before tagging |
+| --- | --- | --- |
+| **v0.1.0** | Public foundation, released | The current product surface is usable and honestly documented: fast file and folder viewing, bounded decoding, ratings and filters, Source Privacy, Trash and Undo, Open With on Windows, focused editing, privacy invariants, meaningful coverage, immutable checksummed archives, attestations, and explicit unsigned-preview limits. |
+| **v0.2.0** | Trusted distribution preview | Windows direct delivery is Authenticode-signed; the macOS application is Developer ID-signed, hardened, notarized, and stapled; a normal Linux package is verified on Wayland and X11. Install, same-version reinstall, explicit update, uninstall, rollback, file associations, checksums, manifests, and provenance pass on the published artifacts. |
+| **v0.3.0** | Accessibility evidence preview | Narrator, VoiceOver, and Orca matrices are completed against exact artifact hashes. Keyboard-only operation, focus order, names, roles, selected and busy state, high contrast, text scaling, loading, errors, crop, ratings, panels, and recovery have no unresolved critical or high-severity accessibility defect. |
+| **v0.4.0** | Reliability architecture beta | Background image details, animation, crop, save, thumbnails, and prefetch have one bounded job owner. Stale work cannot mutate a newer selection or edit, failure paths are observable and recoverable, native glue is thin, race contracts are tested, and meaningful logic coverage remains at least 85 percent. |
+| **v0.5.0** | Display-correct SDR preview | Tagged SDR output matches reference conversions. The active display profile refreshes when the window moves between monitors, worker-decoded images preserve color status, and deterministic sRGB fallback remains visible. Wide-gamut and HDR stay disabled unless an end-to-end higher-precision path is proven. |
+| **v0.6.0** | File-coherence preview | External edits, replacement, rename, deletion, and noisy watcher events produce deterministic visible states without blanking the last good frame or discarding unsaved edits. Open With reaches supported user-mediated chooser APIs on all three platforms. |
+| **v0.7.0** | Format-contract preview | Multi-page and multi-frame containers expose bounded, identifiable navigation rather than silently showing only the first item. The format table distinguishes decode, animation, page, metadata, and color behavior. Camera RAW either meets the isolated-worker, color, fixture, fuzz, memory, and deadline bar or remains explicitly deferred from 1.0. |
+| **v0.8.0** | Integrated product-quality beta | Primary first-time, power-user, admin, failure-recovery, and visual-polish paths pass on representative Windows, macOS, and Linux hardware. Startup, navigation, memory, mixed-DPI, multi-monitor, update, uninstall, interface copy, empty, loading, and error states meet their documented budgets with no unresolved high-severity product-quality issue. |
+| **v0.9.0** | Release candidate | Scope is frozen. Only release-blocking fixes are accepted. The signed candidate passes the full security scan, dependency policy, fuzzing, coverage, performance, privacy, accessibility, packaging, upgrade, rollback, documentation, and representative-hardware matrices with no open 1.0 blocker. |
+| **v1.0.0** | Broadly recommended release | The proven v0.9 scope ships as a fast, faithful, predictable, private, recoverable, accessible, and publisher-authenticated viewer. Documentation matches the artifacts, normal user workflows need no developer tools, and no known critical or high-severity defect remains. |
+
+Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
+minor release. Work for later gates may be researched or prepared, but no later
+version is tagged while an earlier gate remains incomplete.
+
+Release rules:
+
+1. Patch releases such as v0.1.1 fix shipped behavior or security issues. They do
+   not pull later milestone scope forward.
+2. A later milestone cannot compensate for an earlier failed gate. For example,
+   more formats do not compensate for unsigned distribution or inaccessible core
+   workflows.
+3. Scope may be removed or explicitly deferred when evidence says it does not
+   belong in 1.0. Acceptance criteria are not weakened to preserve a version
+   label.
+4. There are no calendar promises or duration estimates. The logical order and
+   falsifiable exit criteria determine when each version is ready.
+5. v1.0 is not a new feature tranche after v0.9. It is the release earned when the
+   candidate evidence holds and any remaining release blockers are closed.
 
 ## Release gate
 
@@ -86,7 +125,7 @@ viewr already has a stronger privacy and hostile-input story than those referenc
 What is missing is not another toolbar. It is end-to-end fidelity, complete edge
 behavior, installability, and maintainable proof of correctness.
 
-### Priority 1: a release people can actually trust and install
+### Priority 1, v0.2 and v0.3: trusted distribution and accessibility
 
 Why first: v0.1.0 closes the gap between repository quality and a release that a
 careful non-developer can obtain and authenticate. The remaining work raises that
@@ -111,16 +150,42 @@ recommendation.
 - [ ] Produce and verify a signed Windows delivery, a Developer ID-signed and
   notarized macOS application and disk image, and a normal Linux Flatpak or
   equivalent package. Store publication remains optional.
-- [ ] Repeat cold-launch, animation, large-image, mixed-DPI, multi-monitor, and
-  profiled-display smoke tests on representative hardware for all three platforms.
 
 Definition of done: a user can download, authenticate, install, exercise, update,
 and remove viewr without compiling it, changing defaults silently, or trusting an
-unrecorded manual build.
+unrecorded manual build, and the core workflows have completed artifact-bound
+human accessibility evidence on all three platforms.
 
-### Priority 2: color that is correct on the actual display
+### Priority 2, v0.4: make correctness easier to preserve
 
-Why second: a viewer that renders the wrong color is failing its primary job, even
+Why second: later milestones add monitor transitions, file watchers, page state,
+and optional worker formats. `app.rs` and `ui.rs` already own too many independent
+state transitions, so those capabilities should not deepen concentrated async
+state before job ownership and test seams are explicit.
+
+- [x] Extract pure crop/output geometry and its keyboard/pointer transitions into
+  a covered module.
+- [x] Extract selected path, presented path, generation, receiver, and load-error
+  transitions into a covered `Session` owner. Native scheduling and retry remain
+  in `App` until bounded job coordination is extracted.
+- [x] Extract `Playlist` folder list, index, and scan-purpose data into its own
+  module without introducing a second mutable store.
+- [x] Extract explicit `PerformanceProbe` state and transitions into a covered
+  module.
+- [ ] Extract bounded job coordination for image details, animation, crop, save,
+  thumbnails, and prefetch, leaving `App` responsible for platform events.
+- [ ] Move dock/menu view models out of paint code so enablement and accessibility
+  state can be exhaustively tested without a window.
+- [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage
+  above 85 percent and add race-contract tests before deleting old paths.
+
+Definition of done: important state transitions have one owner and one pure test
+surface, native glue is thin, and a late worker result cannot mutate a newer image,
+edit, or panel state.
+
+### Priority 3, v0.5: color that is correct on the actual display
+
+Why next: a viewer that renders the wrong color is failing its primary job, even
 when it is fast. The current RGB ICC-to-sRGB normalization prevents the most common
 embedded-profile error, but an RGBA8 sRGB working path cannot preserve wide-gamut
 or HDR source values, and the output is not transformed for the monitor that owns
@@ -174,11 +239,11 @@ window between profiled displays updates output without a restart, worker-decode
 images never lose color status silently, and HDR or wide-gamut modes cannot engage
 without an end-to-end higher-precision path.
 
-### Priority 3: file and format coherence
+### Priority 4, v0.6 and v0.7: file and format coherence
 
-Why third: image viewers commonly sit beside editors, exporters, scanners, and
-download tools. A stale view or a container that exposes only its first page makes
-the application feel unreliable even when the decoder technically succeeded.
+Why after color: image viewers commonly sit beside editors, exporters, scanners,
+and download tools. A stale view or a container that exposes only its first page
+makes the application feel unreliable even when the decoder technically succeeded.
 
 - [x] Keep the last good image visible during a cache miss or failed replacement.
 - [x] Add File > Reload File (`F5`) with cache bypass and no blank frame.
@@ -205,32 +270,31 @@ Definition of done: external edits appear predictably, every selected page/frame
 is identifiable and bounded, and the format table distinguishes container support
 from page, animation, metadata, and color behavior.
 
-### Priority 4: make correctness easier to preserve
+### Priority 5, v0.8 and v0.9: integrated product proof
 
-Why now: `app.rs` and `ui.rs` own too many independent state transitions, and the
-coverage gate currently excludes most native orchestration. The behavior is tested
-in many focused helpers, but future race and accessibility work will get harder if
-load, edit, and dock state remain concentrated in two large files.
+Why last: individual capabilities can pass in isolation while the complete product
+still feels rough or fails under real platform conditions. These releases add no
+broad feature category. They prove and refine the accumulated viewer.
 
-- [x] Extract pure crop/output geometry and its keyboard/pointer transitions into
-  a covered module.
-- [x] Extract selected path, presented path, generation, receiver, and load-error
-  transitions into a covered `Session` owner. Native scheduling and retry remain
-  in `App` until bounded job coordination is extracted.
-- [x] Extract `Playlist` folder list, index, and scan-purpose data into its own
-  module without introducing a second mutable store.
-- [x] Extract explicit `PerformanceProbe` state and transitions into a covered
-  module.
-- [ ] Extract bounded job coordination for image details, animation, crop, save,
-  thumbnails, and prefetch, leaving `App` responsible for platform events.
-- [ ] Move dock/menu view models out of paint code so enablement and accessibility
-  state can be exhaustively tested without a window.
-- [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage
-  above 85 percent and add race-contract tests before deleting old paths.
+- [ ] Exercise first-time, fast-path, admin, failure-recovery, keyboard-only, and
+  visual-polish workflows on published Windows, macOS, and Linux artifacts.
+- [ ] Close evidence-backed layout, spacing, copy, loading, empty, error, recovery,
+  and diagnostic issues without adding decorative controls or unrelated features.
+- [ ] Repeat startup, animation, large-image, 50,000-file, mixed-DPI,
+  multi-monitor, and profiled-display acceptance on representative hardware.
+- [ ] Prove clean install, same-version reinstall, update from each supported
+  pre-1.0 line, uninstall, file-association opt-in, and injected rollback on the
+  signed release candidates.
+- [ ] Freeze scope for v0.9 and rerun the complete security, privacy, dependency,
+  fuzz, coverage, performance, accessibility, packaging, documentation, and
+  release-provenance gates against the exact candidate artifacts.
+- [ ] Enter v1.0 with no known critical or high-severity product, security,
+  accessibility, reliability, or distribution defect and no essential workflow
+  that depends on developer tools.
 
-Definition of done: important state transitions have one owner and one pure test
-surface, native glue is thin, and a late worker result cannot mutate a newer image,
-edit, or panel state.
+Definition of done: the release candidate proves the complete product on real
+platforms, every remaining limitation is explicit and non-essential, and v1.0 can
+ship without adding another feature tranche.
 
 ### Completed track: durable ratings without a photo-library database
 
@@ -656,11 +720,13 @@ install from source or a simple GitHub-style release artifact.
   500 ms window. A focused and pointer-inside optimized rerun completed every
   window at zero or one redraw without weakening the two-redraw budget or normal
   application scheduling.
-- [ ] Display-fidelity acceptance from Priority 2: worker color metadata is
+- [ ] Display-fidelity acceptance from Priority 3: worker color metadata is
   complete; per-display output, reference-profile fixtures, and honest
   wide-gamut/HDR gates remain.
-- [ ] Public, checksummed artifacts from a recorded green multi-OS workflow, with
-  native install surfaces once external signing credentials are available.
+- [x] Public, checksummed, manifest-verified, and attested v0.1.0 artifacts from a
+  recorded green multi-OS workflow.
+- [ ] Publisher-authenticated native install surfaces once external signing and
+  notarization credentials are available.
 
 Definition of done: a careful user can build or download a release artifact, set
 viewr as their image viewer if they choose, and never think about bloat again.

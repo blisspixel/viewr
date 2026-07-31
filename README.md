@@ -139,11 +139,12 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 
 ## Project status
 
-v0.1.0 is a pre-1.0 preview, not a claim that the product is finished. The major
-gates before a broadly recommended 1.0 are Windows signing, macOS signing and
-notarization, human Narrator, VoiceOver, and Orca acceptance, representative
-hardware checks, and per-display color correctness. The
-[release notes](docs/releases/v0.1.0.md) state the exact preview limits.
+v0.1.0 is the first public foundation preview, not a percentage-complete score or
+a claim that the product is finished. The
+[roadmap](docs/ROADMAP.md#version-path-to-an-exceptional-10) defines the logical
+v0.2 through v0.9 trust, accessibility, reliability, fidelity, coherence, format,
+polish, and release-candidate gates that lead to a broadly recommended 1.0. The
+[release notes](docs/releases/v0.1.0.md) state the exact current limits.
 
 ## Development
 

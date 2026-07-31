@@ -10,6 +10,11 @@ and organized by user-visible concern.
 - Recorded the immutable v0.1.0 release, exact hosted CI and fuzz evidence,
   verified 12-asset publication, and the remaining platform-trust gates in the
   roadmap and maintainer publishing guide.
+- Replaced the vague jump from v0.1.0 to 1.0 with dependency-ordered v0.2 through
+  v0.9 release gates for trusted distribution, accessibility evidence, reliability
+  architecture, display correctness, file coherence, format contracts,
+  integrated product proof, and final release-candidate validation. Version
+  numbers now explicitly represent evidence gates rather than percent complete.
 
 ## 0.1.0 - 2026-07-31
 

@@ -90,6 +90,11 @@ manifests, attested all 12 assets, and published the immutable
 
 ## Required before a broadly recommended 1.0
 
+The [version path in the roadmap](ROADMAP.md#version-path-to-an-exceptional-10)
+owns the dependency order. This checklist summarizes the final distribution and
+acceptance conditions; it does not replace the intermediate reliability,
+fidelity, coherence, and release-candidate gates.
+
 - Complete Narrator, VoiceOver, and Orca evidence from
   [Accessibility](ACCESSIBILITY.md), bound to exact artifact hashes.
 - Authenticode-sign the Windows executables and installer through a publicly trusted

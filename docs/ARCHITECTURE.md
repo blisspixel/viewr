@@ -75,17 +75,16 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // One-result auxiliary, Save As, and crop work has an event-loop-owned job.
+    // Auxiliary, Save As, crop, and display-preview work each has a one-result,
+    // event-loop-owned job.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     save_job: Option<OneShotJob<(), SaveResult>>,
     close_after_save: bool,
     save_recovery_unsettled: bool,
     crop_job: Option<OneShotJob<CropJobContext, CropJobResult>>,
     crop_recovery_unsettled: bool,
-
-    // At most one foreground operation of each remaining kind, with generation,
-    // path, and exact decoded-allocation checks before a result can replace state.
-    preview_worker: Option<PreviewWorker>,
+    preview_job: Option<OneShotJob<PreviewJobContext, PreviewJobResult>>,
+    preview_recovery_unsettled: bool,
 
     // Docked chrome and the session-only export-privacy choice.
     show_tools_panel: bool,
@@ -117,14 +116,14 @@ Shipped:
   It opens command-line and native file requests, schedules background work, and
   feeds one immutable frame snapshot to the UI.
 - **`job`**: the bounded, one-result ownership boundary used by current-image
-  details, animation discovery, rating observation, Save As, and crop. The event
-  loop retains operation context while the worker receives one non-cloneable
-  completion endpoint. Replaced work cannot publish, a context-owned cancellation
-  flag can stop obsolete crop rows, and an endpoint that closes without a result
-  wakes the event loop so it becomes a terminal state instead of permanent false
-  busy state. The interface requires a restart after an unexpected executor
-  failure; release builds do not claim thread-panic recovery or promise that the
-  same failing input will succeed after restart.
+  details, animation discovery, rating observation, Save As, crop, and over-limit
+  display previews. The event loop retains operation context while the worker
+  receives one non-cloneable completion endpoint. Replaced work cannot publish, a
+  context-owned cancellation flag can stop obsolete crop rows, and an endpoint
+  that closes without a result wakes the event loop so it becomes a terminal state
+  instead of permanent false busy state. The interface requires a restart after
+  an unexpected executor failure; release builds do not claim thread-panic
+  recovery or promise that the same failing input will succeed after restart.
 - **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
   textured quad, scissored to the physical-pixel viewport left after docked
   chrome. Egui draws in a separate full-window pass. The current image is an sRGB
@@ -132,11 +131,20 @@ Shipped:
   larger than the adapter texture or pixel limit receives an aspect-preserving
   preview prepared by a dedicated replace-latest background worker. Its bounded,
   fallible area resampler works in linear light and premultiplied alpha; the winit
-  thread performs only the validated texture upload. Superseded rows cancel by
-  image generation, while the full decoded image remains available for export. A
-  typed output contract admits only matching RGBA8 sRGB working pixels and an
-  sRGB presentation surface; unsupported surface formats fail explicitly instead
-  of changing the transfer function. A Spot Heal patch updates the base level and
+  thread performs only the validated texture upload. The event loop owns the
+  exact preview path, generation, presentation kind, source, and crop recovery
+  context through one bounded completion slot. Superseded rows cancel by image
+  generation and late completion cannot publish after owner replacement, while
+  the full decoded image remains available for export. Typed failures remain
+  retryable. If the presentation worker exits in an unwind build, a queue guard
+  closes scheduling and drops pending work so its completion loss remains
+  observable even after owner replacement. Endpoint loss becomes persistent,
+  visible recovery state rather than false busy state or scheduling into a dead
+  executor. Retry is disabled only while the current load specifically requires
+  that lost executor; a later ordinary decode failure remains retryable. A typed
+  output contract admits only matching RGBA8 sRGB working pixels and an sRGB
+  presentation surface; unsupported surface formats fail explicitly instead of
+  changing the transfer function. A Spot Heal patch updates the base level and
   regenerates dependent mips. No scene graph.
 - **`color`**: the narrow color contract shared by decode, edits, previews, and
   presentation. It names the working color space and pixel format separately from

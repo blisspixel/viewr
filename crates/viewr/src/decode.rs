@@ -114,33 +114,78 @@ type DecodeJob = Box<dyn FnOnce() + Send + 'static>;
 
 #[derive(Default)]
 struct LatestJobQueue {
-    job: std::sync::Mutex<Option<DecodeJob>>,
+    state: std::sync::Mutex<LatestJobQueueState>,
     ready: std::sync::Condvar,
 }
 
+#[derive(Default)]
+struct LatestJobQueueState {
+    job: Option<DecodeJob>,
+    closed: bool,
+}
+
 impl LatestJobQueue {
-    fn replace(&self, job: DecodeJob) {
-        *self
-            .job
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(job);
+    fn replace(&self, job: DecodeJob) -> Result<(), DecodeJob> {
+        let replaced = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.closed {
+                return Err(job);
+            }
+            state.job.replace(job)
+        };
+        drop(replaced);
         self.ready.notify_one();
+        Ok(())
     }
 
-    fn take(&self) -> DecodeJob {
-        let mut job = self
-            .job
+    fn take(&self) -> Option<DecodeJob> {
+        let mut state = self
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
-            if let Some(job) = job.take() {
-                return job;
+            if let Some(job) = state.job.take() {
+                return Some(job);
             }
-            job = self
+            if state.closed {
+                return None;
+            }
+            state = self
                 .ready
-                .wait(job)
+                .wait(state)
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
+    }
+
+    fn close(&self) {
+        let pending = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.closed = true;
+            state.job.take()
+        };
+        drop(pending);
+        self.ready.notify_all();
+    }
+}
+
+struct CloseLatestJobQueueOnDrop(std::sync::Arc<LatestJobQueue>);
+
+impl Drop for CloseLatestJobQueueOnDrop {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
+fn run_guarded_latest_queue(queue: std::sync::Arc<LatestJobQueue>) {
+    let close_on_exit = CloseLatestJobQueueOnDrop(queue);
+    while let Some(job) = close_on_exit.0.take() {
+        job();
     }
 }
 
@@ -184,8 +229,8 @@ impl DecodeExecutor {
             let thread = std::thread::Builder::new()
                 .name(format!("viewr-decode-foreground-{index}"))
                 .spawn(move || {
-                    loop {
-                        foreground_rx.take()();
+                    while let Some(job) = foreground_rx.take() {
+                        job();
                     }
                 })
                 .map_err(|error| format!("failed to start foreground decoder: {error}"))?;
@@ -198,8 +243,8 @@ impl DecodeExecutor {
             std::thread::Builder::new()
                 .name("viewr-decode-current-details".into())
                 .spawn(move || {
-                    loop {
-                        auxiliary_rx.take()();
+                    while let Some(job) = auxiliary_rx.take() {
+                        job();
                     }
                 })
                 .map_err(|error| format!("failed to start current-image decoder: {error}"))?,
@@ -210,11 +255,7 @@ impl DecodeExecutor {
         threads.push(
             std::thread::Builder::new()
                 .name("viewr-image-preview".into())
-                .spawn(move || {
-                    loop {
-                        presentation_rx.take()();
-                    }
-                })
+                .spawn(move || run_guarded_latest_queue(presentation_rx))
                 .map_err(|error| format!("failed to start image preview worker: {error}"))?,
         );
 
@@ -239,8 +280,10 @@ fn decode_executor() -> Result<&'static DecodeExecutor, Error> {
 
 /// Queue a replace-latest foreground decode without creating per-open threads.
 pub(crate) fn schedule_foreground_decode(job: impl FnOnce() + Send + 'static) -> Result<(), Error> {
-    decode_executor()?.foreground.replace(Box::new(job));
-    Ok(())
+    decode_executor()?
+        .foreground
+        .replace(Box::new(job))
+        .map_err(|_| Error::Decode("foreground image executor stopped unexpectedly".into()))
 }
 
 /// Queue replace-latest animation and metadata work for the current image.
@@ -248,14 +291,18 @@ pub(crate) fn schedule_foreground_decode(job: impl FnOnce() + Send + 'static) ->
 pub(crate) fn schedule_current_image_details(
     job: impl FnOnce() + Send + 'static,
 ) -> Result<(), Error> {
-    decode_executor()?.auxiliary.replace(Box::new(job));
-    Ok(())
+    decode_executor()?
+        .auxiliary
+        .replace(Box::new(job))
+        .map_err(|_| Error::Decode("current-image executor stopped unexpectedly".into()))
 }
 
 /// Queue replace-latest preview preparation without blocking decode or UI work.
 pub(crate) fn schedule_image_preview(job: impl FnOnce() + Send + 'static) -> Result<(), Error> {
-    decode_executor()?.presentation.replace(Box::new(job));
-    Ok(())
+    decode_executor()?
+        .presentation
+        .replace(Box::new(job))
+        .map_err(|_| Error::Decode("image preview executor stopped unexpectedly".into()))
 }
 
 /// Queue bounded speculative work, returning false when the queue is saturated.
@@ -1093,8 +1140,8 @@ mod tests {
         ColorNormalizer, ColorProfileStatus, DecodeGate, DecodeGateState, DecodeGeneration,
         DecodePriority, DecodedImage, GenerationReader, LatestJobQueue,
         MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES, PNG_SIGNATURE,
-        SourceImage, acquire_decode_permit_from, positive_f32_to_px, try_schedule_background,
-        validate_dimensions,
+        SourceImage, acquire_decode_permit_from, positive_f32_to_px, run_guarded_latest_queue,
+        try_schedule_background, validate_dimensions,
     };
     use crate::color::WorkingColorEncoding;
     use crate::ephemeral::TempWorkspace;
@@ -1103,7 +1150,7 @@ mod tests {
     use std::fs;
     use std::io::{Cursor, Read, Write};
     use std::path::PathBuf;
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Condvar, Mutex, mpsc};
     use std::time::{Duration, Instant};
     use viewr_protocol::MAX_DECODE_PIXELS;
@@ -1686,12 +1733,67 @@ mod tests {
         let queue = LatestJobQueue::default();
         let (completed, receiver) = mpsc::channel();
         let first = completed.clone();
-        queue.replace(Box::new(move || first.send(1).unwrap()));
-        queue.replace(Box::new(move || completed.send(2).unwrap()));
+        assert!(
+            queue
+                .replace(Box::new(move || first.send(1).unwrap()))
+                .is_ok()
+        );
+        assert!(
+            queue
+                .replace(Box::new(move || completed.send(2).unwrap()))
+                .is_ok()
+        );
 
-        queue.take()();
+        queue.take().expect("latest queued job")();
         assert_eq!(receiver.recv().unwrap(), 2);
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn guarded_latest_queue_closes_and_drops_pending_work_after_worker_panic() {
+        struct DropCounter(Arc<AtomicUsize>);
+
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+
+        let queue = Arc::new(LatestJobQueue::default());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (panic_tx, panic_rx) = mpsc::channel();
+        assert!(
+            queue
+                .replace(Box::new(move || {
+                    started_tx.send(()).unwrap();
+                    panic_rx.recv().unwrap();
+                    panic!("expected guarded worker failure");
+                }))
+                .is_ok()
+        );
+
+        let worker_queue = Arc::clone(&queue);
+        let worker = std::thread::spawn(move || run_guarded_latest_queue(worker_queue));
+        started_rx.recv().unwrap();
+
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let pending_counter = DropCounter(Arc::clone(&dropped));
+        assert!(
+            queue
+                .replace(Box::new(move || drop(pending_counter)))
+                .is_ok()
+        );
+        panic_tx.send(()).unwrap();
+        assert!(worker.join().is_err());
+
+        assert_eq!(dropped.load(Ordering::Acquire), 1);
+        assert!(queue.take().is_none());
+
+        let rejected_counter = DropCounter(Arc::clone(&dropped));
+        let rejected = queue.replace(Box::new(move || drop(rejected_counter)));
+        assert!(rejected.is_err());
+        drop(rejected);
+        assert_eq!(dropped.load(Ordering::Acquire), 2);
     }
 
     #[test]

@@ -190,8 +190,16 @@ state before job ownership and test seams are explicit.
   consuming completion owner, retains cooperative cancellation and exact
   generation/path/pixel-allocation recovery checks, rejects late publication,
   restores retryable typed failures, and persistently blocks another crop after
-  indeterminate endpoint loss. Executor supervision remains open; release builds
-  do not claim recovery from an in-process thread panic.
+  indeterminate endpoint loss. The fourth slice gives replace-latest over-limit
+  display previews one bounded consuming completion, retains exact path,
+  generation, presentation kind, source, and crop recovery context on the event
+  loop, rejects late publication, and leaves typed failures retryable. Endpoint
+  loss closes the presentation queue, drops pending work even after owner
+  replacement, restores a current crop selection when possible, disables load
+  retry only for the affected selection, and persistently blocks work that needs
+  the lost executor instead of queuing forever. Later ordinary decode failures
+  remain retryable. Executor supervision remains open; release builds do not
+  claim recovery from an in-process thread panic.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window.
 - [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage

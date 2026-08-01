@@ -35,6 +35,17 @@ and organized by user-visible concern.
   selection for direct retry, while unexpected completion loss clears busy state,
   keeps Cancel Crop available, persistently blocks another crop, and requires a
   restart without claiming in-process thread recovery.
+- Over-limit display preview preparation now uses the bounded, consuming
+  completion owner instead of an unbounded result channel. The event loop retains
+  exact path, generation, presentation kind, source, and crop recovery context;
+  replacing the owner rejects late publication. Typed preparation failures remain
+  retryable. The presentation queue closes and drops pending work if its worker
+  exits, so replacing an owner cannot hide executor loss or strand the next job.
+  Unexpected executor loss clears busy state, restores a current crop selection
+  when possible, disables misleading retry only for the affected load, leaves
+  later ordinary decode failures retryable, and does not globally disable
+  otherwise-ready viewing or export actions. Work that needs the lost preview
+  executor remains blocked until restart.
 
 ### Documentation
 

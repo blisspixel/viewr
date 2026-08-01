@@ -90,6 +90,7 @@ pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 pub(crate) const CROP_RECOVERY_STATUS: &str =
     "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
+pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
@@ -384,6 +385,10 @@ pub struct UiFrameOwned {
     pub crop_busy: bool,
     /// A lost crop completion requires restart before another crop.
     pub crop_recovery_unsettled: bool,
+    /// A lost display-preview completion requires restart before more preview work.
+    pub preview_recovery_unsettled: bool,
+    /// Retry for the current load would require the lost display-preview executor.
+    pub preview_load_retry_blocked: bool,
     /// Fixed, path-private description of active Trash restore work.
     pub curation_status: Option<String>,
     /// Durable recovery guidance after an indeterminate restore worker loss.
@@ -496,12 +501,21 @@ impl UiFrameOwned {
         self.current_selection_ready() && !self.save_recovery_unsettled
     }
 
+    const fn retry_load_ready(&self) -> bool {
+        !self.preview_load_retry_blocked
+    }
+
     fn crop_toggle_ready(&self) -> bool {
-        self.current_selection_ready() && (self.is_cropping || !self.crop_recovery_unsettled)
+        self.current_selection_ready()
+            && (self.is_cropping
+                || (!self.crop_recovery_unsettled && !self.preview_recovery_unsettled))
     }
 
     fn crop_apply_ready(&self) -> bool {
-        self.is_cropping && self.current_selection_ready() && !self.crop_recovery_unsettled
+        self.is_cropping
+            && self.current_selection_ready()
+            && !self.crop_recovery_unsettled
+            && !self.preview_recovery_unsettled
     }
 
     fn curation_action_ready(&self) -> bool {
@@ -812,11 +826,15 @@ fn render_top_operation_status(
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_top_status(ui, "Reading folder ratings...", colors);
     } else if frame.has_image && frame.load_error.is_some() {
-        add_retry_button(ui, actions, frame.selected_file_name.as_deref());
+        ui.add_enabled_ui(frame.retry_load_ready(), |ui| {
+            add_retry_button(ui, actions, frame.selected_file_name.as_deref());
+        });
         if frame.save_recovery_unsettled {
             add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
         } else if frame.crop_recovery_unsettled {
             add_top_status(ui, CROP_RECOVERY_STATUS, colors);
+        } else if frame.preview_recovery_unsettled {
+            add_top_status(ui, PREVIEW_RECOVERY_STATUS, colors);
         } else if frame.rating.recovery_unsettled {
             add_top_status(ui, RATING_RECOVERY_STATUS, colors);
         } else if let Some(status) =
@@ -842,6 +860,8 @@ fn render_top_operation_status(
         add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
     } else if frame.crop_recovery_unsettled {
         add_top_status(ui, CROP_RECOVERY_STATUS, colors);
+    } else if frame.preview_recovery_unsettled {
+        add_top_status(ui, PREVIEW_RECOVERY_STATUS, colors);
     } else if frame.rating.recovery_unsettled {
         add_top_status(ui, RATING_RECOVERY_STATUS, colors);
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
@@ -2154,7 +2174,7 @@ fn render_empty_state_actions(
     ui.add_space(16.0);
     ui.horizontal(|ui| {
         if load_error.is_some() {
-            ui.add_enabled_ui(!curation_busy, |ui| {
+            ui.add_enabled_ui(!curation_busy && frame.retry_load_ready(), |ui| {
                 add_empty_retry_button(ui, actions, selected_file_name, colors);
             });
         }
@@ -3533,13 +3553,13 @@ mod tests {
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeLayout, DockSide, DockState,
         FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT, FilmstripItem, HEAL_PANEL_WIDTH,
-        IMAGE_INFO_PANEL_WIDTH, LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, SAVE_RECOVERY_STATUS,
-        TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH,
-        UiAction, UiFrameOwned, appearance_menu, appearance_menu_label, chrome_colors_for,
-        crop_pixel_bounds, image_open_status, panels_menu, rating_filter_menu,
-        rating_filter_menu_label, rating_menu, rating_menu_label, rating_toast_is_status, render,
-        retry_open_label, trash_undo_accessible_label, trash_undo_help, undo_trash_menu_item,
-        viewport_insets,
+        IMAGE_INFO_PANEL_WIDTH, LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, PREVIEW_RECOVERY_STATUS,
+        SAVE_RECOVERY_STATUS, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
+        TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, appearance_menu,
+        appearance_menu_label, chrome_colors_for, crop_pixel_bounds, image_open_status,
+        panels_menu, rating_filter_menu, rating_filter_menu_label, rating_menu, rating_menu_label,
+        rating_toast_is_status, render, retry_open_label, trash_undo_accessible_label,
+        trash_undo_help, undo_trash_menu_item, viewport_insets,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3625,6 +3645,8 @@ mod tests {
             save_recovery_unsettled: false,
             crop_busy: false,
             crop_recovery_unsettled: false,
+            preview_recovery_unsettled: false,
+            preview_load_retry_blocked: false,
             curation_status: None,
             curation_recovery_status: None,
             folder_scan_busy: false,
@@ -3908,6 +3930,88 @@ mod tests {
                 && node.value() == Some(CROP_RECOVERY_STATUS)
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
+    }
+
+    #[test]
+    fn lost_preview_executor_blocks_more_crop_work_but_keeps_other_actions_ready() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.preview_recovery_unsettled = true;
+
+        assert!(frame.current_selection_ready());
+        assert!(frame.save_as_ready());
+        assert!(!frame.crop_toggle_ready());
+        assert!(!frame.crop_apply_ready());
+        frame.is_cropping = true;
+        assert!(frame.crop_toggle_ready());
+        assert!(!frame.crop_apply_ready());
+
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(PREVIEW_RECOVERY_STATUS)
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+
+        for has_image in [false, true] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut frame = accessibility_test_frame();
+            frame.has_image = has_image;
+            frame.load_error = Some(PREVIEW_RECOVERY_STATUS.to_owned());
+            frame.preview_recovery_unsettled = true;
+            frame.preview_load_retry_blocked = true;
+
+            assert!(!frame.retry_load_ready());
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update should be generated");
+            let retry = update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.label() == Some("Retry opening current.png"))
+                .expect("preview recovery Retry button");
+            assert!(retry.is_disabled());
+            assert!(update.nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Label
+                    && node.value() == Some(PREVIEW_RECOVERY_STATUS)
+                    && node.live() == Some(egui::accesskit::Live::Polite)
+            }));
+        }
+
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.load_error = Some("Could not decode: malformed image".to_owned());
+        frame.preview_recovery_unsettled = true;
+
+        assert!(frame.retry_load_ready());
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let retry = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label() == Some("Retry opening current.png"))
+            .expect("ordinary decode failure Retry button");
+        assert!(!retry.is_disabled());
     }
 
     #[test]

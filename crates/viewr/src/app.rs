@@ -144,7 +144,9 @@ fn run_internal(
         save_recovery_unsettled: false,
         crop_job: None,
         crop_recovery_unsettled: false,
-        preview_worker: None,
+        preview_job: None,
+        preview_recovery_unsettled: false,
+        preview_load_retry_blocked: false,
         curation_worker: None,
         close_after_curation: false,
         curation_recovery: CurationRecovery::default(),
@@ -338,12 +340,18 @@ enum NavigationImagePlan {
     LoadOnly,
 }
 
-struct PreviewWorker {
+struct PreviewJobContext {
     path: PathBuf,
+    generation: u64,
     kind: PresentationKind,
     source: Option<Arc<crate::fs::ImageSource>>,
     crop_recovery: Option<CropRecovery>,
-    result_rx: Receiver<Result<(Arc<DecodedImage>, ImagePreview), String>>,
+}
+
+enum PreviewJobResult {
+    Prepared(Arc<DecodedImage>, ImagePreview),
+    Failed(String),
+    Cancelled,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1104,8 +1112,12 @@ struct App {
     crop_job: Option<OneShotJob<CropJobContext, CropJobResult>>,
     /// An indeterminate crop worker loss that requires a process restart.
     crop_recovery_unsettled: bool,
-    /// Replace-latest over-limit preview prepared outside the event thread.
-    preview_worker: Option<PreviewWorker>,
+    /// Replace-latest over-limit preview with bounded completion ownership.
+    preview_job: Option<OneShotJob<PreviewJobContext, PreviewJobResult>>,
+    /// A lost preview executor completion that requires a process restart.
+    preview_recovery_unsettled: bool,
+    /// The current load cannot retry because it requires the lost preview executor.
+    preview_load_retry_blocked: bool,
     /// At most one native restore operation running off-thread.
     curation_worker: Option<CurationWorker>,
     /// A normal close request waiting for destructive work to reconcile.
@@ -1677,53 +1689,68 @@ impl App {
             self.finish_image_presentation(path, image, source, None, kind, crop_recovery);
             return;
         };
+        if self.preview_recovery_unsettled {
+            self.report_preview_executor_loss(kind, crop_recovery);
+            return;
+        }
 
         let generation = self.session.generation.load(Ordering::Acquire);
         let current_generation = Arc::clone(&self.session.generation);
         let worker_image = Arc::clone(&image);
-        let worker_path = path.to_owned();
-        let (sender, receiver) = mpsc::channel();
-        let event_proxy = self.event_proxy.clone();
+        let context = PreviewJobContext {
+            path: path.to_owned(),
+            generation,
+            kind,
+            source,
+            crop_recovery,
+        };
+        let notify_proxy = self.event_proxy.clone();
+        let (completion, job) = OneShotJob::new(context, move || {
+            let _ = notify_proxy.send_event(UserEvent::Wake);
+        });
         let scheduled = crate::decode::schedule_image_preview(move || {
-            let result = crate::gpu::prepare_image_preview(&worker_image, spec, || {
+            let result = match crate::gpu::prepare_image_preview(&worker_image, spec, || {
                 current_generation.load(Ordering::Acquire) != generation
-            });
-            match result {
-                Ok(Some(preview)) => {
-                    let _ = sender.send(Ok((worker_image, preview)));
-                    let _ = event_proxy.send_event(UserEvent::Wake);
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = sender.send(Err(error.to_string()));
-                    let _ = event_proxy.send_event(UserEvent::Wake);
-                }
+            }) {
+                Ok(Some(preview)) => PreviewJobResult::Prepared(worker_image, preview),
+                Ok(None) => PreviewJobResult::Cancelled,
+                Err(error) => PreviewJobResult::Failed(error.to_string()),
+            };
+            if !completion.complete(result) {
+                log::debug!("discarded preview result after owner replacement");
             }
         });
         match scheduled {
             Ok(()) => {
-                self.preview_worker = Some(PreviewWorker {
-                    path: worker_path,
-                    kind,
-                    source,
-                    crop_recovery,
-                    result_rx: receiver,
-                });
+                self.preview_job = Some(job);
                 self.show_toast("Preparing a display-sized preview in the background");
             }
             Err(error) => {
-                if kind == PresentationKind::Cropped {
+                let context = job.into_context();
+                if context.kind == PresentationKind::Cropped {
                     log::error!("crop preview queue failed: {error}");
                 } else {
                     log::error!("failed to queue image preview: {error}");
                 }
-                self.report_presentation_failure(
-                    kind,
-                    format!("Could not prepare image preview: {error}"),
-                    crop_recovery,
-                );
+                self.report_preview_executor_loss(context.kind, context.crop_recovery);
             }
         }
+    }
+
+    fn report_preview_executor_loss(
+        &mut self,
+        kind: PresentationKind,
+        crop_recovery: Option<CropRecovery>,
+    ) {
+        self.preview_recovery_unsettled = true;
+        if kind == PresentationKind::Cropped {
+            let restored = crop_recovery.is_some_and(|recovery| self.restore_failed_crop(recovery));
+            self.show_toast(crop_preview_disconnect_message(restored));
+            return;
+        }
+        self.preview_load_retry_blocked = true;
+        self.session.load_error = Some(crate::ui::PREVIEW_RECOVERY_STATUS.to_owned());
+        self.show_toast(crate::ui::PREVIEW_RECOVERY_STATUS);
     }
 
     fn report_presentation_failure(
@@ -1817,32 +1844,38 @@ impl App {
     }
 
     fn poll_preview_result(&mut self) {
-        let Some(worker) = self.preview_worker.as_ref() else {
+        let Some(job) = self.preview_job.as_ref() else {
             return;
         };
-        let polled = poll_worker(&worker.result_rx);
-        if matches!(&polled, WorkerPoll::Pending) {
+        let polled = job.poll();
+        if matches!(&polled, JobPoll::Pending) {
             return;
         }
-        let worker = self
-            .preview_worker
+        let context = self
+            .preview_job
             .take()
-            .expect("preview worker exists after polling it");
-        let PreviewWorker {
+            .expect("preview job exists after polling it")
+            .into_context();
+        let PreviewJobContext {
             path,
+            generation,
             kind,
             source,
             crop_recovery,
-            ..
-        } = worker;
-        if self.session.selected_path.as_ref() != Some(&path) {
+        } = context;
+        if !preview_job_matches(
+            generation,
+            &path,
+            self.session.generation.load(Ordering::Acquire),
+            self.session.selected_path.as_deref(),
+        ) {
             if kind == PresentationKind::Cropped {
                 log::debug!("discarded stale crop preview result");
             }
             return;
         }
         match polled {
-            WorkerPoll::Ready(Ok((image, preview))) => {
+            JobPoll::Ready(PreviewJobResult::Prepared(image, preview)) => {
                 self.finish_image_presentation(
                     &path,
                     image,
@@ -1853,7 +1886,7 @@ impl App {
                 );
                 self.request_redraw();
             }
-            WorkerPoll::Ready(Err(error)) => {
+            JobPoll::Ready(PreviewJobResult::Failed(error)) => {
                 if kind == PresentationKind::Cropped {
                     log::error!("crop preview preparation failed: {error}");
                 } else {
@@ -1865,26 +1898,27 @@ impl App {
                     crop_recovery,
                 );
             }
-            WorkerPoll::Disconnected => {
-                if kind == PresentationKind::Cropped {
-                    log::error!("crop preview worker disconnected");
-                } else {
-                    log::error!("image preview worker disconnected");
-                }
-                self.report_presentation_failure(
-                    kind,
-                    "Image preview stopped unexpectedly".to_owned(),
-                    crop_recovery,
-                );
+            JobPoll::Ready(PreviewJobResult::Cancelled) => {
+                log::error!("current preview job reported unexpected cancellation");
+                self.report_preview_executor_loss(kind, crop_recovery);
             }
-            WorkerPoll::Pending => unreachable!("pending preview result returned early"),
+            JobPoll::Disconnected => {
+                if kind == PresentationKind::Cropped {
+                    log::error!("crop preview job disconnected before publishing a result");
+                } else {
+                    log::error!("image preview job disconnected before publishing a result");
+                }
+                self.report_preview_executor_loss(kind, crop_recovery);
+            }
+            JobPoll::Pending => unreachable!("pending preview result returned early"),
         }
     }
 
     fn invalidate_displayed_image(&mut self) {
         self.heal.reset_for_image();
         self.cancel_crop_work();
-        self.preview_worker = None;
+        self.preview_job = None;
+        self.preview_load_retry_blocked = false;
         self.animation = None;
         self.image_details = None;
         self.auxiliary_job = None;
@@ -1906,7 +1940,8 @@ impl App {
     fn prepare_for_image_load(&mut self) {
         self.heal.reset_for_image();
         self.cancel_crop_work();
-        self.preview_worker = None;
+        self.preview_job = None;
+        self.preview_load_retry_blocked = false;
         self.animation = None;
         self.auxiliary_job = None;
         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
@@ -2446,10 +2481,15 @@ impl App {
 
     fn cancel_pending_image_load(&mut self) {
         self.session.cancel_pending_load();
-        self.preview_worker = None;
+        self.preview_job = None;
+        self.preview_load_retry_blocked = false;
     }
 
     fn retry_current_image_load(&mut self) {
+        if let Some(message) = preview_retry_blocker(self.preview_load_retry_blocked) {
+            self.show_toast(message);
+            return;
+        }
         if self.block_action_while_curating("retrying the image load") {
             return;
         }
@@ -2476,7 +2516,7 @@ impl App {
             self.show_toast("Wait for Save As to finish before reloading");
             return;
         }
-        if self.session.is_loading() || self.preview_worker.is_some() {
+        if self.session.is_loading() || self.preview_job.is_some() {
             self.show_toast("An image is already loading");
             return;
         }
@@ -3028,7 +3068,7 @@ impl App {
                 .as_ref()
                 .map(|worker| worker.context.kind().work()),
             self.scanner_rx.is_some().then_some(CurrentWork::FolderScan),
-            image_preparation_work(self.session.is_loading(), self.preview_worker.is_some()),
+            image_preparation_work(self.session.is_loading(), self.preview_job.is_some()),
             crop_work(self.transform.is_cropping, self.crop_job.is_some()),
             self.save_job.is_some().then_some(CurrentWork::Save),
             self.rating_write_worker
@@ -3106,8 +3146,11 @@ impl App {
             self.cancel_crop();
             return;
         }
-        if self.crop_recovery_unsettled {
-            self.show_toast(crate::ui::CROP_RECOVERY_STATUS);
+        if let Some(message) = crop_recovery_blocker(
+            self.crop_recovery_unsettled,
+            self.preview_recovery_unsettled,
+        ) {
+            self.show_toast(message);
             return;
         }
         if self.block_action_while_curating("changing Crop") {
@@ -3119,7 +3162,7 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.preview_worker.is_some() {
+        if self.preview_job.is_some() {
             self.show_toast("Wait for the image preview to finish before cropping");
             return;
         }
@@ -3280,7 +3323,7 @@ impl App {
             self.show_toast("Wait for the crop to finish before using Spot Heal");
             return;
         }
-        if !self.heal.active && self.preview_worker.is_some() {
+        if !self.heal.active && self.preview_job.is_some() {
             self.show_toast("Wait for the image preview to finish before using Spot Heal");
             return;
         }
@@ -3346,7 +3389,7 @@ impl App {
         if self.heal.is_busy()
             || self.crop_job.is_some()
             || self.save_job.is_some()
-            || self.preview_worker.is_some()
+            || self.preview_job.is_some()
         {
             return;
         }
@@ -3425,7 +3468,7 @@ impl App {
             || self.heal.is_busy()
             || self.crop_job.is_some()
             || self.save_job.is_some()
-            || self.preview_worker.is_some()
+            || self.preview_job.is_some()
         {
             return;
         }
@@ -4354,7 +4397,7 @@ impl App {
             self.rating_write_worker
                 .is_some()
                 .then_some(SaveStartBlocker::RatingWrite),
-            self.preview_worker
+            self.preview_job
                 .is_some()
                 .then_some(SaveStartBlocker::Preview),
             (self.heal.is_busy() || self.heal.painting).then_some(SaveStartBlocker::SpotHeal),
@@ -4539,8 +4582,11 @@ impl App {
     /// are quantized as whole multiples of their reduced integer components,
     /// so the exported pixel dimensions keep the ratio exactly.
     fn apply_crop_rect(&mut self) {
-        if self.crop_recovery_unsettled {
-            self.show_toast(crate::ui::CROP_RECOVERY_STATUS);
+        if let Some(message) = crop_recovery_blocker(
+            self.crop_recovery_unsettled,
+            self.preview_recovery_unsettled,
+        ) {
+            self.show_toast(message);
             return;
         }
         if self.block_action_while_curating("applying the crop") {
@@ -4559,7 +4605,7 @@ impl App {
             self.show_toast("A crop is already being applied");
             return;
         }
-        if self.preview_worker.is_some() {
+        if self.preview_job.is_some() {
             self.show_toast("Wait for the image preview to finish before cropping");
             return;
         }
@@ -4696,7 +4742,7 @@ impl App {
         if probe.last_presented_path.as_deref() != Some(current_path)
             || probe.navigation_target.is_some()
             || self.session.receiver.is_some()
-            || self.preview_worker.is_some()
+            || self.preview_job.is_some()
             || self.auxiliary_job.is_some()
             || self.crop_job.is_some()
             || self.scanner_rx.is_some()
@@ -4756,7 +4802,7 @@ impl App {
             ),
             PERFORMANCE_PROBE_TIMEOUT.as_secs(),
             self.scanner_rx.is_some(),
-            self.session.receiver.is_some() || self.preview_worker.is_some(),
+            self.session.receiver.is_some() || self.preview_job.is_some(),
             self.auxiliary_job.is_some(),
             self.performance_probe
                 .as_ref()
@@ -5507,7 +5553,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
                 let toast = self.toast.clone();
-                let preview_kind = self.preview_worker.as_ref().map(|worker| worker.kind);
+                let preview_kind = self.preview_job.as_ref().map(|job| job.context().kind);
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
                 let load_error = self.session.load_error.clone();
@@ -5515,6 +5561,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let save_recovery_unsettled = self.save_recovery_unsettled;
                 let crop_busy = self.crop_job.is_some();
                 let crop_recovery_unsettled = self.crop_recovery_unsettled;
+                let preview_recovery_unsettled = self.preview_recovery_unsettled;
+                let preview_load_retry_blocked = self.preview_load_retry_blocked;
                 let curation_status = self
                     .curation_worker
                     .as_ref()
@@ -5716,6 +5764,8 @@ impl ApplicationHandler<UserEvent> for App {
                     save_recovery_unsettled,
                     crop_busy,
                     crop_recovery_unsettled,
+                    preview_recovery_unsettled,
+                    preview_load_retry_blocked,
                     curation_status,
                     curation_recovery_status,
                     folder_scan_busy,
@@ -6263,6 +6313,15 @@ fn durable_presentation_error(kind: PresentationKind, message: &str) -> Option<S
     matches!(kind, PresentationKind::Loaded).then(|| message.to_owned())
 }
 
+fn preview_job_matches(
+    job_generation: u64,
+    job_path: &Path,
+    current_generation: u64,
+    selected_path: Option<&Path>,
+) -> bool {
+    job_generation == current_generation && selected_path == Some(job_path)
+}
+
 fn crop_recovery_matches(
     recovery: &CropRecovery,
     current_generation: u64,
@@ -6289,6 +6348,35 @@ const fn crop_disconnect_message(selection_restored: bool) -> &'static str {
         "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
     } else {
         "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
+    }
+}
+
+const fn crop_preview_disconnect_message(selection_restored: bool) -> &'static str {
+    if selection_restored {
+        "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
+    } else {
+        "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
+    }
+}
+
+const fn crop_recovery_blocker(
+    crop_recovery_unsettled: bool,
+    preview_recovery_unsettled: bool,
+) -> Option<&'static str> {
+    if crop_recovery_unsettled {
+        Some(crate::ui::CROP_RECOVERY_STATUS)
+    } else if preview_recovery_unsettled {
+        Some(crate::ui::PREVIEW_RECOVERY_STATUS)
+    } else {
+        None
+    }
+}
+
+const fn preview_retry_blocker(preview_load_retry_blocked: bool) -> Option<&'static str> {
+    if preview_load_retry_blocked {
+        Some(crate::ui::PREVIEW_RECOVERY_STATUS)
+    } else {
+        None
     }
 }
 
@@ -7340,6 +7428,20 @@ mod test {
     }
 
     #[test]
+    fn preview_job_requires_exact_generation_and_selected_path() {
+        let path = Path::new("album/large.png");
+        assert!(preview_job_matches(17, path, 17, Some(path)));
+        assert!(!preview_job_matches(16, path, 17, Some(path)));
+        assert!(!preview_job_matches(
+            17,
+            path,
+            17,
+            Some(Path::new("album/other.png"))
+        ));
+        assert!(!preview_job_matches(17, path, 17, None));
+    }
+
+    #[test]
     fn loaded_presentation_failures_are_retryable_but_crop_failures_are_not() {
         let message = "Could not prepare image preview";
         assert_eq!(
@@ -7518,6 +7620,32 @@ mod test {
             crop_disconnect_message(false),
             "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
         );
+    }
+
+    #[test]
+    fn crop_preview_disconnect_copy_and_recovery_priority_are_truthful() {
+        assert_eq!(
+            crop_preview_disconnect_message(true),
+            "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
+        );
+        assert_eq!(
+            crop_preview_disconnect_message(false),
+            "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
+        );
+        assert_eq!(
+            crop_recovery_blocker(true, true),
+            Some(crate::ui::CROP_RECOVERY_STATUS)
+        );
+        assert_eq!(
+            crop_recovery_blocker(false, true),
+            Some(crate::ui::PREVIEW_RECOVERY_STATUS)
+        );
+        assert_eq!(crop_recovery_blocker(false, false), None);
+        assert_eq!(
+            preview_retry_blocker(true),
+            Some(crate::ui::PREVIEW_RECOVERY_STATUS)
+        );
+        assert_eq!(preview_retry_blocker(false), None);
     }
 
     #[test]

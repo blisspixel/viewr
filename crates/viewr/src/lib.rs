@@ -20,6 +20,7 @@ pub mod error;
 pub mod fs;
 pub mod gpu;
 mod gpu_image;
+mod gpu_policy;
 pub mod heal;
 pub mod image_info;
 pub(crate) mod job;

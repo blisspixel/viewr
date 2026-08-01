@@ -81,6 +81,11 @@ and organized by user-visible concern.
   adapter retains device and texture ownership and consumes the same validated
   decisions, so preview behavior and memory limits are unchanged while malformed,
   stale, wrong-color, and canceled inputs receive direct regression coverage.
+- GPU surface-format choice, Spot Heal patch upload geometry, placement-buffer
+  packing, and clear-color mapping now live in a second private covered policy
+  module. Exact tests cover first-supported sRGB selection, every placement field,
+  full-resolution and bounds requirements, integer overflow, byte-length mismatch,
+  and all clear-color channels without creating a device or texture.
 
 ### Documentation
 

@@ -91,8 +91,8 @@ cannot be removed by this filename filter:
 
 - `app.rs`: windowing and event-loop integration mixed with pure helpers that
   still need extraction under the v0.2 roadmap
-- `gpu.rs`: device, surface, and texture integration plus remaining pure surface,
-  patch, and placement decisions that still need extraction
+- `gpu.rs`: device, surface, texture, pipeline, and frame-lifecycle integration;
+  standalone image and descriptor decisions live in covered private modules
 - `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
 - `worker_limit.rs`: OS Job Object / process-group glue
 - `error.rs` and both workspace `main.rs` files: entry/error surfaces, including a
@@ -103,9 +103,10 @@ line is untestable. Their pure helpers retain direct unit tests, but those lines
 not count toward the percentage until they move behind covered seams. Everything
 else is in the coverage floor. This includes the `ui.rs` egui/AccessKit adapter,
 the pure `chrome` projection, and the CPU-only `gpu_image` sizing, mip, preview,
-and upload-selection policy. Coverage is a floor and a signal, not the goal. The
-real goal is that the tests would catch a regression, which is why we also run
-mutation testing.
+and upload-selection policy. It also includes `gpu_policy` surface selection,
+patch geometry, placement packing, and clear-color mapping. Coverage is a floor
+and a signal, not the goal. The real goal is that the tests would catch a
+regression, which is why we also run mutation testing.
 
 - `cargo test --workspace --all-targets --locked` is the canonical unit,
   integration, binary, example, and benchmark-target runner. CI separately runs

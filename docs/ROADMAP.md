@@ -226,11 +226,14 @@ state before job ownership and test seams are explicit.
   integration tests or vendored source. The second step moves GPU image sizing,
   mip planning, linear-light preview preparation, and upload selection into the
   covered CPU-only `gpu_image` seam at 95.76 percent line coverage; the complete
-  measured floor is 89.20 percent. `app.rs`, the remaining `gpu.rs` surface,
-  patch, and placement decisions, and entry surfaces still mix platform
-  integration with pure unit-tested helpers. Move those helpers behind covered
-  seams before closing this item. Preserve the bounded job, thumbnail, prefetch,
-  chrome, and preview race/stale-result matrices while doing so.
+  measured floor was 89.20 percent. The third step moves first-supported sRGB
+  surface selection, patch upload geometry, placement packing, and clear-color
+  mapping into the 100 percent covered private `gpu_policy` seam. The complete
+  measured floor is now 89.30 percent. `gpu.rs` retains native resource and frame
+  lifecycle work, while concentrated `app.rs` transitions and entry surfaces
+  still mix platform integration with pure unit-tested helpers. Move those helpers
+  behind covered seams before closing this item. Preserve the bounded job,
+  thumbnail, prefetch, chrome, preview, and GPU upload contracts while doing so.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

@@ -15,8 +15,11 @@ pub(crate) use crate::gpu_image::{
     prepare_image_preview,
 };
 use crate::gpu_image::{mip_level_count, preview_spec, select_image_upload};
-use crate::theme::{self, Mode, Palette};
-use crate::view;
+use crate::gpu_policy::{
+    PLACEMENT_BYTES, pack_placement, palette_to_color, select_srgb_surface_format,
+    validate_patch_upload,
+};
+use crate::theme::{self, Mode};
 
 /// Owns the GPU surface and everything needed to draw a frame.
 pub struct Renderer {
@@ -60,42 +63,6 @@ struct Image {
     working_color: WorkingColorEncoding,
 }
 
-struct PatchUpload {
-    origin: wgpu::Origin3d,
-    extent: wgpu::Extent3d,
-    bytes_per_row: u32,
-}
-
-fn validate_patch_upload(
-    source_size: (u32, u32),
-    texture_size: (u32, u32),
-    patch: &crate::heal::ImagePatch,
-) -> Option<PatchUpload> {
-    if source_size != texture_size {
-        return None;
-    }
-    let bounds = patch.bounds;
-    let right = bounds.x.checked_add(bounds.width)?;
-    let bottom = bounds.y.checked_add(bounds.height)?;
-    let expected_bytes = viewr_protocol::checked_rgba_len(bounds.width, bounds.height).ok()?;
-    if right > texture_size.0 || bottom > texture_size.1 || patch.rgba.len() != expected_bytes {
-        return None;
-    }
-    Some(PatchUpload {
-        origin: wgpu::Origin3d {
-            x: bounds.x,
-            y: bounds.y,
-            z: 0,
-        },
-        extent: wgpu::Extent3d {
-            width: bounds.width,
-            height: bounds.height,
-            depth_or_array_layers: 1,
-        },
-        bytes_per_row: bounds.width.checked_mul(4)?,
-    })
-}
-
 fn build_image_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("viewr sampler"),
@@ -110,17 +77,6 @@ fn build_mipmap_blitter(device: &wgpu::Device) -> wgpu::util::TextureBlitter {
     wgpu::util::TextureBlitterBuilder::new(device, wgpu::TextureFormat::Rgba8UnormSrgb)
         .sample_type(wgpu::FilterMode::Linear)
         .build()
-}
-
-fn select_srgb_surface_format(
-    formats: &[wgpu::TextureFormat],
-) -> Result<(wgpu::TextureFormat, OutputColorTransform), Error> {
-    formats
-        .iter()
-        .copied()
-        .find(wgpu::TextureFormat::is_srgb)
-        .map(|format| (format, OutputColorTransform::SRGB_TO_SRGB))
-        .ok_or_else(|| Error::Gpu("display surface does not support sRGB presentation".into()))
 }
 
 impl Renderer {
@@ -696,27 +652,6 @@ pub enum FrameResult {
     NeedsReconfigure,
 }
 
-/// The uniform buffer size (16 for `scale`/`offset`, 16 for `uv_matrix`, 16 for `crop_rect`).
-const PLACEMENT_BYTES: u64 = 48;
-
-/// Pack `Placement` into 48 bytes (vec4, vec4, vec4).
-fn pack_placement(p: &view::Placement) -> [u8; 48] {
-    let mut bytes = [0; 48];
-    bytes[0..4].copy_from_slice(&p.scale[0].to_ne_bytes());
-    bytes[4..8].copy_from_slice(&p.scale[1].to_ne_bytes());
-    bytes[8..12].copy_from_slice(&p.offset[0].to_ne_bytes());
-    bytes[12..16].copy_from_slice(&p.offset[1].to_ne_bytes());
-    bytes[16..20].copy_from_slice(&p.uv_matrix[0].to_ne_bytes());
-    bytes[20..24].copy_from_slice(&p.uv_matrix[1].to_ne_bytes());
-    bytes[24..28].copy_from_slice(&p.uv_matrix[2].to_ne_bytes());
-    bytes[28..32].copy_from_slice(&p.uv_matrix[3].to_ne_bytes());
-    bytes[32..36].copy_from_slice(&p.crop_rect[0].to_ne_bytes());
-    bytes[36..40].copy_from_slice(&p.crop_rect[1].to_ne_bytes());
-    bytes[40..44].copy_from_slice(&p.crop_rect[2].to_ne_bytes());
-    bytes[44..48].copy_from_slice(&p.crop_rect[3].to_ne_bytes());
-    bytes
-}
-
 /// Build the textured-quad pipeline and its bind group layout.
 fn build_pipeline(
     device: &wgpu::Device,
@@ -792,68 +727,4 @@ fn build_pipeline(
     });
 
     (pipeline, bind_layout)
-}
-
-/// Convert a [`Palette`] background into a wgpu clear color.
-// r, g, b, a are the standard, unambiguous color-channel names.
-#[allow(clippy::many_single_char_names)]
-fn palette_to_color(palette: Palette) -> wgpu::Color {
-    let [r, g, b, a] = palette.background;
-    wgpu::Color { r, g, b, a }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{pack_placement, select_srgb_surface_format, validate_patch_upload};
-    use crate::color::{OutputColorSpace, WorkingColorEncoding};
-    use crate::view::Placement;
-
-    #[test]
-    fn packs_placement_in_field_order() {
-        let p = Placement {
-            scale: [0.5, 0.25],
-            offset: [-0.1, 0.2],
-            uv_matrix: [1.0, 0.0, 0.0, 1.0],
-            crop_rect: [0.0, 0.0, 1.0, 1.0],
-        };
-        let bytes = pack_placement(&p);
-        let unpack = |i: usize| f32::from_ne_bytes(bytes[i..i + 4].try_into().unwrap());
-        assert!((unpack(0) - 0.5).abs() < f32::EPSILON);
-        assert!((unpack(4) - 0.25).abs() < f32::EPSILON);
-        assert!((unpack(8) - -0.1).abs() < f32::EPSILON);
-        assert!((unpack(12) - 0.2).abs() < f32::EPSILON);
-        assert!((unpack(16) - 1.0).abs() < f32::EPSILON);
-        assert!((unpack(28) - 1.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn surface_selection_requires_an_explicit_srgb_output_contract() {
-        let (format, transform) = select_srgb_surface_format(&[
-            wgpu::TextureFormat::Bgra8Unorm,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        ])
-        .unwrap();
-
-        assert_eq!(format, wgpu::TextureFormat::Rgba8UnormSrgb);
-        assert_eq!(transform.source(), WorkingColorEncoding::SRGB_RGBA8);
-        assert_eq!(transform.destination(), OutputColorSpace::Srgb);
-        assert!(select_srgb_surface_format(&[wgpu::TextureFormat::Bgra8Unorm]).is_err());
-        assert!(select_srgb_surface_format(&[]).is_err());
-    }
-
-    #[test]
-    fn patch_upload_requires_a_full_resolution_texture() {
-        let patch = crate::heal::ImagePatch {
-            bounds: crate::edit::Rect {
-                x: 1,
-                y: 1,
-                width: 2,
-                height: 2,
-            },
-            rgba: vec![3; 16],
-        };
-
-        assert!(validate_patch_upload((4, 4), (4, 4), &patch).is_some());
-        assert!(validate_patch_upload((4, 4), (2, 2), &patch).is_none());
-    }
 }

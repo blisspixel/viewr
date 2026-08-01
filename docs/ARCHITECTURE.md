@@ -426,16 +426,21 @@ accessibility presentation no longer live in native paint code. The UI adapter i
 inside the 85 percent CI coverage floor because its egui and AccessKit output is
 exercised without a native window.
 
-The covered `gpu_image` seam now owns CPU-only texture sizing, mip planning,
-linear-light alpha-correct preview preparation, and upload selection. It owns no
-device, queue, surface, texture, or event-loop state. `gpu.rs` keeps those native
-resources and consumes the validated result, preserving one renderer owner and the
-existing asynchronous preview contract. The exact-path exclusion still contains
-surface-format selection, patch validation, placement packing, and other pure
-helpers alongside native GPU integration. `app.rs`, `gpu.rs`, and entry surfaces
-therefore remain explicit v0.2 extraction debt. Meaningful event-loop and renderer
-decisions must keep moving behind narrow covered seams before later monitor,
-watcher, and page-state work expands them.
+The covered `gpu_image` seam owns CPU-only texture sizing, mip planning,
+linear-light alpha-correct preview preparation, and upload selection. The covered
+`gpu_policy` seam owns first-supported sRGB surface selection, full-resolution
+patch geometry validation, exact placement-buffer packing, and clear-color
+mapping. Neither creates a device resource or owns event-loop state. `gpu.rs`
+keeps the device, queue, surface, texture, pipeline, sampler, mip generation, and
+frame lifecycle, consuming the validated decisions while preserving one renderer
+owner and the existing asynchronous preview contract.
+
+The exact-path exclusion remains because the renderer must exercise native wgpu
+resources and surface outcomes. Its remaining pure helpers are small and coupled
+to that adapter rather than hidden domain policy. Concentrated event transitions
+in `app.rs` and pure entry parsing remain explicit v0.2 extraction debt.
+Meaningful decisions must keep moving behind narrow covered seams before later
+monitor, watcher, and page-state work expands them.
 
 Trash restore retains an explicit event-loop ownership boundary. The worker owns
 cloned exact receipts; the event loop owns captured playlist scope, indices, prior

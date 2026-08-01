@@ -10,6 +10,9 @@ and organized by user-visible concern.
 - CI now runs the exact locked, all-target formatting, Clippy, test, and build
   contract documented for contributors, with documentation tests kept as a
   separate explicit gate.
+- Windows native accessibility automation now closes an unsuccessfully expanded
+  View submenu before retrying it, so each attempt starts from a known menu state
+  while retaining the exact accessible-child assertions.
 - Dependency policy now denies every unreviewed duplicate crate version against
   an exact, rationale-backed transitive baseline. Both workspace lockfiles must
   pass cargo-deny without unexplained warnings.

@@ -517,6 +517,27 @@ function Open-ViewSubmenu {
             }
             Start-Sleep -Milliseconds 100
         }
+
+        if ($attempt -lt 3) {
+            # A failed nested-menu invocation can leave View open while AccessKit
+            # publishes no child nodes. Switching through File can only move away
+            # from View, even if View closes between the failed probe and this action.
+            # Wait-ForResult also replaces a UIA element if the tree refreshes before
+            # the invocation reaches it.
+            Wait-ForResult -Description "the File menu action before retrying '$Name'" -Probe {
+                $file = Get-Element -Name "File" -ControlType (
+                    [System.Windows.Automation.ControlType]::Button
+                )
+                if ($null -eq $file) {
+                    return $null
+                }
+                Activate-Element -Element $file
+                return [IntPtr]1
+            } | Out-Null
+            Wait-ForElementAbsent -Name $Name -Prefix -ControlType (
+                [System.Windows.Automation.ControlType]::Button
+            ) | Out-Null
+        }
     }
 
     $treeSummary = Get-TreeSummary

@@ -151,10 +151,10 @@ fn run_internal(
         show_image_info: false,
         show_tools_panel: false,
         tools_panel_open: true,
-        tools_panel_side: crate::ui::DockSide::Left,
+        tools_panel_side: crate::chrome::DockSide::Left,
         show_filmstrip_panel: probe_enabled,
         filmstrip_panel_open: true,
-        image_info_side: crate::ui::DockSide::Right,
+        image_info_side: crate::chrome::DockSide::Right,
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
         bg_override: None,
@@ -1121,13 +1121,13 @@ struct App {
     /// Whether the docked tools panel is expanded.
     tools_panel_open: bool,
     /// Horizontal edge used by the tools dock.
-    tools_panel_side: crate::ui::DockSide,
+    tools_panel_side: crate::chrome::DockSide,
     /// Whether folder previews reserve any viewport space.
     show_filmstrip_panel: bool,
     /// Whether the docked folder-preview panel is expanded.
     filmstrip_panel_open: bool,
     /// Horizontal edge used by Image Information.
-    image_info_side: crate::ui::DockSide,
+    image_info_side: crate::chrome::DockSide,
     /// When true, Save As copies EXIF from the source. Default **false** (strip).
     retain_exif: bool,
     bg_override: Option<[f64; 4]>,
@@ -2585,11 +2585,7 @@ impl App {
             .then_some(path)
     }
 
-    fn viewport_insets(&self) -> crate::view::ViewportInsets {
-        let scale_factor = self
-            .renderer
-            .as_ref()
-            .map_or(1.0, |renderer| renderer.window().scale_factor());
+    fn dock_input(&self) -> crate::chrome::DockInput {
         let has_filmstrip = self
             .playlist
             .as_ref()
@@ -2599,26 +2595,28 @@ impl App {
             .as_ref()
             .and_then(Renderer::image_size)
             .is_some();
-        crate::ui::viewport_insets(crate::ui::ChromeLayout {
-            tools: if !has_image || !self.show_tools_panel {
-                crate::ui::DockState::Hidden
-            } else if self.tools_panel_open {
-                crate::ui::DockState::Expanded
-            } else {
-                crate::ui::DockState::Collapsed
-            },
+        crate::chrome::DockInput {
+            has_image,
+            has_multiple_images: has_filmstrip,
+            show_tools: self.show_tools_panel,
+            tools_expanded: self.tools_panel_open,
             tools_side: self.tools_panel_side,
-            heal: has_image && self.heal.active,
-            filmstrip: if !has_image || !has_filmstrip || !self.show_filmstrip_panel {
-                crate::ui::DockState::Hidden
-            } else if self.filmstrip_panel_open {
-                crate::ui::DockState::Expanded
-            } else {
-                crate::ui::DockState::Collapsed
-            },
-            image_info: (has_image && self.show_image_info).then_some(self.image_info_side),
-            scale_factor,
-        })
+            show_filmstrip: self.show_filmstrip_panel,
+            filmstrip_expanded: self.filmstrip_panel_open,
+            show_image_info: self.show_image_info,
+            image_info_side: self.image_info_side,
+            heal_active: self.heal.active,
+        }
+    }
+
+    fn viewport_insets(&self) -> crate::view::ViewportInsets {
+        let scale_factor = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.window().scale_factor());
+        crate::chrome::viewport_insets(
+            crate::chrome::DockViewModel::new(self.dock_input()).layout(scale_factor),
+        )
     }
 
     fn screen_to_uv(&self, x: f64, y: f64) -> Option<(f32, f32)> {
@@ -3272,7 +3270,7 @@ impl App {
         if self.block_action_while_curating("changing Spot Heal") {
             return;
         }
-        if self.current_loaded_path().is_none() {
+        if !self.heal.active && self.current_loaded_path().is_none() {
             return;
         }
         if !self.heal.active && self.crop_job.is_some() {
@@ -3285,6 +3283,10 @@ impl App {
         }
         if !self.heal.active && self.save_job.is_some() {
             self.show_toast("Wait for the current save to finish before using Spot Heal");
+            return;
+        }
+        if !self.heal.active && self.rating_write_worker.is_some() {
+            self.show_toast("Wait for the rating update to finish before using Spot Heal");
             return;
         }
         if !self.heal.active && self.heal.is_busy() {
@@ -5500,7 +5502,6 @@ impl ApplicationHandler<UserEvent> for App {
                 let curation_recovery_status = self.curation_recovery.status();
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
-                let curation_busy = curation_status.is_some();
                 let folder_scan_busy = self.scanner_rx.is_some();
                 let path_str = self
                     .session
@@ -5513,13 +5514,6 @@ impl ApplicationHandler<UserEvent> for App {
                     .selected_path
                     .as_deref()
                     .map(prefetch::privacy_safe_file_name);
-                let show_image_info = self.show_image_info;
-                let show_tools_panel = self.show_tools_panel;
-                let tools_panel_open = self.tools_panel_open;
-                let tools_panel_side = self.tools_panel_side;
-                let show_filmstrip_panel = self.show_filmstrip_panel;
-                let filmstrip_panel_open = self.filmstrip_panel_open;
-                let image_info_side = self.image_info_side;
                 let retain_exif = self.retain_exif;
                 let theme_preference = self.theme_preference;
                 let show_about = self.show_about;
@@ -5542,7 +5536,6 @@ impl ApplicationHandler<UserEvent> for App {
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
                 let custom_crop_ratio = self.custom_crop_ratio;
-                let is_healing = self.heal.active;
                 let heal_busy = self.heal.is_busy();
                 let heal_brush_radius = self.heal.brush_radius;
                 let heal_feather_percent = self.heal.feather_percent;
@@ -5551,25 +5544,10 @@ impl ApplicationHandler<UserEvent> for App {
                     .refresh
                     .as_ref()
                     .map(|refresh| (refresh.candidate_index, refresh.candidate_count));
-                let can_undo_edit = !is_loading
-                    && !heal_busy
-                    && !crop_busy
-                    && !save_busy
-                    && !curation_busy
-                    && self.heal.history.can_undo();
-                let can_redo_edit = !is_loading
-                    && !heal_busy
-                    && !crop_busy
-                    && !save_busy
-                    && !curation_busy
-                    && self.heal.history.can_redo();
-                let can_undo_trash = !self.last_trashed.is_empty()
-                    && !is_loading
-                    && !crop_busy
-                    && !save_busy
-                    && !heal_busy
-                    && !self.heal.painting
-                    && !curation_busy;
+                let has_undo_edit = self.heal.history.can_undo();
+                let has_redo_edit = self.heal.history.can_redo();
+                let has_undo_trash = !self.last_trashed.is_empty();
+                let heal_painting = self.heal.painting;
                 let is_panning =
                     self.transform.is_panning || (self.space_held && self.mouse_left_down);
                 let bg_override = self.bg_override;
@@ -5585,7 +5563,10 @@ impl ApplicationHandler<UserEvent> for App {
                 let flip_h = self.transform.flip_h;
                 let flip_v = self.transform.flip_v;
                 let crop_rect = self.transform.crop_rect;
-                let viewport_insets = self.viewport_insets();
+                let dock = self.dock_input();
+                let viewport_insets = crate::chrome::viewport_insets(
+                    crate::chrome::DockViewModel::new(dock).layout(scale_factor),
+                );
                 let pixel_scale = self.renderer.as_ref().and_then(|renderer| {
                     let size = renderer.window().inner_size();
                     let image = renderer.image_size()?;
@@ -5644,14 +5625,10 @@ impl ApplicationHandler<UserEvent> for App {
                 };
 
                 let img_size = renderer.image_size();
-                let can_heal = !is_loading
-                    && load_error.is_none()
-                    && !crop_busy
-                    && !save_busy
-                    && !curation_busy
-                    && image_is_fully_displayed(source_image_size, renderer.image_texture_size());
+                let heal_supported =
+                    image_is_fully_displayed(source_image_size, renderer.image_texture_size());
                 let frame = crate::ui::UiFrameOwned {
-                    show_image_info,
+                    dock,
                     retain_exif,
                     background_override: bg_override,
                     theme_preference,
@@ -5660,12 +5637,6 @@ impl ApplicationHandler<UserEvent> for App {
                     show_update,
                     rating,
                     external_edit_pending,
-                    show_tools_panel,
-                    tools_panel_open,
-                    tools_panel_side,
-                    show_filmstrip_panel,
-                    filmstrip_panel_open,
-                    image_info_side,
                     file_path: path_str,
                     selected_file_name,
                     img_size,
@@ -5675,18 +5646,17 @@ impl ApplicationHandler<UserEvent> for App {
                     is_cropping,
                     crop_ratio,
                     custom_crop_ratio,
-                    is_healing,
-                    can_heal,
+                    heal_supported,
                     heal_busy,
+                    heal_painting,
                     heal_brush_radius,
                     heal_feather_percent,
                     heal_source,
-                    can_undo_edit,
-                    can_redo_edit,
-                    can_undo_trash,
+                    has_undo_edit,
+                    has_redo_edit,
+                    has_undo_trash,
                     restore_recovery_unsettled,
                     is_panning,
-                    has_image: img_size.is_some(),
                     is_loading,
                     is_opening,
                     load_error,

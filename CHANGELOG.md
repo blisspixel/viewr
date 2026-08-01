@@ -64,6 +64,13 @@ and organized by user-visible concern.
   owns nothing and remains retryable without a wake loop. Worker diagnostics use
   stable path-free categories while terminal suppression and the five-entry,
   256 MiB decoded cache policy remain unchanged.
+- Dock layout and menu presentation now come from one covered, immutable chrome
+  model rather than paint-time policy spread across the event loop and UI. One
+  captured dock snapshot drives both image-safe viewport insets and visible
+  panels. Shared tool controls now publish consistent readiness, selected state,
+  labels, shortcuts, and accessibility semantics across menus, context actions,
+  and docks, while active Spot Heal remains closable during conflicting work or
+  after opening an image that exceeds the GPU edit limit.
 
 ### Documentation
 

@@ -8,6 +8,7 @@
 
 pub(crate) mod animated;
 pub mod app;
+mod chrome;
 pub mod cli;
 pub mod color;
 pub mod crop;

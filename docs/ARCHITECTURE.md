@@ -109,10 +109,10 @@ struct App {
 
 There is no document database, plugin registry, or scene graph. The state is
 intentionally centralized so the winit event loop has one owner. The `session`,
-`crop`, `playlist`, `performance`, `job`, `prefetch`, and `thumbs` modules
-establish smaller state and logic seams without introducing a second mutable
-store. `App` remains a large orchestrator. Extracting dock/menu view models and
-narrowing native event plumbing are explicit roadmap work.
+`crop`, `playlist`, `performance`, `job`, `prefetch`, `thumbs`, and `chrome`
+modules establish smaller state and logic seams without introducing a second
+mutable store. `App` remains a large orchestrator. Narrowing native event
+plumbing is explicit roadmap work.
 
 ## Modules
 
@@ -334,8 +334,15 @@ Shipped:
 - **`performance`**: stable, path-free probe output and narrow platform peak-RSS
   readers used only by the explicit developer/CI performance command.
 - **`error`**: the typed error set for the app.
-- **`ui`**: the `egui` layer for the conventional menu bar, fully hideable and
-  collapsible docked tools and folder previews, left/right Image Information,
+- **`chrome`**: the pure, immutable projection from one event-loop-owned frame
+  snapshot to dock layout and control presentation. It derives applicability,
+  readiness, selected state, labels, shortcuts, and accessibility copy without a
+  window or a second mutable store. The same captured dock facts reserve the GPU
+  viewport and drive the painted panels, preventing layout and visible chrome
+  from observing different state.
+- **`ui`**: the thin `egui` and AccessKit adapter. It paints the conventional menu
+  bar, fully hideable and collapsible docked tools and folder previews, left/right
+  Image Information,
   animation controls, crop controls and handles, the temporary docked Spot Heal
   inspector, accessible rating and threshold radio groups, first-write disclosure,
   filtered-empty recovery, About modal, appearance picker, load/retry state, and
@@ -413,12 +420,13 @@ The rule: **the UI thread only ever draws things that are already ready.** All
 ## Current architecture pressure
 
 `app.rs` owns the event loop, input table, asynchronous job lifecycle, crop
-geometry, curation, and frame assembly. `ui.rs` owns both dock/menu policy and
-painting. That concentration was useful while the interaction model converged,
-but it now makes race behavior and accessibility enablement harder to test than
-the underlying decode/edit logic. The repository coverage command excludes most
-native application and rendering glue, so keeping product state inside those
-files also hides meaningful logic from the gate.
+geometry, curation, and frame assembly. `ui.rs` paints an immutable frame through
+the covered `chrome` policy, so dock layout, menu enablement, selected state, and
+accessibility presentation no longer live in native paint code. The remaining
+concentration is event dispatch and frame assembly in `app.rs` plus rendering
+adapters in `ui.rs`. The repository coverage command excludes most of that native
+glue, so meaningful transitions must continue moving behind narrow covered seams
+before later monitor, watcher, and page-state work expands them.
 
 Trash restore retains an explicit event-loop ownership boundary. The worker owns
 cloned exact receipts; the event loop owns captured playlist scope, indices, prior

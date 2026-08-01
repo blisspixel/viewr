@@ -4,6 +4,16 @@
 //! Design intent (see `docs/DESIGN.md`): persistent controls reserve their own
 //! space and never cover the photo. Amber marks active tools only.
 
+pub(crate) use crate::chrome::RATING_RECOVERY_STATUS;
+use crate::chrome::{
+    ChromeControl, ChromeInput, ChromeViewModel, DisclosureDirection, DisclosureView, DockInput,
+    PanelKind, PositionedPanel, ToolControlView,
+};
+pub use crate::chrome::{
+    ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
+    HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
+    viewport_insets,
+};
 use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::text::LayoutJob;
 use egui::{
@@ -57,23 +67,9 @@ const PRIMARY_MODIFIER: &str = "Cmd";
 #[cfg(not(target_os = "macos"))]
 const PRIMARY_MODIFIER: &str = "Ctrl";
 
-/// Logical height reserved for the persistent menu and image status bar.
-pub const TOP_BAR_HEIGHT: f32 = 40.0;
 const TOP_STATUS_MAX_WIDTH: f32 = 220.0;
 const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
 const TOP_METADATA_GAP: f32 = 8.0;
-/// Logical width of the collapsed tools rail.
-pub const TOOLS_RAIL_WIDTH: f32 = 44.0;
-/// Logical width of the expanded tools panel.
-pub const TOOLS_PANEL_WIDTH: f32 = 64.0;
-/// Logical width of the temporary spot-heal inspector.
-pub const HEAL_PANEL_WIDTH: f32 = 248.0;
-/// Logical height of the collapsed folder-preview rail.
-pub const FILMSTRIP_RAIL_HEIGHT: f32 = 44.0;
-/// Logical height of the expanded folder-preview panel.
-pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
-/// Logical width of the Image Info panel.
-pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
 
 const OPEN_SCOPE_SUMMARY: &str = "Open a file to start. Its folder is browsed when access allows. Open Folder selects it explicitly for this session.";
 const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
@@ -85,7 +81,6 @@ const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
 const EXTERNAL_EDIT_STATUS: &str =
     "External app opened source. Press F5 to reload possible changes.";
-pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 pub(crate) const CROP_RECOVERY_STATUS: &str =
@@ -94,83 +89,6 @@ pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation st
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
-
-/// Horizontal edge used by a docked side panel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DockSide {
-    /// Dock against the left edge of the available window.
-    Left,
-    /// Dock against the right edge of the available window.
-    Right,
-}
-
-/// Space reservation state for a docked panel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DockState {
-    /// The panel is not applicable to the current content.
-    Hidden,
-    /// Only the panel's narrow disclosure rail is visible.
-    Collapsed,
-    /// The panel and its controls are visible.
-    Expanded,
-}
-
-/// Persistent chrome layout used to derive the image-safe viewport.
-#[derive(Clone, Copy, Debug)]
-pub struct ChromeLayout {
-    /// Tools rail or expanded tools panel.
-    pub tools: DockState,
-    /// Edge used by the tools rail or panel.
-    pub tools_side: DockSide,
-    /// Whether the temporary spot-heal inspector is visible beside Tools.
-    pub heal: bool,
-    /// Folder-preview rail or expanded preview panel.
-    pub filmstrip: DockState,
-    /// Edge used by Image Information when the panel is visible.
-    pub image_info: Option<DockSide>,
-    /// Physical pixels per logical UI point.
-    pub scale_factor: f64,
-}
-
-/// Convert persistent panel state into physical-pixel image insets.
-#[must_use]
-pub fn viewport_insets(layout: ChromeLayout) -> crate::view::ViewportInsets {
-    let scale = layout.scale_factor.max(0.0) as f32;
-    let tools_width = match layout.tools {
-        DockState::Hidden => 0.0,
-        DockState::Collapsed => TOOLS_RAIL_WIDTH,
-        DockState::Expanded => TOOLS_PANEL_WIDTH,
-    };
-    let edit_width = if layout.heal { HEAL_PANEL_WIDTH } else { 0.0 };
-    let left = if layout.tools_side == DockSide::Left {
-        tools_width + edit_width
-    } else {
-        0.0
-    } + if layout.image_info == Some(DockSide::Left) {
-        IMAGE_INFO_PANEL_WIDTH
-    } else {
-        0.0
-    };
-    let right = if layout.tools_side == DockSide::Right {
-        tools_width + edit_width
-    } else {
-        0.0
-    } + if layout.image_info == Some(DockSide::Right) {
-        IMAGE_INFO_PANEL_WIDTH
-    } else {
-        0.0
-    };
-    crate::view::ViewportInsets {
-        left: left * scale,
-        right: right * scale,
-        top: TOP_BAR_HEIGHT * scale,
-        bottom: match layout.filmstrip {
-            DockState::Hidden => 0.0,
-            DockState::Collapsed => FILMSTRIP_RAIL_HEIGHT,
-            DockState::Expanded => FILMSTRIP_PANEL_HEIGHT,
-        } * scale,
-    }
-}
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub enum UiAction {
@@ -298,9 +216,9 @@ pub enum UiAction {
 
 /// Owned frame inputs for drawing chrome.
 #[allow(clippy::struct_excessive_bools)] // independent UI mode bits for one frame
-pub struct UiFrameOwned {
-    /// Whether the Image Info side panel is open.
-    pub show_image_info: bool,
+pub(crate) struct UiFrameOwned {
+    /// Raw dock facts captured once by the event loop for layout and paint.
+    pub(crate) dock: DockInput,
     /// Whether Save As will retain EXIF (default false = strip).
     pub retain_exif: bool,
     /// Current image-background override; `None` follows the operating-system theme.
@@ -317,18 +235,6 @@ pub struct UiFrameOwned {
     pub rating: RatingUiState,
     /// Whether an external handoff may have made the displayed pixels stale.
     pub external_edit_pending: bool,
-    /// Whether the docked tools panel is visible at all.
-    pub show_tools_panel: bool,
-    /// Whether the visible tools panel is expanded.
-    pub tools_panel_open: bool,
-    /// Horizontal edge used by the tools panel.
-    pub tools_panel_side: DockSide,
-    /// Whether the docked folder-preview panel is visible at all.
-    pub show_filmstrip_panel: bool,
-    /// Whether the visible folder-preview panel is expanded.
-    pub filmstrip_panel_open: bool,
-    /// Horizontal edge used by Image Information.
-    pub image_info_side: DockSide,
     /// Path associated with the currently presented pixels (display only).
     pub file_path: Option<String>,
     /// Privacy-safe basename of the currently selected file.
@@ -347,30 +253,28 @@ pub struct UiFrameOwned {
     pub crop_ratio: crate::crop::CropRatio,
     /// Session-local custom ratio fields shown by the crop picker.
     pub custom_crop_ratio: (u16, u16),
-    /// Focused spot-heal mode is active.
-    pub is_healing: bool,
-    /// The displayed texture represents every source pixel and can be edited.
-    pub can_heal: bool,
+    /// The displayed texture represents every source pixel Spot Heal can edit.
+    pub heal_supported: bool,
     /// A spot-heal worker is processing the current stroke.
     pub heal_busy: bool,
+    /// A pointer stroke is actively collecting spot-heal samples.
+    pub heal_painting: bool,
     /// Spot-heal radius in source-image pixels.
     pub heal_brush_radius: u32,
     /// Spot-heal feather as a percentage of brush radius.
     pub heal_feather_percent: u8,
     /// Selected and total ranked source patches for the latest repair.
     pub heal_source: Option<(usize, usize)>,
-    /// Whether an in-memory pixel edit can be undone.
-    pub can_undo_edit: bool,
-    /// Whether an undone in-memory pixel edit can be reapplied.
-    pub can_redo_edit: bool,
-    /// Whether a retained exact Trash receipt can be acted on in the current UI state.
-    pub can_undo_trash: bool,
+    /// Whether the edit history contains an undo entry before UI gating.
+    pub has_undo_edit: bool,
+    /// Whether the edit history contains a redo entry before UI gating.
+    pub has_redo_edit: bool,
+    /// Whether a retained exact Trash receipt exists before UI gating.
+    pub has_undo_trash: bool,
     /// Whether a prior Restore must reconcile before Undo ownership can be replaced.
     pub restore_recovery_unsettled: bool,
     /// Hand tool is currently dragging.
     pub is_panning: bool,
-    /// An image texture is loaded.
-    pub has_image: bool,
     /// A decode or display-preparation job is blocking image actions.
     pub is_loading: bool,
     /// A selected source is decoding or preparing its first display preview.
@@ -482,59 +386,36 @@ pub struct AnimationUiInfo {
 }
 
 impl UiFrameOwned {
-    fn curation_busy(&self) -> bool {
-        self.curation_status.is_some()
-    }
-
-    fn current_selection_ready(&self) -> bool {
-        self.has_image
-            && !self.is_loading
-            && self.load_error.is_none()
-            && !self.crop_busy
-            && !self.save_busy
-            && !self.heal_busy
-            && !self.curation_busy()
-            && !self.rating.write_busy
-    }
-
-    fn save_as_ready(&self) -> bool {
-        self.current_selection_ready() && !self.save_recovery_unsettled
-    }
-
-    const fn retry_load_ready(&self) -> bool {
-        !self.preview_load_retry_blocked
-    }
-
-    fn crop_toggle_ready(&self) -> bool {
-        self.current_selection_ready()
-            && (self.is_cropping
-                || (!self.crop_recovery_unsettled && !self.preview_recovery_unsettled))
-    }
-
-    fn crop_apply_ready(&self) -> bool {
-        self.is_cropping
-            && self.current_selection_ready()
-            && !self.crop_recovery_unsettled
-            && !self.preview_recovery_unsettled
-    }
-
-    fn curation_action_ready(&self) -> bool {
-        !self.is_loading
-            && !self.crop_busy
-            && !self.save_busy
-            && !self.heal_busy
-            && !self.is_cropping
-            && !self.is_healing
-            && !self.folder_scan_busy
-            && !self.curation_busy()
-    }
-
-    fn trash_undo_ready(&self) -> bool {
-        self.can_undo_trash && self.curation_action_ready()
-    }
-
-    fn trash_move_ready(&self) -> bool {
-        !self.restore_recovery_unsettled && self.current_selection_ready()
+    fn chrome_view_model(&self) -> ChromeViewModel {
+        ChromeViewModel::new(ChromeInput {
+            dock: self.dock,
+            is_loading: self.is_loading,
+            is_opening: self.is_opening,
+            load_failed: self.load_error.is_some(),
+            save_busy: self.save_busy,
+            crop_busy: self.crop_busy,
+            heal_busy: self.heal_busy,
+            heal_painting: self.heal_painting,
+            curation_busy: self.curation_status.is_some(),
+            folder_scan_busy: self.folder_scan_busy,
+            is_cropping: self.is_cropping,
+            heal_supported: self.heal_supported,
+            has_heal_source: self.heal_source.is_some(),
+            has_undo_edit: self.has_undo_edit,
+            has_redo_edit: self.has_redo_edit,
+            has_undo_trash: self.has_undo_trash,
+            restore_recovery_unsettled: self.restore_recovery_unsettled,
+            save_recovery_unsettled: self.save_recovery_unsettled,
+            crop_recovery_unsettled: self.crop_recovery_unsettled,
+            preview_recovery_unsettled: self.preview_recovery_unsettled,
+            preview_retry_blocked: self.preview_load_retry_blocked,
+            rating_state: self.rating.state,
+            rating_capability: self.rating.capability,
+            rating_filter: self.rating.filter,
+            rating_write_busy: self.rating.write_busy,
+            rating_recovery_unsettled: self.rating.recovery_unsettled,
+            rating_folder_count: self.rating.folder_count,
+        })
     }
 }
 
@@ -552,12 +433,13 @@ pub struct FilmstripItem {
 }
 
 /// Render the UI overlays and return a list of actions triggered by the user.
-pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
+pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let mut actions = Vec::new();
     apply_chrome_theme(ui.ctx(), frame.theme_mode);
     let colors = chrome_colors(ui);
+    let chrome = frame.chrome_view_model();
 
-    render_top_menu(ui, &mut actions, frame);
+    render_top_menu(ui, &mut actions, frame, chrome);
     if frame.rating.pending_disclosure.is_some() {
         render_rating_disclosure(ui, &mut actions, frame);
     } else {
@@ -579,30 +461,30 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
         return actions;
     }
 
-    if !frame.has_image {
-        render_empty_state(ui, &mut actions, frame);
+    if !frame.dock.has_image {
+        render_empty_state(ui, &mut actions, frame, chrome);
         if let Some(msg) = &frame.toast {
             render_toast(ui, msg, frame);
         }
         return actions;
     }
 
-    render_context_menu(ui, &mut actions, frame, colors);
+    render_context_menu(ui, &mut actions, frame, chrome, colors);
 
-    if frame.show_image_info {
-        render_image_info_panel(ui, &mut actions, frame);
+    if let Some(side) = chrome.dock.image_info {
+        render_image_info_panel(ui, &mut actions, frame, side);
     }
 
-    if frame.show_filmstrip_panel && frame.filmstrip.len() > 1 {
-        render_filmstrip(ui, &mut actions, frame);
+    if chrome.dock.filmstrip.state != DockState::Hidden {
+        render_filmstrip(ui, &mut actions, frame, chrome);
     }
 
-    if frame.show_tools_panel {
-        render_tools_panel(ui, &mut actions, frame);
+    if chrome.dock.tools.state != DockState::Hidden {
+        render_tools_panel(ui, &mut actions, frame, chrome);
     }
 
-    if frame.is_healing {
-        render_heal_panel(ui, &mut actions, frame);
+    if frame.dock.heal_active {
+        render_heal_panel(ui, &mut actions, frame, chrome);
         render_heal_overlay(ui, frame);
     }
 
@@ -611,7 +493,7 @@ pub fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     }
 
     if frame.is_cropping {
-        render_crop_overlay(ui, frame, &mut actions);
+        render_crop_overlay(ui, frame, chrome, &mut actions);
     }
 
     apply_cursor(ui, frame);
@@ -622,6 +504,7 @@ fn render_context_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
     let Some(pos) = frame.context_menu_pos else {
@@ -635,76 +518,109 @@ fn render_context_menu(
         .resizable(false)
         .show(ui.ctx(), |ui| {
             ui.set_max_width(320.0);
-            ui.add_enabled_ui(!frame.curation_busy(), |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Spot Heal (J)").clicked() {
-                        actions.push(UiAction::ToggleHeal);
-                        close = true;
-                    }
-                    let crop_label = if frame.is_cropping {
-                        "Cancel Crop (Esc)"
-                    } else {
-                        "Crop (C)"
-                    };
-                    if ui
-                        .add_enabled(frame.crop_toggle_ready(), egui::Button::new(crop_label))
-                        .clicked()
-                    {
-                        actions.push(UiAction::ToggleCrop);
-                        close = true;
-                    }
-                });
-                ui.separator();
-                let mut radius = frame.heal_brush_radius;
-                ui.label(
-                    RichText::new("Heal Brush Radius")
-                        .size(11.5)
-                        .color(colors.muted),
-                );
-                let slider = egui::Slider::new(
-                    &mut radius,
-                    crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
-                )
-                .suffix(" px");
-                let response = ui.add(slider);
-                response.widget_info(|| {
-                    WidgetInfo::slider(ui.is_enabled(), f64::from(radius), "Heal brush radius")
-                });
-                if response.changed() {
-                    actions.push(UiAction::SetHealBrushRadius(radius));
+            ui.horizontal(|ui| {
+                let heal = chrome.heal_control();
+                if context_tool_button(ui, heal).clicked() {
+                    actions.push(UiAction::ToggleHeal);
+                    close = true;
                 }
-                let mut feather = frame.heal_feather_percent;
-                ui.label(RichText::new("Heal Feather").size(11.5).color(colors.muted));
-                let response = ui.add(
-                    egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT)
-                        .suffix("%"),
-                );
-                response.widget_info(|| {
-                    WidgetInfo::slider(ui.is_enabled(), f64::from(feather), "Heal feather")
-                });
-                if response.changed() {
-                    actions.push(UiAction::SetHealFeather(feather));
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    ui.separator();
-                    let enabled = frame.current_selection_ready();
-                    let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
-                    open_with.widget_info(|| {
-                        WidgetInfo::labeled(WidgetType::Button, enabled, "Open With...")
-                    });
-                    if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
-                        actions.push(UiAction::OpenWith);
-                        close = true;
-                    }
-                    ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
+                let crop = chrome.crop_control();
+                if context_tool_button(ui, crop).clicked() {
+                    actions.push(UiAction::ToggleCrop);
+                    close = true;
                 }
             });
+            ui.separator();
+            let mut radius = frame.heal_brush_radius;
+            ui.label(
+                RichText::new("Heal Brush Radius")
+                    .size(11.5)
+                    .color(colors.muted),
+            );
+            let slider = egui::Slider::new(
+                &mut radius,
+                crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
+            )
+            .suffix(" px");
+            let adjust_enabled = chrome.is_enabled(ChromeControl::HealAdjust);
+            let response = ui.add_enabled(adjust_enabled, slider);
+            response.widget_info(|| {
+                WidgetInfo::slider(
+                    ui.is_enabled() && adjust_enabled,
+                    f64::from(radius),
+                    "Heal brush radius",
+                )
+            });
+            if response.changed() {
+                actions.push(UiAction::SetHealBrushRadius(radius));
+            }
+            let mut feather = frame.heal_feather_percent;
+            ui.label(RichText::new("Heal Feather").size(11.5).color(colors.muted));
+            let response = ui.add_enabled(
+                adjust_enabled,
+                egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT).suffix("%"),
+            );
+            response.widget_info(|| {
+                WidgetInfo::slider(
+                    ui.is_enabled() && adjust_enabled,
+                    f64::from(feather),
+                    "Heal feather",
+                )
+            });
+            if response.changed() {
+                actions.push(UiAction::SetHealFeather(feather));
+            }
+            #[cfg(target_os = "windows")]
+            {
+                ui.separator();
+                let enabled = chrome.is_enabled(ChromeControl::OpenWith);
+                let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
+                open_with.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Button, enabled, "Open With...")
+                });
+                if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
+                    actions.push(UiAction::OpenWith);
+                    close = true;
+                }
+                ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
+            }
         });
 
     if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
         actions.push(UiAction::CloseContextMenu);
     }
+}
+
+fn menu_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Response {
+    let enabled = ui.is_enabled() && view.enabled;
+    let response = ui.add_enabled(
+        view.enabled,
+        egui::Button::new(view.label)
+            .shortcut_text(view.shortcut)
+            .selected(view.selected),
+    );
+    response.widget_info(|| {
+        WidgetInfo::selected(WidgetType::Button, enabled, view.selected, view.label)
+    });
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_keyboard_shortcut(view.shortcut);
+    });
+    response
+}
+
+fn context_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Response {
+    let label = format!("{} ({})", view.label, view.shortcut);
+    let enabled = ui.is_enabled() && view.enabled;
+    let response = ui.add_enabled(
+        view.enabled,
+        egui::Button::new(&label).selected(view.selected),
+    );
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, view.selected, &label));
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_keyboard_shortcut(view.shortcut);
+    });
+    response
 }
 
 fn apply_chrome_theme(ctx: &egui::Context, mode: crate::theme::Mode) {
@@ -786,7 +702,12 @@ fn configure_top_menu_widgets(ui: &mut egui::Ui, colors: ChromeColors) {
     clippy::too_many_lines,
     reason = "the menu bar keeps its ordered menus and responsive status strip together"
 )]
-fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_top_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
     Panel::top("top_panel")
         .exact_size(TOP_BAR_HEIGHT)
@@ -796,15 +717,15 @@ fn render_top_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFra
             configure_top_menu_widgets(ui, colors);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                file_menu(ui, actions, frame);
-                edit_menu(ui, actions, frame);
-                view_menu(ui, actions, frame);
-                tools_menu(ui, actions, frame);
+                file_menu(ui, actions, chrome);
+                edit_menu(ui, actions, frame, chrome);
+                view_menu(ui, actions, frame, chrome);
+                tools_menu(ui, actions, chrome);
                 help_menu(ui, actions);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    render_top_operation_status(ui, actions, frame, colors);
+                    render_top_operation_status(ui, actions, frame, chrome, colors);
                     render_top_rating_position(ui, frame, colors);
-                    render_top_image_facts(ui, frame, colors);
+                    render_top_image_facts(ui, frame, chrome, colors);
                 });
             });
         });
@@ -814,6 +735,7 @@ fn render_top_operation_status(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
     if let Some(status) = frame.curation_status.as_deref() {
@@ -825,8 +747,8 @@ fn render_top_operation_status(
     } else if frame.rating.discovery_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_top_status(ui, "Reading folder ratings...", colors);
-    } else if frame.has_image && frame.load_error.is_some() {
-        ui.add_enabled_ui(frame.retry_load_ready(), |ui| {
+    } else if frame.dock.has_image && frame.load_error.is_some() {
+        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RetryLoad), |ui| {
             add_retry_button(ui, actions, frame.selected_file_name.as_deref());
         });
         if frame.save_recovery_unsettled {
@@ -842,18 +764,18 @@ fn render_top_operation_status(
         {
             add_top_status(ui, &status, colors);
         }
-    } else if frame.has_image && frame.is_opening {
+    } else if frame.dock.has_image && frame.is_opening {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         if let Some(status) = image_open_status(true, false, frame.selected_file_name.as_deref()) {
             add_top_status(ui, &status, colors);
         }
-    } else if frame.has_image && frame.is_loading {
+    } else if frame.dock.has_image && frame.is_loading {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_top_status(ui, "Preparing preview...", colors);
-    } else if frame.has_image && frame.save_busy {
+    } else if frame.dock.has_image && frame.save_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_top_status(ui, "Saving...", colors);
-    } else if frame.has_image && frame.crop_busy {
+    } else if frame.dock.has_image && frame.crop_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_top_status(ui, "Applying crop...", colors);
     } else if frame.save_recovery_unsettled {
@@ -913,15 +835,20 @@ fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: C
     }
 }
 
-fn render_top_image_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
-    if frame.has_image {
+fn render_top_image_facts(
+    ui: &mut egui::Ui,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+    colors: ChromeColors,
+) {
+    if frame.dock.has_image {
         Frame::new()
             .fill(colors.raised)
             .corner_radius(CornerRadius::same(6))
             .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
                 ui.label(
-                    RichText::new(rating_status_label(frame.rating.state))
+                    RichText::new(chrome.rating_menu_label())
                         .size(12.5)
                         .color(colors.muted),
                 );
@@ -932,7 +859,7 @@ fn render_top_image_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: Chrom
         return;
     }
     let mut has_detail = false;
-    if frame.has_image {
+    if frame.dock.has_image {
         ui.label(
             RichText::new(format!("{:.0}%", frame.pixel_scale * 100.0))
                 .size(12.5)
@@ -965,13 +892,13 @@ fn render_top_image_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: Chrom
     }
 }
 
-fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("File").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(238.0);
         let open_file = ui
             .add_enabled(
-                !frame.curation_busy(),
+                chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new("Open File...").shortcut_text(format!("{PRIMARY_MODIFIER}+O")),
             )
             .on_hover_text(OPEN_FILE_SCOPE_HELP);
@@ -981,7 +908,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         let open_folder = ui
             .add_enabled(
-                !frame.curation_busy(),
+                chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new("Open Folder...")
                     .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+O")),
             )
@@ -992,7 +919,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready() && !frame.heal_busy,
+                chrome.is_enabled(ChromeControl::Reload),
                 egui::Button::new("Reload File").shortcut_text("F5"),
             )
             .clicked()
@@ -1004,7 +931,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         {
             let open_with = ui
                 .add_enabled(
-                    frame.current_selection_ready(),
+                    chrome.is_enabled(ChromeControl::OpenWith),
                     egui::Button::new("Open With..."),
                 )
                 .on_hover_text(OPEN_WITH_HELP);
@@ -1015,7 +942,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.save_as_ready(),
+                chrome.is_enabled(ChromeControl::SaveAs),
                 egui::Button::new("Save As...")
                     .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+S")),
             )
@@ -1027,7 +954,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         ui.separator();
         if ui
             .add_enabled(
-                frame.trash_move_ready(),
+                chrome.is_enabled(ChromeControl::MoveToTrash),
                 egui::Button::new("Move to Trash").shortcut_text("Delete"),
             )
             .clicked()
@@ -1037,7 +964,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready() && !frame.heal_busy,
+                chrome.is_enabled(ChromeControl::PermanentDelete),
                 egui::Button::new("Permanently Delete...").shortcut_text("Shift+Delete"),
             )
             .clicked()
@@ -1045,48 +972,43 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             actions.push(UiAction::PermanentDelete);
             ui.close();
         }
-        undo_trash_menu_item(ui, actions, frame);
+        undo_trash_menu_item(ui, actions, chrome);
     });
 }
 
-fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
-    let label = "Undo Trash";
-    let unsettled = frame.curation_busy() || frame.restore_recovery_unsettled;
-    let help = trash_undo_help(frame.can_undo_trash, unsettled);
-    let enabled = frame.trash_undo_ready();
-    let response = ui.add_enabled(enabled, egui::Button::new(label).shortcut_text("U"));
-    let accessible_label = trash_undo_accessible_label(frame.can_undo_trash, unsettled);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, &accessible_label));
-    if response.on_hover_text(help).clicked() {
+fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+    let view = chrome.undo_trash();
+    let response = ui.add_enabled(
+        view.enabled,
+        egui::Button::new(view.label).shortcut_text(view.shortcut),
+    );
+    response.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Button, view.enabled, &view.accessibility_label)
+    });
+    if response.on_hover_text(view.help).clicked() {
         actions.push(UiAction::UndoTrash);
         ui.close();
     }
 }
 
-fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn edit_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("Edit").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(210.0);
-        let crop_label = if frame.is_cropping {
-            "Cancel Crop"
-        } else {
-            "Crop"
-        };
-        let crop_shortcut = if frame.is_cropping { "Esc" } else { "C" };
-        if ui
-            .add_enabled(
-                frame.crop_toggle_ready(),
-                egui::Button::new(crop_label).shortcut_text(crop_shortcut),
-            )
-            .clicked()
-        {
+        let crop = chrome.crop_control();
+        if menu_tool_button(ui, crop).clicked() {
             actions.push(UiAction::ToggleCrop);
             ui.close();
         }
         if frame.is_cropping
             && ui
                 .add_enabled(
-                    frame.crop_apply_ready(),
+                    chrome.is_enabled(ChromeControl::ApplyCrop),
                     egui::Button::new("Apply Crop").shortcut_text("Enter"),
                 )
                 .clicked()
@@ -1094,11 +1016,11 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             actions.push(UiAction::ApplyCrop);
             ui.close();
         }
-        spot_heal_menu_items(ui, actions, frame);
+        spot_heal_menu_items(ui, actions, chrome);
         ui.separator();
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                chrome.is_enabled(ChromeControl::EditTransform),
                 egui::Button::new("Rotate Clockwise").shortcut_text("R"),
             )
             .clicked()
@@ -1108,7 +1030,7 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                chrome.is_enabled(ChromeControl::EditTransform),
                 egui::Button::new("Rotate Counterclockwise").shortcut_text("L"),
             )
             .clicked()
@@ -1118,7 +1040,7 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                chrome.is_enabled(ChromeControl::EditTransform),
                 egui::Button::new("Flip Horizontally").shortcut_text("H"),
             )
             .clicked()
@@ -1128,7 +1050,7 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                chrome.is_enabled(ChromeControl::EditTransform),
                 egui::Button::new("Flip Vertically").shortcut_text("V"),
             )
             .clicked()
@@ -1137,139 +1059,75 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.close();
         }
         ui.separator();
-        let label = rating_menu_label(frame);
-        ui.add_enabled_ui(!frame.rating.write_busy, |ui| {
-            ui.menu_button(label, |ui| rating_menu(ui, actions, frame));
+        let label = chrome.rating_menu_label();
+        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingMenu), |ui| {
+            ui.menu_button(label, |ui| rating_menu(ui, actions, chrome));
         });
     });
 }
 
-fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     ui.set_min_width(220.0);
-    let writable = frame.current_selection_ready()
-        && !frame.rating.recovery_unsettled
-        && frame.rating.capability == crate::ratings::RatingWriteCapability::WritableJpeg;
-    let choices = std::iter::once((
-        crate::ratings::RatingAssignment::Clear,
-        "Unrated",
-        "0",
-        frame.rating.state == crate::ratings::RatingState::Unrated,
-    ))
-    .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
-        (
-            crate::ratings::RatingAssignment::Set(rating),
-            match rating.get() {
-                1 => "1 of 5",
-                2 => "2 of 5",
-                3 => "3 of 5",
-                4 => "4 of 5",
-                5 => "5 of 5",
-                _ => unreachable!("validated rating"),
-            },
-            match rating.get() {
-                1 => "1",
-                2 => "2",
-                3 => "3",
-                4 => "4",
-                5 => "5",
-                _ => unreachable!("validated rating"),
-            },
-            frame.rating.state == crate::ratings::RatingState::Rated(rating),
-        )
-    }));
-    for (assignment, label, shortcut, selected) in choices {
+    let choices = chrome.rating_choices();
+    for choice in choices {
         let response = ui.add_enabled(
-            writable,
-            egui::RadioButton::new(selected, format!("{label}    {shortcut}")),
+            choice.enabled,
+            egui::RadioButton::new(
+                choice.selected,
+                format!("{}    {}", choice.label, choice.shortcut),
+            ),
         );
         response.widget_info(|| {
             WidgetInfo::selected(
                 WidgetType::RadioButton,
-                writable,
-                selected,
-                format!("Rating {label}, shortcut {shortcut}"),
+                choice.enabled,
+                choice.selected,
+                &choice.accessibility_label,
             )
         });
         if response.clicked() {
-            actions.push(UiAction::AssignRating(assignment));
+            actions.push(UiAction::AssignRating(choice.assignment));
             ui.close();
         }
     }
-    if !writable {
+    if !chrome.is_enabled(ChromeControl::RatingChoice) {
         ui.separator();
         ui.label(
-            RichText::new(rating_write_unavailable_text(frame))
+            RichText::new(chrome.rating_unavailable_text())
                 .size(11.0)
                 .color(chrome_colors(ui).muted),
         );
     }
 }
 
-fn tools_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn tools_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("Tools").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(210.0);
-        let crop_label = if frame.is_cropping {
-            "Cancel Crop"
-        } else {
-            "Crop"
-        };
-        let crop_shortcut = if frame.is_cropping { "Esc" } else { "C" };
-        if ui
-            .add_enabled(
-                frame.crop_toggle_ready(),
-                egui::Button::new(crop_label).shortcut_text(crop_shortcut),
-            )
-            .clicked()
-        {
+        let crop = chrome.crop_control();
+        if menu_tool_button(ui, crop).clicked() {
             actions.push(UiAction::ToggleCrop);
             ui.close();
         }
 
-        let heal_label = if frame.is_healing {
-            "Finish Spot Heal"
-        } else if frame.heal_busy {
-            "Finishing Spot Heal..."
-        } else {
-            "Spot Heal"
-        };
-        let heal_shortcut = if frame.is_healing { "Esc" } else { "J" };
-        if ui
-            .add_enabled(
-                frame.can_heal && (!frame.heal_busy || frame.is_healing),
-                egui::Button::new(heal_label).shortcut_text(heal_shortcut),
-            )
-            .clicked()
-        {
+        let heal = chrome.heal_control();
+        if menu_tool_button(ui, heal).clicked() {
             actions.push(UiAction::ToggleHeal);
             ui.close();
         }
     });
 }
 
-fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
-    let heal_label = if frame.is_healing {
-        "Finish Spot Heal"
-    } else if frame.heal_busy {
-        "Finishing Spot Heal..."
-    } else {
-        "Spot Heal"
-    };
-    let shortcut = if frame.is_healing { "Esc" } else { "J" };
-    if ui
-        .add_enabled(
-            frame.can_heal && (!frame.heal_busy || frame.is_healing),
-            egui::Button::new(heal_label).shortcut_text(shortcut),
-        )
-        .clicked()
-    {
+fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+    let heal = chrome.heal_control();
+    if menu_tool_button(ui, heal).clicked() {
         actions.push(UiAction::ToggleHeal);
         ui.close();
     }
     ui.separator();
     if ui
         .add_enabled(
-            frame.can_undo_edit,
+            chrome.is_enabled(ChromeControl::UndoEdit),
             egui::Button::new("Undo Spot Heal").shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
         )
         .clicked()
@@ -1279,7 +1137,7 @@ fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &
     }
     if ui
         .add_enabled(
-            frame.can_redo_edit,
+            chrome.is_enabled(ChromeControl::RedoEdit),
             egui::Button::new("Redo Spot Heal")
                 .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
         )
@@ -1333,28 +1191,6 @@ fn retry_open_label(selected_file_name: Option<&str>) -> String {
     format!("Retry opening {}", selected_file_name.unwrap_or("image"))
 }
 
-fn trash_undo_help(can_undo: bool, unsettled: bool) -> &'static str {
-    if unsettled {
-        "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
-    } else if can_undo {
-        "Restores the latest safely recoverable Trash action. It may belong to another folder."
-    } else {
-        "No safely recoverable Trash action is available."
-    }
-}
-
-fn trash_undo_accessible_label(can_undo: bool, unsettled: bool) -> String {
-    if !can_undo && !unsettled {
-        "Undo Trash".to_owned()
-    } else {
-        format!("Undo Trash. {}", trash_undo_help(can_undo, unsettled))
-    }
-}
-
-fn appearance_menu_label(preference: crate::theme::Preference) -> String {
-    format!("Appearance: {}", preference.name())
-}
-
 fn add_retry_button(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
@@ -1390,13 +1226,18 @@ fn add_empty_retry_button(
     }
 }
 
-fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn view_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("View").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(228.0);
         if ui
             .add_enabled(
-                frame.has_image,
+                chrome.is_enabled(ChromeControl::ViewImage),
                 egui::Button::new("Fit Image to View")
                     .shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
             )
@@ -1407,7 +1248,7 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.has_image,
+                chrome.is_enabled(ChromeControl::ViewImage),
                 egui::Button::new("Actual Size").shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
             )
             .clicked()
@@ -1417,7 +1258,7 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.has_image,
+                chrome.is_enabled(ChromeControl::ViewImage),
                 egui::Button::new("Zoom In").shortcut_text("+"),
             )
             .clicked()
@@ -1427,7 +1268,7 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.has_image,
+                chrome.is_enabled(ChromeControl::ViewImage),
                 egui::Button::new("Zoom Out").shortcut_text("-"),
             )
             .clicked()
@@ -1436,11 +1277,10 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.close();
         }
         ui.separator();
-        let rating_filter_available = frame.rating.folder_count > 0;
-        let rating_filter_label = rating_filter_menu_label(frame);
-        ui.add_enabled_ui(rating_filter_available, |ui| {
+        let rating_filter_label = chrome.rating_filter_menu_label();
+        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
             ui.menu_button(rating_filter_label, |ui| {
-                rating_filter_menu(ui, actions, frame);
+                rating_filter_menu(ui, actions, chrome);
             });
         });
         ui.separator();
@@ -1452,197 +1292,97 @@ fn view_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.close();
         }
         ui.separator();
-        ui.menu_button("Panels", |ui| panels_menu(ui, actions, frame));
+        ui.menu_button("Panels", |ui| panels_menu(ui, actions, chrome));
         ui.menu_button("Panel Position", |ui| {
-            panel_position_menu(ui, actions, frame);
+            panel_position_menu(ui, actions, chrome);
         });
         ui.separator();
         ui.menu_button("Image Background", |ui| {
             background_menu(ui, actions, frame.background_override);
         });
-        ui.menu_button(appearance_menu_label(frame.theme_preference), |ui| {
-            appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
-        });
+        ui.menu_button(
+            crate::chrome::appearance_menu_label(frame.theme_preference),
+            |ui| {
+                appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
+            },
+        );
     });
 }
 
-fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     ui.set_min_width(220.0);
-    let all = frame.rating.filter == crate::ratings::RatingFilter::All;
-    if ui.radio(all, "All images").clicked() {
-        actions.push(UiAction::SetRatingFilter(crate::ratings::RatingFilter::All));
-        ui.close();
-    }
-    for rating in crate::ratings::Rating::ALL {
-        let filter = crate::ratings::RatingFilter::AtLeast(rating);
-        let label = format!("At least {}", rating.get());
-        let response = ui.radio(frame.rating.filter == filter, &label);
+    for choice in chrome.rating_filter_choices() {
+        let response = ui.add_enabled(
+            choice.enabled,
+            egui::RadioButton::new(choice.selected, &choice.label),
+        );
         response.widget_info(|| {
             WidgetInfo::selected(
                 WidgetType::RadioButton,
-                ui.is_enabled(),
-                frame.rating.filter == filter,
-                format!("Rating filter: {label}"),
+                choice.enabled,
+                choice.selected,
+                &choice.accessibility_label,
             )
         });
         if response.clicked() {
-            actions.push(UiAction::SetRatingFilter(filter));
+            actions.push(UiAction::SetRatingFilter(choice.filter));
             ui.close();
         }
     }
 }
 
-fn rating_status_label(state: crate::ratings::RatingState) -> &'static str {
-    match state {
-        crate::ratings::RatingState::Loading => "Rating: Reading...",
-        crate::ratings::RatingState::Unrated => "Rating: Unrated",
-        crate::ratings::RatingState::Rated(rating) => match rating.get() {
-            1 => "Rating: 1 of 5",
-            2 => "Rating: 2 of 5",
-            3 => "Rating: 3 of 5",
-            4 => "Rating: 4 of 5",
-            5 => "Rating: 5 of 5",
-            _ => "Rating: Unsupported",
-        },
-        crate::ratings::RatingState::Rejected => "Rating: Rejected",
-        crate::ratings::RatingState::Conflict => "Rating: Conflict",
-        crate::ratings::RatingState::Unsupported => "Rating: Unsupported",
-        crate::ratings::RatingState::Unreadable => "Rating: Unreadable",
-    }
-}
-
-fn rating_menu_label(frame: &UiFrameOwned) -> &'static str {
-    if frame.has_image {
-        rating_status_label(frame.rating.state)
-    } else if frame.is_opening {
-        "Rating: Loading image"
-    } else if frame.load_error.is_some() {
-        "Rating: Image unavailable"
-    } else {
-        "Rating: Open an image"
-    }
-}
-
-fn rating_filter_label(filter: crate::ratings::RatingFilter) -> String {
-    match filter {
-        crate::ratings::RatingFilter::All => "Rating Filter: All images".to_owned(),
-        crate::ratings::RatingFilter::AtLeast(rating) => {
-            format!("Rating Filter: At least {}", rating.get())
-        }
-    }
-}
-
-fn rating_filter_menu_label(frame: &UiFrameOwned) -> String {
-    if frame.folder_scan_busy {
-        "Rating Filter: Reading folder...".to_owned()
-    } else if frame.rating.folder_count == 0 {
-        "Rating Filter: Open a folder".to_owned()
-    } else {
-        rating_filter_label(frame.rating.filter)
-    }
-}
-
-fn rating_write_unavailable_text(frame: &UiFrameOwned) -> &'static str {
-    if frame.rating.recovery_unsettled {
-        return RATING_RECOVERY_STATUS;
-    }
-    if !frame.has_image {
-        if frame.is_opening {
-            return "Wait for the selected image to finish loading.";
-        }
-        if frame.load_error.is_some() {
-            return "Reload or open another image before assigning a rating.";
-        }
-        return "Open an image to assign a rating.";
-    }
-    match frame.rating.capability {
-        crate::ratings::RatingWriteCapability::WritableJpeg => "Rating is not ready yet.",
-        crate::ratings::RatingWriteCapability::ReadOnlyFormat => {
-            "This image's rating is read-only in viewr."
-        }
-        crate::ratings::RatingWriteCapability::UnsafeSource => {
-            "Safe source identity is unavailable for rating writes."
-        }
-        crate::ratings::RatingWriteCapability::ObservationFailed => {
-            "Rating could not be read. Close and reopen viewr before changing it."
-        }
-        crate::ratings::RatingWriteCapability::UnsupportedMetadata => {
-            "This image has unsupported rating metadata."
-        }
-    }
-}
-
-fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     ui.set_min_width(224.0);
-    let choices = [
-        (
-            "Tools",
-            "T",
-            frame.has_image,
-            frame.show_tools_panel,
-            UiAction::ToggleToolsPanelVisibility,
-        ),
-        (
-            "Folder Previews",
-            "G",
-            frame.filmstrip.len() > 1,
-            frame.show_filmstrip_panel,
-            UiAction::ToggleFilmstripPanelVisibility,
-        ),
-        (
-            "Image Information",
-            "I",
-            frame.has_image,
-            frame.show_image_info,
-            UiAction::ToggleImageInfo,
-        ),
-    ];
-    for (label, shortcut, enabled, selected, action) in choices {
+    for choice in chrome.dock.panel_toggles() {
         let response = ui
             .add_enabled(
-                enabled,
-                egui::Button::new(label)
-                    .shortcut_text(shortcut)
-                    .selected(selected)
+                choice.enabled,
+                egui::Button::new(choice.label)
+                    .shortcut_text(choice.shortcut)
+                    .selected(choice.selected)
                     .min_size(Vec2::new(ui.available_width(), 0.0)),
             )
-            .on_hover_text(format!("Toggle {label} ({shortcut})"));
+            .on_hover_text(format!("Toggle {} ({})", choice.label, choice.shortcut));
         response.ctx.accesskit_node_builder(response.id, |node| {
-            node.set_keyboard_shortcut(shortcut);
+            node.set_keyboard_shortcut(choice.shortcut);
         });
         if response.clicked() {
-            actions.push(action);
+            actions.push(match choice.kind {
+                PanelKind::Tools => UiAction::ToggleToolsPanelVisibility,
+                PanelKind::Filmstrip => UiAction::ToggleFilmstripPanelVisibility,
+                PanelKind::ImageInfo => UiAction::ToggleImageInfo,
+            });
             ui.close();
         }
     }
 }
 
-fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     ui.set_min_width(224.0);
-    dock_side_choices(
+    render_dock_side_choices(
         ui,
         actions,
         "TOOLS",
-        "Tools",
-        frame.tools_panel_side,
+        PositionedPanel::Tools,
+        chrome.dock.tools.side,
         UiAction::SetToolsPanelSide,
     );
     ui.separator();
-    dock_side_choices(
+    render_dock_side_choices(
         ui,
         actions,
         "IMAGE INFORMATION",
-        "Image Information",
-        frame.image_info_side,
+        PositionedPanel::ImageInfo,
+        chrome.dock.image_info_side,
         UiAction::SetImageInfoSide,
     );
 }
 
-fn dock_side_choices(
+fn render_dock_side_choices(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     heading: &str,
-    accessibility_heading: &str,
+    panel: PositionedPanel,
     current: DockSide,
     action: fn(DockSide) -> UiAction,
 ) {
@@ -1653,18 +1393,18 @@ fn dock_side_choices(
             .color(colors.muted)
             .strong(),
     );
-    for (side, label) in [(DockSide::Left, "Left"), (DockSide::Right, "Right")] {
-        let response = ui.radio(current == side, label);
+    for choice in crate::chrome::dock_side_choices(panel, current) {
+        let response = ui.radio(choice.selected, choice.label);
         response.widget_info(|| {
             WidgetInfo::selected(
                 WidgetType::RadioButton,
                 ui.is_enabled(),
-                current == side,
-                format!("{accessibility_heading}: {label}"),
+                choice.selected,
+                &choice.accessibility_label,
             )
         });
         if response.clicked() {
-            actions.push(action(side));
+            actions.push(action(choice.side));
             ui.close();
         }
     }
@@ -1672,15 +1412,9 @@ fn dock_side_choices(
 
 fn background_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, current: Option<[f64; 4]>) {
     ui.set_min_width(172.0);
-    let choices = [
-        ("Theme Default", None),
-        ("Black", Some([0.0, 0.0, 0.0, 1.0])),
-        ("Neutral Gray", Some([0.2, 0.2, 0.2, 1.0])),
-        ("White", Some([1.0, 1.0, 1.0, 1.0])),
-    ];
-    for (label, value) in choices {
-        if ui.radio(current == value, label).clicked() {
-            actions.push(UiAction::SetBackground(value));
+    for choice in crate::chrome::background_choices(current) {
+        if ui.radio(choice.selected, choice.label).clicked() {
+            actions.push(UiAction::SetBackground(choice.value));
             ui.close();
         }
     }
@@ -1705,13 +1439,11 @@ fn appearance_menu(
         .wrap(),
     );
     ui.separator();
-    let current_system_mode = (current == crate::theme::Preference::System).then_some(resolved);
-    for preference in crate::theme::Preference::ALL {
-        let description = preference.description(current_system_mode);
+    for choice in crate::chrome::appearance_choices(current, resolved) {
         let mut label = LayoutJob::default();
         label.wrap.max_width = TEXT_WIDTH;
         label.append(
-            preference.name(),
+            choice.label,
             0.0,
             TextFormat {
                 font_id: FontId::proportional(13.0),
@@ -1729,7 +1461,7 @@ fn appearance_menu(
             },
         );
         label.append(
-            &description,
+            &choice.description,
             0.0,
             TextFormat {
                 font_id: FontId::proportional(11.5),
@@ -1737,18 +1469,17 @@ fn appearance_menu(
                 ..TextFormat::default()
             },
         );
-        let accessibility_label = preference.accessible_label(current_system_mode);
-        let response = ui.add(egui::RadioButton::new(current == preference, label));
+        let response = ui.add(egui::RadioButton::new(choice.selected, label));
         response.widget_info(|| {
             WidgetInfo::selected(
                 WidgetType::RadioButton,
                 ui.is_enabled(),
-                current == preference,
-                &accessibility_label,
+                choice.selected,
+                &choice.accessibility_label,
             )
         });
         if response.clicked() {
-            actions.push(UiAction::SetTheme(preference));
+            actions.push(UiAction::SetTheme(choice.preference));
             ui.close();
         }
     }
@@ -2085,7 +1816,12 @@ fn render_filtered_empty_state(
         });
 }
 
-fn render_empty_state(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_empty_state(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let is_opening = frame.is_opening;
     let load_error = frame.load_error.as_deref();
     let selected_file_name = frame.selected_file_name.as_deref();
@@ -2147,7 +1883,7 @@ fn render_empty_state(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                         };
                         ui.label(RichText::new(description).size(13.0).color(colors.muted));
                         if !is_opening {
-                            render_empty_state_actions(ui, actions, frame, colors);
+                            render_empty_state_actions(ui, actions, frame, chrome, colors);
                         }
                         ui.label(
                             RichText::new(LOCAL_PRIVACY_SUMMARY)
@@ -2166,21 +1902,25 @@ fn render_empty_state_actions(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
     let load_error = frame.load_error.as_deref();
     let selected_file_name = frame.selected_file_name.as_deref();
-    let curation_busy = frame.curation_busy();
     ui.add_space(16.0);
     ui.horizontal(|ui| {
         if load_error.is_some() {
-            ui.add_enabled_ui(!curation_busy && frame.retry_load_ready(), |ui| {
-                add_empty_retry_button(ui, actions, selected_file_name, colors);
-            });
+            ui.add_enabled_ui(
+                chrome.is_enabled(ChromeControl::OpenSource)
+                    && chrome.is_enabled(ChromeControl::RetryLoad),
+                |ui| {
+                    add_empty_retry_button(ui, actions, selected_file_name, colors);
+                },
+            );
         }
         let open_file = ui
             .add_enabled(
-                !curation_busy,
+                chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new("Open File").min_size(Vec2::new(116.0, 36.0)),
             )
             .on_hover_text(OPEN_FILE_SCOPE_HELP);
@@ -2189,7 +1929,7 @@ fn render_empty_state_actions(
         }
         let open_folder = ui
             .add_enabled(
-                !curation_busy,
+                chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new("Open Folder").min_size(Vec2::new(116.0, 36.0)),
             )
             .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
@@ -2219,9 +1959,14 @@ fn paint_empty_image_icon(painter: &egui::Painter, rect: Rect, colors: ChromeCol
     painter.circle_filled(frame.right_top() + Vec2::new(-9.0, 9.0), 3.0, colors.accent);
 }
 
-fn render_image_info_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_image_info_panel(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    side: DockSide,
+) {
     let colors = chrome_colors(ui);
-    let panel = match frame.image_info_side {
+    let panel = match side {
         DockSide::Left => Panel::left("image_info_panel"),
         DockSide::Right => Panel::right("image_info_panel"),
     };
@@ -2482,6 +2227,24 @@ enum ChevronDirection {
     Down,
 }
 
+const fn map_disclosure_direction(direction: DisclosureDirection) -> ChevronDirection {
+    match direction {
+        DisclosureDirection::Left => ChevronDirection::Left,
+        DisclosureDirection::Right => ChevronDirection::Right,
+        DisclosureDirection::Up => ChevronDirection::Up,
+        DisclosureDirection::Down => ChevronDirection::Down,
+    }
+}
+
+fn dock_disclosure_button(ui: &mut egui::Ui, disclosure: DisclosureView) -> egui::Response {
+    disclosure_button(
+        ui,
+        map_disclosure_direction(disclosure.direction),
+        disclosure.label,
+        disclosure.expanded,
+    )
+}
+
 fn disclosure_button(
     ui: &mut egui::Ui,
     direction: ChevronDirection,
@@ -2537,14 +2300,19 @@ fn disclosure_button(
     response
 }
 
-fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_tools_panel(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
-    let width = if frame.tools_panel_open {
-        TOOLS_PANEL_WIDTH
-    } else {
-        TOOLS_RAIL_WIDTH
+    let width = match chrome.dock.tools.state {
+        DockState::Expanded => TOOLS_PANEL_WIDTH,
+        DockState::Collapsed => TOOLS_RAIL_WIDTH,
+        DockState::Hidden => return,
     };
-    let panel = match frame.tools_panel_side {
+    let panel = match chrome.dock.tools.side {
         DockSide::Left => Panel::left("tools_panel"),
         DockSide::Right => Panel::right("tools_panel"),
     };
@@ -2554,17 +2322,16 @@ fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
         .frame(docked_frame(colors))
         .show(ui, |ui| {
             ui.vertical_centered(|ui| {
-                let (direction, label) = match (frame.tools_panel_side, frame.tools_panel_open) {
-                    (DockSide::Left, true) => (ChevronDirection::Left, "Collapse tools panel"),
-                    (DockSide::Left, false) => (ChevronDirection::Right, "Expand tools panel"),
-                    (DockSide::Right, true) => (ChevronDirection::Right, "Collapse tools panel"),
-                    (DockSide::Right, false) => (ChevronDirection::Left, "Expand tools panel"),
-                };
-                if disclosure_button(ui, direction, label, frame.tools_panel_open).clicked() {
+                let disclosure = chrome
+                    .dock
+                    .tools
+                    .disclosure()
+                    .expect("visible tools dock has disclosure state");
+                if dock_disclosure_button(ui, disclosure).clicked() {
                     actions.push(UiAction::ToggleToolsPanelExpansion);
                 }
 
-                if frame.tools_panel_open {
+                if chrome.dock.tools.state == DockState::Expanded {
                     ui.label(
                         RichText::new("TOOLS")
                             .size(10.0)
@@ -2573,49 +2340,51 @@ fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                     );
                     ui.separator();
                     ui.set_width(44.0);
-                    ui.add_enabled_ui(frame.current_selection_ready(), |ui| {
-                        ui.vertical_centered(|ui| {
+                    ui.vertical_centered(|ui| {
                         ui.spacing_mut().item_spacing.y = 5.0;
-                        icon_btn(
-                            ui,
-                            ToolIcon::RotateCcw,
-                            "Rotate counterclockwise (L)",
-                            false,
-                            || {
-                                actions.push(UiAction::RotateCcw);
-                            },
-                        );
-                        icon_btn(
-                            ui,
-                            ToolIcon::RotateCw,
-                            "Rotate clockwise (R)",
-                            false,
-                            || {
-                                actions.push(UiAction::RotateCw);
-                            },
-                        );
-                        icon_btn(ui, ToolIcon::FlipH, "Flip horizontally (H)", false, || {
-                            actions.push(UiAction::FlipH);
-                        });
-                        icon_btn(ui, ToolIcon::FlipV, "Flip vertically (V)", false, || {
-                            actions.push(UiAction::FlipV);
+                        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::EditTransform), |ui| {
+                            icon_btn(
+                                ui,
+                                ToolIcon::RotateCcw,
+                                "Rotate counterclockwise (L)",
+                                false,
+                                || {
+                                    actions.push(UiAction::RotateCcw);
+                                },
+                            );
+                            icon_btn(
+                                ui,
+                                ToolIcon::RotateCw,
+                                "Rotate clockwise (R)",
+                                false,
+                                || {
+                                    actions.push(UiAction::RotateCw);
+                                },
+                            );
+                            icon_btn(ui, ToolIcon::FlipH, "Flip horizontally (H)", false, || {
+                                actions.push(UiAction::FlipH);
+                            });
+                            icon_btn(ui, ToolIcon::FlipV, "Flip vertically (V)", false, || {
+                                actions.push(UiAction::FlipV);
+                            });
                         });
                         ui.add_space(4.0);
-                        ui.add_enabled_ui(frame.crop_toggle_ready(), |ui| {
-                            icon_btn(ui, ToolIcon::Crop, "Crop (C)", frame.is_cropping, || {
+                        let crop = chrome.crop_control();
+                        ui.add_enabled_ui(crop.enabled, |ui| {
+                            icon_btn(ui, ToolIcon::Crop, "Crop (C)", crop.selected, || {
                                 actions.push(UiAction::ToggleCrop);
                             });
                         });
-                        let heal_tip = if frame.can_heal {
+                        let heal_tip = if frame.heal_supported {
                             "Spot heal (J)"
                         } else {
                             "Spot heal is unavailable for images larger than the GPU texture limit"
                         };
-                        ui.add_enabled_ui(frame.can_heal || frame.is_healing, |ui| {
-                            icon_btn(ui, ToolIcon::Heal, heal_tip, frame.is_healing, || {
+                        let heal = chrome.heal_control();
+                        ui.add_enabled_ui(heal.enabled, |ui| {
+                            icon_btn(ui, ToolIcon::Heal, heal_tip, heal.selected, || {
                                 actions.push(UiAction::ToggleHeal);
                             });
-                        });
                         });
                     });
                 }
@@ -2739,9 +2508,14 @@ fn paint_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color3
     }
 }
 
-fn render_heal_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_heal_panel(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
-    let panel = match frame.tools_panel_side {
+    let panel = match chrome.dock.tools.side {
         DockSide::Left => Panel::left("spot_heal_panel"),
         DockSide::Right => Panel::right("spot_heal_panel"),
     };
@@ -2758,7 +2532,14 @@ fn render_heal_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiF
                         .strong(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Done").clicked() {
+                    let heal = chrome.heal_control();
+                    if ui
+                        .add_enabled(
+                            heal.enabled,
+                            egui::Button::new("Done").selected(heal.selected),
+                        )
+                        .clicked()
+                    {
                         actions.push(UiAction::ToggleHeal);
                     }
                 });
@@ -2773,7 +2554,7 @@ fn render_heal_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiF
                 .wrap(),
             );
             ui.add_space(12.0);
-            render_heal_controls(ui, actions, frame, colors);
+            render_heal_controls(ui, actions, frame, chrome, colors);
             render_heal_guidance(ui, frame, colors);
         });
 }
@@ -2782,6 +2563,7 @@ fn render_heal_controls(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
     let mut radius = frame.heal_brush_radius;
@@ -2791,8 +2573,15 @@ fn render_heal_controls(
         crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
     )
     .suffix(" px");
-    let response = ui.add_enabled(!frame.heal_busy, slider);
-    response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), f64::from(radius), "Brush radius"));
+    let adjust_enabled = chrome.is_enabled(ChromeControl::HealAdjust);
+    let response = ui.add_enabled(adjust_enabled, slider);
+    response.widget_info(|| {
+        WidgetInfo::slider(
+            ui.is_enabled() && adjust_enabled,
+            f64::from(radius),
+            "Brush radius",
+        )
+    });
     if response.changed() {
         actions.push(UiAction::SetHealBrushRadius(radius));
     }
@@ -2803,9 +2592,15 @@ fn render_heal_controls(
     let feather_slider =
         egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT).suffix("%");
     let response = ui
-        .add_enabled(!frame.heal_busy, feather_slider)
+        .add_enabled(adjust_enabled, feather_slider)
         .on_hover_text("Softens the repair edge outward from the painted area");
-    response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), f64::from(feather), "Feather"));
+    response.widget_info(|| {
+        WidgetInfo::slider(
+            ui.is_enabled() && adjust_enabled,
+            f64::from(feather),
+            "Feather",
+        )
+    });
     if response.changed() {
         actions.push(UiAction::SetHealFeather(feather));
     }
@@ -2817,7 +2612,7 @@ fn render_heal_controls(
     );
     if ui
         .add_enabled(
-            !frame.heal_busy && frame.heal_source.is_some(),
+            chrome.is_enabled(ChromeControl::HealRefreshSource),
             egui::Button::new(source_label).shortcut_text("/"),
         )
         .on_hover_text("Try the next ranked clean source patch")
@@ -2829,13 +2624,19 @@ fn render_heal_controls(
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(frame.can_undo_edit, egui::Button::new("Undo"))
+            .add_enabled(
+                chrome.is_enabled(ChromeControl::UndoEdit),
+                egui::Button::new("Undo"),
+            )
             .clicked()
         {
             actions.push(UiAction::UndoEdit);
         }
         if ui
-            .add_enabled(frame.can_redo_edit, egui::Button::new("Redo"))
+            .add_enabled(
+                chrome.is_enabled(ChromeControl::RedoEdit),
+                egui::Button::new("Redo"),
+            )
             .clicked()
         {
             actions.push(UiAction::RedoEdit);
@@ -2914,33 +2715,36 @@ fn render_heal_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     }
 }
 
-fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn render_filmstrip(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
     let current = frame.rating.current_catalog_index;
-    let height = if frame.filmstrip_panel_open {
-        FILMSTRIP_PANEL_HEIGHT
-    } else {
-        FILMSTRIP_RAIL_HEIGHT
+    let height = match chrome.dock.filmstrip.state {
+        DockState::Expanded => FILMSTRIP_PANEL_HEIGHT,
+        DockState::Collapsed => FILMSTRIP_RAIL_HEIGHT,
+        DockState::Hidden => return,
     };
     Panel::bottom("filmstrip_panel")
         .exact_size(height)
         .resizable(false)
         .frame(docked_frame(colors))
         .show(ui, |ui| {
-            if frame.filmstrip_panel_open {
+            if chrome.dock.filmstrip.state == DockState::Expanded {
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
                         Vec2::new(112.0, ui.available_height()),
                         egui::Layout::top_down(egui::Align::Center),
                         |ui| {
-                            if disclosure_button(
-                                ui,
-                                ChevronDirection::Down,
-                                "Collapse folder previews",
-                                true,
-                            )
-                            .clicked()
-                            {
+                            let disclosure = chrome
+                                .dock
+                                .filmstrip
+                                .disclosure()
+                                .expect("visible filmstrip has disclosure state");
+                            if dock_disclosure_button(ui, disclosure).clicked() {
                                 actions.push(UiAction::ToggleFilmstripPanelExpansion);
                             }
                             ui.label(
@@ -2970,21 +2774,27 @@ fn render_filmstrip(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                         .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            ui.add_enabled_ui(!frame.curation_busy(), |ui| {
-                                ui.horizontal_centered(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 8.0;
-                                    for item in &frame.filmstrip {
-                                        render_filmstrip_item(ui, actions, item, current);
-                                    }
-                                });
-                            });
+                            ui.add_enabled_ui(
+                                chrome.is_enabled(ChromeControl::NavigateFilmstrip),
+                                |ui| {
+                                    ui.horizontal_centered(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 8.0;
+                                        for item in &frame.filmstrip {
+                                            render_filmstrip_item(ui, actions, item, current);
+                                        }
+                                    });
+                                },
+                            );
                         });
                 });
             } else {
                 ui.horizontal_centered(|ui| {
-                    if disclosure_button(ui, ChevronDirection::Up, "Expand folder previews", false)
-                        .clicked()
-                    {
+                    let disclosure = chrome
+                        .dock
+                        .filmstrip
+                        .disclosure()
+                        .expect("visible filmstrip has disclosure state");
+                    if dock_disclosure_button(ui, disclosure).clicked() {
                         actions.push(UiAction::ToggleFilmstripPanelExpansion);
                     }
                     let position = match frame.rating.filter {
@@ -3116,12 +2926,22 @@ fn rating_toast_is_status(message: &str) -> bool {
             == "viewr could not verify this image's source safely. The file was not changed.")
 }
 
-fn render_crop_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<UiAction>) {
-    render_crop_toolbar(ui, frame, actions);
+fn render_crop_overlay(
+    ui: &mut egui::Ui,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+    actions: &mut Vec<UiAction>,
+) {
+    render_crop_toolbar(ui, frame, chrome, actions);
     render_crop_selection(ui, frame, actions);
 }
 
-fn render_crop_toolbar(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<UiAction>) {
+fn render_crop_toolbar(
+    ui: &mut egui::Ui,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+    actions: &mut Vec<UiAction>,
+) {
     let colors = chrome_colors(ui);
     let image_viewport = image_viewport_rect(ui.ctx(), frame);
     let toolbar_width = (image_viewport.width() - 24.0).clamp(240.0, 520.0);
@@ -3156,7 +2976,7 @@ fn render_crop_toolbar(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Ve
                             ui.separator();
                             if ui
                                 .add_enabled(
-                                    frame.crop_apply_ready(),
+                                    chrome.is_enabled(ChromeControl::ApplyCrop),
                                     egui::Button::new(
                                         RichText::new("Apply").color(colors.accent_ink),
                                     )
@@ -3537,7 +3357,7 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     if ui.ctx().is_pointer_over_egui() {
         return;
     }
-    if frame.is_cropping || frame.is_healing {
+    if frame.is_cropping || frame.dock.heal_active {
         ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
     } else if frame.is_panning {
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -3551,15 +3371,12 @@ mod tests {
     #[cfg(target_os = "windows")]
     use super::OPEN_WITH_HELP;
     use super::{
-        APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeLayout, DockSide, DockState,
-        FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT, FilmstripItem, HEAL_PANEL_WIDTH,
-        IMAGE_INFO_PANEL_WIDTH, LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, PREVIEW_RECOVERY_STATUS,
-        SAVE_RECOVERY_STATUS, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
-        TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, appearance_menu,
-        appearance_menu_label, chrome_colors_for, crop_pixel_bounds, image_open_status,
-        panels_menu, rating_filter_menu, rating_filter_menu_label, rating_menu, rating_menu_label,
-        rating_toast_is_status, render, retry_open_label, trash_undo_accessible_label,
-        trash_undo_help, undo_trash_menu_item, viewport_insets,
+        APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
+        FilmstripItem, LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, PREVIEW_RECOVERY_STATUS,
+        SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
+        appearance_menu, chrome_colors_for, context_tool_button, crop_pixel_bounds,
+        image_open_status, menu_tool_button, panels_menu, rating_filter_menu, rating_menu,
+        rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3589,7 +3406,18 @@ mod tests {
 
     fn accessibility_test_frame() -> UiFrameOwned {
         UiFrameOwned {
-            show_image_info: true,
+            dock: DockInput {
+                has_image: true,
+                has_multiple_images: true,
+                show_tools: true,
+                tools_expanded: true,
+                tools_side: DockSide::Left,
+                show_filmstrip: true,
+                filmstrip_expanded: true,
+                show_image_info: true,
+                image_info_side: DockSide::Right,
+                heal_active: false,
+            },
             retain_exif: false,
             background_override: None,
             theme_preference: crate::theme::Preference::System,
@@ -3611,12 +3439,6 @@ mod tests {
                 pending_disclosure: None,
             },
             external_edit_pending: false,
-            show_tools_panel: true,
-            tools_panel_open: true,
-            tools_panel_side: DockSide::Left,
-            show_filmstrip_panel: true,
-            filmstrip_panel_open: true,
-            image_info_side: DockSide::Right,
             file_path: Some("C:/photos/current.png".to_owned()),
             selected_file_name: Some("current.png".to_owned()),
             img_size: Some((1920, 1080)),
@@ -3626,18 +3448,17 @@ mod tests {
             is_cropping: false,
             crop_ratio: crate::crop::CropRatio::Free,
             custom_crop_ratio: (3, 5),
-            is_healing: false,
-            can_heal: true,
+            heal_supported: true,
             heal_busy: false,
+            heal_painting: false,
             heal_brush_radius: 18,
             heal_feather_percent: crate::heal::DEFAULT_FEATHER_PERCENT,
             heal_source: Some((0, 4)),
-            can_undo_edit: false,
-            can_redo_edit: false,
-            can_undo_trash: true,
+            has_undo_edit: false,
+            has_redo_edit: false,
+            has_undo_trash: true,
             restore_recovery_unsettled: false,
             is_panning: false,
-            has_image: true,
             is_loading: false,
             is_opening: false,
             load_error: None,
@@ -3678,6 +3499,10 @@ mod tests {
         }
     }
 
+    fn control_enabled(frame: &UiFrameOwned, control: ChromeControl) -> bool {
+        frame.chrome_view_model().is_enabled(control)
+    }
+
     #[test]
     fn filmstrip_labels_use_projection_position_but_navigation_uses_catalog_index() {
         let item = FilmstripItem {
@@ -3696,25 +3521,34 @@ mod tests {
 
     #[test]
     fn trash_undo_copy_reports_availability_without_batch_counts() {
+        let mut frame = accessibility_test_frame();
+        frame.has_undo_trash = false;
+        let unavailable = frame.chrome_view_model().undo_trash();
         assert_eq!(
-            trash_undo_help(false, false),
+            unavailable.help,
             "No safely recoverable Trash action is available."
         );
+        assert_eq!(unavailable.accessibility_label, "Undo Trash");
+
+        frame.has_undo_trash = true;
+        let available = frame.chrome_view_model().undo_trash();
         assert_eq!(
-            trash_undo_help(true, false),
+            available.help,
             "Restores the latest safely recoverable Trash action. It may belong to another folder."
         );
         assert_eq!(
-            trash_undo_help(true, true),
-            "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
-        );
-        assert_eq!(trash_undo_accessible_label(false, false), "Undo Trash");
-        assert_eq!(
-            trash_undo_accessible_label(true, false),
+            available.accessibility_label,
             "Undo Trash. Restores the latest safely recoverable Trash action. It may belong to another folder."
         );
+
+        frame.restore_recovery_unsettled = true;
+        let unsettled = frame.chrome_view_model().undo_trash();
         assert_eq!(
-            trash_undo_accessible_label(true, true),
+            unsettled.help,
+            "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
+        );
+        assert_eq!(
+            unsettled.accessibility_label,
             "Undo Trash. Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
         );
     }
@@ -3734,7 +3568,7 @@ mod tests {
 
         let output = context.run_ui(input, |ui| {
             let mut actions = Vec::new();
-            undo_trash_menu_item(ui, &mut actions, &frame);
+            undo_trash_menu_item(ui, &mut actions, frame.chrome_view_model());
             assert!(actions.is_empty());
         });
         let update = output
@@ -3763,44 +3597,44 @@ mod tests {
     #[test]
     fn trash_and_restore_are_disabled_during_conflicting_visible_work() {
         let mut frame = accessibility_test_frame();
-        assert!(frame.trash_move_ready());
-        assert!(frame.trash_undo_ready());
+        assert!(control_enabled(&frame, ChromeControl::MoveToTrash));
+        assert!(control_enabled(&frame, ChromeControl::UndoTrash));
 
         frame.restore_recovery_unsettled = true;
-        assert!(frame.current_selection_ready());
-        assert!(!frame.trash_move_ready());
-        assert!(frame.trash_undo_ready());
+        assert!(control_enabled(&frame, ChromeControl::EditTransform));
+        assert!(!control_enabled(&frame, ChromeControl::MoveToTrash));
+        assert!(control_enabled(&frame, ChromeControl::UndoTrash));
         frame.restore_recovery_unsettled = false;
 
         frame.is_loading = true;
-        assert!(!frame.trash_move_ready());
-        assert!(!frame.trash_undo_ready());
+        assert!(!control_enabled(&frame, ChromeControl::MoveToTrash));
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.is_loading = false;
         frame.crop_busy = true;
-        assert!(!frame.trash_move_ready());
-        assert!(!frame.trash_undo_ready());
+        assert!(!control_enabled(&frame, ChromeControl::MoveToTrash));
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.crop_busy = false;
         frame.save_busy = true;
-        assert!(!frame.trash_move_ready());
-        assert!(!frame.trash_undo_ready());
+        assert!(!control_enabled(&frame, ChromeControl::MoveToTrash));
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.save_busy = false;
         frame.heal_busy = true;
-        assert!(!frame.trash_move_ready());
-        assert!(!frame.trash_undo_ready());
+        assert!(!control_enabled(&frame, ChromeControl::MoveToTrash));
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.heal_busy = false;
-        frame.is_healing = true;
-        assert!(frame.current_selection_ready());
-        assert!(!frame.trash_undo_ready());
-        frame.is_healing = false;
+        frame.dock.heal_active = true;
+        assert!(control_enabled(&frame, ChromeControl::EditTransform));
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
+        frame.dock.heal_active = false;
         frame.is_cropping = true;
-        assert!(!frame.trash_undo_ready());
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.is_cropping = false;
         frame.folder_scan_busy = true;
-        assert!(!frame.trash_undo_ready());
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.folder_scan_busy = false;
         frame.curation_status = Some("Restoring 1 file from Trash...".to_owned());
-        assert!(!frame.trash_undo_ready());
-        assert!(!frame.current_selection_ready());
+        assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
+        assert!(!control_enabled(&frame, ChromeControl::EditTransform));
     }
 
     #[test]
@@ -3855,7 +3689,7 @@ mod tests {
 
         let empty_context = egui::Context::default();
         empty_context.enable_accesskit();
-        frame.has_image = false;
+        frame.dock.has_image = false;
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.filmstrip.clear();
@@ -3887,8 +3721,8 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.save_recovery_unsettled = true;
 
-        assert!(frame.current_selection_ready());
-        assert!(!frame.save_as_ready());
+        assert!(control_enabled(&frame, ChromeControl::EditTransform));
+        assert!(!control_enabled(&frame, ChromeControl::SaveAs));
 
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
@@ -3911,12 +3745,12 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.crop_recovery_unsettled = true;
 
-        assert!(frame.current_selection_ready());
-        assert!(!frame.crop_toggle_ready());
-        assert!(!frame.crop_apply_ready());
+        assert!(control_enabled(&frame, ChromeControl::EditTransform));
+        assert!(!control_enabled(&frame, ChromeControl::Crop));
+        assert!(!control_enabled(&frame, ChromeControl::ApplyCrop));
         frame.is_cropping = true;
-        assert!(frame.crop_toggle_ready());
-        assert!(!frame.crop_apply_ready());
+        assert!(control_enabled(&frame, ChromeControl::Crop));
+        assert!(!control_enabled(&frame, ChromeControl::ApplyCrop));
 
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
@@ -3939,13 +3773,13 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.preview_recovery_unsettled = true;
 
-        assert!(frame.current_selection_ready());
-        assert!(frame.save_as_ready());
-        assert!(!frame.crop_toggle_ready());
-        assert!(!frame.crop_apply_ready());
+        assert!(control_enabled(&frame, ChromeControl::EditTransform));
+        assert!(control_enabled(&frame, ChromeControl::SaveAs));
+        assert!(!control_enabled(&frame, ChromeControl::Crop));
+        assert!(!control_enabled(&frame, ChromeControl::ApplyCrop));
         frame.is_cropping = true;
-        assert!(frame.crop_toggle_ready());
-        assert!(!frame.crop_apply_ready());
+        assert!(control_enabled(&frame, ChromeControl::Crop));
+        assert!(!control_enabled(&frame, ChromeControl::ApplyCrop));
 
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
@@ -3964,12 +3798,12 @@ mod tests {
             let context = egui::Context::default();
             context.enable_accesskit();
             let mut frame = accessibility_test_frame();
-            frame.has_image = has_image;
+            frame.dock.has_image = has_image;
             frame.load_error = Some(PREVIEW_RECOVERY_STATUS.to_owned());
             frame.preview_recovery_unsettled = true;
             frame.preview_load_retry_blocked = true;
 
-            assert!(!frame.retry_load_ready());
+            assert!(!control_enabled(&frame, ChromeControl::RetryLoad));
             let output = context.run_ui(accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
@@ -3997,7 +3831,7 @@ mod tests {
         frame.load_error = Some("Could not decode: malformed image".to_owned());
         frame.preview_recovery_unsettled = true;
 
-        assert!(frame.retry_load_ready());
+        assert!(control_enabled(&frame, ChromeControl::RetryLoad));
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
@@ -4088,7 +3922,7 @@ mod tests {
         menu_context.enable_accesskit();
         let menu_output = menu_context.run_ui(accessibility_input(), |ui| {
             let mut actions = Vec::new();
-            rating_menu(ui, &mut actions, &frame);
+            rating_menu(ui, &mut actions, frame.chrome_view_model());
             assert!(actions.is_empty());
         });
         let menu_update = menu_output
@@ -4104,7 +3938,7 @@ mod tests {
         assert_eq!(radios.len(), 6);
         assert!(radios.iter().all(|node| node.is_disabled()));
         assert_eq!(
-            super::rating_write_unavailable_text(&frame),
+            frame.chrome_view_model().rating_unavailable_text(),
             super::RATING_RECOVERY_STATUS
         );
     }
@@ -4116,10 +3950,13 @@ mod tests {
         frame.rating.capability = crate::ratings::RatingWriteCapability::ObservationFailed;
 
         assert_eq!(
-            super::rating_write_unavailable_text(&frame),
+            frame.chrome_view_model().rating_unavailable_text(),
             "Rating could not be read. Close and reopen viewr before changing it."
         );
-        assert_eq!(rating_menu_label(&frame), "Rating: Unreadable");
+        assert_eq!(
+            frame.chrome_view_model().rating_menu_label(),
+            "Rating: Unreadable"
+        );
     }
 
     fn accessibility_input() -> egui::RawInput {
@@ -4196,85 +4033,6 @@ mod tests {
     }
 
     #[test]
-    fn expanded_panels_reserve_scaled_physical_pixels() {
-        let insets = viewport_insets(ChromeLayout {
-            tools: DockState::Expanded,
-            tools_side: DockSide::Left,
-            heal: false,
-            filmstrip: DockState::Expanded,
-            image_info: Some(DockSide::Right),
-            scale_factor: 1.5,
-        });
-        assert!((insets.left - TOOLS_PANEL_WIDTH * 1.5).abs() < f32::EPSILON);
-        assert!((insets.right - IMAGE_INFO_PANEL_WIDTH * 1.5).abs() < f32::EPSILON);
-        assert!((insets.top - TOP_BAR_HEIGHT * 1.5).abs() < f32::EPSILON);
-        assert!((insets.bottom - FILMSTRIP_PANEL_HEIGHT * 1.5).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn collapsed_disclosure_rails_reserve_their_exact_size() {
-        let insets = viewport_insets(ChromeLayout {
-            tools: DockState::Collapsed,
-            tools_side: DockSide::Left,
-            heal: false,
-            filmstrip: DockState::Collapsed,
-            image_info: None,
-            scale_factor: 1.0,
-        });
-        assert!((insets.left - TOOLS_RAIL_WIDTH).abs() < f32::EPSILON);
-        assert!((insets.bottom - FILMSTRIP_RAIL_HEIGHT).abs() < f32::EPSILON);
-        assert!(insets.right.abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn side_panels_reserve_their_selected_edges_and_accumulate() {
-        let insets = viewport_insets(ChromeLayout {
-            tools: DockState::Expanded,
-            tools_side: DockSide::Right,
-            heal: false,
-            filmstrip: DockState::Hidden,
-            image_info: Some(DockSide::Right),
-            scale_factor: 1.0,
-        });
-        assert!(insets.left.abs() < f32::EPSILON);
-        assert!((insets.right - TOOLS_PANEL_WIDTH - IMAGE_INFO_PANEL_WIDTH).abs() < f32::EPSILON);
-        assert!((insets.top - TOP_BAR_HEIGHT).abs() < f32::EPSILON);
-        assert!(insets.bottom.abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn fully_hidden_panels_reserve_no_image_space_beyond_the_menu() {
-        let insets = viewport_insets(ChromeLayout {
-            tools: DockState::Hidden,
-            tools_side: DockSide::Right,
-            heal: false,
-            filmstrip: DockState::Hidden,
-            image_info: None,
-            scale_factor: 1.0,
-        });
-        assert!(insets.left.abs() < f32::EPSILON);
-        assert!(insets.right.abs() < f32::EPSILON);
-        assert!((insets.top - TOP_BAR_HEIGHT).abs() < f32::EPSILON);
-        assert!(insets.bottom.abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn spot_heal_inspector_reserves_space_on_the_tools_edge() {
-        let insets = viewport_insets(ChromeLayout {
-            tools: DockState::Expanded,
-            tools_side: DockSide::Right,
-            heal: true,
-            filmstrip: DockState::Hidden,
-            image_info: None,
-            scale_factor: 1.25,
-        });
-        assert!(insets.left.abs() < f32::EPSILON);
-        assert!(
-            (insets.right - (TOOLS_PANEL_WIDTH + HEAL_PANEL_WIDTH) * 1.25).abs() < f32::EPSILON
-        );
-    }
-
-    #[test]
     fn chrome_text_and_controls_meet_wcag_aa_contrast() {
         for mode in [
             crate::theme::Mode::Light,
@@ -4319,7 +4077,7 @@ mod tests {
             (crate::theme::Preference::Dark, "Appearance: Dark"),
             (crate::theme::Preference::Console, "Appearance: Console"),
         ] {
-            assert_eq!(appearance_menu_label(preference), expected);
+            assert_eq!(crate::chrome::appearance_menu_label(preference), expected);
         }
     }
 
@@ -4435,7 +4193,7 @@ mod tests {
         let empty_context = egui::Context::default();
         empty_context.enable_accesskit();
         let mut empty = accessibility_test_frame();
-        empty.has_image = false;
+        empty.dock.has_image = false;
         empty.file_path = None;
         empty.is_loading = true;
         empty.is_opening = true;
@@ -4479,9 +4237,9 @@ mod tests {
         frame.is_loading = true;
         frame.is_opening = true;
         frame.playlist_pos = Some((2, 2));
-        frame.show_tools_panel = false;
-        frame.show_filmstrip_panel = false;
-        frame.show_image_info = false;
+        frame.dock.show_tools = false;
+        frame.dock.show_filmstrip = false;
+        frame.dock.show_image_info = false;
         let mut input = accessibility_input();
         input.screen_rect = Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -4583,7 +4341,7 @@ mod tests {
         let frame = accessibility_test_frame();
         let output = context.run_ui(accessibility_input(), |ui| {
             let mut actions = Vec::new();
-            panels_menu(ui, &mut actions, &frame);
+            panels_menu(ui, &mut actions, frame.chrome_view_model());
         });
         let update = output
             .platform_output
@@ -4615,7 +4373,7 @@ mod tests {
         );
         let output = context.run_ui(accessibility_input(), |ui| {
             let mut actions = Vec::new();
-            rating_menu(ui, &mut actions, &frame);
+            rating_menu(ui, &mut actions, frame.chrome_view_model());
         });
         let update = output
             .platform_output
@@ -4656,23 +4414,29 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.has_image = false;
+        frame.dock.has_image = false;
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.rating.folder_count = 0;
         frame.rating.current_catalog_index = None;
 
-        assert_eq!(rating_menu_label(&frame), "Rating: Open an image");
         assert_eq!(
-            rating_filter_menu_label(&frame),
+            frame.chrome_view_model().rating_menu_label(),
+            "Rating: Open an image"
+        );
+        assert_eq!(
+            frame.chrome_view_model().rating_filter_menu_label(),
             "Rating Filter: Open a folder"
         );
 
         frame.is_opening = true;
         frame.folder_scan_busy = true;
-        assert_eq!(rating_menu_label(&frame), "Rating: Loading image");
         assert_eq!(
-            rating_filter_menu_label(&frame),
+            frame.chrome_view_model().rating_menu_label(),
+            "Rating: Loading image"
+        );
+        assert_eq!(
+            frame.chrome_view_model().rating_filter_menu_label(),
             "Rating Filter: Reading folder..."
         );
         frame.is_opening = false;
@@ -4680,7 +4444,7 @@ mod tests {
 
         let output = context.run_ui(accessibility_input(), |ui| {
             let mut actions = Vec::new();
-            rating_menu(ui, &mut actions, &frame);
+            rating_menu(ui, &mut actions, frame.chrome_view_model());
         });
         let update = output
             .platform_output
@@ -4709,7 +4473,7 @@ mod tests {
         );
         let output = context.run_ui(accessibility_input(), |ui| {
             let mut actions = Vec::new();
-            rating_filter_menu(ui, &mut actions, &frame);
+            rating_filter_menu(ui, &mut actions, frame.chrome_view_model());
         });
         let update = output
             .platform_output
@@ -4821,7 +4585,7 @@ mod tests {
         frame.rating.match_count = 0;
         frame.rating.visible_position = None;
         frame.rating.folder_count = 12;
-        frame.has_image = false;
+        frame.dock.has_image = false;
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.filmstrip.clear();
@@ -4985,7 +4749,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.context_menu_pos = Some([100.0, 100.0]);
-        assert!(frame.current_selection_ready());
+        assert!(control_enabled(&frame, ChromeControl::OpenWith));
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
@@ -5009,6 +4773,85 @@ mod tests {
                 .iter()
                 .any(|node| node.value() == Some(OPEN_WITH_HELP))
         );
+    }
+
+    #[test]
+    fn context_spot_heal_uses_shared_dynamic_state_and_accessibility() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.context_menu_pos = Some([100.0, 100.0]);
+        frame.heal_supported = false;
+        frame.heal_busy = true;
+
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let node = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Finishing Spot Heal... (J)")
+            })
+            .expect("dynamic Spot Heal context action");
+
+        assert!(node.is_disabled());
+    }
+
+    #[test]
+    fn active_tools_publish_selected_state_across_shared_adapters() {
+        let adapter_context = egui::Context::default();
+        adapter_context.enable_accesskit();
+        let mut crop_frame = accessibility_test_frame();
+        crop_frame.is_cropping = true;
+        let crop = crop_frame.chrome_view_model().crop_control();
+        let mut heal_frame = accessibility_test_frame();
+        heal_frame.dock.heal_active = true;
+        heal_frame.heal_busy = true;
+        let heal = heal_frame.chrome_view_model().heal_control();
+        let adapter_output = adapter_context.run_ui(accessibility_input(), |ui| {
+            let _ = context_tool_button(ui, crop);
+            let _ = menu_tool_button(ui, heal);
+        });
+        let adapter_update = adapter_output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        for label in ["Cancel Crop (Esc)", "Finish Spot Heal"] {
+            let node = adapter_update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.label() == Some(label))
+                .unwrap_or_else(|| panic!("missing active tool adapter: {label}"));
+            assert_eq!(node.toggled(), Some(egui::accesskit::Toggled::True));
+            assert_eq!(node.keyboard_shortcut(), Some("Esc"));
+            assert!(!node.is_disabled());
+        }
+
+        let dock_context = egui::Context::default();
+        dock_context.enable_accesskit();
+        let dock_output = dock_context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &heal_frame);
+        });
+        let dock_update = dock_output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let dock_heal = dock_update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label() == Some("Spot heal (J)"))
+            .expect("active dock Spot Heal action");
+        assert_eq!(dock_heal.toggled(), Some(egui::accesskit::Toggled::True));
+        assert!(!dock_heal.is_disabled());
     }
 
     #[test]
@@ -5037,7 +4880,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.has_image = false;
+        frame.dock.has_image = false;
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.filmstrip.clear();
@@ -5138,7 +4981,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.has_image = false;
+        frame.dock.has_image = false;
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.filmstrip.clear();
@@ -5349,7 +5192,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.is_healing = true;
+        frame.dock.heal_active = true;
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });

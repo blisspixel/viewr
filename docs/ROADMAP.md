@@ -183,8 +183,11 @@ state before job ownership and test seams are explicit.
   thumbnails, and prefetch, leaving `App` responsible for platform events. The
   first covered slice now owns the one-result image-details, animation-discovery,
   and rating-observation lifecycle, including closed-completion wakeup and exact
-  path/generation rejection. Executor supervision remains open; release builds do
-  not claim recovery from an in-process thread panic.
+  path/generation rejection. The second slice gives Save As a one-item consuming
+  completion, fail-closed terminal disconnect handling, and success-only close
+  reconciliation; its captured output transaction cannot overlap rating mutation
+  or mutate foreground image state. Executor supervision remains open; release
+  builds do not claim recovery from an in-process thread panic.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window.
 - [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage

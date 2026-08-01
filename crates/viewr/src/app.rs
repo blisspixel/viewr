@@ -139,7 +139,9 @@ fn run_internal(
         animation: None,
         image_details: None,
         auxiliary_job: None,
-        save_worker: None,
+        save_job: None,
+        close_after_save: false,
+        save_recovery_unsettled: false,
         crop_worker: None,
         preview_worker: None,
         curation_worker: None,
@@ -296,10 +298,6 @@ enum RatingDiscoveryTransition {
 #[derive(Debug)]
 struct PlaylistScope;
 
-struct SaveWorker {
-    result_rx: Receiver<Result<crate::edit::MetadataDisposition, String>>,
-}
-
 struct CropWorker {
     recovery: CropRecovery,
     cancel: Arc<AtomicBool>,
@@ -386,14 +384,77 @@ fn trash_replacement_preflight(recovery: &CurationRecovery) -> Option<&'static s
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CloseDisposition {
     Exit,
+    WaitForSave,
     WaitForCuration,
+    WaitForSaveAndCuration,
 }
 
-const fn close_disposition(curation_active: bool) -> CloseDisposition {
-    if curation_active {
-        CloseDisposition::WaitForCuration
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SaveTerminalState {
+    Succeeded,
+    Failed,
+    Disconnected,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SaveCloseDisposition {
+    StayOpen,
+    Exit,
+    WaitForCuration,
+    CancelDeferredClose,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SaveStartBlocker {
+    Recovery,
+    RatingWrite,
+    Preview,
+    SpotHeal,
+    Crop,
+    Save,
+}
+
+const fn close_disposition(save_active: bool, curation_active: bool) -> CloseDisposition {
+    match (save_active, curation_active) {
+        (false, false) => CloseDisposition::Exit,
+        (true, false) => CloseDisposition::WaitForSave,
+        (false, true) => CloseDisposition::WaitForCuration,
+        (true, true) => CloseDisposition::WaitForSaveAndCuration,
+    }
+}
+
+const fn save_close_disposition(
+    close_requested: bool,
+    terminal: SaveTerminalState,
+    curation_active: bool,
+) -> SaveCloseDisposition {
+    if !close_requested {
+        SaveCloseDisposition::StayOpen
+    } else if !matches!(terminal, SaveTerminalState::Succeeded) {
+        SaveCloseDisposition::CancelDeferredClose
+    } else if curation_active {
+        SaveCloseDisposition::WaitForCuration
     } else {
-        CloseDisposition::Exit
+        SaveCloseDisposition::Exit
+    }
+}
+
+fn save_start_blocker<const N: usize>(
+    blockers: [Option<SaveStartBlocker>; N],
+) -> Option<SaveStartBlocker> {
+    blockers.into_iter().flatten().next()
+}
+
+const fn save_start_blocker_message(blocker: SaveStartBlocker) -> &'static str {
+    match blocker {
+        SaveStartBlocker::Recovery => crate::ui::SAVE_RECOVERY_STATUS,
+        SaveStartBlocker::RatingWrite => {
+            "Wait for the rating update to finish before saving a copy"
+        }
+        SaveStartBlocker::Preview => "Wait for the image preview to finish before saving",
+        SaveStartBlocker::SpotHeal => "Wait for spot heal to finish before saving",
+        SaveStartBlocker::Crop => "Wait for the crop to finish before saving",
+        SaveStartBlocker::Save => "A copy is already being saved",
     }
 }
 
@@ -465,6 +526,8 @@ type AuxiliaryLoadResult = (
     crate::image_info::ImageDetails,
     RatingObservation,
 );
+
+type SaveResult = Result<crate::edit::MetadataDisposition, String>;
 
 type ThumbnailResult = (u64, Result<ThumbRgba, (PathBuf, String)>);
 
@@ -1025,8 +1088,12 @@ struct App {
     image_details: Option<crate::image_info::ImageDetails>,
     /// Replace-latest animation and metadata result for the current source.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
-    /// At most one explicit Save As encode running off the UI thread.
-    save_worker: Option<SaveWorker>,
+    /// At most one explicit Save As encode with bounded completion ownership.
+    save_job: Option<OneShotJob<(), SaveResult>>,
+    /// A normal close request waiting for Save As to reach a terminal state.
+    close_after_save: bool,
+    /// An indeterminate Save As worker loss that requires a process restart.
+    save_recovery_unsettled: bool,
     /// At most one full-resolution crop running off the UI thread.
     crop_worker: Option<CropWorker>,
     /// Replace-latest over-limit preview prepared outside the event thread.
@@ -2101,6 +2168,10 @@ impl App {
     }
 
     fn start_rating_write(&mut self, pending: &PendingRatingWrite) {
+        if self.save_job.is_some() {
+            self.show_toast("Wait for Save As to finish before changing the rating");
+            return;
+        }
         if self.rating_write_worker.is_some()
             || self.session.presented_path.as_ref() != Some(&pending.path)
         {
@@ -2393,7 +2464,7 @@ impl App {
             self.show_toast("Wait for the crop to finish before reloading");
             return;
         }
-        if self.save_worker.is_some() {
+        if self.save_job.is_some() {
             self.show_toast("Wait for Save As to finish before reloading");
             return;
         }
@@ -2951,7 +3022,7 @@ impl App {
             self.scanner_rx.is_some().then_some(CurrentWork::FolderScan),
             image_preparation_work(self.session.is_loading(), self.preview_worker.is_some()),
             crop_work(self.transform.is_cropping, self.crop_worker.is_some()),
-            self.save_worker.is_some().then_some(CurrentWork::Save),
+            self.save_job.is_some().then_some(CurrentWork::Save),
             self.rating_write_worker
                 .is_some()
                 .then_some(CurrentWork::RatingWrite),
@@ -3043,7 +3114,7 @@ impl App {
             self.show_toast("A crop is already being applied");
             return;
         }
-        if self.save_worker.is_some() {
+        if self.save_job.is_some() {
             self.show_toast("Wait for the current save to finish before cropping");
             return;
         }
@@ -3201,7 +3272,7 @@ impl App {
             self.show_toast("Wait for the image preview to finish before using Spot Heal");
             return;
         }
-        if !self.heal.active && self.save_worker.is_some() {
+        if !self.heal.active && self.save_job.is_some() {
             self.show_toast("Wait for the current save to finish before using Spot Heal");
             return;
         }
@@ -3262,7 +3333,7 @@ impl App {
     fn refresh_heal_source(&mut self) {
         if self.heal.is_busy()
             || self.crop_worker.is_some()
-            || self.save_worker.is_some()
+            || self.save_job.is_some()
             || self.preview_worker.is_some()
         {
             return;
@@ -3341,7 +3412,7 @@ impl App {
         if !self.heal.active
             || self.heal.is_busy()
             || self.crop_worker.is_some()
-            || self.save_worker.is_some()
+            || self.save_job.is_some()
             || self.preview_worker.is_some()
         {
             return;
@@ -4265,20 +4336,20 @@ impl App {
         if self.block_action_while_curating("saving a copy") {
             return;
         }
-        if self.preview_worker.is_some() {
-            self.show_toast("Wait for the image preview to finish before saving");
-            return;
-        }
-        if self.heal.is_busy() || self.heal.painting {
-            self.show_toast("Wait for spot heal to finish before saving");
-            return;
-        }
-        if self.crop_worker.is_some() {
-            self.show_toast("Wait for the crop to finish before saving");
-            return;
-        }
-        if self.save_worker.is_some() {
-            self.show_toast("A copy is already being saved");
+        if let Some(blocker) = save_start_blocker([
+            self.save_recovery_unsettled
+                .then_some(SaveStartBlocker::Recovery),
+            self.rating_write_worker
+                .is_some()
+                .then_some(SaveStartBlocker::RatingWrite),
+            self.preview_worker
+                .is_some()
+                .then_some(SaveStartBlocker::Preview),
+            (self.heal.is_busy() || self.heal.painting).then_some(SaveStartBlocker::SpotHeal),
+            self.crop_worker.is_some().then_some(SaveStartBlocker::Crop),
+            self.save_job.is_some().then_some(SaveStartBlocker::Save),
+        ]) {
+            self.show_toast(save_start_blocker_message(blocker));
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -4312,8 +4383,10 @@ impl App {
         } else {
             crate::edit::SaveOptions::strip()
         };
-        let (sender, receiver) = mpsc::channel();
         let event_proxy = self.event_proxy.clone();
+        let (completion, job) = OneShotJob::new((), move || {
+            let _ = event_proxy.send_event(UserEvent::Wake);
+        });
         let spawn = std::thread::Builder::new()
             .name("viewr-save".into())
             .spawn(move || {
@@ -4326,14 +4399,11 @@ impl App {
                     crate::edit::save_with_options(export_image, &save_path, Some(&path), options)
                         .map_err(|error| error.to_string())
                 })();
-                let _ = sender.send(result);
-                let _ = event_proxy.send_event(UserEvent::Wake);
+                let _ = completion.complete(result);
             });
         match spawn {
             Ok(_) => {
-                self.save_worker = Some(SaveWorker {
-                    result_rx: receiver,
-                });
+                self.save_job = Some(job);
                 self.show_toast("Saving copy in the background");
             }
             Err(error) => {
@@ -4343,35 +4413,52 @@ impl App {
         }
     }
 
-    fn poll_save_result(&mut self) {
-        let result = match self
-            .save_worker
-            .as_ref()
-            .map(|worker| worker.result_rx.try_recv())
-        {
-            Some(Ok(result)) => result,
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.save_worker = None;
-                self.show_toast("Save stopped unexpectedly");
-                return;
-            }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => return,
+    fn poll_save_result(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(job) = self.save_job.as_ref() else {
+            return;
         };
-        self.save_worker = None;
-        match result {
-            Ok(crate::edit::MetadataDisposition::Retained) => {
+        let polled = job.poll();
+        if matches!(polled, JobPoll::Pending) {
+            return;
+        }
+        self.save_job
+            .take()
+            .expect("save job exists after polling it")
+            .into_context();
+        let close_requested = std::mem::take(&mut self.close_after_save);
+        let terminal = match polled {
+            JobPoll::Ready(Ok(crate::edit::MetadataDisposition::Retained)) => {
                 self.show_toast("Saved copy · EXIF retained");
+                SaveTerminalState::Succeeded
             }
-            Ok(crate::edit::MetadataDisposition::NotPresent) => {
+            JobPoll::Ready(Ok(crate::edit::MetadataDisposition::NotPresent)) => {
                 self.show_toast("Saved copy · no EXIF found");
+                SaveTerminalState::Succeeded
             }
-            Ok(crate::edit::MetadataDisposition::Stripped) => {
+            JobPoll::Ready(Ok(crate::edit::MetadataDisposition::Stripped)) => {
                 self.show_toast("Saved copy · metadata stripped");
+                SaveTerminalState::Succeeded
             }
-            Err(error) => {
+            JobPoll::Ready(Err(error)) => {
                 log::error!("failed to save image");
                 self.show_toast(format!("Save failed: {error}"));
+                SaveTerminalState::Failed
             }
+            JobPoll::Disconnected => {
+                log::error!("save job disconnected before publishing a result");
+                self.save_recovery_unsettled = true;
+                self.show_toast(crate::ui::SAVE_RECOVERY_STATUS);
+                SaveTerminalState::Disconnected
+            }
+            JobPoll::Pending => unreachable!("pending save result returned early"),
+        };
+        match save_close_disposition(close_requested, terminal, self.curation_worker.is_some()) {
+            SaveCloseDisposition::StayOpen => {}
+            SaveCloseDisposition::Exit => event_loop.exit(),
+            SaveCloseDisposition::WaitForCuration => {
+                self.close_after_curation = true;
+            }
+            SaveCloseDisposition::CancelDeferredClose => self.close_after_curation = false,
         }
     }
 
@@ -4415,11 +4502,16 @@ impl App {
                 log::info!("curation worker reconciled: operation={kind:?}, submitted={submitted}");
                 self.request_redraw();
                 if std::mem::take(&mut self.close_after_curation) {
-                    event_loop.exit();
+                    if self.save_job.is_some() {
+                        self.close_after_save = true;
+                    } else {
+                        event_loop.exit();
+                    }
                 }
             }
             WorkerPoll::Disconnected => {
                 self.close_after_curation = false;
+                self.close_after_save = false;
                 log::error!(
                     "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}"
                 );
@@ -4455,7 +4547,7 @@ impl App {
             self.show_toast("Wait for the image preview to finish before cropping");
             return;
         }
-        if self.save_worker.is_some() {
+        if self.save_job.is_some() {
             self.show_toast("Wait for the current save to finish before cropping");
             return;
         }
@@ -4961,8 +5053,12 @@ impl ApplicationHandler<UserEvent> for App {
                     self.show_toast("Finishing the rating update before closing...");
                     return;
                 }
-                match close_disposition(self.curation_worker.is_some()) {
+                match close_disposition(self.save_job.is_some(), self.curation_worker.is_some()) {
                     CloseDisposition::Exit => event_loop.exit(),
+                    CloseDisposition::WaitForSave => {
+                        self.close_after_save = true;
+                        self.show_toast("Finishing Save As before closing...");
+                    }
                     CloseDisposition::WaitForCuration => {
                         if !self.close_after_curation {
                             let worker = self
@@ -4977,6 +5073,13 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         self.close_after_curation = true;
                         self.request_redraw();
+                    }
+                    CloseDisposition::WaitForSaveAndCuration => {
+                        self.close_after_save = true;
+                        self.close_after_curation = true;
+                        self.show_toast(
+                            "Finishing Save As and the Trash restore before closing...",
+                        );
                     }
                 }
             }
@@ -5385,7 +5488,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
                 let load_error = self.session.load_error.clone();
-                let save_busy = self.save_worker.is_some();
+                let save_busy = self.save_job.is_some();
+                let save_recovery_unsettled = self.save_recovery_unsettled;
                 let crop_busy = self.crop_worker.is_some();
                 let curation_status = self
                     .curation_worker
@@ -5585,6 +5689,7 @@ impl ApplicationHandler<UserEvent> for App {
                     is_opening,
                     load_error,
                     save_busy,
+                    save_recovery_unsettled,
                     crop_busy,
                     curation_status,
                     curation_recovery_status,
@@ -5890,7 +5995,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.poll_preview_result();
         self.poll_auxiliary_load();
         self.poll_crop_result();
-        self.poll_save_result();
+        self.poll_save_result(event_loop);
         if let Some(rx) = &self.session.receiver
             && let Ok((path, result)) = rx.try_recv()
         {
@@ -6599,8 +6704,19 @@ mod test {
             curation_status(CurationKind::Restore, 3, true),
             "Finishing Trash restore for 3 files before closing..."
         );
-        assert_eq!(close_disposition(false), CloseDisposition::Exit);
-        assert_eq!(close_disposition(true), CloseDisposition::WaitForCuration);
+        assert_eq!(close_disposition(false, false), CloseDisposition::Exit);
+        assert_eq!(
+            close_disposition(true, false),
+            CloseDisposition::WaitForSave
+        );
+        assert_eq!(
+            close_disposition(false, true),
+            CloseDisposition::WaitForCuration
+        );
+        assert_eq!(
+            close_disposition(true, true),
+            CloseDisposition::WaitForSaveAndCuration
+        );
         assert_eq!(
             curation_action_preflight(
                 Some(CurationKind::Restore),
@@ -6621,6 +6737,84 @@ mod test {
             ),
             Some("Nothing to restore from Trash".to_owned())
         );
+    }
+
+    #[test]
+    fn save_start_preflight_excludes_rating_writes_and_unsettled_recovery() {
+        use SaveStartBlocker::{Crop, Preview, RatingWrite, Recovery, Save, SpotHeal};
+
+        let cases = [
+            (
+                [
+                    Some(Recovery),
+                    Some(RatingWrite),
+                    Some(Preview),
+                    Some(SpotHeal),
+                    Some(Crop),
+                    Some(Save),
+                ],
+                Some(Recovery),
+            ),
+            (
+                [None, Some(RatingWrite), None, None, None, None],
+                Some(RatingWrite),
+            ),
+            (
+                [
+                    None,
+                    None,
+                    Some(Preview),
+                    Some(SpotHeal),
+                    Some(Crop),
+                    Some(Save),
+                ],
+                Some(Preview),
+            ),
+            (
+                [None, None, None, Some(SpotHeal), Some(Crop), Some(Save)],
+                Some(SpotHeal),
+            ),
+            ([None, None, None, None, Some(Crop), Some(Save)], Some(Crop)),
+            ([None, None, None, None, None, Some(Save)], Some(Save)),
+            ([None; 6], None),
+        ];
+        for (blockers, expected) in cases {
+            assert_eq!(save_start_blocker(blockers), expected);
+        }
+        assert_eq!(
+            save_start_blocker_message(RatingWrite),
+            "Wait for the rating update to finish before saving a copy"
+        );
+        assert_eq!(
+            save_start_blocker_message(Recovery),
+            crate::ui::SAVE_RECOVERY_STATUS
+        );
+    }
+
+    #[test]
+    fn deferred_close_requires_a_successful_save_terminal_state() {
+        assert_eq!(
+            save_close_disposition(false, SaveTerminalState::Succeeded, false),
+            SaveCloseDisposition::StayOpen
+        );
+        assert_eq!(
+            save_close_disposition(true, SaveTerminalState::Succeeded, false),
+            SaveCloseDisposition::Exit
+        );
+        assert_eq!(
+            save_close_disposition(true, SaveTerminalState::Succeeded, true),
+            SaveCloseDisposition::WaitForCuration
+        );
+        for terminal in [SaveTerminalState::Failed, SaveTerminalState::Disconnected] {
+            assert_eq!(
+                save_close_disposition(true, terminal, false),
+                SaveCloseDisposition::CancelDeferredClose
+            );
+            assert_eq!(
+                save_close_disposition(true, terminal, true),
+                SaveCloseDisposition::CancelDeferredClose
+            );
+        }
     }
 
     #[test]

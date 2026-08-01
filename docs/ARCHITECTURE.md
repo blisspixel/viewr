@@ -75,11 +75,16 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // At most one foreground operation of each kind, with generation, path,
-    // and exact decoded-allocation checks before a result can replace state.
+    // One-result auxiliary and Save As work has an event-loop-owned bounded job.
+    auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
+    save_job: Option<OneShotJob<(), SaveResult>>,
+    close_after_save: bool,
+    save_recovery_unsettled: bool,
+
+    // At most one foreground operation of each remaining kind, with generation,
+    // path, and exact decoded-allocation checks before a result can replace state.
     // CropWorker also owns cooperative cancellation and a recovery snapshot.
     crop_worker: Option<CropWorker>,
-    save_worker: Option<SaveWorker>,
     preview_worker: Option<PreviewWorker>,
 
     // Docked chrome and the session-only export-privacy choice.
@@ -211,7 +216,16 @@ Shipped:
   replacement attempt. Explicit session-only EXIF retention is content-driven,
   supports JPEG, PNG, and WebP destinations, uses the bounded metadata reader,
   and normalizes orientation, output dimensions, and stale thumbnail offsets
-  before writing supported tags.
+  before writing supported tags. The event loop owns one bounded Save As result
+  slot while the worker receives a non-cloneable consuming completion endpoint.
+  Rating replacement and Save As exclude each other at their method boundaries.
+  A normal close waits for a successful captured output transaction; failure
+  cancels deferred close so its guidance remains visible. Completion updates only
+  path-free status for the captured image snapshot, not foreground image state,
+  so changing the current selection cannot admit a stale pixel mutation. Endpoint
+  loss clears busy ownership, retains a persistent recovery state that disables
+  another export, and requires a process restart; release builds do not claim
+  recovery from an in-process thread panic.
 - **`heal`**: pure-Rust spot-heal preparation, bounded region extraction,
   deterministic edge-aware ranking of up to eight spatially distinct patches,
   robust boundary tone adaptation, adjustable feathered compositing,

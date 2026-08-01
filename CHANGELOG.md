@@ -19,6 +19,14 @@ and organized by user-visible concern.
   closed completion endpoint wakes the event loop, clears busy state, and exposes
   explicit restart guidance instead of failing silently or promising that an
   unsupervised executor can recover in place.
+- Save As now uses the same bounded, consuming completion contract instead of an
+  unbounded result channel. Closing viewr waits for the captured output
+  transaction to finish successfully, including the defensive case where Trash
+  reconciliation is also active. Failure keeps the window open so its result is
+  visible, while a lost completion clears busy state, persistently blocks another
+  export, and requires restart. Rating replacement and Save As cannot overlap.
+  Save completion changes only status for its captured snapshot and cannot mutate
+  a newer foreground image.
 
 ### Documentation
 

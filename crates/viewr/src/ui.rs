@@ -86,6 +86,8 @@ const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. 
 const EXTERNAL_EDIT_STATUS: &str =
     "External app opened source. Press F5 to reload possible changes.";
 pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
+pub(crate) const SAVE_RECOVERY_STATUS: &str =
+    "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
@@ -374,6 +376,8 @@ pub struct UiFrameOwned {
     pub load_error: Option<String>,
     /// An explicit Save As encode is running.
     pub save_busy: bool,
+    /// A lost Save As completion requires restart before another export.
+    pub save_recovery_unsettled: bool,
     /// A full-resolution crop is being applied off the UI thread.
     pub crop_busy: bool,
     /// Fixed, path-private description of active Trash restore work.
@@ -482,6 +486,10 @@ impl UiFrameOwned {
             && !self.heal_busy
             && !self.curation_busy()
             && !self.rating.write_busy
+    }
+
+    fn save_as_ready(&self) -> bool {
+        self.current_selection_ready() && !self.save_recovery_unsettled
     }
 
     fn curation_action_ready(&self) -> bool {
@@ -785,7 +793,9 @@ fn render_top_operation_status(
         add_top_status(ui, "Reading folder ratings...", colors);
     } else if frame.has_image && frame.load_error.is_some() {
         add_retry_button(ui, actions, frame.selected_file_name.as_deref());
-        if frame.rating.recovery_unsettled {
+        if frame.save_recovery_unsettled {
+            add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
+        } else if frame.rating.recovery_unsettled {
             add_top_status(ui, RATING_RECOVERY_STATUS, colors);
         } else if let Some(status) =
             image_open_status(false, true, frame.selected_file_name.as_deref())
@@ -806,6 +816,8 @@ fn render_top_operation_status(
     } else if frame.has_image && frame.crop_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_top_status(ui, "Applying crop...", colors);
+    } else if frame.save_recovery_unsettled {
+        add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
     } else if frame.rating.recovery_unsettled {
         add_top_status(ui, RATING_RECOVERY_STATUS, colors);
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
@@ -959,7 +971,7 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if ui
             .add_enabled(
-                frame.current_selection_ready() && !frame.heal_busy && !frame.save_busy,
+                frame.save_as_ready(),
                 egui::Button::new("Save As...")
                     .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+S")),
             )
@@ -3491,12 +3503,12 @@ mod tests {
     use super::{
         APPEARANCE_SCOPE_HELP, ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT,
         FILMSTRIP_RAIL_HEIGHT, FilmstripItem, HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH,
-        LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH,
-        TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, appearance_menu,
-        appearance_menu_label, chrome_colors_for, crop_pixel_bounds, image_open_status,
-        panels_menu, rating_filter_menu, rating_filter_menu_label, rating_menu, rating_menu_label,
-        rating_toast_is_status, render, retry_open_label, trash_undo_accessible_label,
-        trash_undo_help, undo_trash_menu_item, viewport_insets,
+        LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, SAVE_RECOVERY_STATUS, TOOLS_PANEL_WIDTH,
+        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
+        appearance_menu, appearance_menu_label, chrome_colors_for, crop_pixel_bounds,
+        image_open_status, panels_menu, rating_filter_menu, rating_filter_menu_label, rating_menu,
+        rating_menu_label, rating_toast_is_status, render, retry_open_label,
+        trash_undo_accessible_label, trash_undo_help, undo_trash_menu_item, viewport_insets,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3579,6 +3591,7 @@ mod tests {
             is_opening: false,
             load_error: None,
             save_busy: false,
+            save_recovery_unsettled: false,
             crop_busy: false,
             curation_status: None,
             curation_recovery_status: None,
@@ -3811,6 +3824,30 @@ mod tests {
                 "curation control stayed enabled: {label}"
             );
         }
+    }
+
+    #[test]
+    fn failed_save_is_persistent_and_blocks_only_another_save() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.save_recovery_unsettled = true;
+
+        assert!(frame.current_selection_ready());
+        assert!(!frame.save_as_ready());
+
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(SAVE_RECOVERY_STATUS)
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
     }
 
     #[test]

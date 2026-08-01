@@ -1504,6 +1504,9 @@ fn rating_write_unavailable_text(frame: &UiFrameOwned) -> &'static str {
         crate::ratings::RatingWriteCapability::UnsafeSource => {
             "Safe source identity is unavailable for rating writes."
         }
+        crate::ratings::RatingWriteCapability::ObservationFailed => {
+            "Rating could not be read. Close and reopen viewr before changing it."
+        }
         crate::ratings::RatingWriteCapability::UnsupportedMetadata => {
             "This image has unsupported rating metadata."
         }
@@ -3903,6 +3906,19 @@ mod tests {
             super::rating_write_unavailable_text(&frame),
             super::RATING_RECOVERY_STATUS
         );
+    }
+
+    #[test]
+    fn failed_rating_observation_has_truthful_restart_guidance() {
+        let mut frame = accessibility_test_frame();
+        frame.rating.state = crate::ratings::RatingState::Unreadable;
+        frame.rating.capability = crate::ratings::RatingWriteCapability::ObservationFailed;
+
+        assert_eq!(
+            super::rating_write_unavailable_text(&frame),
+            "Rating could not be read. Close and reopen viewr before changing it."
+        );
+        assert_eq!(rating_menu_label(&frame), "Rating: Unreadable");
     }
 
     fn accessibility_input() -> egui::RawInput {

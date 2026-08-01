@@ -229,8 +229,13 @@ rules keep it honest.
   desktop targets only after the complete reusable CI and fuzz workflows pass. It
   does not create a public release, install software, sign a package, or claim
   cross-environment bit-for-bit linker reproducibility.
-- Publicly distributed builds must be signed and, where required, notarized.
-  That is later distribution work, not part of the local Phase 7 proof.
+- Builds presented as trusted or broadly recommended public distribution must be
+  signed and, where required, notarized. An explicitly unsigned pre-1.0 preview
+  may be published from immutable, checksummed, attested artifacts when every
+  public surface states that trust boundary and normal operating-system warnings
+  are expected. It must never be described as signed, notarized, or ready for
+  broad recommendation. Publisher authentication remains a v0.9 and 1.0 gate,
+  not part of the earlier product-development milestones.
 - A human-written changelog. People deserve to know what changed and why.
 
 ## A note on humility

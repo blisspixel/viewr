@@ -13,6 +13,12 @@ and organized by user-visible concern.
 - Dependency policy now denies every unreviewed duplicate crate version against
   an exact, rationale-backed transitive baseline. Both workspace lockfiles must
   pass cargo-deny without unexplained warnings.
+- Current-image details, animation discovery, and rating observation now return
+  through a tested single-result owner with a one-item channel. Replaced work
+  cannot publish, exact path and generation identity gate every result, and a
+  closed completion endpoint wakes the event loop, clears busy state, and exposes
+  explicit restart guidance instead of failing silently or promising that an
+  unsupervised executor can recover in place.
 
 ### Documentation
 
@@ -23,10 +29,11 @@ and organized by user-visible concern.
   verified 12-asset publication, and the remaining platform-trust gates in the
   roadmap and maintainer publishing guide.
 - Replaced the vague jump from v0.1.0 to 1.0 with dependency-ordered v0.2 through
-  v0.9 release gates for trusted distribution, accessibility evidence, reliability
-  architecture, display correctness, file coherence, format contracts,
-  integrated product proof, and final release-candidate validation. Version
-  numbers now explicitly represent evidence gates rather than percent complete.
+  v0.9 release gates for reliability architecture, display correctness, file
+  coherence, format contracts, integrated product proof, accessibility evidence,
+  release readiness, and final publisher-authenticated candidate validation.
+  Signing and notarization now occur only after the product scope is stable;
+  version numbers represent evidence gates rather than percent complete.
 
 ## 0.1.0 - 2026-07-31
 

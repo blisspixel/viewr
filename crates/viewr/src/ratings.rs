@@ -143,6 +143,8 @@ pub enum RatingWriteCapability {
     ReadOnlyFormat,
     /// The selected object is a link, reparse point, or lacks identity evidence.
     UnsafeSource,
+    /// Rating observation ended before source metadata could be classified.
+    ObservationFailed,
     /// The JPEG metadata cannot be changed without unsupported repair.
     UnsupportedMetadata,
 }

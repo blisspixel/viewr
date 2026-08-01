@@ -37,6 +37,7 @@ use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
+use crate::job::{JobPoll, OneShotJob};
 use crate::prefetch::{self, PrefetchCache};
 use crate::theme::{Preference, PreferenceRecovery};
 use crate::thumbs::{self, ThumbRgba};
@@ -137,7 +138,7 @@ fn run_internal(
         current_image_reuse: ImageReuseEligibility::Ineligible,
         animation: None,
         image_details: None,
-        auxiliary_loader_rx: None,
+        auxiliary_job: None,
         save_worker: None,
         crop_worker: None,
         preview_worker: None,
@@ -454,8 +455,12 @@ impl CurationWorker {
     }
 }
 
+struct AuxiliaryLoadContext {
+    path: PathBuf,
+    generation: u64,
+}
+
 type AuxiliaryLoadResult = (
-    PathBuf,
     Result<Option<crate::animated::DecodedAnimation>, String>,
     crate::image_info::ImageDetails,
     RatingObservation,
@@ -483,7 +488,30 @@ struct CropRecovery {
     source_image: Arc<DecodedImage>,
     transform: Transform,
     animation: Option<crate::animated::AnimationPlayback>,
-    auxiliary_loader_rx: Option<Receiver<AuxiliaryLoadResult>>,
+    auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
+}
+
+struct RestoredCropEditState {
+    transform: Transform,
+    animation: Option<crate::animated::AnimationPlayback>,
+    auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
+}
+
+impl CropRecovery {
+    fn into_restored_edit_state(self) -> RestoredCropEditState {
+        let Self {
+            mut transform,
+            animation,
+            auxiliary_job,
+            ..
+        } = self;
+        transform.crop_start = None;
+        RestoredCropEditState {
+            transform,
+            animation,
+            auxiliary_job,
+        }
+    }
 }
 
 enum WorkerPoll<T> {
@@ -996,7 +1024,7 @@ struct App {
     /// Best-effort facts for the current Image Information panel.
     image_details: Option<crate::image_info::ImageDetails>,
     /// Replace-latest animation and metadata result for the current source.
-    auxiliary_loader_rx: Option<Receiver<AuxiliaryLoadResult>>,
+    auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     /// At most one explicit Save As encode running off the UI thread.
     save_worker: Option<SaveWorker>,
     /// At most one full-resolution crop running off the UI thread.
@@ -1784,7 +1812,7 @@ impl App {
         self.preview_worker = None;
         self.animation = None;
         self.image_details = None;
-        self.auxiliary_loader_rx = None;
+        self.auxiliary_job = None;
         self.session.load_error = None;
         self.current_image = None;
         self.current_source = None;
@@ -1805,7 +1833,7 @@ impl App {
         self.cancel_crop_work();
         self.preview_worker = None;
         self.animation = None;
-        self.auxiliary_loader_rx = None;
+        self.auxiliary_job = None;
         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
         self.presented_rating =
             next_presented_rating(self.presented_rating, PresentedRatingTransition::Retain);
@@ -1819,13 +1847,16 @@ impl App {
     fn start_auxiliary_load(&mut self, path: &Path) {
         self.animation = None;
         self.image_details = None;
-        self.auxiliary_loader_rx = None;
+        self.auxiliary_job = None;
         let path = path.to_owned();
         let job_path = path.clone();
-        let (sender, receiver) = mpsc::channel();
-        let event_proxy = self.event_proxy.clone();
         let current_generation = Arc::clone(&self.session.generation);
         let generation = current_generation.load(Ordering::Acquire);
+        let event_proxy = self.event_proxy.clone();
+        let (completion, job) =
+            OneShotJob::new(AuxiliaryLoadContext { path, generation }, move || {
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
         let source = self.current_source.clone();
         let scheduled = crate::decode::schedule_current_image_details(move || {
             if current_generation.load(Ordering::Acquire) != generation {
@@ -1857,11 +1888,10 @@ impl App {
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
-            let _ = sender.send((job_path, animation, details, rating));
-            let _ = event_proxy.send_event(UserEvent::Wake);
+            let _ = completion.complete((animation, details, rating));
         });
         match scheduled {
-            Ok(()) => self.auxiliary_loader_rx = Some(receiver),
+            Ok(()) => self.auxiliary_job = Some(job),
             Err(error) => {
                 log::error!("failed to queue current-image details");
                 self.show_toast(format!("Image details unavailable: {error}"));
@@ -1870,19 +1900,46 @@ impl App {
     }
 
     fn poll_auxiliary_load(&mut self) {
-        let completed = self
-            .auxiliary_loader_rx
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        let Some((path, result, details, rating)) = completed else {
+        let Some(job) = self.auxiliary_job.as_ref() else {
             return;
         };
-        self.auxiliary_loader_rx = None;
-        if self.session.presented_path.as_ref() != Some(&path)
-            || self.session.selected_path.as_ref() != Some(&path)
-        {
+        let polled = job.poll();
+        if matches!(polled, JobPoll::Pending) {
             return;
         }
+        let context = self
+            .auxiliary_job
+            .take()
+            .expect("auxiliary job exists after polling it")
+            .into_context();
+        if !auxiliary_job_is_current(
+            &context,
+            self.session.generation.load(Ordering::Acquire),
+            self.session.selected_path.as_deref(),
+            self.session.presented_path.as_deref(),
+        ) {
+            return;
+        }
+        let (result, details, rating) = match polled {
+            JobPoll::Ready(result) => result,
+            JobPoll::Disconnected => {
+                log::error!("current-image details worker disconnected");
+                let rating = rating_after_auxiliary_disconnect();
+                self.current_rating_capability = rating.capability;
+                self.presented_rating = next_presented_rating(
+                    self.presented_rating,
+                    PresentedRatingTransition::Replace(rating.state),
+                );
+                if let Some(playlist) = self.playlist.as_mut() {
+                    playlist.set_rating(&context.path, rating.state);
+                }
+                self.show_toast(auxiliary_disconnect_message());
+                self.request_redraw();
+                return;
+            }
+            JobPoll::Pending => unreachable!("pending auxiliary result returned early"),
+        };
+        let path = context.path;
         self.image_details = Some(details);
         self.current_rating_capability = rating.capability;
         self.presented_rating = next_presented_rating(
@@ -2011,6 +2068,12 @@ impl App {
             RatingWriteCapability::UnsafeSource => {
                 self.show_toast(
                     "viewr could not verify this image's source safely. The file was not changed.",
+                );
+                return;
+            }
+            RatingWriteCapability::ObservationFailed => {
+                self.show_toast(
+                    "The rating could not be read. Close and reopen viewr before changing this file.",
                 );
                 return;
             }
@@ -2299,7 +2362,7 @@ impl App {
 
     fn discard_animation_for_pixel_edit(&mut self) {
         self.animation = None;
-        self.auxiliary_loader_rx = None;
+        self.auxiliary_job = None;
     }
 
     fn cancel_pending_image_load(&mut self) {
@@ -2951,16 +3014,10 @@ impl App {
             log::debug!("discarded stale crop recovery state");
             return false;
         }
-        let CropRecovery {
-            mut transform,
-            animation,
-            auxiliary_loader_rx,
-            ..
-        } = recovery;
-        transform.crop_start = None;
-        self.transform = transform;
-        self.animation = animation;
-        self.auxiliary_loader_rx = auxiliary_loader_rx;
+        let restored = recovery.into_restored_edit_state();
+        self.transform = restored.transform;
+        self.animation = restored.animation;
+        self.auxiliary_job = restored.auxiliary_job;
         self.request_redraw();
         true
     }
@@ -4456,7 +4513,7 @@ impl App {
             source_image,
             transform: source_transform,
             animation: self.animation.take(),
-            auxiliary_loader_rx: self.auxiliary_loader_rx.take(),
+            auxiliary_job: self.auxiliary_job.take(),
         };
         self.transform.zoom = 1.0;
         self.transform.offset_x = 0.0;
@@ -4525,7 +4582,7 @@ impl App {
             || probe.navigation_target.is_some()
             || self.session.receiver.is_some()
             || self.preview_worker.is_some()
-            || self.auxiliary_loader_rx.is_some()
+            || self.auxiliary_job.is_some()
             || self.crop_worker.is_some()
             || self.scanner_rx.is_some()
         {
@@ -4538,7 +4595,7 @@ impl App {
         if !self.performance_probe_has_presented_current()
             || !self.prefetch_schedule.is_idle()
             || !self.thumbs_in_flight.is_empty()
-            || self.auxiliary_loader_rx.is_some()
+            || self.auxiliary_job.is_some()
             || !performance_ui_is_settled(self.egui_repaint_at)
         {
             return false;
@@ -4585,7 +4642,7 @@ impl App {
             PERFORMANCE_PROBE_TIMEOUT.as_secs(),
             self.scanner_rx.is_some(),
             self.session.receiver.is_some() || self.preview_worker.is_some(),
-            self.auxiliary_loader_rx.is_some(),
+            self.auxiliary_job.is_some(),
             self.performance_probe
                 .as_ref()
                 .is_some_and(|probe| probe.navigation_target.is_some()),
@@ -5963,6 +6020,28 @@ fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
     current == Some(selected)
 }
 
+fn auxiliary_job_is_current(
+    context: &AuxiliaryLoadContext,
+    generation: u64,
+    selected: Option<&Path>,
+    presented: Option<&Path>,
+) -> bool {
+    context.generation == generation
+        && selected == Some(context.path.as_path())
+        && presented == Some(context.path.as_path())
+}
+
+const fn auxiliary_disconnect_message() -> &'static str {
+    "Image details, animation, and rating reading stopped unexpectedly. Close and reopen viewr before continuing."
+}
+
+const fn rating_after_auxiliary_disconnect() -> RatingObservation {
+    RatingObservation {
+        state: RatingState::Unreadable,
+        capability: RatingWriteCapability::ObservationFailed,
+    }
+}
+
 fn performance_navigation_targets(current: usize, len: usize) -> VecDeque<usize> {
     let mut targets = VecDeque::new();
     if len <= 1 {
@@ -6298,6 +6377,59 @@ mod test {
         assert!(thumbnail_result_is_current(8, 8, true));
         assert!(!thumbnail_result_is_current(8, 7, true));
         assert!(!thumbnail_result_is_current(8, 8, false));
+    }
+
+    #[test]
+    fn auxiliary_result_requires_exact_generation_and_both_image_owners() {
+        let path = PathBuf::from("current.jpg");
+        let other = Path::new("other.jpg");
+        let context = AuxiliaryLoadContext {
+            path: path.clone(),
+            generation: 8,
+        };
+
+        assert!(auxiliary_job_is_current(
+            &context,
+            8,
+            Some(&path),
+            Some(&path)
+        ));
+        assert!(!auxiliary_job_is_current(
+            &context,
+            7,
+            Some(&path),
+            Some(&path)
+        ));
+        assert!(!auxiliary_job_is_current(
+            &context,
+            8,
+            Some(other),
+            Some(&path)
+        ));
+        assert!(!auxiliary_job_is_current(
+            &context,
+            8,
+            Some(&path),
+            Some(other)
+        ));
+    }
+
+    #[test]
+    fn auxiliary_disconnect_copy_requires_a_restart_without_promising_success() {
+        let message = auxiliary_disconnect_message();
+
+        assert!(message.contains("Close and reopen viewr"));
+        assert!(message.contains("rating"));
+        assert!(!message.contains("recover"));
+        assert!(!message.contains("F5"));
+        assert!(!message.contains(['\\', '/']));
+        assert_eq!(
+            rating_after_auxiliary_disconnect(),
+            RatingObservation {
+                state: RatingState::Unreadable,
+                capability: RatingWriteCapability::ObservationFailed,
+            }
+        );
     }
 
     #[test]
@@ -7026,7 +7158,7 @@ mod test {
             source_image: Arc::clone(&source_image),
             transform,
             animation: None,
-            auxiliary_loader_rx: None,
+            auxiliary_job: None,
         };
 
         assert!(crop_recovery_matches(
@@ -7059,6 +7191,69 @@ mod test {
         ));
         assert_eq!(recovery.transform.crop_rect, Some([0.2, 0.3, 0.8, 0.9]));
         assert_eq!(recovery.transform.rotation_steps, 1);
+    }
+
+    #[test]
+    fn crop_recovery_preserves_every_auxiliary_job_terminal_state() {
+        let path = PathBuf::from("source.png");
+        let source_image = Arc::new(DecodedImage {
+            rgba: vec![10, 20, 30, 255],
+            width: 1,
+            height: 1,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        });
+        let transform = Transform {
+            crop_start: Some((0.2, 0.3)),
+            ..Transform::default()
+        };
+        let context = || AuxiliaryLoadContext {
+            path: path.clone(),
+            generation: 42,
+        };
+        let recovery = |auxiliary_job| CropRecovery {
+            source_path: path.clone(),
+            source_generation: 42,
+            source_image: Arc::clone(&source_image),
+            transform,
+            animation: None,
+            auxiliary_job,
+        };
+        let output = || {
+            (
+                Ok(None),
+                crate::image_info::ImageDetails::default(),
+                RatingObservation {
+                    state: RatingState::Unrated,
+                    capability: RatingWriteCapability::ReadOnlyFormat,
+                },
+            )
+        };
+
+        let (pending_completion, pending_job) = OneShotJob::new(context(), || {});
+        let pending = recovery(Some(pending_job)).into_restored_edit_state();
+        assert!(matches!(
+            pending.auxiliary_job.as_ref().unwrap().poll(),
+            JobPoll::Pending
+        ));
+        assert_eq!(pending.transform.crop_start, None);
+        drop(pending_completion);
+
+        let (ready_completion, ready_job) = OneShotJob::new(context(), || {});
+        assert!(ready_completion.complete(output()));
+        let ready = recovery(Some(ready_job)).into_restored_edit_state();
+        assert!(matches!(
+            ready.auxiliary_job.as_ref().unwrap().poll(),
+            JobPoll::Ready(_)
+        ));
+
+        let (disconnected_completion, disconnected_job) = OneShotJob::new(context(), || {});
+        drop(disconnected_completion);
+        let disconnected = recovery(Some(disconnected_job)).into_restored_edit_state();
+        assert!(matches!(
+            disconnected.auxiliary_job.as_ref().unwrap().poll(),
+            JobPoll::Disconnected
+        ));
     }
 
     #[test]

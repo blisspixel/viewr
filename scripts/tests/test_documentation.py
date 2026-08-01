@@ -183,6 +183,26 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn('multiple-versions = "deny"', deny_policy)
         self.assertNotIn('multiple-versions = "warn"', deny_policy)
 
+    def test_pre_one_version_path_builds_product_before_distribution(self) -> None:
+        roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        standards = (REPOSITORY_ROOT / "docs/STANDARDS.md").read_text(encoding="utf-8")
+        ordered_gates = (
+            "| **v0.2.0** | Reliability architecture beta |",
+            "| **v0.3.0** | Display-correct SDR preview |",
+            "| **v0.4.0** | File-coherence preview |",
+            "| **v0.5.0** | Format-contract preview |",
+            "| **v0.6.0** | Integrated product-quality beta |",
+            "| **v0.7.0** | Accessibility evidence preview |",
+            "| **v0.8.0** | Release-readiness beta |",
+            "| **v0.9.0** | Publisher-authenticated release candidate |",
+        )
+        positions = [roadmap.index(gate) for gate in ordered_gates]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("Immediate focus: v0.2 reliability architecture", roadmap)
+        self.assertIn("Native platform trust | Deferred to v0.9", roadmap)
+        self.assertIn("explicitly unsigned pre-1.0 preview", standards)
+        self.assertIn("Publisher authentication remains a v0.9 and 1.0 gate", standards)
+
 
 if __name__ == "__main__":
     unittest.main()

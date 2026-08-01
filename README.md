@@ -142,8 +142,9 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 v0.1.0 is the first public foundation preview, not a percentage-complete score or
 a claim that the product is finished. The
 [roadmap](docs/ROADMAP.md#version-path-to-an-exceptional-10) defines the logical
-v0.2 through v0.9 trust, accessibility, reliability, fidelity, coherence, format,
-polish, and release-candidate gates that lead to a broadly recommended 1.0. The
+v0.2 through v0.9 reliability, fidelity, coherence, format, product-quality,
+accessibility, release-readiness, and publisher-authenticated candidate gates that
+lead to a broadly recommended 1.0. The
 [release notes](docs/releases/v0.1.0.md) state the exact current limits.
 
 ## Development

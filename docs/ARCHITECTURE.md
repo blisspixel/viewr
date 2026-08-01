@@ -99,10 +99,10 @@ struct App {
 
 There is no document database, plugin registry, or scene graph. The state is
 intentionally centralized so the winit event loop has one owner. The `session`,
-`crop`, `playlist`, and `performance` modules establish smaller state and logic
-seams without introducing a second mutable store. `App` remains a large
-orchestrator, and bounded job coordination plus dock/menu view models are still
-explicit roadmap work.
+`crop`, `playlist`, `performance`, and `job` modules establish smaller state and
+logic seams without introducing a second mutable store. `App` remains a large
+orchestrator. Extending bounded job ownership to the remaining worker surfaces,
+plus extracting dock/menu view models, is explicit roadmap work.
 
 ## Modules
 
@@ -111,6 +111,14 @@ Shipped:
 - **`app`**: the winit application handler and centralized state/input dispatch.
   It opens command-line and native file requests, schedules background work, and
   feeds one immutable frame snapshot to the UI.
+- **`job`**: the bounded, one-result ownership boundary first used by current-image
+  details, animation discovery, and rating observation. The event loop retains
+  path and generation context while the worker receives one non-cloneable
+  completion endpoint. Replaced work cannot publish, and an endpoint that closes
+  without a result wakes the event loop so it becomes a terminal state instead
+  of permanent false busy state. The interface requires a restart after an
+  unexpected executor failure; release builds do not claim thread-panic recovery
+  or promise that the same failing input will succeed after restart.
 - **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
   textured quad, scissored to the physical-pixel viewport left after docked
   chrome. Egui draws in a separate full-window pass. The current image is an sRGB

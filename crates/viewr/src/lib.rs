@@ -20,6 +20,7 @@ pub mod fs;
 pub mod gpu;
 pub mod heal;
 pub mod image_info;
+pub(crate) mod job;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod performance;

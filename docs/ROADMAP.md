@@ -33,10 +33,11 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Immediate focus: v0.2 trusted distribution, followed by v0.3 human
-accessibility evidence and v0.4 reliability architecture. The next product gates
-are v0.5 display correctness, v0.6 file coherence, and v0.7 format-contract
-closure.** Optional
+**Immediate focus: v0.2 reliability architecture, followed by v0.3 display
+correctness and v0.4 file coherence. The next product gates are v0.5
+format-contract closure and v0.6 integrated product quality. Artifact-bound human
+accessibility evidence, release hardening, and publisher-authenticated delivery
+close v0.7 through v0.9 after product behavior is mature.** Optional
 model-backed description remains a gated post-1.0 candidate, not active Phase 8
 scope.
 
@@ -50,14 +51,14 @@ dependency order. A version is tagged only when its exit criteria are true.
 | Version | Role | Required outcome before tagging |
 | --- | --- | --- |
 | **v0.1.0** | Public foundation, released | The current product surface is usable and honestly documented: fast file and folder viewing, bounded decoding, ratings and filters, Source Privacy, Trash and Undo, Open With on Windows, focused editing, privacy invariants, meaningful coverage, immutable checksummed archives, attestations, and explicit unsigned-preview limits. |
-| **v0.2.0** | Trusted distribution preview | Windows direct delivery is Authenticode-signed; the macOS application is Developer ID-signed, hardened, notarized, and stapled; a normal Linux package is verified on Wayland and X11. Install, same-version reinstall, explicit update, uninstall, rollback, file associations, checksums, manifests, and provenance pass on the published artifacts. |
-| **v0.3.0** | Accessibility evidence preview | Narrator, VoiceOver, and Orca matrices are completed against exact artifact hashes. Keyboard-only operation, focus order, names, roles, selected and busy state, high contrast, text scaling, loading, errors, crop, ratings, panels, and recovery have no unresolved critical or high-severity accessibility defect. |
-| **v0.4.0** | Reliability architecture beta | Background image details, animation, crop, save, thumbnails, and prefetch have one bounded job owner. Stale work cannot mutate a newer selection or edit, failure paths are observable and recoverable, native glue is thin, race contracts are tested, and meaningful logic coverage remains at least 85 percent. |
-| **v0.5.0** | Display-correct SDR preview | Tagged SDR output matches reference conversions. The active display profile refreshes when the window moves between monitors, worker-decoded images preserve color status, and deterministic sRGB fallback remains visible. Wide-gamut and HDR stay disabled unless an end-to-end higher-precision path is proven. |
-| **v0.6.0** | File-coherence preview | External edits, replacement, rename, deletion, and noisy watcher events produce deterministic visible states without blanking the last good frame or discarding unsaved edits. Open With reaches supported user-mediated chooser APIs on all three platforms. |
-| **v0.7.0** | Format-contract preview | Multi-page and multi-frame containers expose bounded, identifiable navigation rather than silently showing only the first item. The format table distinguishes decode, animation, page, metadata, and color behavior. Camera RAW either meets the isolated-worker, color, fixture, fuzz, memory, and deadline bar or remains explicitly deferred from 1.0. |
-| **v0.8.0** | Integrated product-quality beta | Primary first-time, power-user, admin, failure-recovery, and visual-polish paths pass on representative Windows, macOS, and Linux hardware. Startup, navigation, memory, mixed-DPI, multi-monitor, update, uninstall, interface copy, empty, loading, and error states meet their documented budgets with no unresolved high-severity product-quality issue. |
-| **v0.9.0** | Release candidate | Scope is frozen. Only release-blocking fixes are accepted. The signed candidate passes the full security scan, dependency policy, fuzzing, coverage, performance, privacy, accessibility, packaging, upgrade, rollback, documentation, and representative-hardware matrices with no open 1.0 blocker. |
+| **v0.2.0** | Reliability architecture beta | Background image details, animation, crop, save, thumbnails, and prefetch have one bounded job owner. Stale work cannot mutate a newer selection or edit, failure paths are observable and recoverable, native glue is thin, race contracts are tested, and meaningful logic coverage remains at least 85 percent. |
+| **v0.3.0** | Display-correct SDR preview | Tagged SDR output matches reference conversions. The active display profile refreshes when the window moves between monitors, worker-decoded images preserve color status, and deterministic sRGB fallback remains visible. Wide-gamut and HDR stay disabled unless an end-to-end higher-precision path is proven. |
+| **v0.4.0** | File-coherence preview | External edits, replacement, rename, deletion, and noisy watcher events produce deterministic visible states without blanking the last good frame or discarding unsaved edits. Open With reaches supported user-mediated chooser APIs on all three platforms. |
+| **v0.5.0** | Format-contract preview | Multi-page and multi-frame containers expose bounded, identifiable navigation rather than silently showing only the first item. The format table distinguishes decode, animation, page, metadata, and color behavior. Camera RAW either meets the isolated-worker, color, fixture, fuzz, memory, and deadline bar or remains explicitly deferred from 1.0. |
+| **v0.6.0** | Integrated product-quality beta | Primary first-time, power-user, admin, failure-recovery, and visual-polish paths pass on representative Windows, macOS, and Linux hardware. Startup, navigation, memory, mixed-DPI, multi-monitor, interface copy, empty, loading, and error states meet their documented budgets with no unresolved high-severity product-quality issue. |
+| **v0.7.0** | Accessibility evidence preview | Narrator, VoiceOver, and Orca matrices are completed against exact artifact hashes. Keyboard-only operation, focus order, names, roles, selected and busy state, high contrast, text scaling, loading, errors, crop, ratings, panels, and recovery have no unresolved critical or high-severity accessibility defect. |
+| **v0.8.0** | Release-readiness beta | Scope is stable enough for representative-hardware, clean-install, same-version reinstall, explicit update, uninstall, rollback, file-association, provenance, and complete product-acceptance matrices. Unsigned candidate artifacts remain acceptable here when their trust boundary is explicit. |
+| **v0.9.0** | Publisher-authenticated release candidate | Scope is frozen and only release-blocking fixes are accepted. Windows delivery is Authenticode-signed; the macOS application is Developer ID-signed, hardened, notarized, and stapled; a normal Linux package is verified on Wayland and X11. The exact candidate passes the full security, dependency, fuzz, coverage, performance, privacy, accessibility, packaging, upgrade, rollback, documentation, and hardware matrices. |
 | **v1.0.0** | Broadly recommended release | The proven v0.9 scope ships as a fast, faithful, predictable, private, recoverable, accessible, and publisher-authenticated viewer. Documentation matches the artifacts, normal user workflows need no developer tools, and no known critical or high-severity defect remains. |
 
 Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
@@ -69,8 +70,8 @@ Release rules:
 1. Patch releases such as v0.1.1 fix shipped behavior or security issues. They do
    not pull later milestone scope forward.
 2. A later milestone cannot compensate for an earlier failed gate. For example,
-   more formats do not compensate for unsigned distribution or inaccessible core
-   workflows.
+   more formats do not compensate for unreliable background work, and signing
+   does not compensate for inaccessible core workflows.
 3. Scope may be removed or explicitly deferred when evidence says it does not
    belong in 1.0. Acceptance criteria are not weakened to preserve a version
    label.
@@ -90,10 +91,10 @@ but completed history does not override an open gate here.
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) reran CI and fuzzing, built four platform archives, published the exact 12-asset set, and attested every asset. The public installer commands use fixed-version release URLs. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. Path-filtered fuzz remains mandatory in the release workflow. |
-| Human accessibility evidence | Open | Complete Narrator, VoiceOver, and Orca records against the exact candidate artifact under `docs/release-evidence/accessibility/`. |
-| Native platform trust | Open | Sign Windows deliverables, sign and notarize the macOS application and disk image, and verify a normal Linux package on its target desktop. |
-| Representative hardware acceptance | Open | Repeat cold launch, animation, large-image, mixed-DPI, multi-monitor, and profiled-display checks on all three platforms. |
-| Display correctness | Partial | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference-profile fixtures, wide-gamut, and HDR gates remain. |
+| Human accessibility evidence | Open for v0.7 | Complete Narrator, VoiceOver, and Orca records against the exact candidate artifact under `docs/release-evidence/accessibility/`. |
+| Native platform trust | Deferred to v0.9 | Sign Windows deliverables, sign and notarize the macOS application and disk image, and verify a normal Linux package on its target desktop after the product scope is stable. |
+| Representative hardware acceptance | Open for v0.8 | Repeat cold launch, animation, large-image, mixed-DPI, multi-monitor, and profiled-display checks on all three platforms. |
+| Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference-profile fixtures, wide-gamut, and HDR gates remain. |
 
 The first public pre-1.0 release may remain clearly labeled as unsigned. A broadly
 recommended 1.0 must close the human accessibility, native platform trust,
@@ -125,12 +126,13 @@ viewr already has a stronger privacy and hostile-input story than those referenc
 What is missing is not another toolbar. It is end-to-end fidelity, complete edge
 behavior, installability, and maintainable proof of correctness.
 
-### Priority 1, v0.2 and v0.3: trusted distribution and accessibility
+### Release-close gates, v0.7 through v0.9: accessibility and trusted distribution
 
-Why first: v0.1.0 closes the gap between repository quality and a release that a
-careful non-developer can obtain and authenticate. The remaining work raises that
-explicitly unsigned preview to the trust level required for a broad 1.0
-recommendation.
+Why later: accessible implementation remains a baseline throughout development,
+but artifact-bound human evidence and publisher authentication should be gathered
+against a stable product candidate. The unsigned v0.1.0 preview remains honest
+while reliability, fidelity, coherence, formats, and integrated product quality
+are completed first.
 
 - [x] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
   commit and retain the [green CI run](https://github.com/blisspixel/viewr/actions/runs/30642307317)
@@ -151,18 +153,19 @@ recommendation.
   documentation now agrees on the public unsigned v0.1.0 state, CI runs the exact
   locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
   against an explicit transitive baseline without unexplained warnings.
-- [ ] Produce and verify a signed Windows delivery, a Developer ID-signed and
+- [ ] For v0.9, produce and verify a signed Windows delivery, a Developer ID-signed and
   notarized macOS application and disk image, and a normal Linux Flatpak or
   equivalent package. Store publication remains optional.
 
-Definition of done: a user can download, authenticate, install, exercise, update,
+Definition of done for these release-close gates: a user can download,
+authenticate, install, exercise, update,
 and remove viewr without compiling it, changing defaults silently, or trusting an
 unrecorded manual build, and the core workflows have completed artifact-bound
 human accessibility evidence on all three platforms.
 
-### Priority 2, v0.4: make correctness easier to preserve
+### Priority 1, v0.2: make correctness easier to preserve
 
-Why second: later milestones add monitor transitions, file watchers, page state,
+Why now: later milestones add monitor transitions, file watchers, page state,
 and optional worker formats. `app.rs` and `ui.rs` already own too many independent
 state transitions, so those capabilities should not deepen concentrated async
 state before job ownership and test seams are explicit.
@@ -177,7 +180,11 @@ state before job ownership and test seams are explicit.
 - [x] Extract explicit `PerformanceProbe` state and transitions into a covered
   module.
 - [ ] Extract bounded job coordination for image details, animation, crop, save,
-  thumbnails, and prefetch, leaving `App` responsible for platform events.
+  thumbnails, and prefetch, leaving `App` responsible for platform events. The
+  first covered slice now owns the one-result image-details, animation-discovery,
+  and rating-observation lifecycle, including closed-completion wakeup and exact
+  path/generation rejection. Executor supervision remains open; release builds do
+  not claim recovery from an in-process thread panic.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window.
 - [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage
@@ -187,7 +194,7 @@ Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,
 edit, or panel state.
 
-### Priority 3, v0.5: color that is correct on the actual display
+### Priority 2, v0.3: color that is correct on the actual display
 
 Why next: a viewer that renders the wrong color is failing its primary job, even
 when it is fast. The current RGB ICC-to-sRGB normalization prevents the most common
@@ -243,7 +250,7 @@ window between profiled displays updates output without a restart, worker-decode
 images never lose color status silently, and HDR or wide-gamut modes cannot engage
 without an end-to-end higher-precision path.
 
-### Priority 4, v0.6 and v0.7: file and format coherence
+### Priority 3, v0.4 and v0.5: file and format coherence
 
 Why after color: image viewers commonly sit beside editors, exporters, scanners,
 and download tools. A stale view or a container that exposes only its first page
@@ -274,7 +281,7 @@ Definition of done: external edits appear predictably, every selected page/frame
 is identifiable and bounded, and the format table distinguishes container support
 from page, animation, metadata, and color behavior.
 
-### Priority 5, v0.8 and v0.9: integrated product proof
+### Priority 4, v0.6 through v0.9: integrated product and release proof
 
 Why last: individual capabilities can pass in isolation while the complete product
 still feels rough or fails under real platform conditions. These releases add no
@@ -724,7 +731,7 @@ install from source or a simple GitHub-style release artifact.
   500 ms window. A focused and pointer-inside optimized rerun completed every
   window at zero or one redraw without weakening the two-redraw budget or normal
   application scheduling.
-- [ ] Display-fidelity acceptance from Priority 3: worker color metadata is
+- [ ] Display-fidelity acceptance from Priority 2: worker color metadata is
   complete; per-display output, reference-profile fixtures, and honest
   wide-gamut/HDR gates remain.
 - [x] Public, checksummed, manifest-verified, and attested v0.1.0 artifacts from a
@@ -738,9 +745,10 @@ viewr as their image viewer if they choose, and never think about bloat again.
 
 ## Distribution scope
 
-Trusted direct installation is active 1.0 work. Store presence is not. The product
-does not need a marketplace listing to be recommendable, but direct downloads must
-meet the operating system's normal publisher-trust path.
+Trusted direct installation is v0.9 release-candidate work. Store presence is not.
+The product does not need a marketplace listing to be recommendable, but direct
+downloads must meet the operating system's normal publisher-trust path before
+v1.0.
 
 - [ ] Authenticode-sign direct Windows deliverables through a publicly trusted
   signing path.
@@ -752,8 +760,8 @@ meet the operating system's normal publisher-trust path.
   exist for sandbox testing)
 
 Signing credentials and notarization may require external accounts. They do not
-block local development or an explicitly unsigned pre-1.0 archive, but their
-absence remains visible and blocks a broadly recommended 1.0.
+block v0.2 through v0.8 development or an explicitly unsigned pre-1.0 archive,
+but their absence remains visible and blocks v0.9 and a broadly recommended 1.0.
 
 ## Beyond 1.0, candidates held to the same bar
 

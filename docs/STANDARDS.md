@@ -89,8 +89,10 @@ Target: 85 percent line coverage or higher on the testable logic, measured with
 not basename patterns, so similarly named integration tests and vendored files
 cannot be removed by this filename filter:
 
-- `app.rs`, `gpu.rs`: windowing, event-loop, and GPU integration mixed with pure
-  helpers that still need extraction under the v0.2 roadmap
+- `app.rs`: windowing and event-loop integration mixed with pure helpers that
+  still need extraction under the v0.2 roadmap
+- `gpu.rs`: device, surface, and texture integration plus remaining pure surface,
+  patch, and placement decisions that still need extraction
 - `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
 - `worker_limit.rs`: OS Job Object / process-group glue
 - `error.rs` and both workspace `main.rs` files: entry/error surfaces, including a
@@ -99,10 +101,10 @@ cannot be removed by this filename filter:
 The whole-file exclusions are acknowledged debt, not a claim that every excluded
 line is untestable. Their pure helpers retain direct unit tests, but those lines do
 not count toward the percentage until they move behind covered seams. Everything
-else is in the coverage floor, including the `ui.rs` egui/AccessKit adapter now
-that presentation policy lives in the pure `chrome` projection and UI behavior is
-exercised without a native window. Coverage is a floor and a signal, not the goal.
-The real goal is that the tests would catch a regression, which is why we also run
+else is in the coverage floor. This includes the `ui.rs` egui/AccessKit adapter,
+the pure `chrome` projection, and the CPU-only `gpu_image` sizing, mip, preview,
+and upload-selection policy. Coverage is a floor and a signal, not the goal. The
+real goal is that the tests would catch a regression, which is why we also run
 mutation testing.
 
 - `cargo test --workspace --all-targets --locked` is the canonical unit,

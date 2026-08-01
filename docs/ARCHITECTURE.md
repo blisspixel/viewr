@@ -422,15 +422,20 @@ The rule: **the UI thread only ever draws things that are already ready.** All
 `app.rs` owns the event loop, input table, asynchronous job lifecycle, crop
 geometry, curation, and frame assembly. `ui.rs` paints an immutable frame through
 the covered `chrome` policy, so dock layout, menu enablement, selected state, and
-accessibility presentation no longer live in native paint code. The remaining
-concentration is event dispatch and frame assembly in `app.rs` plus rendering
-adapters in `ui.rs`. The UI adapter is now inside the 85 percent CI coverage floor
-because its egui and AccessKit output is exercised without a native window. The
-remaining exclusions are path-scoped so they cannot hide similarly named tests or
-vendored files, but `app.rs`, `gpu.rs`, and the entry surfaces still mix native
-integration with pure tested helpers. That whole-file exclusion remains explicit
-v0.2 debt. Meaningful event-loop transitions must keep moving behind narrow
-covered seams before later monitor, watcher, and page-state work expands them.
+accessibility presentation no longer live in native paint code. The UI adapter is
+inside the 85 percent CI coverage floor because its egui and AccessKit output is
+exercised without a native window.
+
+The covered `gpu_image` seam now owns CPU-only texture sizing, mip planning,
+linear-light alpha-correct preview preparation, and upload selection. It owns no
+device, queue, surface, texture, or event-loop state. `gpu.rs` keeps those native
+resources and consumes the validated result, preserving one renderer owner and the
+existing asynchronous preview contract. The exact-path exclusion still contains
+surface-format selection, patch validation, placement packing, and other pure
+helpers alongside native GPU integration. `app.rs`, `gpu.rs`, and entry surfaces
+therefore remain explicit v0.2 extraction debt. Meaningful event-loop and renderer
+decisions must keep moving behind narrow covered seams before later monitor,
+watcher, and page-state work expands them.
 
 Trash restore retains an explicit event-loop ownership boundary. The worker owns
 cloned exact receipts; the event loop owns captured playlist scope, indices, prior

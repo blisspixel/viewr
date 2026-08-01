@@ -19,6 +19,7 @@ pub mod ephemeral;
 pub mod error;
 pub mod fs;
 pub mod gpu;
+mod gpu_image;
 pub mod heal;
 pub mod image_info;
 pub(crate) mod job;

@@ -76,6 +76,11 @@ and organized by user-visible concern.
   so this filter cannot also remove similarly named integration tests or vendored
   source. Mixed native and pure helpers in those files remain explicit v0.2
   extraction debt rather than being described as untestable platform glue.
+- GPU image sizing, mip planning, linear-light alpha-correct preview preparation,
+  and upload selection now live in a covered CPU-only policy module. The wgpu
+  adapter retains device and texture ownership and consumes the same validated
+  decisions, so preview behavior and memory limits are unchanged while malformed,
+  stale, wrong-color, and canceled inputs receive direct regression coverage.
 
 ### Documentation
 

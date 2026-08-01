@@ -223,10 +223,14 @@ state before job ownership and test seams are explicit.
   enforcement step now includes the egui/AccessKit `ui.rs` adapter after chrome
   policy moved to its pure projection, while the measured floor remains above 85
   percent. The exclusion is exact-path scoped so it cannot hide similarly named
-  integration tests or vendored source. `app.rs`, `gpu.rs`, and entry surfaces
-  still mix platform integration with pure unit-tested helpers; move those helpers
-  behind covered seams before closing this item. Preserve the bounded job,
-  thumbnail, prefetch, and chrome race/stale-result matrices while doing so.
+  integration tests or vendored source. The second step moves GPU image sizing,
+  mip planning, linear-light preview preparation, and upload selection into the
+  covered CPU-only `gpu_image` seam at 95.76 percent line coverage; the complete
+  measured floor is 89.20 percent. `app.rs`, the remaining `gpu.rs` surface,
+  patch, and placement decisions, and entry surfaces still mix platform
+  integration with pure unit-tested helpers. Move those helpers behind covered
+  seams before closing this item. Preserve the bounded job, thumbnail, prefetch,
+  chrome, and preview race/stale-result matrices while doing so.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

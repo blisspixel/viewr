@@ -30,6 +30,7 @@ pub mod performance;
 /// Folder and navigation state.
 pub mod playlist;
 pub mod prefetch;
+mod presentation;
 pub mod privacy;
 /// Embedded image ratings and session-only rating filters.
 pub mod ratings;

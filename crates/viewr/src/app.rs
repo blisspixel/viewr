@@ -39,6 +39,10 @@ use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
 use crate::prefetch::{self, PrefetchCache};
+use crate::presentation::{
+    ImageReuseEligibility, NavigationImagePlan, PresentationKind, durable_presentation_error,
+    image_open_in_progress, navigation_image_plan, preview_job_matches,
+};
 use crate::theme::{Preference, PreferenceRecovery};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
@@ -303,34 +307,6 @@ enum CropJobResult {
     Completed(DecodedImage),
     Failed(String),
     Cancelled,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PresentationKind {
-    Loaded,
-    Cropped,
-}
-
-impl PresentationKind {
-    const fn image_reuse(self) -> ImageReuseEligibility {
-        match self {
-            Self::Loaded => ImageReuseEligibility::PristineSource,
-            Self::Cropped => ImageReuseEligibility::Ineligible,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ImageReuseEligibility {
-    Ineligible,
-    PristineSource,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum NavigationImagePlan {
-    ReusePresented,
-    RetainPresented,
-    LoadOnly,
 }
 
 struct PreviewJobContext {
@@ -6180,48 +6156,6 @@ fn record_idle_event_attribution(
     }
 }
 
-fn navigation_image_plan(
-    current_index: usize,
-    target_index: usize,
-    current_path: &Path,
-    target_path: &Path,
-    presented_path: Option<&Path>,
-    has_image: bool,
-    reuse: ImageReuseEligibility,
-) -> NavigationImagePlan {
-    if !has_image || reuse != ImageReuseEligibility::PristineSource {
-        return NavigationImagePlan::LoadOnly;
-    }
-    if presented_path == Some(target_path) {
-        return NavigationImagePlan::ReusePresented;
-    }
-    if presented_path == Some(current_path) && current_index.abs_diff(target_index) <= 2 {
-        NavigationImagePlan::RetainPresented
-    } else {
-        NavigationImagePlan::LoadOnly
-    }
-}
-
-const fn image_open_in_progress(
-    foreground_decode_pending: bool,
-    preview_kind: Option<PresentationKind>,
-) -> bool {
-    foreground_decode_pending || matches!(preview_kind, Some(PresentationKind::Loaded))
-}
-
-fn durable_presentation_error(kind: PresentationKind, message: &str) -> Option<String> {
-    matches!(kind, PresentationKind::Loaded).then(|| message.to_owned())
-}
-
-fn preview_job_matches(
-    job_generation: u64,
-    job_path: &Path,
-    current_generation: u64,
-    selected_path: Option<&Path>,
-) -> bool {
-    job_generation == current_generation && selected_path == Some(job_path)
-}
-
 fn crop_recovery_matches(
     recovery: &CropRecovery,
     current_generation: u64,
@@ -7231,120 +7165,6 @@ mod test {
             HealStrokeUpdate::TooManyPoints
         );
         assert_eq!(full.len(), crate::heal::MAX_STROKE_POINTS);
-    }
-
-    #[test]
-    fn reverse_navigation_reuses_only_pristine_presented_pixels() {
-        let a = Path::new("a.png");
-        let b = Path::new("b.png");
-        let c = Path::new("c.png");
-
-        assert_eq!(
-            navigation_image_plan(
-                1,
-                0,
-                b,
-                a,
-                Some(a),
-                true,
-                ImageReuseEligibility::PristineSource,
-            ),
-            NavigationImagePlan::ReusePresented
-        );
-        assert_eq!(
-            navigation_image_plan(
-                0,
-                1,
-                a,
-                b,
-                Some(a),
-                true,
-                ImageReuseEligibility::PristineSource,
-            ),
-            NavigationImagePlan::RetainPresented
-        );
-        for (has_image, reuse) in [
-            (false, ImageReuseEligibility::PristineSource),
-            (true, ImageReuseEligibility::Ineligible),
-        ] {
-            assert_eq!(
-                navigation_image_plan(1, 0, b, a, Some(a), has_image, reuse),
-                NavigationImagePlan::LoadOnly
-            );
-        }
-        assert_eq!(
-            navigation_image_plan(
-                0,
-                3,
-                a,
-                c,
-                Some(a),
-                true,
-                ImageReuseEligibility::PristineSource,
-            ),
-            NavigationImagePlan::LoadOnly
-        );
-        assert_eq!(
-            navigation_image_plan(
-                0,
-                1,
-                a,
-                b,
-                Some(c),
-                true,
-                ImageReuseEligibility::PristineSource,
-            ),
-            NavigationImagePlan::LoadOnly
-        );
-        assert_eq!(
-            PresentationKind::Loaded.image_reuse(),
-            ImageReuseEligibility::PristineSource
-        );
-        assert_eq!(
-            PresentationKind::Cropped.image_reuse(),
-            ImageReuseEligibility::Ineligible
-        );
-    }
-
-    #[test]
-    fn opening_state_excludes_derived_preview_preparation() {
-        assert!(image_open_in_progress(true, None));
-        assert!(image_open_in_progress(
-            false,
-            Some(PresentationKind::Loaded)
-        ));
-        assert!(!image_open_in_progress(
-            false,
-            Some(PresentationKind::Cropped)
-        ));
-        assert!(!image_open_in_progress(false, None));
-    }
-
-    #[test]
-    fn preview_job_requires_exact_generation_and_selected_path() {
-        let path = Path::new("album/large.png");
-        assert!(preview_job_matches(17, path, 17, Some(path)));
-        assert!(!preview_job_matches(16, path, 17, Some(path)));
-        assert!(!preview_job_matches(
-            17,
-            path,
-            17,
-            Some(Path::new("album/other.png"))
-        ));
-        assert!(!preview_job_matches(17, path, 17, None));
-    }
-
-    #[test]
-    fn loaded_presentation_failures_are_retryable_but_crop_failures_are_not() {
-        let message = "Could not prepare image preview";
-        assert_eq!(
-            durable_presentation_error(PresentationKind::Loaded, message).as_deref(),
-            Some(message)
-        );
-        assert_eq!(
-            durable_presentation_error(PresentationKind::Cropped, message),
-            None
-        );
     }
 
     #[test]

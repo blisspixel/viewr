@@ -426,6 +426,14 @@ accessibility presentation no longer live in native paint code. The UI adapter i
 inside the 85 percent CI coverage floor because its egui and AccessKit output is
 exercised without a native window.
 
+The covered `presentation` seam owns immutable loaded-versus-cropped identity,
+pristine-pixel reuse eligibility, selected-versus-presented navigation planning,
+opening-state classification, durable load-error selection, and preview result
+identity. It owns no path, image, cache, job, playlist, session, renderer, window,
+or event-loop state. `App` supplies one snapshot of those facts and remains the
+only owner that applies the decision, mutates selection, schedules work, or
+publishes pixels.
+
 The covered `gpu_image` seam owns CPU-only texture sizing, mip planning,
 linear-light alpha-correct preview preparation, and upload selection. The covered
 `gpu_policy` seam owns first-supported sRGB surface selection, full-resolution
@@ -435,12 +443,13 @@ keeps the device, queue, surface, texture, pipeline, sampler, mip generation, an
 frame lifecycle, consuming the validated decisions while preserving one renderer
 owner and the existing asynchronous preview contract.
 
-The exact-path exclusion remains because the renderer must exercise native wgpu
-resources and surface outcomes. Its remaining pure helpers are small and coupled
-to that adapter rather than hidden domain policy. Concentrated event transitions
-in `app.rs` and pure entry parsing remain explicit v0.2 extraction debt.
-Meaningful decisions must keep moving behind narrow covered seams before later
-monitor, watcher, and page-state work expands them.
+The exact-path exclusions remain because the application and renderer must
+exercise native event-loop and wgpu outcomes. Remaining renderer helpers are small
+and coupled to that adapter rather than hidden domain policy. Concentrated rating,
+curation, recovery, shortcut, and event transitions in `app.rs`, plus pure entry
+parsing, remain explicit v0.2 extraction debt. Meaningful decisions must keep
+moving behind narrow covered seams before later monitor, watcher, and page-state
+work expands them.
 
 Trash restore retains an explicit event-loop ownership boundary. The worker owns
 cloned exact receipts; the event loop owns captured playlist scope, indices, prior

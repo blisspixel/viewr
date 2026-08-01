@@ -104,9 +104,11 @@ not count toward the percentage until they move behind covered seams. Everything
 else is in the coverage floor. This includes the `ui.rs` egui/AccessKit adapter,
 the pure `chrome` projection, and the CPU-only `gpu_image` sizing, mip, preview,
 and upload-selection policy. It also includes `gpu_policy` surface selection,
-patch geometry, placement packing, and clear-color mapping. Coverage is a floor
-and a signal, not the goal. The real goal is that the tests would catch a
-regression, which is why we also run mutation testing.
+patch geometry, placement packing, and clear-color mapping, plus `presentation`
+selected-versus-presented navigation, pristine reuse, opening, durable-error, and
+preview-identity policy. Coverage is a floor and a signal, not the goal. The real
+goal is that the tests would catch a regression, which is why we also run mutation
+testing.
 
 - `cargo test --workspace --all-targets --locked` is the canonical unit,
   integration, binary, example, and benchmark-target runner. CI separately runs

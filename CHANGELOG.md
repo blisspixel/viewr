@@ -86,6 +86,11 @@ and organized by user-visible concern.
   module. Exact tests cover first-supported sRGB selection, every placement field,
   full-resolution and bounds requirements, integer overflow, byte-length mismatch,
   and all clear-color channels without creating a device or texture.
+- Selected-versus-presented navigation policy now lives in a private covered
+  module instead of the event-loop adapter. Exact tests cover pristine-pixel reuse,
+  the near-navigation retention boundary, edited-image rejection, opening-state
+  classification, durable loaded-image errors, and exact preview generation/path
+  identity while `App` retains all path, cache, session, and job ownership.
 
 ### Documentation
 

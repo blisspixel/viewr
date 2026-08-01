@@ -1312,14 +1312,11 @@ fn view_menu(
 fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
     ui.set_min_width(220.0);
     for choice in chrome.rating_filter_choices() {
-        let response = ui.add_enabled(
-            choice.enabled,
-            egui::RadioButton::new(choice.selected, &choice.label),
-        );
+        let response = ui.radio(choice.selected, &choice.label);
         response.widget_info(|| {
             WidgetInfo::selected(
                 WidgetType::RadioButton,
-                choice.enabled,
+                ui.is_enabled(),
                 choice.selected,
                 &choice.accessibility_label,
             )

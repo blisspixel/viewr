@@ -358,6 +358,7 @@ pub(crate) struct ChromeInput {
 pub(crate) enum ChromeControl {
     OpenSource,
     Reload,
+    #[cfg(target_os = "windows")]
     OpenWith,
     SaveAs,
     MoveToTrash,
@@ -381,9 +382,10 @@ pub(crate) enum ChromeControl {
 
 impl ChromeControl {
     #[cfg(test)]
-    pub const ALL: [Self; 21] = [
+    pub const ALL: &'static [Self] = &[
         Self::OpenSource,
         Self::Reload,
+        #[cfg(target_os = "windows")]
         Self::OpenWith,
         Self::SaveAs,
         Self::MoveToTrash,
@@ -437,7 +439,6 @@ pub(crate) struct RatingChoiceView {
 pub(crate) struct RatingFilterChoiceView {
     pub filter: crate::ratings::RatingFilter,
     pub label: String,
-    pub enabled: bool,
     pub selected: bool,
     pub accessibility_label: String,
 }
@@ -481,9 +482,10 @@ impl ChromeViewModel {
                 !self.input.curation_busy
             }
             ChromeControl::Reload
-            | ChromeControl::OpenWith
             | ChromeControl::PermanentDelete
             | ChromeControl::EditTransform => current,
+            #[cfg(target_os = "windows")]
+            ChromeControl::OpenWith => current,
             ChromeControl::SaveAs => current && !self.input.save_recovery_unsettled,
             ChromeControl::MoveToTrash => current && !self.input.restore_recovery_unsettled,
             ChromeControl::UndoTrash => {
@@ -668,7 +670,6 @@ impl ChromeViewModel {
 
     #[must_use]
     pub fn rating_filter_choices(self) -> Vec<RatingFilterChoiceView> {
-        let enabled = self.is_enabled(ChromeControl::RatingFilterMenu);
         std::iter::once((
             crate::ratings::RatingFilter::All,
             "All images".to_owned(),
@@ -686,7 +687,6 @@ impl ChromeViewModel {
             |(filter, label, accessibility_label)| RatingFilterChoiceView {
                 filter,
                 label,
-                enabled,
                 selected: self.input.rating_filter == filter,
                 accessibility_label,
             },
@@ -892,8 +892,11 @@ mod tests {
     #[test]
     fn ready_state_defines_every_control_without_windowing() {
         let model = ChromeViewModel::new(ready_input());
-        assert_eq!(ChromeControl::ALL.len(), 21);
-        for control in ChromeControl::ALL {
+        assert_eq!(
+            ChromeControl::ALL.len(),
+            if cfg!(target_os = "windows") { 21 } else { 20 }
+        );
+        for &control in ChromeControl::ALL {
             let expected = control != ChromeControl::ApplyCrop;
             assert_eq!(model.is_enabled(control), expected, "{control:?}");
         }
@@ -916,6 +919,7 @@ mod tests {
             let model = ChromeViewModel::new(input);
             for control in [
                 ChromeControl::Reload,
+                #[cfg(target_os = "windows")]
                 ChromeControl::OpenWith,
                 ChromeControl::SaveAs,
                 ChromeControl::MoveToTrash,
@@ -1190,7 +1194,7 @@ mod tests {
         let choices = model.rating_filter_choices();
         assert_eq!(choices.len(), 6);
         assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
-        assert!(choices.iter().all(|choice| choice.enabled));
+        assert!(model.is_enabled(ChromeControl::RatingFilterMenu));
         assert_eq!(choices[3].accessibility_label, "Rating filter: At least 3");
 
         input.rating_folder_count = 0;
@@ -1199,12 +1203,6 @@ mod tests {
         assert_eq!(
             model.rating_filter_menu_label(),
             "Rating Filter: Open a folder"
-        );
-        assert!(
-            model
-                .rating_filter_choices()
-                .iter()
-                .all(|choice| !choice.enabled)
         );
         input.folder_scan_busy = true;
         assert_eq!(

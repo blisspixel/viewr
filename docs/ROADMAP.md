@@ -219,8 +219,14 @@ state before job ownership and test seams are explicit.
   accessibility copy from a single raw frame snapshot. Covered blocker matrices
   include recovery ownership, concurrent work, unavailable Spot Heal, and the
   requirement that an active tool always remains closable.
-- [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage
-  above 85 percent and add race-contract tests before deleting old paths.
+- [ ] Narrow the coverage exclusion as each seam becomes pure. The first
+  enforcement step now includes the egui/AccessKit `ui.rs` adapter after chrome
+  policy moved to its pure projection, while the measured floor remains above 85
+  percent. The exclusion is exact-path scoped so it cannot hide similarly named
+  integration tests or vendored source. `app.rs`, `gpu.rs`, and entry surfaces
+  still mix platform integration with pure unit-tested helpers; move those helpers
+  behind covered seams before closing this item. Preserve the bounded job,
+  thumbnail, prefetch, and chrome race/stale-result matrices while doing so.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

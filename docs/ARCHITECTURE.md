@@ -424,9 +424,13 @@ geometry, curation, and frame assembly. `ui.rs` paints an immutable frame throug
 the covered `chrome` policy, so dock layout, menu enablement, selected state, and
 accessibility presentation no longer live in native paint code. The remaining
 concentration is event dispatch and frame assembly in `app.rs` plus rendering
-adapters in `ui.rs`. The repository coverage command excludes most of that native
-glue, so meaningful transitions must continue moving behind narrow covered seams
-before later monitor, watcher, and page-state work expands them.
+adapters in `ui.rs`. The UI adapter is now inside the 85 percent CI coverage floor
+because its egui and AccessKit output is exercised without a native window. The
+remaining exclusions are path-scoped so they cannot hide similarly named tests or
+vendored files, but `app.rs`, `gpu.rs`, and the entry surfaces still mix native
+integration with pure tested helpers. That whole-file exclusion remains explicit
+v0.2 debt. Meaningful event-loop transitions must keep moving behind narrow
+covered seams before later monitor, watcher, and page-state work expands them.
 
 Trash restore retains an explicit event-loop ownership boundary. The worker owns
 cloned exact receipts; the event loop owns captured playlist scope, indices, prior

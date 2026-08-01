@@ -165,6 +165,30 @@ class DocumentationTests(unittest.TestCase):
                 self.assertIn(command, workflow)
                 self.assertIn(command, verification_guide)
         self.assertRegex(workflow, r"cargo llvm-cov --workspace\s+--locked")
+        exclusion_matches = re.findall(
+            r"--ignore-filename-regex '([^']+)'",
+            workflow,
+        )
+        self.assertEqual(len(exclusion_matches), 1)
+        exclusion = re.compile(exclusion_matches[0])
+        rust_files = {
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for root in ("crates", "fuzz", "vendor")
+            for path in (REPOSITORY_ROOT / root).rglob("*.rs")
+        }
+        excluded = {path for path in rust_files if exclusion.search(path)}
+        self.assertEqual(
+            excluded,
+            {
+                "crates/viewr-decode/src/main.rs",
+                "crates/viewr/src/app.rs",
+                "crates/viewr/src/error.rs",
+                "crates/viewr/src/gpu.rs",
+                "crates/viewr/src/main.rs",
+                "crates/viewr/src/sandbox.rs",
+                "crates/viewr/src/worker_limit.rs",
+            },
+        )
 
         privacy_command_parts = (
             "cargo deny --locked check --hide-inclusion-graph -D warnings",

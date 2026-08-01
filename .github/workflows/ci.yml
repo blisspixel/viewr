@@ -260,15 +260,15 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # Coverage is enforced on testable logic. Display/IPC glue (app, gpu, ui,
-      # sandbox) and trivial entry points (error, main) need a display or the
-      # external viewr-decode binary; they are driven by end-to-end checks, not
-      # the line-coverage floor. See docs/STANDARDS.md.
+      # Coverage includes the egui/AccessKit UI adapter. The remaining exact-path
+      # exclusions contain native integration that cannot run honestly here, plus
+      # pure-helper debt still tracked by the v0.2 roadmap. The path-qualified
+      # pattern must not hide similarly named tests or vendored source.
       - name: Coverage
         run: >
           cargo llvm-cov --workspace
           --locked
-          --ignore-filename-regex '(app|gpu|ui|sandbox|worker_limit|error|main)\.rs$'
+          --ignore-filename-regex '(^|[/\\])crates[/\\](viewr[/\\]src[/\\](app|gpu|sandbox|worker_limit|error|main)|viewr-decode[/\\]src[/\\]main)\.rs$'
           --fail-under-lines 85
           --lcov --output-path target/lcov.info
 

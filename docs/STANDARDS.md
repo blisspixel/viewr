@@ -85,19 +85,25 @@ with intent, not as though it was assembled from plausible fragments.
 ## Testing
 
 Target: 85 percent line coverage or higher on the testable logic, measured with
-`cargo-llvm-cov` and enforced in CI. Display and IPC glue that cannot be exercised
-honestly without a window or an external worker binary is excluded and covered by
-end-to-end verification instead:
+`cargo-llvm-cov` and enforced in CI. The current exclusions are exact source paths,
+not basename patterns, so similarly named integration tests and vendored files
+cannot be removed by this filename filter:
 
-- `app.rs`, `gpu.rs`, `ui.rs`: windowing, GPU, and egui chrome
+- `app.rs`, `gpu.rs`: windowing, event-loop, and GPU integration mixed with pure
+  helpers that still need extraction under the v0.2 roadmap
 - `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
 - `worker_limit.rs`: OS Job Object / process-group glue
-- `error.rs`, `main.rs`: thin entry/error surfaces
+- `error.rs` and both workspace `main.rs` files: entry/error surfaces, including a
+  small amount of pure parsing still tracked for extraction
 
-Everything else (decode pure paths, edit, heal, fs ordering, view math, theme) is in
-the coverage floor. Coverage is a floor and a signal, not the goal. The real goal
-is that the tests would catch a regression, which is why we also run mutation
-testing.
+The whole-file exclusions are acknowledged debt, not a claim that every excluded
+line is untestable. Their pure helpers retain direct unit tests, but those lines do
+not count toward the percentage until they move behind covered seams. Everything
+else is in the coverage floor, including the `ui.rs` egui/AccessKit adapter now
+that presentation policy lives in the pure `chrome` projection and UI behavior is
+exercised without a native window. Coverage is a floor and a signal, not the goal.
+The real goal is that the tests would catch a regression, which is why we also run
+mutation testing.
 
 - `cargo test --workspace --all-targets --locked` is the canonical unit,
   integration, binary, example, and benchmark-target runner. CI separately runs

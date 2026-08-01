@@ -71,6 +71,11 @@ and organized by user-visible concern.
   labels, shortcuts, and accessibility semantics across menus, context actions,
   and docks, while active Spot Heal remains closable during conflicting work or
   after opening an image that exceeds the GPU edit limit.
+- The egui and AccessKit UI adapter is now included in the enforced 85 percent
+  logic-coverage floor. The remaining whole-file exclusions are exact-path scoped,
+  so this filter cannot also remove similarly named integration tests or vendored
+  source. Mixed native and pure helpers in those files remain explicit v0.2
+  extraction debt rather than being described as untestable platform glue.
 
 ### Documentation
 

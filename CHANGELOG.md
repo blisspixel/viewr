@@ -49,6 +49,13 @@ and organized by user-visible concern.
   later ordinary decode failures retryable, and does not globally disable
   otherwise-ready viewing or export actions. Work that needs the lost preview
   executor remains blocked until restart.
+- Filmstrip thumbnails now use a tested event-loop-owned schedule capped at nine
+  active jobs instead of an unbounded shared result channel. Exact generation and
+  visible-window checks reject stale uploads, while thumbnail workers return only
+  validated sRGB pixels or path-free failure categories. Executor saturation
+  remains retryable without a redraw loop. A failed or disconnected visible path
+  keeps its placeholder without being decoded repeatedly, then becomes eligible
+  after leaving the visible window or after an explicit generation reset.
 
 ### Documentation
 

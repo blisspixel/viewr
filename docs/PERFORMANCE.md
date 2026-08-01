@@ -17,6 +17,9 @@ viewer launches never collect these measurements.
   positions in the folder.
 - **Idle redraws:** delivered redraw events during a settled 500 ms observation
   window.
+- **Settled filmstrip:** every visible cell has either its bounded GPU thumbnail
+  or a terminal placeholder for the current visible-window generation. A corrupt
+  optional thumbnail cannot turn a stable viewer into a probe timeout.
 - **Peak resident memory:** the process peak resident set after decode, thumbnail,
   and navigation work has settled.
 - **Folder scaling:** resident-memory growth between 16-image and 50,000-image

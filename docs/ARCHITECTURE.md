@@ -86,6 +86,10 @@ struct App {
     preview_job: Option<OneShotJob<PreviewJobContext, PreviewJobResult>>,
     preview_recovery_unsettled: bool,
 
+    // At most nine event-loop-owned filmstrip jobs and GPU textures.
+    thumbnail_schedule: ThumbnailSchedule,
+    thumb_textures: HashMap<PathBuf, TextureHandle>,
+
     // Docked chrome and the session-only export-privacy choice.
     show_tools_panel: bool,
     tools_panel_open: bool,
@@ -103,10 +107,10 @@ struct App {
 
 There is no document database, plugin registry, or scene graph. The state is
 intentionally centralized so the winit event loop has one owner. The `session`,
-`crop`, `playlist`, `performance`, and `job` modules establish smaller state and
-logic seams without introducing a second mutable store. `App` remains a large
-orchestrator. Extending bounded job ownership to the remaining worker surfaces,
-plus extracting dock/menu view models, is explicit roadmap work.
+`crop`, `playlist`, `performance`, `job`, and `thumbs` modules establish smaller
+state and logic seams without introducing a second mutable store. `App` remains a
+large orchestrator. Extending bounded job ownership to the remaining worker
+surfaces, plus extracting dock/menu view models, is explicit roadmap work.
 
 ## Modules
 
@@ -116,14 +120,15 @@ Shipped:
   It opens command-line and native file requests, schedules background work, and
   feeds one immutable frame snapshot to the UI.
 - **`job`**: the bounded, one-result ownership boundary used by current-image
-  details, animation discovery, rating observation, Save As, crop, and over-limit
-  display previews. The event loop retains operation context while the worker
-  receives one non-cloneable completion endpoint. Replaced work cannot publish, a
-  context-owned cancellation flag can stop obsolete crop rows, and an endpoint
-  that closes without a result wakes the event loop so it becomes a terminal state
-  instead of permanent false busy state. The interface requires a restart after
-  an unexpected executor failure; release builds do not claim thread-panic
-  recovery or promise that the same failing input will succeed after restart.
+  details, animation discovery, rating observation, Save As, crop, over-limit
+  display previews, and each active filmstrip thumbnail. The event loop retains
+  operation context while the worker receives one non-cloneable completion
+  endpoint. Replaced work cannot publish, a context-owned cancellation flag can
+  stop obsolete crop rows, and an endpoint that closes without a result wakes the
+  event loop so it becomes a terminal state instead of permanent false busy state.
+  The interface requires a restart after an unexpected required executor failure;
+  release builds do not claim general thread-panic recovery or promise that the
+  same failing input will succeed after restart.
 - **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
   textured quad, scissored to the physical-pixel viewport left after docked
   chrome. Egui draws in a separate full-window pass. The current image is an sRGB
@@ -306,8 +311,16 @@ Shipped:
   just-left pristine frame can
   enter the cache without copying pixels. Entries and scheduling state are never
   persisted.
-- **`thumbs`**: bounded folder-preview decoding and at most nine retained GPU
-  thumbnail textures for the visible filmstrip window.
+- **`thumbs`**: one event-loop-owned schedule capped at nine active folder-preview
+  jobs and nine retained GPU textures for the visible filmstrip window. Exact
+  generation and visibility gate publication. Workers return only structurally
+  valid sRGB RGBA8 pixels or a stable path-free failure category. Typed failure
+  and closed completion are terminal only while the path stays visible; unwind
+  builds also contain worker panic at this boundary. Leaving the window or
+  resetting the generation permits an explicit retry. Executor saturation owns
+  nothing and stays retryable. An acceptance-armed wake handshake makes fast or
+  disconnected accepted work observable without letting rejected work spin the
+  event loop.
 - **`theme`**: resolves System, Light, Dark, or Console against winit's native
   decoration and theme signal, supplies complete GPU and chrome color tokens,
   and reads or writes one validated appearance word in the platform configuration
@@ -377,9 +390,10 @@ treatment.
    playback frames, explicit-Reload state, and oversized images remain excluded.
    Navigation can upload an already-decoded frame immediately.
 5. **Caches are bounded.** Full decoded neighbors are capped by both count and
-   decoded bytes, thumbnail work has an in-flight bound, and the renderer owns one
-   current image texture plus its mip levels. Image-cache memory does not grow with
-   folder length; the lightweight playlist path index necessarily does.
+   decoded bytes, thumbnail work and visible GPU textures are each capped at nine,
+   and the renderer owns one current image texture plus its mip levels. Image-cache
+   memory does not grow with folder length; the lightweight playlist path index
+   necessarily does.
 6. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are changes to the sampling transform, with mip selection handled by the
    sampler. No re-decode and no CPU resampling occur per frame.

@@ -198,8 +198,13 @@ state before job ownership and test seams are explicit.
   replacement, restores a current crop selection when possible, disables load
   retry only for the affected selection, and persistently blocks work that needs
   the lost executor instead of queuing forever. Later ordinary decode failures
-  remain retryable. Executor supervision remains open; release builds do not
-  claim recovery from an in-process thread panic.
+  remain retryable. The fifth slice moves filmstrip thumbnails behind a
+  nine-owner maximum with event-loop-owned path and generation context. Thumbnail
+  pixels are structurally validated and path-free, stale or off-window results
+  cannot upload, executor saturation remains retryable without a wake loop, and a
+  typed or disconnected failure is attempted once until the path leaves the
+  visible window or its generation resets. Executor supervision remains open;
+  release builds do not claim general recovery from an in-process thread panic.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window.
 - [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage

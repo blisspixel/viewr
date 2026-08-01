@@ -40,7 +40,7 @@ use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
 use crate::prefetch::{self, PrefetchCache};
 use crate::theme::{Preference, PreferenceRecovery};
-use crate::thumbs::{self, ThumbRgba};
+use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
 
 /// Start viewr: create the event loop and run the application to completion.
@@ -97,7 +97,6 @@ fn run_internal(
     #[cfg(target_os = "macos")]
     crate::macos::install_open_file_handler(event_proxy.clone())
         .map_err(|message| Error::Platform(message.to_owned()))?;
-    let (thumb_result_tx, thumb_rx) = mpsc::channel();
     let (prefetch_result_tx, prefetch_rx) = mpsc::channel();
     let image_path = image_path.map(|path| crate::fs::canonical_file_path(&path).unwrap_or(path));
     let probe_enabled = performance_probe.is_some();
@@ -177,10 +176,7 @@ fn run_internal(
         mouse_right_down: false,
         right_click_start: None,
         context_menu_pos: None,
-        thumb_result_tx,
-        thumb_rx,
-        thumbnail_generation: 0,
-        thumbs_in_flight: HashMap::new(),
+        thumbnail_schedule: thumbs::ThumbnailSchedule::default(),
         thumb_textures: HashMap::new(),
         prefetch: PrefetchCache::with_limits(
             prefetch::DEFAULT_CAPACITY,
@@ -542,8 +538,6 @@ type AuxiliaryLoadResult = (
 );
 
 type SaveResult = Result<crate::edit::MetadataDisposition, String>;
-
-type ThumbnailResult = (u64, Result<ThumbRgba, (PathBuf, String)>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PresentedRatingTransition {
@@ -1174,14 +1168,8 @@ struct App {
     right_click_start: Option<(f64, f64)>,
     /// Screen position of the right-click context menu, if open.
     context_menu_pos: Option<[f32; 2]>,
-    /// Generation-tagged thumbnail results (or failures) from background jobs.
-    thumb_result_tx: Sender<ThumbnailResult>,
-    /// Receiver for generation-tagged thumbnail results.
-    thumb_rx: Receiver<ThumbnailResult>,
-    /// Owner token for thumbnail work in the active playlist scope.
-    thumbnail_generation: u64,
-    /// Paths currently decoding, paired with their playlist generation.
-    thumbs_in_flight: HashMap<PathBuf, u64>,
+    /// Bounded owner for thumbnail generations, jobs, and terminal failures.
+    thumbnail_schedule: thumbs::ThumbnailSchedule,
     /// Uploaded egui textures for filmstrip cells.
     thumb_textures: HashMap<PathBuf, egui::TextureHandle>,
     /// In-memory neighbor full-decode cache (never written to disk).
@@ -1321,14 +1309,6 @@ const fn exit_after_rating_write(
     terminal_error: Option<RatingWriteError>,
 ) -> bool {
     close_requested && !matches!(terminal_error, Some(RatingWriteError::RecoveryFailed))
-}
-
-const fn thumbnail_result_is_current(
-    current_generation: u64,
-    result_generation: u64,
-    visible: bool,
-) -> bool {
-    current_generation == result_generation && visible
 }
 
 const fn filmstrip_is_available(projected_count: usize) -> bool {
@@ -1588,7 +1568,7 @@ impl App {
         self.rating_generation = self.rating_generation.wrapping_add(1);
         self.pending_rating_write = None;
         self.reset_prefetch_for_playlist_change();
-        self.advance_thumbnail_generation();
+        self.thumbnail_schedule.reset();
         self.thumb_textures.clear();
         self.playlist_scope = Some(Arc::new(PlaylistScope));
         self.playlist = Some(Playlist::new(files, index));
@@ -2530,7 +2510,7 @@ impl App {
         // decodes in the foreground.
         self.remove_prefetched_image(&path);
         self.prefetch_schedule.reset();
-        self.advance_thumbnail_generation();
+        self.thumbnail_schedule.reset();
         self.thumb_textures.remove(&path);
         self.transform = Transform::default();
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
@@ -3977,39 +3957,23 @@ impl App {
             .collect()
     }
 
-    fn advance_thumbnail_generation(&mut self) {
-        self.thumbnail_generation = self.thumbnail_generation.wrapping_add(1);
-        self.thumbs_in_flight.clear();
-    }
-
     fn request_thumbs_for_filmstrip(&mut self) {
         let paths = self.visible_filmstrip_paths();
-        if paths.is_empty() {
-            return;
-        }
         let visible = paths.iter().cloned().collect::<HashSet<_>>();
         self.thumb_textures.retain(|path, _| visible.contains(path));
-        let generation = self.thumbnail_generation;
+        self.thumbnail_schedule.retain_visible_failures(&visible);
         for path in paths {
-            if self.thumb_textures.contains_key(&path)
-                || self.thumbs_in_flight.get(&path) == Some(&generation)
-            {
+            if self.thumb_textures.contains_key(&path) {
                 continue;
             }
-            let job_path = path.clone();
-            let tx = self.thumb_result_tx.clone();
             let event_proxy = self.event_proxy.clone();
-            let scheduled = crate::decode::schedule_background_decode(move || {
-                let result = match thumbs::generate_thumb(&job_path) {
-                    Ok(thumb) => Ok(thumb),
-                    Err(err) => Err((job_path, err)),
-                };
-                let _ = tx.send((generation, result));
-                let _ = event_proxy.send_event(UserEvent::Wake);
-            });
-            if scheduled {
-                self.thumbs_in_flight.insert(path, generation);
-            }
+            self.thumbnail_schedule.request(
+                path,
+                move || {
+                    let _ = event_proxy.send_event(UserEvent::Wake);
+                },
+                crate::decode::schedule_background_decode,
+            );
         }
     }
 
@@ -4032,48 +3996,37 @@ impl App {
         } else {
             HashSet::new()
         };
-        let mut got = false;
-        while let Ok((generation, msg)) = self.thumb_rx.try_recv() {
-            let path = match &msg {
-                Ok(thumb) => thumb.path.clone(),
-                Err((path, _)) => path.clone(),
-            };
-            if self.thumbs_in_flight.get(&path) == Some(&generation) {
-                self.thumbs_in_flight.remove(&path);
-            }
-            if !thumbnail_result_is_current(
-                self.thumbnail_generation,
-                generation,
-                visible.contains(&path),
-            ) {
-                continue;
-            }
-            got = true;
-            match msg {
-                Ok(thumb) => {
+        self.thumbnail_schedule.retain_visible_failures(&visible);
+        let poll = self.thumbnail_schedule.poll(&visible);
+        let has_visible_completion = !poll.completions.is_empty();
+        for completion in poll.completions {
+            match completion {
+                ThumbnailCompletion::Ready { path, thumbnail } => {
                     if let Some(renderer) = &self.renderer {
                         let image = egui::ColorImage::from_rgba_unmultiplied(
-                            [thumb.width as usize, thumb.height as usize],
-                            &thumb.rgba,
+                            thumbnail.dimensions(),
+                            thumbnail.rgba(),
                         );
-                        let id = format!("thumb:{}", thumb.path.display());
+                        let id = format!("thumb:{}", path.display());
                         let handle =
                             renderer
                                 .egui_ctx
                                 .load_texture(id, image, egui::TextureOptions::LINEAR);
-                        self.thumb_textures.insert(thumb.path, handle);
+                        self.thumb_textures.insert(path, handle);
                     }
                 }
-                Err((_path, err)) => {
-                    // Filename-only (no directory) if the user opted into RUST_LOG.
-                    log::debug!("thumb failed: {err}");
+                ThumbnailCompletion::Failed { failure } => {
+                    log::debug!(
+                        "thumbnail preparation failed: {}",
+                        failure.diagnostic_name()
+                    );
                 }
             }
         }
-        if got && let Some(r) = self.renderer.as_ref() {
+        if has_visible_completion && let Some(r) = self.renderer.as_ref() {
             r.window().request_redraw();
         }
-        if got {
+        if poll.made_progress {
             self.kick_prefetch();
             if self.show_filmstrip_panel && self.filmstrip_panel_open {
                 self.request_thumbs_for_filmstrip();
@@ -4755,7 +4708,7 @@ impl App {
     fn performance_probe_is_settled(&self) -> bool {
         if !self.performance_probe_has_presented_current()
             || !self.prefetch_schedule.is_idle()
-            || !self.thumbs_in_flight.is_empty()
+            || !self.thumbnail_schedule.is_idle()
             || self.auxiliary_job.is_some()
             || !performance_ui_is_settled(self.egui_repaint_at)
         {
@@ -4764,9 +4717,10 @@ impl App {
         // The filmstrip is the final asynchronous presentation surface. The
         // idle observation begins only after its visible textures are ready and
         // egui has no delayed hover or activation repaint outstanding.
-        self.visible_filmstrip_paths()
-            .iter()
-            .all(|path| self.thumb_textures.contains_key(path))
+        self.visible_filmstrip_paths().iter().all(|path| {
+            self.thumb_textures.contains_key(path)
+                || self.thumbnail_schedule.has_terminal_failure(path)
+        })
     }
 
     fn fail_performance_probe(&mut self, event_loop: &ActiveEventLoop, message: String) {
@@ -4813,7 +4767,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|probe| probe.idle_until.is_some()),
             self.prefetch_schedule.in_flight_len(),
-            self.thumbs_in_flight.len(),
+            self.thumbnail_schedule.in_flight_len(),
             ready_thumbnails,
             visible.len(),
         )
@@ -6596,13 +6550,6 @@ mod test {
             rating_recovery_after_presentation(PresentationKind::Loaded, true),
             RatingRecoveryTransition::AcceptSource
         );
-    }
-
-    #[test]
-    fn old_thumbnail_generation_cannot_publish_for_the_same_visible_path() {
-        assert!(thumbnail_result_is_current(8, 8, true));
-        assert!(!thumbnail_result_is_current(8, 7, true));
-        assert!(!thumbnail_result_is_current(8, 8, false));
     }
 
     #[test]

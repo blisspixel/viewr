@@ -45,16 +45,15 @@ allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "MIT",
-    "MIT-0",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    # LLVM libFuzzer runtime, used only by the separate fuzz workspace.
+    # LLVM libFuzzer runtime, used only by the separate fuzz workspace. The main
+    # workspace check permits this one expected license-not-encountered lint;
+    # the separate fuzz check denies warnings and proves the allowance is used.
     "NCSA",
     "ISC",
     "Zlib",
-    "MPL-2.0",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "CC0-1.0",
     "BSL-1.0",
     # Bundled default UI fonts from egui (`epaint_default_fonts`). Display-only;
@@ -65,8 +64,78 @@ allow = [
 confidence-threshold = 0.9
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
 wildcards = "allow"
+# cargo-deny fails every duplicate not listed here. Each exception names the
+# exact older transitive version and the upstream path that still requires it.
+# `-D warnings` also rejects stale entries after an upstream convergence.
+skip = [
+    # AccessKit's current Windows, AT-SPI, and macOS adapters use three consumer
+    # API lines. Keep the newest line visible and baseline the two older adapters.
+    { crate = "accesskit_consumer@0.35.0", reason = "accesskit_windows 0.32.1 requires this API line" },
+    { crate = "accesskit_consumer@0.36.0", reason = "accesskit_atspi_common 0.18.1 requires this API line" },
+
+    # Winit 0.30 and its platform dependencies have not fully converged with the
+    # newer egui, wgpu, rfd, clipboard, and text-rendering dependency lines.
+    { crate = "bitflags@1.3.2", reason = "winit CoreGraphics and Redox dependencies require bitflags 1" },
+    { crate = "block2@0.5.1", reason = "winit and AccessKit macOS adapters require block2 0.5" },
+    { crate = "calloop@0.13.0", reason = "winit 0.30 requires the smithay-client-toolkit 0.19 event loop" },
+    { crate = "calloop-wayland-source@0.3.0", reason = "smithay-client-toolkit 0.19 requires this source adapter" },
+    { crate = "core-foundation@0.9.4", reason = "winit 0.30 and core-graphics 0.23 require this macOS line" },
+    { crate = "foldhash@0.1.5", reason = "gpu-descriptor's hashbrown 0.15 requires this hash implementation" },
+    { crate = "getrandom@0.3.4", reason = "the locked ahash line requires getrandom 0.3" },
+    { crate = "hashbrown@0.15.5", reason = "gpu-descriptor 0.3 requires hashbrown 0.15" },
+    { crate = "hashbrown@0.16.1", reason = "the locked AccessKit and wgpu lines require hashbrown 0.16" },
+    { crate = "jni-sys@0.3.1", reason = "the Android NDK line and jni-sys 0.4 bridge require this ABI line" },
+    { crate = "linux-raw-sys@0.4.15", reason = "winit's rustix 0.38 path requires linux-raw-sys 0.4" },
+    { crate = "objc2@0.5.2", reason = "winit and AccessKit macOS adapters require objc2 0.5" },
+    { crate = "objc2-app-kit@0.2.2", reason = "winit and AccessKit macOS adapters require AppKit 0.2" },
+    { crate = "objc2-foundation@0.2.2", reason = "winit and AccessKit macOS adapters require Foundation 0.2" },
+    { crate = "objc2-ui-kit@0.2.2", reason = "winit 0.30 requires UIKit 0.2" },
+    { crate = "pollster@0.4.0", reason = "rfd 0.17 requires pollster 0.4 while viewr uses pollster 1" },
+    { crate = "r-efi@5.3.0", reason = "the locked getrandom 0.3 path requires r-efi 5" },
+    { crate = "redox_syscall@0.4.1", reason = "winit 0.30 requires the Redox 0.4 syscall line" },
+    { crate = "redox_syscall@0.5.18", reason = "parking_lot_core 0.9 requires the Redox 0.5 syscall line" },
+    { crate = "rustc-hash@1.1.0", reason = "the locked wgpu and naga lines require rustc-hash 1" },
+    { crate = "rustix@0.38.44", reason = "winit 0.30 and smithay-client-toolkit 0.19 require rustix 0.38" },
+    { crate = "smithay-client-toolkit@0.19.2", reason = "winit 0.30 and sctk-adwaita 0.10 require this Wayland line" },
+    { crate = "syn@2.0.119", reason = "the locked stable procedural-macro graph still requires syn 2" },
+    { crate = "thiserror@1.0.69", reason = "winit's older Wayland and Android paths require thiserror 1" },
+    { crate = "thiserror-impl@1.0.69", reason = "thiserror 1 requires its matching derive implementation" },
+    { crate = "tiny-skia@0.11.4", reason = "sctk-adwaita 0.10 requires tiny-skia 0.11" },
+    { crate = "tiny-skia-path@0.11.4", reason = "tiny-skia 0.11 requires its matching path crate" },
+
+    # Metadata writes, Wayland code generation, and viewr's bounded rating parser
+    # currently require distinct quick-xml APIs. Their security reachability is
+    # reviewed with the advisory exceptions above.
+    { crate = "quick-xml@0.37.5", reason = "little_exif 0.6 requires quick-xml 0.37" },
+    { crate = "quick-xml@0.39.4", reason = "wayland-scanner 0.31 requires quick-xml 0.39 at build time" },
+
+    # trash 5 remains on windows 0.56, while AccessKit and wgpu use windows 0.62.
+    # Winit and rustix also retain two older windows-sys ABI lines.
+    { crate = "windows@0.56.0", reason = "trash 5.2 requires the windows 0.56 API" },
+    { crate = "windows-core@0.56.0", reason = "windows 0.56 requires its matching core crate" },
+    { crate = "windows-implement@0.56.0", reason = "windows-core 0.56 requires its matching implementation crate" },
+    { crate = "windows-interface@0.56.0", reason = "windows-core 0.56 requires its matching interface crate" },
+    { crate = "windows-result@0.1.2", reason = "windows-core 0.56 requires the legacy result ABI" },
+    { crate = "windows-sys@0.52.0", reason = "winit 0.30 and arboard 3 require windows-sys 0.52" },
+    { crate = "windows-sys@0.59.0", reason = "viewr's native glue and rustix 0.38 require windows-sys 0.59" },
+
+    # The separate fuzz lock resolves arboard and uds_windows through
+    # windows-sys 0.60. Its generated target crates retain the 0.52 ABI while
+    # windows-sys 0.60 brings in 0.53. The main check permits these entries to be
+    # unmatched; the fuzz check denies warnings and proves every entry is live.
+    { crate = "windows-sys@0.60.2", reason = "the fuzz lock's arboard and uds_windows paths require windows-sys 0.60" },
+    { crate = "windows-targets@0.52.6", reason = "the fuzz lock's Windows 0.56 and windows-sys 0.52 paths require targets 0.52" },
+    { crate = "windows_aarch64_gnullvm@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_aarch64_msvc@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_i686_gnu@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_i686_gnullvm@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_i686_msvc@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_x86_64_gnu@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_x86_64_gnullvm@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+    { crate = "windows_x86_64_msvc@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
+]
 # The dependency half of the privacy invariant. HTTP clients/servers, websocket,
 # QUIC, and TLS stacks fail the build. Linux accessibility requires upstream's
 # generic D-Bus implementation, so zbus and its process helper may occur only

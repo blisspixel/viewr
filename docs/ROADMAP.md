@@ -147,6 +147,10 @@ recommendation.
 - [x] Publish [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0)
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
+- [x] Make the release-state and quality-gate contract executable: canonical
+  documentation now agrees on the public unsigned v0.1.0 state, CI runs the exact
+  locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
+  against an explicit transitive baseline without unexplained warnings.
 - [ ] Produce and verify a signed Windows delivery, a Developer ID-signed and
   notarized macOS application and disk image, and a normal Linux Flatpak or
   equivalent package. Store publication remains optional.

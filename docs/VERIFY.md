@@ -56,10 +56,13 @@ verification set includes formatting, strict Clippy, tests, coverage, privacy,
 dependency policy, advisory checks, and the separate fuzz workspace lockfile.
 
 ```text
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --locked
-cargo deny check
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+cargo test --workspace --doc --locked
+cargo build --workspace --all-targets --locked
+cargo deny --locked check --hide-inclusion-graph -D warnings -A license-not-encountered -A unmatched-skip -A unnecessary-skip
+cargo deny --manifest-path fuzz/Cargo.toml --locked check --hide-inclusion-graph -D warnings
 cargo audit -D warnings
 cargo about generate about.hbs --workspace --locked --offline --fail --output-file target/THIRD_PARTY_LICENSES.html
 python -B scripts/verify_license_inventory.py THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html

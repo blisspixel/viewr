@@ -5,8 +5,20 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Changed
+
+- CI now runs the exact locked, all-target formatting, Clippy, test, and build
+  contract documented for contributors, with documentation tests kept as a
+  separate explicit gate.
+- Dependency policy now denies every unreviewed duplicate crate version against
+  an exact, rationale-backed transitive baseline. Both workspace lockfiles must
+  pass cargo-deny without unexplained warnings.
+
 ### Documentation
 
+- Corrected the installation guide to identify v0.1.0 as the public, immutable,
+  checksummed, attested, and explicitly unsigned preview, and added a repository
+  test that rejects stale prerelease claims across canonical release surfaces.
 - Recorded the immutable v0.1.0 release, exact hosted CI and fuzz evidence,
   verified 12-asset publication, and the remaining platform-trust gates in the
   roadmap and maintainer publishing guide.

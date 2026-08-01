@@ -64,6 +64,125 @@ class DocumentationTests(unittest.TestCase):
                     )
         self.assertEqual(failures, [], "\n" + "\n".join(failures))
 
+    def test_public_release_state_is_consistent(self) -> None:
+        requirements = {
+            "README.md": (
+                "v0.1.0 is the first public preview",
+                "checksummed and",
+                "attested",
+                "not Authenticode-signed",
+                "notarized",
+            ),
+            "docs/INSTALL.md": (
+                "v0.1.0 is the first public GitHub Release",
+                "checksummed",
+                "manifest-verified",
+                "attested",
+                "not Authenticode-signed",
+                "ID-signed or notarized",
+            ),
+            "docs/ROADMAP.md": (
+                "Current position: v0.1.0 is released and verified",
+                "Public foundation, released",
+                "immutable checksummed archives",
+                "attestations",
+                "explicit unsigned-preview limits",
+            ),
+            "docs/PUBLISHING.md": (
+                "v0.1.0 is public, immutable, checksummed, and attested",
+                "explicitly unsigned pre-1.0 preview",
+            ),
+            "docs/releases/v0.1.0.md": (
+                "The first public preview of viewr",
+                "GitHub build-provenance attestation",
+                "not Authenticode-signed",
+                "notarized",
+            ),
+            "CHANGELOG.md": (
+                "## 0.1.0 - 2026-07-31",
+                "first unsigned pre-1.0 release",
+            ),
+        }
+        contents: dict[str, str] = {}
+        for relative_path, required_phrases in requirements.items():
+            document = REPOSITORY_ROOT / relative_path
+            contents[relative_path] = document.read_text(encoding="utf-8")
+            for phrase in required_phrases:
+                with self.subTest(document=relative_path, phrase=phrase):
+                    self.assertIn(phrase, contents[relative_path])
+
+        combined = "\n".join(contents.values()).casefold()
+        stale_claims = (
+            "no public github release exists",
+            "build from source today",
+            "become active with the first tagged release",
+            "planned first portable archives",
+        )
+        for stale_claim in stale_claims:
+            with self.subTest(stale_claim=stale_claim):
+                self.assertNotIn(stale_claim, combined)
+
+    def test_quality_commands_match_the_executable_ci_contract(self) -> None:
+        core_commands = (
+            "cargo fmt --all -- --check",
+            "cargo clippy --workspace --all-targets --locked -- -D warnings",
+            "cargo test --workspace --all-targets --locked",
+        )
+        contract_surfaces = (
+            "README.md",
+            "CONTRIBUTING.md",
+            "docs/STANDARDS.md",
+            "docs/VERIFY.md",
+            ".github/workflows/ci.yml",
+        )
+        for relative_path in contract_surfaces:
+            contents = (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
+            for command in core_commands:
+                with self.subTest(document=relative_path, command=command):
+                    self.assertIn(command, contents)
+
+        workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+        verification_guide = (REPOSITORY_ROOT / "docs/VERIFY.md").read_text(
+            encoding="utf-8"
+        )
+        workflow_commands = (
+            "cargo test --workspace --doc --locked",
+            "cargo build --workspace --all-targets --locked",
+            (
+                "cargo deny --locked check --hide-inclusion-graph -D warnings "
+                "-A license-not-encountered -A unmatched-skip "
+                "-A unnecessary-skip"
+            ),
+            (
+                "cargo deny --manifest-path fuzz/Cargo.toml --locked check "
+                "--hide-inclusion-graph -D warnings"
+            ),
+        )
+        for command in workflow_commands:
+            with self.subTest(command=command):
+                self.assertIn(command, workflow)
+                self.assertIn(command, verification_guide)
+        self.assertRegex(workflow, r"cargo llvm-cov --workspace\s+--locked")
+
+        privacy_command_parts = (
+            "cargo deny --locked check --hide-inclusion-graph -D warnings",
+            "-A license-not-encountered -A unmatched-skip -A unnecessary-skip",
+        )
+        for relative_path in (
+            "scripts/privacy-check.ps1",
+            "scripts/privacy-check.sh",
+        ):
+            contents = (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
+            for command_part in privacy_command_parts:
+                with self.subTest(document=relative_path, command=command_part):
+                    self.assertIn(command_part, contents)
+
+        deny_policy = (REPOSITORY_ROOT / "deny.toml").read_text(encoding="utf-8")
+        self.assertIn('multiple-versions = "deny"', deny_policy)
+        self.assertNotIn('multiple-versions = "warn"', deny_policy)
+
 
 if __name__ == "__main__":
     unittest.main()

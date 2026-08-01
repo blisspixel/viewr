@@ -7,7 +7,8 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 
 Write-Host "== cargo deny (remote-client ban + confined Linux D-Bus + licenses) =="
-cargo deny check
+cargo deny --locked check --hide-inclusion-graph -D warnings `
+    -A license-not-encountered -A unmatched-skip -A unnecessary-skip
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "== packaging artifacts must omit network grants =="

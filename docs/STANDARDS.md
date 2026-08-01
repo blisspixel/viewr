@@ -49,10 +49,12 @@ with intent, not as though it was assembled from plausible fragments.
 
 ## Formatting and linting (gated in CI)
 
-- `cargo fmt --check`: one canonical style, no debates, no diffs about whitespace.
-- `cargo clippy` at the `pedantic` level with warnings treated as errors
-  (`-D warnings`). Clippy ships 550+ lints; we opt into the strict set and allow
-  specific lints explicitly in `clippy.toml` with a comment saying why. Turning
+- `cargo fmt --all -- --check`: one canonical style, no debates, no diffs about
+  whitespace.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` at the
+  `pedantic` level with warnings treated as errors. Clippy ships 550+ lints; we
+  opt into the strict set and allow specific lints explicitly in workspace
+  configuration with a comment saying why. Turning
   stylistic advice into a build failure is the point.
 - No warnings of any kind in a merged build. A warning is a bug that has not
   happened yet.
@@ -97,7 +99,10 @@ the coverage floor. Coverage is a floor and a signal, not the goal. The real goa
 is that the tests would catch a regression, which is why we also run mutation
 testing.
 
-- `cargo nextest` as the test runner for speed and clear output.
+- `cargo test --workspace --all-targets --locked` is the canonical unit,
+  integration, binary, example, and benchmark-target runner. CI separately runs
+  `cargo test --workspace --doc --locked` because Cargo does not allow `--doc`
+  to be combined with the other target selectors.
 - Unit tests next to the code they cover.
 - Integration tests for the real flows: open, navigate, rate and filter disposable
   JPEGs, delete-and-undo, crop, spot-heal and edit undo/redo, convert, and strip
@@ -146,8 +151,11 @@ higher standard than the rest of the app.
 
 ## Supply chain
 
-- `cargo-deny` in CI enforces three things: the allowed license set, a ban on
-  duplicate or yanked crates, and the security advisory database.
+- `cargo-deny` in CI enforces the allowed license set, denies yanked crates and
+  unreviewed duplicate versions, and checks the security advisory database.
+  Exact legacy transitive versions that upstream dependencies still require are
+  baselined in `[bans].skip` with dependency-path rationale. CI denies new
+  warnings, so unexpected duplicates and stale exceptions fail the gate.
 - `cargo-audit` checks the RUSTSEC advisory database on every build and on a
   schedule. CI denies every unreviewed warning, including unsoundness and
   unmaintained dependencies; narrow informational exceptions require documented

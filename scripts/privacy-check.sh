@@ -6,7 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "== cargo deny (remote-client ban + confined Linux D-Bus + licenses) =="
-cargo deny check
+cargo deny --locked check --hide-inclusion-graph -D warnings \
+  -A license-not-encountered -A unmatched-skip -A unnecessary-skip
 
 echo "== packaging artifacts must omit network grants =="
 # Only flag real finish-args, not comments that say "do NOT add --share=network".

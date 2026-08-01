@@ -56,9 +56,21 @@ and organized by user-visible concern.
   remains retryable without a redraw loop. A failed or disconnected visible path
   keeps its placeholder without being decoded repeatedly, then becomes eligible
   after leaving the visible window or after an explicit generation reset.
+- Neighbor prefetch now gives each accepted speculative decode one bounded,
+  event-loop-owned result endpoint instead of sharing an unbounded result channel.
+  At most four owners exist across current and cancelled generations. Exact owner
+  context rejects stale pixels, a successful foreground open cancels and wins over
+  same-path work, and accepted completion loss is observable. Queue rejection
+  owns nothing and remains retryable without a wake loop. Worker diagnostics use
+  stable path-free categories while terminal suppression and the five-entry,
+  256 MiB decoded cache policy remain unchanged.
 
 ### Documentation
 
+- Clarified the README's "No tracking" promise as a literal product boundary:
+  viewr rejects spyware and bloatware patterns, has no collection or upload
+  machinery, initializes no logger during normal runs, and writes no log file.
+  Explicit developer console diagnostics remain local, path-private, and opt-in.
 - Corrected the installation guide to identify v0.1.0 as the public, immutable,
   checksummed, attested, and explicitly unsigned preview, and added a repository
   test that rejects stale prerelease claims across canonical release surfaces.

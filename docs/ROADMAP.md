@@ -179,7 +179,7 @@ state before job ownership and test seams are explicit.
   module without introducing a second mutable store.
 - [x] Extract explicit `PerformanceProbe` state and transitions into a covered
   module.
-- [ ] Extract bounded job coordination for image details, animation, crop, save,
+- [x] Extract bounded job coordination for image details, animation, crop, save,
   thumbnails, and prefetch, leaving `App` responsible for platform events. The
   first covered slice now owns the one-result image-details, animation-discovery,
   and rating-observation lifecycle, including closed-completion wakeup and exact
@@ -205,6 +205,14 @@ state before job ownership and test seams are explicit.
   typed or disconnected failure is attempted once until the path leaves the
   visible window or its generation resets. Executor supervision remains open;
   release builds do not claim general recovery from an in-process thread panic.
+  The sixth slice replaces prefetch's shared unbounded completion channel with
+  at most four event-loop-owned one-result jobs across current and cancelled
+  generations. Owner context supplies the only publishable path and generation,
+  cancellation remains cooperative, a successful foreground open wins the
+  same-path race, stale pixels cannot publish, and fixed path-free failures retain
+  the existing terminal-retry policy. A shared acceptance-armed wake contract
+  makes fast completion and accepted endpoint loss observable while rejected work
+  owns nothing and remains retryable.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window.
 - [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage

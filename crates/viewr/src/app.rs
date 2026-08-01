@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -97,7 +97,6 @@ fn run_internal(
     #[cfg(target_os = "macos")]
     crate::macos::install_open_file_handler(event_proxy.clone())
         .map_err(|message| Error::Platform(message.to_owned()))?;
-    let (prefetch_result_tx, prefetch_rx) = mpsc::channel();
     let image_path = image_path.map(|path| crate::fs::canonical_file_path(&path).unwrap_or(path));
     let probe_enabled = performance_probe.is_some();
     let appearance = crate::theme::load_preference();
@@ -184,8 +183,6 @@ fn run_internal(
         ),
         prefetch_sources: HashMap::new(),
         prefetch_schedule: prefetch::PrefetchSchedule::default(),
-        prefetch_result_tx,
-        prefetch_rx,
         event_proxy,
         performance_probe,
     };
@@ -1176,12 +1173,8 @@ struct App {
     prefetch: PrefetchCache,
     /// Source handles paired with every path retained by the decoded-image cache.
     prefetch_sources: HashMap<PathBuf, Arc<crate::fs::ImageSource>>,
-    /// Generation, in-flight, and terminal speculative decode state.
+    /// Bounded owners, generations, cancellation, and terminal prefetch state.
     prefetch_schedule: prefetch::PrefetchSchedule,
-    /// Sender shared by bounded speculative decode jobs.
-    prefetch_result_tx: Sender<(u64, PathBuf, Result<Option<LoadedImage>, String>)>,
-    /// Completed prefetch jobs: `(speculative generation, path, result)`.
-    prefetch_rx: Receiver<(u64, PathBuf, Result<Option<LoadedImage>, String>)>,
     /// Wakes the event loop when background work finishes before a window exists.
     event_proxy: EventLoopProxy<UserEvent>,
     /// Explicit developer/CI performance probe; absent from normal launches.
@@ -2884,40 +2877,23 @@ impl App {
         }
 
         for path in targets {
-            let Some(ticket) = self.prefetch_schedule.start(path.clone()) else {
-                continue;
-            };
-            let generation = ticket.generation();
-            let job_path = path.clone();
-            let tx = self.prefetch_result_tx.clone();
             let event_proxy = self.event_proxy.clone();
-            let scheduled = crate::decode::schedule_background_decode(move || {
-                let res = DecodedImage::load_background_if_current(
-                    &job_path,
-                    ticket.cancellation_generation(),
-                    0,
-                )
-                .map_err(|error| error.to_string());
-                let _ = tx.send((generation, job_path, res));
-                let _ = event_proxy.send_event(UserEvent::Wake);
-            });
-            if !scheduled {
-                let _ = self.prefetch_schedule.finish(generation, &path, false);
-            }
+            let _ = self.prefetch_schedule.request(
+                path,
+                move || {
+                    let _ = event_proxy.send_event(UserEvent::Wake);
+                },
+                crate::decode::schedule_background_decode,
+            );
         }
     }
 
     fn poll_prefetch(&mut self) {
-        let mut completed = false;
+        let poll = self.prefetch_schedule.poll();
+        let completed = poll.made_progress();
         let mut presented = false;
-        while let Ok((generation, path, result)) = self.prefetch_rx.try_recv() {
-            completed = true;
-            if !self.prefetch_schedule.accepts_result(generation, &path) {
-                continue;
-            }
-            let superseded = self
-                .prefetch_schedule
-                .result_was_superseded(generation, &path);
+        for completion in poll.into_completions() {
+            let (path, result, superseded) = completion.into_parts();
             let selected_with_foreground = self.session.selected_path.as_deref()
                 == Some(path.as_path())
                 && self.session.is_loading();
@@ -2951,18 +2927,18 @@ impl App {
                 },
                 Ok(None) => false,
                 Err(_) if selected_with_foreground => false,
-                Err(error) => {
+                Err(failure) => {
                     diagnostic = Some(format!(
-                        "neighbor prefetch failed for {}: {error}",
-                        prefetch::privacy_safe_file_name(&path)
+                        "neighbor prefetch failed for {}: {}",
+                        prefetch::privacy_safe_file_name(&path),
+                        failure.diagnostic_name()
                     ));
                     true
                 }
             };
             let effective_terminal = self
                 .prefetch_schedule
-                .finish(generation, &path, terminal)
-                .unwrap_or(false);
+                .record_outcome(&path, terminal, superseded);
             if effective_terminal && let Some(diagnostic) = diagnostic {
                 log::warn!("{diagnostic}");
             }

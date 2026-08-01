@@ -5,42 +5,86 @@
 //! thumbnail database, no history file, cleared when the process exits.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::decode::DecodedImage;
+use crate::decode::{DecodedImage, LoadedImage};
+use crate::job::{JobPoll, OneShotJob, try_schedule_one_shot};
 
 /// Default number of decoded full images kept around the current one.
 pub const DEFAULT_CAPACITY: usize = 5;
 /// Default decoded-neighbor RAM budget: 256 MiB.
 pub const DEFAULT_MAX_BYTES: usize = 256 * 1024 * 1024;
 const MAX_SAFE_FILENAME_CHARS: usize = 96;
+const MAX_ACTIVE_JOBS: usize = 4;
 
-/// Cancellation and result-generation identity for one speculative decode.
-#[derive(Clone, Debug)]
-pub struct PrefetchTicket {
-    generation: u64,
-    cancellation: Arc<AtomicU64>,
+/// Stable, path-free failure categories for speculative decode diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrefetchFailure {
+    /// The checked image decoder rejected the source.
+    Decode,
+    /// A worker unwound before publishing a result in unwind-enabled builds.
+    WorkerPanicked,
+    /// The accepted executor closure was dropped without running.
+    WorkerDisconnected,
 }
 
-impl PrefetchTicket {
-    /// Speculative schedule generation captured by this job.
+impl PrefetchFailure {
+    /// Privacy-safe diagnostic category suitable for local logs.
     #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    pub(crate) const fn diagnostic_name(self) -> &'static str {
+        match self {
+            Self::Decode => "decode failed",
+            Self::WorkerPanicked => "worker panicked",
+            Self::WorkerDisconnected => "worker disconnected",
+        }
+    }
+}
+
+type PrefetchResult = Result<Option<LoadedImage>, PrefetchFailure>;
+
+/// Event-loop-owned identity and cancellation state for one speculative decode.
+#[derive(Debug)]
+struct PrefetchJobContext {
+    path: PathBuf,
+    generation: u64,
+    cancellation: Arc<AtomicU64>,
+    foreground_proven: bool,
+}
+
+/// One current-generation completion whose path came from owner context.
+pub(crate) struct PrefetchCompletion {
+    path: PathBuf,
+    result: PrefetchResult,
+    foreground_proven: bool,
+}
+
+impl PrefetchCompletion {
+    /// Consume the completion for event-loop destination and terminal policy.
+    pub(crate) fn into_parts(self) -> (PathBuf, PrefetchResult, bool) {
+        (self.path, self.result, self.foreground_proven)
+    }
+}
+
+/// Non-blocking collection of all terminal owners observed in one poll.
+pub(crate) struct PrefetchPoll {
+    completions: Vec<PrefetchCompletion>,
+    made_progress: bool,
+}
+
+impl PrefetchPoll {
+    /// Whether any owner completed, disconnected, or was discarded as stale.
+    #[must_use]
+    pub(crate) const fn made_progress(&self) -> bool {
+        self.made_progress
     }
 
-    /// Cancellation generation observed by the checked decoder boundary.
+    /// Consume the poll and return publishable current-generation completions.
     #[must_use]
-    pub fn cancellation_generation(&self) -> &AtomicU64 {
-        &self.cancellation
-    }
-
-    /// Whether the speculative decode still owns useful work.
-    #[must_use]
-    pub fn is_current(&self) -> bool {
-        self.cancellation.load(Ordering::Acquire) == 0
+    pub(crate) fn into_completions(self) -> Vec<PrefetchCompletion> {
+        self.completions
     }
 }
 
@@ -48,95 +92,153 @@ impl PrefetchTicket {
 ///
 /// Paths with terminal outcomes remain suppressed until the playlist changes or
 /// a successful foreground presentation proves that the path is usable again.
-#[derive(Debug, Default)]
-pub struct PrefetchSchedule {
+#[derive(Default)]
+pub(crate) struct PrefetchSchedule {
     generation: u64,
-    in_flight: HashMap<PathBuf, Arc<AtomicU64>>,
+    active: Vec<OneShotJob<PrefetchJobContext, PrefetchResult>>,
     terminal: HashSet<PathBuf>,
-    foreground_proven: HashSet<PathBuf>,
 }
 
 impl PrefetchSchedule {
     /// Whether a path can start a speculative decode in the current generation.
     #[must_use]
-    pub fn is_eligible(&self, path: &Path) -> bool {
-        !self.in_flight.contains_key(path) && !self.terminal.contains(path)
+    pub(crate) fn is_eligible(&self, path: &Path) -> bool {
+        self.active.len() < MAX_ACTIVE_JOBS
+            && !self.terminal.contains(path)
+            && !self.active.iter().any(|job| {
+                job.context().generation == self.generation && job.context().path == path
+            })
     }
 
-    /// Mark a path as scheduled and return the playlist generation for its job.
-    pub fn start(&mut self, path: PathBuf) -> Option<PrefetchTicket> {
-        if !self.is_eligible(&path) {
-            return None;
-        }
-        let cancellation = Arc::new(AtomicU64::new(0));
-        self.in_flight.insert(path, Arc::clone(&cancellation));
-        Some(PrefetchTicket {
-            generation: self.generation,
-            cancellation,
+    /// Submit one bounded speculative decode and own its only result endpoint.
+    ///
+    /// Returns `false` without retaining state when the path is ineligible or
+    /// the shared bounded executor rejects the closure.
+    pub(crate) fn request<N, S>(&mut self, path: PathBuf, notify: N, schedule: S) -> bool
+    where
+        N: FnOnce() + Send + 'static,
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
+    {
+        self.request_with(path, notify, schedule, |path, cancellation| {
+            DecodedImage::load_background_if_current(path, cancellation, 0)
+                .map_err(|_| PrefetchFailure::Decode)
         })
     }
 
-    /// Whether a result belongs to a job still active in the current generation.
-    #[must_use]
-    pub fn accepts_result(&self, generation: u64, path: &Path) -> bool {
-        generation == self.generation && self.in_flight.contains_key(path)
-    }
-
-    /// Whether a trusted presentation made this speculative result obsolete.
-    ///
-    /// The result still needs to be finished so its in-flight bookkeeping is
-    /// removed, but decoded pixels from it must not replace the trusted image.
-    #[must_use]
-    pub fn result_was_superseded(&self, generation: u64, path: &Path) -> bool {
-        generation == self.generation && self.foreground_proven.contains(path)
-    }
-
-    /// Finish a current-generation job.
-    ///
-    /// Returns `None` for stale or unknown work. Accepted work returns whether
-    /// it created an effective terminal transition after foreground recovery.
-    pub fn finish(&mut self, generation: u64, path: &Path, terminal: bool) -> Option<bool> {
-        if generation != self.generation || self.in_flight.remove(path).is_none() {
-            return None;
+    fn request_with<N, S, W>(&mut self, path: PathBuf, notify: N, schedule: S, worker: W) -> bool
+    where
+        N: FnOnce() + Send + 'static,
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
+        W: FnOnce(&Path, &AtomicU64) -> PrefetchResult + Send + 'static,
+    {
+        if !self.is_eligible(&path) {
+            return false;
         }
-        let foreground_proven = self.foreground_proven.remove(path);
+        let cancellation = Arc::new(AtomicU64::new(0));
+        let context = PrefetchJobContext {
+            path: path.clone(),
+            generation: self.generation,
+            cancellation: Arc::clone(&cancellation),
+            foreground_proven: false,
+        };
+        let worker_path = path;
+        try_schedule_one_shot(
+            context,
+            notify,
+            schedule,
+            move || {
+                catch_unwind(AssertUnwindSafe(|| worker(&worker_path, &cancellation)))
+                    .unwrap_or(Err(PrefetchFailure::WorkerPanicked))
+            },
+            |owner| self.active.push(owner),
+        )
+    }
+
+    /// Poll all owner endpoints once without blocking the event loop.
+    #[must_use]
+    pub(crate) fn poll(&mut self) -> PrefetchPoll {
+        let mut completions = Vec::new();
+        let mut made_progress = false;
+        let mut index = 0;
+        while index < self.active.len() {
+            let result = match self.active[index].poll() {
+                JobPoll::Pending => {
+                    index += 1;
+                    continue;
+                }
+                JobPoll::Ready(result) => result,
+                JobPoll::Disconnected => Err(PrefetchFailure::WorkerDisconnected),
+            };
+            let job = self.active.swap_remove(index);
+            let context = job.into_context();
+            made_progress = true;
+            if context.generation == self.generation {
+                completions.push(PrefetchCompletion {
+                    path: context.path,
+                    result,
+                    foreground_proven: context.foreground_proven,
+                });
+            }
+        }
+
+        PrefetchPoll {
+            completions,
+            made_progress,
+        }
+    }
+
+    /// Record the event-loop policy outcome for a collected current result.
+    ///
+    /// Returns whether this completion created an effective terminal transition
+    /// after accounting for a trusted foreground presentation.
+    pub(crate) fn record_outcome(
+        &mut self,
+        path: &Path,
+        terminal: bool,
+        foreground_proven: bool,
+    ) -> bool {
         let effective_terminal = terminal && !foreground_proven;
         if effective_terminal {
             self.terminal.insert(path.to_owned());
         }
-        Some(effective_terminal)
+        effective_terminal
     }
 
-    /// Start a new playlist generation and forget all prior scheduling state.
-    pub fn reset(&mut self) {
-        for cancellation in self.in_flight.values() {
-            cancellation.store(1, Ordering::Release);
+    /// Start a new playlist generation and cancel prior speculative work.
+    ///
+    /// Stale owners remain bounded and observable until their workers publish or
+    /// disconnect. Their results can never enter the new generation.
+    pub(crate) fn reset(&mut self) {
+        for job in &self.active {
+            job.context().cancellation.store(1, Ordering::Release);
         }
         self.generation = self.generation.wrapping_add(1);
-        self.in_flight.clear();
         self.terminal.clear();
-        self.foreground_proven.clear();
     }
 
     /// Allow a path again after a successful trusted presentation.
-    pub fn allow(&mut self, path: &Path) {
+    pub(crate) fn allow(&mut self, path: &Path) {
         self.terminal.remove(path);
-        if let Some(cancellation) = self.in_flight.get(path) {
-            cancellation.store(1, Ordering::Release);
-            self.foreground_proven.insert(path.to_owned());
+        if let Some(job) = self
+            .active
+            .iter_mut()
+            .find(|job| job.context().generation == self.generation && job.context().path == path)
+        {
+            job.context().cancellation.store(1, Ordering::Release);
+            job.context_mut().foreground_proven = true;
         }
     }
 
-    /// Number of current-generation jobs still in flight.
+    /// Number of accepted jobs whose owner endpoints are still active.
     #[must_use]
-    pub fn in_flight_len(&self) -> usize {
-        self.in_flight.len()
+    pub(crate) fn in_flight_len(&self) -> usize {
+        self.active.len()
     }
 
-    /// Whether no current-generation job is in flight.
+    /// Whether no accepted speculative job remains active.
     #[must_use]
-    pub fn is_idle(&self) -> bool {
-        self.in_flight.is_empty()
+    pub(crate) fn is_idle(&self) -> bool {
+        self.active.is_empty()
     }
 }
 
@@ -315,11 +417,15 @@ pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize>
 
 #[cfg(test)]
 mod tests {
-    use super::{PrefetchCache, PrefetchSchedule, neighbor_indices, privacy_safe_file_name};
+    use super::{
+        MAX_ACTIVE_JOBS, PrefetchCache, PrefetchFailure, PrefetchSchedule, neighbor_indices,
+        privacy_safe_file_name,
+    };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
     use std::path::PathBuf;
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     fn tiny(id: u8) -> DecodedImage {
         DecodedImage {
@@ -419,176 +525,267 @@ mod tests {
     }
 
     #[test]
-    fn terminal_attempt_is_scheduled_once_per_playlist_generation() {
+    fn schedule_caps_owners_and_rejected_work_stays_retryable() {
         let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("broken.png");
-        assert!(schedule.is_idle());
-        let ticket = schedule.start(path.clone()).expect("first attempt");
-        let generation = ticket.generation();
+        let queued = Arc::new(Mutex::new(Vec::new()));
+        for index in 0..MAX_ACTIVE_JOBS {
+            let queued = Arc::clone(&queued);
+            assert!(schedule.request_with(
+                PathBuf::from(format!("{index}.png")),
+                || {},
+                move |task| {
+                    queued.lock().unwrap().push(task);
+                    true
+                },
+                |_, _| Ok(None),
+            ));
+        }
+        assert_eq!(schedule.in_flight_len(), MAX_ACTIVE_JOBS);
+        assert!(!schedule.request_with(
+            PathBuf::from("overflow.png"),
+            || {},
+            |_| true,
+            |_, _| Ok(None),
+        ));
 
-        assert!(!schedule.is_eligible(&path));
-        assert_eq!(schedule.in_flight_len(), 1);
-        assert!(!schedule.is_idle());
-        assert_eq!(schedule.finish(generation, &path, true), Some(true));
-        assert!(schedule.is_idle());
-        assert!(!schedule.is_eligible(&path));
-        assert!(schedule.start(path.clone()).is_none());
-
-        schedule.reset();
-        assert!(schedule.is_eligible(&path));
-        assert_ne!(schedule.start(path).unwrap().generation(), generation);
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let notified = Arc::clone(&notifications);
+        let mut rejected = PrefetchSchedule::default();
+        let path = PathBuf::from("retry.png");
+        assert!(!rejected.request_with(
+            path.clone(),
+            move || {
+                notified.fetch_add(1, Ordering::AcqRel);
+            },
+            |task| {
+                drop(task);
+                false
+            },
+            |_, _| Ok(None),
+        ));
+        assert!(rejected.is_idle());
+        assert!(rejected.is_eligible(&path));
+        assert_eq!(notifications.load(Ordering::Acquire), 0);
     }
 
     #[test]
-    fn scheduler_rejection_remains_retryable() {
+    fn production_request_maps_decoder_errors_to_a_stable_path_free_category() {
+        let workspace = crate::ephemeral::TempWorkspace::new("prefetch-missing").unwrap();
+        let missing = workspace.path().join("private-missing.png");
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let notified = Arc::clone(&notifications);
         let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("queued.png");
-        let generation = schedule
-            .start(path.clone())
-            .expect("queue attempt")
-            .generation();
 
-        assert_eq!(schedule.finish(generation, &path, false), Some(false));
-        assert!(schedule.is_eligible(&path));
-    }
+        assert!(schedule.request(
+            missing,
+            move || {
+                notified.fetch_add(1, Ordering::AcqRel);
+            },
+            |task| {
+                task();
+                true
+            },
+        ));
 
-    #[test]
-    fn stale_completion_cannot_mutate_current_generation() {
-        let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("shared.png");
-        let stale_generation = schedule
-            .start(path.clone())
-            .expect("old attempt")
-            .generation();
-        schedule.reset();
-        let current_generation = schedule
-            .start(path.clone())
-            .expect("current attempt")
-            .generation();
-
-        assert!(!schedule.accepts_result(stale_generation, &path));
-        assert!(schedule.accepts_result(current_generation, &path));
-        assert_eq!(schedule.finish(stale_generation, &path, true), None);
-        assert!(!schedule.is_eligible(&path));
+        assert_eq!(notifications.load(Ordering::Acquire), 1);
+        let completion = schedule.poll().into_completions().pop().unwrap();
+        let (_, result, _) = completion.into_parts();
+        assert!(matches!(result, Err(PrefetchFailure::Decode)));
+        assert_eq!(PrefetchFailure::Decode.diagnostic_name(), "decode failed");
         assert_eq!(
-            schedule.finish(current_generation, &path, false),
-            Some(false)
+            PrefetchFailure::WorkerPanicked.diagnostic_name(),
+            "worker panicked"
         );
-        assert!(schedule.is_eligible(&path));
+        assert_eq!(
+            PrefetchFailure::WorkerDisconnected.diagnostic_name(),
+            "worker disconnected"
+        );
     }
 
     #[test]
-    fn successful_foreground_presentation_reopens_terminal_path() {
+    fn stale_completion_cannot_publish_for_same_path_in_new_generation() {
         let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("repaired.png");
-        let generation = schedule
-            .start(path.clone())
-            .expect("prefetch attempt")
-            .generation();
-        assert_eq!(schedule.finish(generation, &path, true), Some(true));
-
-        schedule.allow(&path);
-        assert!(schedule.is_eligible(&path));
-    }
-
-    #[test]
-    fn successful_foreground_presentation_overrides_late_prefetch_failure() {
-        let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("foreground.png");
-        let generation = schedule
-            .start(path.clone())
-            .expect("prefetch attempt")
-            .generation();
-
-        schedule.allow(&path);
-        assert!(schedule.result_was_superseded(generation, &path));
-        assert_eq!(schedule.finish(generation, &path, true), Some(false));
-        assert!(schedule.is_eligible(&path));
-    }
-
-    #[test]
-    fn trusted_presentation_supersedes_late_prefetch_pixels() {
-        let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("retained.png");
-        let generation = schedule
-            .start(path.clone())
-            .expect("prefetch attempt")
-            .generation();
-
-        schedule.allow(&path);
-
-        assert!(schedule.accepts_result(generation, &path));
-        assert!(schedule.result_was_superseded(generation, &path));
-        assert_eq!(schedule.finish(generation, &path, false), Some(false));
-        assert!(!schedule.result_was_superseded(generation, &path));
-        assert!(schedule.is_eligible(&path));
-    }
-
-    #[test]
-    fn explicit_reload_generation_rejects_prior_work() {
-        let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("reloaded.png");
-        let before_reload = schedule
-            .start(path.clone())
-            .expect("prefetch attempt")
-            .generation();
-
+        let queued = Arc::new(Mutex::new(Vec::new()));
+        let path = PathBuf::from("shared.png");
+        let old_cancelled = Arc::new(AtomicBool::new(false));
+        let observed_old_cancel = Arc::clone(&old_cancelled);
+        let old_queue = Arc::clone(&queued);
+        assert!(schedule.request_with(
+            path.clone(),
+            || {},
+            move |task| {
+                old_queue.lock().unwrap().push(task);
+                true
+            },
+            move |_, cancellation| {
+                observed_old_cancel
+                    .store(cancellation.load(Ordering::Acquire) != 0, Ordering::Release);
+                Err(PrefetchFailure::Decode)
+            },
+        ));
         schedule.reset();
-        assert!(!schedule.accepts_result(before_reload, &path));
-        assert_eq!(schedule.finish(before_reload, &path, true), None);
-        assert!(schedule.is_eligible(&path));
+        let current_queue = Arc::clone(&queued);
+        assert!(schedule.request_with(
+            path.clone(),
+            || {},
+            move |task| {
+                current_queue.lock().unwrap().push(task);
+                true
+            },
+            |_, _| Ok(None),
+        ));
+
+        let old_task = queued.lock().unwrap().remove(0);
+        old_task();
+        let stale = schedule.poll();
+        assert!(stale.made_progress());
+        assert!(stale.into_completions().is_empty());
+        assert!(old_cancelled.load(Ordering::Acquire));
+        assert_eq!(schedule.in_flight_len(), 1);
+
+        let current_task = queued.lock().unwrap().remove(0);
+        current_task();
+        let mut current = schedule.poll().into_completions();
+        assert_eq!(current.len(), 1);
+        let (completed_path, result, superseded) = current.pop().unwrap().into_parts();
+        assert_eq!(completed_path, path);
+        assert!(matches!(result, Ok(None)));
+        assert!(!superseded);
+        assert!(schedule.is_idle());
     }
 
     #[test]
-    fn reset_cooperatively_cancels_underlying_speculative_work() {
-        let mut schedule = PrefetchSchedule::default();
-        let path = PathBuf::from("obsolete.png");
-        let ticket = schedule.start(path).expect("prefetch attempt");
-        assert!(ticket.is_current());
-
-        schedule.reset();
-        assert!(!ticket.is_current());
-    }
-
-    #[test]
-    fn foreground_success_cancels_only_the_same_path_ticket() {
+    fn foreground_success_cancels_and_supersedes_only_the_same_current_job() {
         let mut schedule = PrefetchSchedule::default();
         let selected = PathBuf::from("selected.png");
         let neighbor = PathBuf::from("neighbor.png");
-        let selected_ticket = schedule.start(selected.clone()).unwrap();
-        let neighbor_ticket = schedule.start(neighbor).unwrap();
+        let queued = Arc::new(Mutex::new(Vec::new()));
+        let selected_cancelled = Arc::new(AtomicBool::new(false));
+        let selected_observation = Arc::clone(&selected_cancelled);
+        let worker_queue = Arc::clone(&queued);
+        assert!(schedule.request_with(
+            selected.clone(),
+            || {},
+            move |task| {
+                worker_queue.lock().unwrap().push(task);
+                true
+            },
+            move |_, cancellation| {
+                selected_observation
+                    .store(cancellation.load(Ordering::Acquire) != 0, Ordering::Release);
+                Err(PrefetchFailure::Decode)
+            },
+        ));
+        let neighbor_cancelled = Arc::new(AtomicBool::new(false));
+        let neighbor_observation = Arc::clone(&neighbor_cancelled);
+        let neighbor_queue = Arc::clone(&queued);
+        assert!(schedule.request_with(
+            neighbor.clone(),
+            || {},
+            move |task| {
+                neighbor_queue.lock().unwrap().push(task);
+                true
+            },
+            move |_, cancellation| {
+                neighbor_observation
+                    .store(cancellation.load(Ordering::Acquire) != 0, Ordering::Release);
+                Ok(None)
+            },
+        ));
 
         schedule.allow(&selected);
+        while let Some(task) = queued.lock().unwrap().pop() {
+            task();
+        }
+        let mut selected_completion = None;
+        let mut neighbor_completion = None;
+        for completion in schedule.poll().into_completions() {
+            let parts = completion.into_parts();
+            if parts.0 == selected {
+                selected_completion = Some(parts);
+            } else if parts.0 == neighbor {
+                neighbor_completion = Some(parts);
+            }
+        }
+        let (completed_path, result, foreground_proven) = selected_completion.unwrap();
+        let (_, neighbor_result, neighbor_foreground_proven) = neighbor_completion.unwrap();
 
-        assert!(!selected_ticket.is_current());
-        assert!(neighbor_ticket.is_current());
-        assert_eq!(
-            schedule.finish(selected_ticket.generation(), &selected, true),
-            Some(false)
-        );
+        assert_eq!(completed_path, selected);
+        assert!(matches!(result, Err(PrefetchFailure::Decode)));
+        assert!(matches!(neighbor_result, Ok(None)));
+        assert!(selected_cancelled.load(Ordering::Acquire));
+        assert!(!neighbor_cancelled.load(Ordering::Acquire));
+        assert!(foreground_proven);
+        assert!(!neighbor_foreground_proven);
+        assert!(!schedule.record_outcome(&completed_path, true, foreground_proven));
+        assert!(schedule.is_eligible(&completed_path));
     }
 
     #[test]
-    fn finish_reports_only_effective_terminal_transitions() {
+    fn terminal_failure_is_suppressed_until_foreground_success_or_reset() {
         let mut schedule = PrefetchSchedule::default();
-        let terminal = PathBuf::from("terminal.png");
-        let recovered = PathBuf::from("recovered.png");
-        let terminal_ticket = schedule.start(terminal.clone()).unwrap();
-        let recovered_ticket = schedule.start(recovered.clone()).unwrap();
-        schedule.allow(&recovered);
+        let path = PathBuf::from("broken.png");
+        assert!(schedule.request_with(
+            path.clone(),
+            || {},
+            |task| {
+                task();
+                true
+            },
+            |_, _| Err(PrefetchFailure::Decode),
+        ));
+        let completion = schedule.poll().into_completions().pop().unwrap();
+        let (completed_path, _, foreground_proven) = completion.into_parts();
+        assert!(schedule.record_outcome(&completed_path, true, foreground_proven));
+        assert!(!schedule.is_eligible(&path));
 
-        assert_eq!(
-            schedule.finish(terminal_ticket.generation(), &terminal, true),
-            Some(true)
-        );
-        assert_eq!(
-            schedule.finish(recovered_ticket.generation(), &recovered, true),
-            Some(false)
-        );
-        assert_eq!(
-            schedule.finish(recovered_ticket.generation(), &recovered, true),
-            None
-        );
+        schedule.allow(&path);
+        assert!(schedule.is_eligible(&path));
+        assert!(schedule.request_with(
+            path.clone(),
+            || {},
+            |task| {
+                task();
+                true
+            },
+            |_, _| Err(PrefetchFailure::Decode),
+        ));
+        let completion = schedule.poll().into_completions().pop().unwrap();
+        let (completed_path, _, foreground_proven) = completion.into_parts();
+        assert!(schedule.record_outcome(&completed_path, true, foreground_proven));
+        schedule.reset();
+        assert!(schedule.is_eligible(&path));
+    }
+
+    #[test]
+    fn dropped_and_panicking_workers_have_stable_terminal_failures() {
+        let mut dropped = PrefetchSchedule::default();
+        assert!(dropped.request_with(
+            PathBuf::from("dropped.png"),
+            || {},
+            |task| {
+                drop(task);
+                true
+            },
+            |_, _| Ok(None),
+        ));
+        let completion = dropped.poll().into_completions().pop().unwrap();
+        let (_, result, _) = completion.into_parts();
+        assert!(matches!(result, Err(PrefetchFailure::WorkerDisconnected)));
+
+        let mut panicked = PrefetchSchedule::default();
+        assert!(panicked.request_with(
+            PathBuf::from("panicked.png"),
+            || {},
+            |task| {
+                task();
+                true
+            },
+            |_, _| panic!("worker panic"),
+        ));
+        let completion = panicked.poll().into_completions().pop().unwrap();
+        let (_, result, _) = completion.into_parts();
+        assert!(matches!(result, Err(PrefetchFailure::WorkerPanicked)));
     }
 
     #[test]

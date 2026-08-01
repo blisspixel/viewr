@@ -7,10 +7,8 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
 
-use crate::job::{JobPoll, OneShotJob};
+use crate::job::{JobPoll, OneShotJob, try_schedule_one_shot};
 
 /// Target edge length for filmstrip thumbnails (pixels).
 pub const THUMB_EDGE: u32 = 72;
@@ -103,84 +101,6 @@ struct ThumbnailJobContext {
 
 type ThumbnailResult = Result<ThumbRgba, ThumbnailFailure>;
 
-const WAKE_PENDING: u8 = 0;
-const WAKE_ARMED: u8 = 1;
-const WAKE_SIGNALED: u8 = 2;
-const WAKE_REJECTED: u8 = 3;
-const WAKE_FIRED: u8 = 4;
-
-/// Arms completion notification only after the bounded executor accepts work.
-///
-/// This handshake covers the race where a fast worker finishes before the
-/// event loop inserts its owner. Rejected work stays silent even though dropping
-/// its one-shot completion necessarily signals a disconnected endpoint.
-struct CompletionWake<N: FnOnce()> {
-    state: AtomicU8,
-    notify: Mutex<Option<N>>,
-}
-
-impl<N: FnOnce()> CompletionWake<N> {
-    fn new(notify: N) -> Self {
-        Self {
-            state: AtomicU8::new(WAKE_PENDING),
-            notify: Mutex::new(Some(notify)),
-        }
-    }
-
-    fn signal(&self) {
-        match self.state.compare_exchange(
-            WAKE_PENDING,
-            WAKE_SIGNALED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) | Err(WAKE_SIGNALED | WAKE_REJECTED | WAKE_FIRED) => {}
-            Err(WAKE_ARMED) => self.fire_from(WAKE_ARMED),
-            Err(unexpected) => unreachable!("invalid completion wake state {unexpected}"),
-        }
-    }
-
-    fn arm(&self) {
-        match self.state.compare_exchange(
-            WAKE_PENDING,
-            WAKE_ARMED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) | Err(WAKE_ARMED | WAKE_FIRED) => {}
-            Err(WAKE_SIGNALED) => self.fire_from(WAKE_SIGNALED),
-            Err(WAKE_REJECTED) => unreachable!("rejected thumbnail wake cannot be armed"),
-            Err(unexpected) => unreachable!("invalid completion wake state {unexpected}"),
-        }
-    }
-
-    fn reject(&self) {
-        self.state.store(WAKE_REJECTED, Ordering::Release);
-        self.notify
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-    }
-
-    fn fire_from(&self, expected: u8) {
-        if self
-            .state
-            .compare_exchange(expected, WAKE_FIRED, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return;
-        }
-        let notify = self
-            .notify
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(notify) = notify {
-            notify();
-        }
-    }
-}
-
 /// A current completion whose path came from event-loop-owned job context.
 #[derive(Debug)]
 pub(crate) enum ThumbnailCompletion {
@@ -249,24 +169,21 @@ impl ThumbnailSchedule {
             path: path.clone(),
             generation: self.generation,
         };
-        let wake = Arc::new(CompletionWake::new(notify));
-        let completion_wake = Arc::clone(&wake);
-        let (completion, owner) = OneShotJob::new(context, move || completion_wake.signal());
         let worker_path = path.clone();
-        let task = Box::new(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| worker(&worker_path)))
-                .unwrap_or(Err(ThumbnailFailure::WorkerPanicked));
-            let _ = completion.complete(result);
-        });
-        if !schedule(task) {
-            wake.reject();
-            return false;
-        }
-
-        let replaced = self.active.insert(path, owner);
-        debug_assert!(replaced.is_none(), "eligible thumbnail path must be unique");
-        wake.arm();
-        true
+        let owner_path = path;
+        try_schedule_one_shot(
+            context,
+            notify,
+            schedule,
+            move || {
+                catch_unwind(AssertUnwindSafe(|| worker(&worker_path)))
+                    .unwrap_or(Err(ThumbnailFailure::WorkerPanicked))
+            },
+            |owner| {
+                let replaced = self.active.insert(owner_path, owner);
+                debug_assert!(replaced.is_none(), "eligible thumbnail path must be unique");
+            },
+        )
     }
 
     /// Poll every active owner once and return only current visible results.

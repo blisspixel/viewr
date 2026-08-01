@@ -68,6 +68,8 @@ struct App {
     current_image_reuse: ImageReuseEligibility,
     prefetch: PrefetchCache,
     prefetch_sources: HashMap<PathBuf, Arc<ImageSource>>,
+    // At most four event-loop-owned speculative decode jobs across generations.
+    prefetch_schedule: PrefetchSchedule,
 
     // View, crop, animation, details, and in-memory pixel edit state.
     transform: Transform,
@@ -107,10 +109,10 @@ struct App {
 
 There is no document database, plugin registry, or scene graph. The state is
 intentionally centralized so the winit event loop has one owner. The `session`,
-`crop`, `playlist`, `performance`, `job`, and `thumbs` modules establish smaller
-state and logic seams without introducing a second mutable store. `App` remains a
-large orchestrator. Extending bounded job ownership to the remaining worker
-surfaces, plus extracting dock/menu view models, is explicit roadmap work.
+`crop`, `playlist`, `performance`, `job`, `prefetch`, and `thumbs` modules
+establish smaller state and logic seams without introducing a second mutable
+store. `App` remains a large orchestrator. Extracting dock/menu view models and
+narrowing native event plumbing are explicit roadmap work.
 
 ## Modules
 
@@ -121,14 +123,16 @@ Shipped:
   feeds one immutable frame snapshot to the UI.
 - **`job`**: the bounded, one-result ownership boundary used by current-image
   details, animation discovery, rating observation, Save As, crop, over-limit
-  display previews, and each active filmstrip thumbnail. The event loop retains
-  operation context while the worker receives one non-cloneable completion
-  endpoint. Replaced work cannot publish, a context-owned cancellation flag can
-  stop obsolete crop rows, and an endpoint that closes without a result wakes the
-  event loop so it becomes a terminal state instead of permanent false busy state.
-  The interface requires a restart after an unexpected required executor failure;
-  release builds do not claim general thread-panic recovery or promise that the
-  same failing input will succeed after restart.
+  display previews, each active filmstrip thumbnail, and each speculative
+  neighbor decode. The event loop retains operation context while the worker
+  receives one non-cloneable completion endpoint. Replaced work cannot publish,
+  context-owned cancellation flags stop obsolete crop or prefetch work, and an
+  endpoint that closes without a result wakes the event loop so it becomes a
+  terminal state instead of permanent false busy state. An acceptance-armed wake
+  handshake installs every accepted owner before notification and keeps rejected
+  work silent and unowned. The interface requires a restart after an unexpected
+  required executor failure; release builds do not claim general thread-panic
+  recovery or promise that the same failing input will succeed after restart.
 - **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
   textured quad, scissored to the physical-pixel viewport left after docked
   chrome. Egui draws in a separate full-window pass. The current image is an sRGB
@@ -305,12 +309,14 @@ Shipped:
   canonical positions. A just-rated image can remain explicitly outside the
   active filter until the next navigation action without creating a second list.
 - **`prefetch`**: an in-memory LRU bounded to five decoded neighbors and 256 MiB,
-  whichever limit is reached first, plus generation-tagged scheduling that makes
-  failed or uncacheable outcomes terminal for the current playlist. Entries use
-  shared immutable decoded ownership plus its paired source handle so a nearby
-  just-left pristine frame can
-  enter the cache without copying pixels. Entries and scheduling state are never
-  persisted.
+  whichever limit is reached first, plus at most four event-loop-owned one-result
+  decode jobs across current and cancelled generations. Owner context retains the
+  only publishable path, generation, cancellation state, and foreground-win bit.
+  Stale work cannot publish, queue rejection owns nothing, and typed decode or
+  endpoint failures become terminal for the current playlist without including a
+  path in the worker result. Entries use shared immutable decoded ownership plus
+  its paired source handle so a nearby just-left pristine frame can enter the
+  cache without copying pixels. Entries and scheduling state are never persisted.
 - **`thumbs`**: one event-loop-owned schedule capped at nine active folder-preview
   jobs and nine retained GPU textures for the visible filmstrip window. Exact
   generation and visibility gate publication. Workers return only structurally
@@ -381,18 +387,21 @@ treatment.
    generation, selected and presented paths, and decoded Arc identity.
 4. **Neighbors are prefetched.** After the current image, `decode` speculatively
    decodes nearby entries in the background and parks a bounded set of RGBA
-   results in RAM. A terminal outcome is attempted once until the speculative
-   generation changes or a successful foreground open makes the path eligible
-   again. Per-job cancellation stops superseded reads after playlist replacement,
-   explicit Reload, or a same-path foreground win; old-generation completions are
-   ignored. After moves within two positions, a just-left pristine source decode
-   is shared into this same LRU after replacement, while larger jumps, edits,
-   playback frames, explicit-Reload state, and oversized images remain excluded.
-   Navigation can upload an already-decoded frame immediately.
+   results in RAM. Each of at most four accepted jobs owns one result endpoint;
+   cancelled old-generation owners remain bounded and observable until they
+   finish, but their pixels cannot publish. A terminal outcome is attempted once
+   until the speculative generation changes or a successful foreground open
+   makes the path eligible again. Per-job cancellation stops superseded reads
+   after playlist replacement, explicit Reload, or a same-path foreground win.
+   After moves within two positions, a just-left pristine source decode is shared
+   into this same LRU after replacement, while larger jumps, edits, playback
+   frames, explicit-Reload state, and oversized images remain excluded. Navigation
+   can upload an already-decoded frame immediately.
 5. **Caches are bounded.** Full decoded neighbors are capped by both count and
-   decoded bytes, thumbnail work and visible GPU textures are each capped at nine,
-   and the renderer owns one current image texture plus its mip levels. Image-cache
-   memory does not grow with folder length; the lightweight playlist path index
+   decoded bytes, speculative neighbor work is capped at four accepted owners,
+   thumbnail work and visible GPU textures are each capped at nine, and the
+   renderer owns one current image texture plus its mip levels. Image-cache memory
+   does not grow with folder length; the lightweight playlist path index
    necessarily does.
 6. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are changes to the sampling transform, with mip selection handled by the

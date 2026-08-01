@@ -5,13 +5,15 @@
 [![CI](https://github.com/blisspixel/viewr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/blisspixel/viewr/actions/workflows/ci.yml)
 
 Tired of photo software that wants to become a cloud library, editing suite,
-storefront, and subscription? viewr stays a viewer. Open a file or folder, move
-through photos quickly, inspect metadata, rate the keepers, make a small edit, and
-get back to what you were doing.
+storefront, and subscription? viewr rejects the spyware-and-bloatware pattern of
+turning a simple utility into a data-collection platform. It stays a viewer. Open
+a file or folder, move through photos quickly, inspect metadata, rate the keepers,
+make a small edit, and get back to what you were doing.
 
-viewr is a focused desktop image viewer for Windows, macOS, and Linux. The
-application has no account, cloud service, telemetry, advertising, background
-indexer, activity history, or automatic update check.
+viewr is a focused desktop image viewer for Windows, macOS, and Linux. **No
+tracking is literal.** The application has no account, cloud service, telemetry,
+analytics, advertising, background indexer, activity history, crash-report
+uploader, or automatic update check.
 
 ## Why viewr
 
@@ -92,9 +94,11 @@ Implemented behavior and remaining work are in [Roadmap](docs/ROADMAP.md).
 ## Privacy and security
 
 viewr sends no photos, filenames, paths, metadata, diagnostics, ratings, or usage
-data anywhere. Normal runs create no logs. Optional C-backed image formats execute
-in a bounded helper that receives encoded bytes rather than a filesystem path, and
-platform packages add network-denied sandbox profiles.
+data anywhere. Normal runs initialize no logger and create no logs. Explicit
+developer-only console diagnostics are opt-in, path-private, local, and never
+written to a log file. Optional C-backed image formats execute in a bounded helper
+that receives encoded bytes rather than a filesystem path, and platform packages
+add network-denied sandbox profiles.
 
 Opening an image still means parsing untrusted data. The codebase uses bounded
 decoding, dimension and allocation limits, source-identity checks around

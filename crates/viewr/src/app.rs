@@ -142,7 +142,8 @@ fn run_internal(
         save_job: None,
         close_after_save: false,
         save_recovery_unsettled: false,
-        crop_worker: None,
+        crop_job: None,
+        crop_recovery_unsettled: false,
         preview_worker: None,
         curation_worker: None,
         close_after_curation: false,
@@ -298,10 +299,15 @@ enum RatingDiscoveryTransition {
 #[derive(Debug)]
 struct PlaylistScope;
 
-struct CropWorker {
+struct CropJobContext {
     recovery: CropRecovery,
     cancel: Arc<AtomicBool>,
-    result_rx: Receiver<Result<DecodedImage, String>>,
+}
+
+enum CropJobResult {
+    Completed(DecodedImage),
+    Failed(String),
+    Cancelled,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1094,8 +1100,10 @@ struct App {
     close_after_save: bool,
     /// An indeterminate Save As worker loss that requires a process restart.
     save_recovery_unsettled: bool,
-    /// At most one full-resolution crop running off the UI thread.
-    crop_worker: Option<CropWorker>,
+    /// At most one full-resolution crop with bounded completion ownership.
+    crop_job: Option<OneShotJob<CropJobContext, CropJobResult>>,
+    /// An indeterminate crop worker loss that requires a process restart.
+    crop_recovery_unsettled: bool,
     /// Replace-latest over-limit preview prepared outside the event thread.
     preview_worker: Option<PreviewWorker>,
     /// At most one native restore operation running off-thread.
@@ -2460,7 +2468,7 @@ impl App {
             self.show_toast("Wait for spot heal to finish before reloading");
             return;
         }
-        if self.crop_worker.is_some() {
+        if self.crop_job.is_some() {
             self.show_toast("Wait for the crop to finish before reloading");
             return;
         }
@@ -3021,7 +3029,7 @@ impl App {
                 .map(|worker| worker.context.kind().work()),
             self.scanner_rx.is_some().then_some(CurrentWork::FolderScan),
             image_preparation_work(self.session.is_loading(), self.preview_worker.is_some()),
-            crop_work(self.transform.is_cropping, self.crop_worker.is_some()),
+            crop_work(self.transform.is_cropping, self.crop_job.is_some()),
             self.save_job.is_some().then_some(CurrentWork::Save),
             self.rating_write_worker
                 .is_some()
@@ -3064,8 +3072,8 @@ impl App {
     }
 
     fn cancel_crop_work(&mut self) {
-        if let Some(worker) = self.crop_worker.take() {
-            worker.cancel.store(true, Ordering::Release);
+        if let Some(job) = self.crop_job.take() {
+            job.context().cancel.store(true, Ordering::Release);
             log::debug!("crop work cancelled after source change");
         }
     }
@@ -3094,6 +3102,14 @@ impl App {
     }
 
     fn toggle_crop_mode(&mut self) {
+        if self.transform.is_cropping {
+            self.cancel_crop();
+            return;
+        }
+        if self.crop_recovery_unsettled {
+            self.show_toast(crate::ui::CROP_RECOVERY_STATUS);
+            return;
+        }
         if self.block_action_while_curating("changing Crop") {
             return;
         }
@@ -3110,16 +3126,12 @@ impl App {
         if self.current_loaded_path().is_none() {
             return;
         }
-        if self.crop_worker.is_some() {
+        if self.crop_job.is_some() {
             self.show_toast("A crop is already being applied");
             return;
         }
         if self.save_job.is_some() {
             self.show_toast("Wait for the current save to finish before cropping");
-            return;
-        }
-        if self.transform.is_cropping {
-            self.cancel_crop();
             return;
         }
         if self.heal.is_busy() {
@@ -3264,7 +3276,7 @@ impl App {
         if self.current_loaded_path().is_none() {
             return;
         }
-        if !self.heal.active && self.crop_worker.is_some() {
+        if !self.heal.active && self.crop_job.is_some() {
             self.show_toast("Wait for the crop to finish before using Spot Heal");
             return;
         }
@@ -3332,7 +3344,7 @@ impl App {
 
     fn refresh_heal_source(&mut self) {
         if self.heal.is_busy()
-            || self.crop_worker.is_some()
+            || self.crop_job.is_some()
             || self.save_job.is_some()
             || self.preview_worker.is_some()
         {
@@ -3411,7 +3423,7 @@ impl App {
     fn begin_heal_stroke(&mut self) {
         if !self.heal.active
             || self.heal.is_busy()
-            || self.crop_worker.is_some()
+            || self.crop_job.is_some()
             || self.save_job.is_some()
             || self.preview_worker.is_some()
         {
@@ -4346,7 +4358,7 @@ impl App {
                 .is_some()
                 .then_some(SaveStartBlocker::Preview),
             (self.heal.is_busy() || self.heal.painting).then_some(SaveStartBlocker::SpotHeal),
-            self.crop_worker.is_some().then_some(SaveStartBlocker::Crop),
+            self.crop_job.is_some().then_some(SaveStartBlocker::Crop),
             self.save_job.is_some().then_some(SaveStartBlocker::Save),
         ]) {
             self.show_toast(save_start_blocker_message(blocker));
@@ -4527,6 +4539,10 @@ impl App {
     /// are quantized as whole multiples of their reduced integer components,
     /// so the exported pixel dimensions keep the ratio exactly.
     fn apply_crop_rect(&mut self) {
+        if self.crop_recovery_unsettled {
+            self.show_toast(crate::ui::CROP_RECOVERY_STATUS);
+            return;
+        }
         if self.block_action_while_curating("applying the crop") {
             return;
         }
@@ -4539,7 +4555,7 @@ impl App {
         let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        if self.crop_worker.is_some() {
+        if self.crop_job.is_some() {
             self.show_toast("A crop is already being applied");
             return;
         }
@@ -4573,32 +4589,6 @@ impl App {
         let source_transform = self.transform;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
-        let (sender, receiver) = mpsc::channel();
-        let event_proxy = self.event_proxy.clone();
-        let spawn = std::thread::Builder::new()
-            .name("viewr-crop".into())
-            .spawn(move || {
-                let cropped =
-                    crate::edit::crop_cancellable(image.as_ref(), pixel_rect, &worker_cancel)
-                        .map_err(|error| error.to_string());
-                let delivered = match cropped {
-                    Ok(Some(cropped)) => sender.send(Ok(cropped)).is_ok(),
-                    Ok(None) => {
-                        log::debug!("crop worker stopped after cancellation");
-                        false
-                    }
-                    Err(error) => sender.send(Err(error)).is_ok(),
-                };
-                if delivered {
-                    let _ = event_proxy.send_event(UserEvent::Wake);
-                }
-            });
-        if let Err(error) = spawn {
-            log::error!("crop worker spawn failed: {error}");
-            self.show_toast("Could not start crop. Selection kept; press Enter to try again.");
-            return;
-        }
-
         let recovery = CropRecovery {
             source_path,
             source_generation,
@@ -4607,6 +4597,36 @@ impl App {
             animation: self.animation.take(),
             auxiliary_job: self.auxiliary_job.take(),
         };
+        let notify_proxy = self.event_proxy.clone();
+        let (completion, job) = OneShotJob::new(CropJobContext { recovery, cancel }, move || {
+            let _ = notify_proxy.send_event(UserEvent::Wake);
+        });
+        let spawn = std::thread::Builder::new()
+            .name("viewr-crop".into())
+            .spawn(move || {
+                let result =
+                    match crate::edit::crop_cancellable(image.as_ref(), pixel_rect, &worker_cancel)
+                    {
+                        Ok(Some(cropped)) => CropJobResult::Completed(cropped),
+                        Ok(None) => {
+                            log::debug!("crop worker stopped after cancellation");
+                            CropJobResult::Cancelled
+                        }
+                        Err(error) => CropJobResult::Failed(error.to_string()),
+                    };
+                if !completion.complete(result) {
+                    log::debug!("discarded crop result after owner cancellation");
+                }
+            });
+        if let Err(error) = spawn {
+            log::error!("crop worker spawn failed: {error}");
+            let context = job.into_context();
+            self.animation = context.recovery.animation;
+            self.auxiliary_job = context.recovery.auxiliary_job;
+            self.show_toast("Could not start crop. Selection kept; press Enter to try again.");
+            return;
+        }
+
         self.transform.zoom = 1.0;
         self.transform.offset_x = 0.0;
         self.transform.offset_y = 0.0;
@@ -4615,43 +4635,46 @@ impl App {
         self.transform.crop_rect = None;
         self.transform.is_cropping = false;
         self.transform.crop_start = None;
-        self.crop_worker = Some(CropWorker {
-            recovery,
-            cancel,
-            result_rx: receiver,
-        });
+        self.crop_job = Some(job);
         self.show_toast("Applying crop in the background");
         self.request_redraw();
     }
 
     fn poll_crop_result(&mut self) {
-        let Some(worker) = self.crop_worker.as_ref() else {
+        let Some(job) = self.crop_job.as_ref() else {
             return;
         };
-        let polled = poll_worker(&worker.result_rx);
-        if matches!(&polled, WorkerPoll::Pending) {
+        let polled = job.poll();
+        if matches!(&polled, JobPoll::Pending) {
             return;
         }
-        let worker = self
-            .crop_worker
+        let context = self
+            .crop_job
             .take()
-            .expect("crop worker exists after polling it");
-        let recovery = worker.recovery;
+            .expect("crop job exists after polling it")
+            .into_context();
+        let recovery = context.recovery;
         let cropped = match polled {
-            WorkerPoll::Ready(Ok(cropped)) => cropped,
-            WorkerPoll::Ready(Err(error)) => {
+            JobPoll::Ready(CropJobResult::Completed(cropped)) => cropped,
+            JobPoll::Ready(CropJobResult::Failed(error)) => {
                 log::error!("crop computation failed: {error}");
                 let restored = self.restore_failed_crop(recovery);
                 self.show_toast(crop_failure_message(restored));
                 return;
             }
-            WorkerPoll::Disconnected => {
-                log::error!("crop worker disconnected");
-                let restored = self.restore_failed_crop(recovery);
-                self.show_toast(crop_failure_message(restored));
+            JobPoll::Ready(CropJobResult::Cancelled) => {
+                log::debug!("crop computation reached the event loop after cancellation");
+                self.restore_failed_crop(recovery);
                 return;
             }
-            WorkerPoll::Pending => unreachable!("pending crop result returned early"),
+            JobPoll::Disconnected => {
+                log::error!("crop job disconnected before publishing a result");
+                let restored = self.restore_failed_crop(recovery);
+                self.crop_recovery_unsettled = true;
+                self.show_toast(crop_disconnect_message(restored));
+                return;
+            }
+            JobPoll::Pending => unreachable!("pending crop result returned early"),
         };
 
         if !self.crop_recovery_is_current(&recovery) {
@@ -4675,7 +4698,7 @@ impl App {
             || self.session.receiver.is_some()
             || self.preview_worker.is_some()
             || self.auxiliary_job.is_some()
-            || self.crop_worker.is_some()
+            || self.crop_job.is_some()
             || self.scanner_rx.is_some()
         {
             return false;
@@ -5490,7 +5513,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let load_error = self.session.load_error.clone();
                 let save_busy = self.save_job.is_some();
                 let save_recovery_unsettled = self.save_recovery_unsettled;
-                let crop_busy = self.crop_worker.is_some();
+                let crop_busy = self.crop_job.is_some();
+                let crop_recovery_unsettled = self.crop_recovery_unsettled;
                 let curation_status = self
                     .curation_worker
                     .as_ref()
@@ -5691,6 +5715,7 @@ impl ApplicationHandler<UserEvent> for App {
                     save_busy,
                     save_recovery_unsettled,
                     crop_busy,
+                    crop_recovery_unsettled,
                     curation_status,
                     curation_recovery_status,
                     folder_scan_busy,
@@ -6256,6 +6281,14 @@ const fn crop_failure_message(selection_restored: bool) -> &'static str {
         "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
     } else {
         "Crop was not applied because the image changed."
+    }
+}
+
+const fn crop_disconnect_message(selection_restored: bool) -> &'static str {
+    if selection_restored {
+        "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
+    } else {
+        "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
     }
 }
 
@@ -7472,6 +7505,18 @@ mod test {
         assert_eq!(
             crop_failure_message(false),
             "Crop was not applied because the image changed."
+        );
+    }
+
+    #[test]
+    fn crop_disconnect_copy_requires_restart_without_promising_retry() {
+        assert_eq!(
+            crop_disconnect_message(true),
+            "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
+        );
+        assert_eq!(
+            crop_disconnect_message(false),
+            "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
         );
     }
 

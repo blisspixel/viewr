@@ -186,8 +186,12 @@ state before job ownership and test seams are explicit.
   path/generation rejection. The second slice gives Save As a one-item consuming
   completion, fail-closed terminal disconnect handling, and success-only close
   reconciliation; its captured output transaction cannot overlap rating mutation
-  or mutate foreground image state. Executor supervision remains open; release
-  builds do not claim recovery from an in-process thread panic.
+  or mutate foreground image state. The third slice gives crop the same bounded,
+  consuming completion owner, retains cooperative cancellation and exact
+  generation/path/pixel-allocation recovery checks, rejects late publication,
+  restores retryable typed failures, and persistently blocks another crop after
+  indeterminate endpoint loss. Executor supervision remains open; release builds
+  do not claim recovery from an in-process thread panic.
 - [ ] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window.
 - [ ] Narrow the coverage exclusion as each seam becomes pure. Keep logic coverage

@@ -94,6 +94,11 @@ impl<C, T> OneShotJob<C, T> {
         }
     }
 
+    /// Borrow the event-loop-owned context while the job is still active.
+    pub(crate) const fn context(&self) -> &C {
+        &self.context
+    }
+
     /// Consume the terminal job and return its event-loop-owned context.
     pub(crate) fn into_context(self) -> C {
         self.context
@@ -148,5 +153,17 @@ mod tests {
 
         assert!(!completion.complete(7));
         assert_eq!(notifications.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn context_can_coordinate_cancellation_without_consuming_the_job() {
+        let (completion, job) = OneShotJob::<_, u8>::new(AtomicUsize::new(0), || {});
+
+        job.context().store(1, Ordering::Release);
+
+        assert_eq!(job.context().load(Ordering::Acquire), 1);
+        assert_eq!(job.poll(), JobPoll::Pending);
+        drop(completion);
+        assert_eq!(job.poll(), JobPoll::Disconnected);
     }
 }

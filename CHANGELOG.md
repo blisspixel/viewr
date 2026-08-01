@@ -27,6 +27,14 @@ and organized by user-visible concern.
   export, and requires restart. Rating replacement and Save As cannot overlap.
   Save completion changes only status for its captured snapshot and cannot mutate
   a newer foreground image.
+- Full-resolution crop now uses the bounded, consuming completion owner instead
+  of an unbounded result channel. Source replacement signals cooperative
+  cancellation and drops ownership so late pixels cannot publish. Exact
+  generation, selected path, presented path, and decoded-allocation checks still
+  gate recovery and presentation. A normal computation failure restores the
+  selection for direct retry, while unexpected completion loss clears busy state,
+  keeps Cancel Crop available, persistently blocks another crop, and requires a
+  restart without claiming in-process thread recovery.
 
 ### Documentation
 

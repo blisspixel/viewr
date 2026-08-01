@@ -75,16 +75,16 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // One-result auxiliary and Save As work has an event-loop-owned bounded job.
+    // One-result auxiliary, Save As, and crop work has an event-loop-owned job.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     save_job: Option<OneShotJob<(), SaveResult>>,
     close_after_save: bool,
     save_recovery_unsettled: bool,
+    crop_job: Option<OneShotJob<CropJobContext, CropJobResult>>,
+    crop_recovery_unsettled: bool,
 
     // At most one foreground operation of each remaining kind, with generation,
     // path, and exact decoded-allocation checks before a result can replace state.
-    // CropWorker also owns cooperative cancellation and a recovery snapshot.
-    crop_worker: Option<CropWorker>,
     preview_worker: Option<PreviewWorker>,
 
     // Docked chrome and the session-only export-privacy choice.
@@ -116,14 +116,15 @@ Shipped:
 - **`app`**: the winit application handler and centralized state/input dispatch.
   It opens command-line and native file requests, schedules background work, and
   feeds one immutable frame snapshot to the UI.
-- **`job`**: the bounded, one-result ownership boundary first used by current-image
-  details, animation discovery, and rating observation. The event loop retains
-  path and generation context while the worker receives one non-cloneable
-  completion endpoint. Replaced work cannot publish, and an endpoint that closes
-  without a result wakes the event loop so it becomes a terminal state instead
-  of permanent false busy state. The interface requires a restart after an
-  unexpected executor failure; release builds do not claim thread-panic recovery
-  or promise that the same failing input will succeed after restart.
+- **`job`**: the bounded, one-result ownership boundary used by current-image
+  details, animation discovery, rating observation, Save As, and crop. The event
+  loop retains operation context while the worker receives one non-cloneable
+  completion endpoint. Replaced work cannot publish, a context-owned cancellation
+  flag can stop obsolete crop rows, and an endpoint that closes without a result
+  wakes the event loop so it becomes a terminal state instead of permanent false
+  busy state. The interface requires a restart after an unexpected executor
+  failure; release builds do not claim thread-panic recovery or promise that the
+  same failing input will succeed after restart.
 - **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
   textured quad, scissored to the physical-pixel viewport left after docked
   chrome. Egui draws in a separate full-window pass. The current image is an sRGB
@@ -210,7 +211,14 @@ Shipped:
   Unit-tested without a GPU.
 - **`edit`**: exact pixel transforms, crop, and save-as/convert. Export re-encodes
   from the visible pixels and strips metadata by default without cloning a second
-  RGBA buffer. Crop validates source shape and uses fallible output allocation.
+  RGBA buffer. Crop validates source shape, uses fallible output allocation, and
+  checks cooperative cancellation before allocation and between copied rows. Its
+  event-loop-owned job retains the exact source generation, selected and
+  presented path, decoded allocation, edit transform, animation, and auxiliary
+  work needed to reject stale completion or restore a retryable selection.
+  Discarding the job rejects late publication. A typed computation failure keeps
+  direct retry available, while endpoint loss persistently disables another crop
+  until restart instead of promising recovery from an unsupervised thread.
   Save As rejects a destination that aliases the open source before encoding and
   builds the complete output in a sibling temporary file before one atomic
   replacement attempt. Explicit session-only EXIF retention is content-driven,

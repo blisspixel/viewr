@@ -88,6 +88,8 @@ const EXTERNAL_EDIT_STATUS: &str =
 pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
+pub(crate) const CROP_RECOVERY_STATUS: &str =
+    "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
@@ -380,6 +382,8 @@ pub struct UiFrameOwned {
     pub save_recovery_unsettled: bool,
     /// A full-resolution crop is being applied off the UI thread.
     pub crop_busy: bool,
+    /// A lost crop completion requires restart before another crop.
+    pub crop_recovery_unsettled: bool,
     /// Fixed, path-private description of active Trash restore work.
     pub curation_status: Option<String>,
     /// Durable recovery guidance after an indeterminate restore worker loss.
@@ -490,6 +494,14 @@ impl UiFrameOwned {
 
     fn save_as_ready(&self) -> bool {
         self.current_selection_ready() && !self.save_recovery_unsettled
+    }
+
+    fn crop_toggle_ready(&self) -> bool {
+        self.current_selection_ready() && (self.is_cropping || !self.crop_recovery_unsettled)
+    }
+
+    fn crop_apply_ready(&self) -> bool {
+        self.is_cropping && self.current_selection_ready() && !self.crop_recovery_unsettled
     }
 
     fn curation_action_ready(&self) -> bool {
@@ -615,7 +627,15 @@ fn render_context_menu(
                         actions.push(UiAction::ToggleHeal);
                         close = true;
                     }
-                    if ui.button("Crop (C)").clicked() {
+                    let crop_label = if frame.is_cropping {
+                        "Cancel Crop (Esc)"
+                    } else {
+                        "Crop (C)"
+                    };
+                    if ui
+                        .add_enabled(frame.crop_toggle_ready(), egui::Button::new(crop_label))
+                        .clicked()
+                    {
                         actions.push(UiAction::ToggleCrop);
                         close = true;
                     }
@@ -795,6 +815,8 @@ fn render_top_operation_status(
         add_retry_button(ui, actions, frame.selected_file_name.as_deref());
         if frame.save_recovery_unsettled {
             add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
+        } else if frame.crop_recovery_unsettled {
+            add_top_status(ui, CROP_RECOVERY_STATUS, colors);
         } else if frame.rating.recovery_unsettled {
             add_top_status(ui, RATING_RECOVERY_STATUS, colors);
         } else if let Some(status) =
@@ -818,6 +840,8 @@ fn render_top_operation_status(
         add_top_status(ui, "Applying crop...", colors);
     } else if frame.save_recovery_unsettled {
         add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
+    } else if frame.crop_recovery_unsettled {
+        add_top_status(ui, CROP_RECOVERY_STATUS, colors);
     } else if frame.rating.recovery_unsettled {
         add_top_status(ui, RATING_RECOVERY_STATUS, colors);
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
@@ -1031,7 +1055,7 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         let crop_shortcut = if frame.is_cropping { "Esc" } else { "C" };
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                frame.crop_toggle_ready(),
                 egui::Button::new(crop_label).shortcut_text(crop_shortcut),
             )
             .clicked()
@@ -1041,7 +1065,10 @@ fn edit_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
         }
         if frame.is_cropping
             && ui
-                .add(egui::Button::new("Apply Crop").shortcut_text("Enter"))
+                .add_enabled(
+                    frame.crop_apply_ready(),
+                    egui::Button::new("Apply Crop").shortcut_text("Enter"),
+                )
                 .clicked()
         {
             actions.push(UiAction::ApplyCrop);
@@ -1170,7 +1197,7 @@ fn tools_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwn
         let crop_shortcut = if frame.is_cropping { "Esc" } else { "C" };
         if ui
             .add_enabled(
-                frame.current_selection_ready(),
+                frame.crop_toggle_ready(),
                 egui::Button::new(crop_label).shortcut_text(crop_shortcut),
             )
             .clicked()
@@ -2554,8 +2581,10 @@ fn render_tools_panel(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                             actions.push(UiAction::FlipV);
                         });
                         ui.add_space(4.0);
-                        icon_btn(ui, ToolIcon::Crop, "Crop (C)", frame.is_cropping, || {
-                            actions.push(UiAction::ToggleCrop);
+                        ui.add_enabled_ui(frame.crop_toggle_ready(), |ui| {
+                            icon_btn(ui, ToolIcon::Crop, "Crop (C)", frame.is_cropping, || {
+                                actions.push(UiAction::ToggleCrop);
+                            });
                         });
                         let heal_tip = if frame.can_heal {
                             "Spot heal (J)"
@@ -3106,7 +3135,8 @@ fn render_crop_toolbar(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Ve
                             }
                             ui.separator();
                             if ui
-                                .add(
+                                .add_enabled(
+                                    frame.crop_apply_ready(),
                                     egui::Button::new(
                                         RichText::new("Apply").color(colors.accent_ink),
                                     )
@@ -3501,14 +3531,15 @@ mod tests {
     #[cfg(target_os = "windows")]
     use super::OPEN_WITH_HELP;
     use super::{
-        APPEARANCE_SCOPE_HELP, ChromeLayout, DockSide, DockState, FILMSTRIP_PANEL_HEIGHT,
-        FILMSTRIP_RAIL_HEIGHT, FilmstripItem, HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH,
-        LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, SAVE_RECOVERY_STATUS, TOOLS_PANEL_WIDTH,
-        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
-        appearance_menu, appearance_menu_label, chrome_colors_for, crop_pixel_bounds,
-        image_open_status, panels_menu, rating_filter_menu, rating_filter_menu_label, rating_menu,
-        rating_menu_label, rating_toast_is_status, render, retry_open_label,
-        trash_undo_accessible_label, trash_undo_help, undo_trash_menu_item, viewport_insets,
+        APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeLayout, DockSide, DockState,
+        FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT, FilmstripItem, HEAL_PANEL_WIDTH,
+        IMAGE_INFO_PANEL_WIDTH, LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, SAVE_RECOVERY_STATUS,
+        TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH,
+        UiAction, UiFrameOwned, appearance_menu, appearance_menu_label, chrome_colors_for,
+        crop_pixel_bounds, image_open_status, panels_menu, rating_filter_menu,
+        rating_filter_menu_label, rating_menu, rating_menu_label, rating_toast_is_status, render,
+        retry_open_label, trash_undo_accessible_label, trash_undo_help, undo_trash_menu_item,
+        viewport_insets,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3593,6 +3624,7 @@ mod tests {
             save_busy: false,
             save_recovery_unsettled: false,
             crop_busy: false,
+            crop_recovery_unsettled: false,
             curation_status: None,
             curation_recovery_status: None,
             folder_scan_busy: false,
@@ -3846,6 +3878,34 @@ mod tests {
         assert!(update.nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Label
                 && node.value() == Some(SAVE_RECOVERY_STATUS)
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
+    fn lost_crop_is_persistent_and_allows_only_cancelling_the_restored_selection() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.crop_recovery_unsettled = true;
+
+        assert!(frame.current_selection_ready());
+        assert!(!frame.crop_toggle_ready());
+        assert!(!frame.crop_apply_ready());
+        frame.is_cropping = true;
+        assert!(frame.crop_toggle_ready());
+        assert!(!frame.crop_apply_ready());
+
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(CROP_RECOVERY_STATUS)
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
     }

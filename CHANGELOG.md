@@ -22,7 +22,10 @@ and organized by user-visible concern.
   and uses the conventional Right Arrow expansion before checking the child
   again. Focused shortcut checks prefer `SendInput` and use a native queued-key
   fallback only when the runner denies foreground ownership; every key remains
-  verified through the resulting accessible application state.
+  verified through the resulting accessible application state. UI Automation
+  focus on the live application root or a submenu node is a best-effort hint when
+  Windows rejects `SetFocus`; stale elements and unexpected failures still abort
+  the attempt.
 - Dependency policy now denies every unreviewed duplicate crate version against
   an exact, rationale-backed transitive baseline. Both workspace lockfiles must
   pass cargo-deny without unexplained warnings.
@@ -100,10 +103,6 @@ and organized by user-visible concern.
 - The restored-provenance regression now changes an explicit modification-time
   field instead of assuming every filesystem reports a version change for an
   immediate rename round trip.
-- The Windows accessibility smoke now treats submenu-specific UI Automation
-  focus as a best-effort hint. An invokable AccessKit menu node that Windows
-  temporarily marks non-focusable no longer aborts valid window-level keyboard
-  fallback and the remaining semantic checks.
 - Full Windows source-content comparisons now run only in owned background work.
   Windows Open With uses one generation-cancellable verification job before the
   native chooser. Trash and permanent delete use the existing single curation

@@ -637,6 +637,22 @@ function Open-EditSubmenu {
     Activate-Element -Element $submenu
 }
 
+function Set-ApplicationFocusHint {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Element
+    )
+
+    try {
+        $Element.SetFocus()
+    }
+    catch [System.InvalidOperationException] {
+        # UIA focusability can change between discovery and SetFocus. Native key
+        # delivery still has to succeed, and every caller verifies its semantic
+        # effect. A stale element or any unexpected failure remains fatal.
+    }
+}
+
 function Send-ApplicationKey {
     param(
         [Parameter(Mandatory)]
@@ -648,16 +664,9 @@ function Send-ApplicationKey {
     $applicationRoot = [System.Windows.Automation.AutomationElement]::FromHandle(
         $script:Window
     )
-    $applicationRoot.SetFocus()
+    Set-ApplicationFocusHint -Element $applicationRoot
     if ($null -ne $PreferredFocusElement) {
-        try {
-            $PreferredFocusElement.SetFocus()
-        }
-        catch [System.InvalidOperationException] {
-            # AccessKit menu buttons can remain invokable while UIA reports that
-            # they cannot receive focus. Native delivery still targets the active
-            # application after the menu invocation above.
-        }
+        Set-ApplicationFocusHint -Element $PreferredFocusElement
     }
     Start-Sleep -Milliseconds 50
     if (-not [ViewrAccessibilityNativeMethods]::SendKeyPress(

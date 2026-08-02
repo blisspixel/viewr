@@ -5,8 +5,20 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Security
+
+- Filmstrip labels, status filenames, Image Information basenames, and thumbnail
+  texture names now use the same privacy-safe filename helper. Full directory
+  paths no longer enter display chrome or in-process texture debug names.
+
 ### Changed
 
+- Rating lifecycle policy now lives in a 100 percent line-covered private seam.
+  Presented state, indeterminate-recovery handling, filter discovery scheduling,
+  terminal writer reconciliation, and deferred-close decisions are exhaustive
+  pure transitions. The application remains the sole accepted-source, path,
+  worker, disclosure, playlist, visible-recovery, UI-dispatch, and close owner.
+  User-visible behavior is unchanged.
 - Curation lifecycle policy now lives in a 100 percent line-covered private seam.
   Trash, permanent-delete, and restore recovery priority, fixed guidance,
   operation status, count grammar, and deferred-close decisions are exhaustive

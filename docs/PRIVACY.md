@@ -63,7 +63,10 @@ VIEWR_LOG=info
 ```
 
 Even when logging is on, viewr avoids writing full filesystem paths into log
-lines. Bare levels such as `info` apply only to viewr. Only the exact `viewr`
+lines. Display chrome, filmstrip labels, Image Information basenames, status
+text, and in-process texture debug names use the same privacy-safe filename
+helper, so full directory paths do not enter those surfaces. Bare levels such as
+`info` apply only to viewr. Only the exact `viewr`
 target or a `viewr::` descendant can emit records; prefix lookalikes and
 dependency-target directives are rejected because external payloads do not share
 viewr's path-private logging contract. Nothing is ever sent off-machine.

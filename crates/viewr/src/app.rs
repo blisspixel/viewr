@@ -48,6 +48,12 @@ use crate::presentation::{
     durable_presentation_error, external_edit_pending_after_frame_transition,
     image_open_in_progress, navigation_image_plan, preview_job_matches,
 };
+use crate::rating_state::{
+    PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
+    RatingRecoveryTransition, RatingWriteTerminal, next_presented_rating,
+    next_rating_recovery_state, rating_close_disposition, rating_discovery_transition,
+    rating_recovery_after_presentation, rating_recovery_blocker, reconcile_rating_write,
+};
 use crate::theme::{Preference, PreferenceRecovery};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
@@ -300,14 +306,6 @@ struct RatingWriteWorker {
     join: JoinHandle<()>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RatingDiscoveryTransition {
-    Apply,
-    Start,
-    KeepRunning,
-    CancelAndApply,
-}
-
 /// Exact identity of one installed playlist. Restores may rejoin only this view.
 #[derive(Debug)]
 struct PlaylistScope;
@@ -539,20 +537,6 @@ const fn filter_selection_changes_source(
         FilterSelection::Stay => !has_current_image,
         FilterSelection::Select(_) | FilterSelection::Empty => true,
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PresentedRatingTransition {
-    Retain,
-    Replace(RatingState),
-    Clear,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RatingRecoveryTransition {
-    Retain,
-    MarkUnsettled,
-    AcceptSource,
 }
 
 struct CropRecovery {
@@ -1242,82 +1226,6 @@ fn space_release_must_unwind(
     space_held && state == winit::event::ElementState::Released && is_space_key(key)
 }
 
-const fn next_presented_rating(
-    current: RatingState,
-    transition: PresentedRatingTransition,
-) -> RatingState {
-    match transition {
-        PresentedRatingTransition::Retain => current,
-        PresentedRatingTransition::Replace(rating) => rating,
-        PresentedRatingTransition::Clear => RatingState::Loading,
-    }
-}
-
-const fn next_rating_recovery_state(current: bool, transition: RatingRecoveryTransition) -> bool {
-    match transition {
-        RatingRecoveryTransition::Retain => current,
-        RatingRecoveryTransition::MarkUnsettled => true,
-        RatingRecoveryTransition::AcceptSource => false,
-    }
-}
-
-const fn rating_recovery_blocker(unsettled: bool) -> Option<&'static str> {
-    if unsettled {
-        Some(crate::ui::RATING_RECOVERY_STATUS)
-    } else {
-        None
-    }
-}
-
-const fn rating_recovery_after_presentation(
-    kind: PresentationKind,
-    accepted_source: bool,
-) -> RatingRecoveryTransition {
-    if matches!(kind, PresentationKind::Loaded) && accepted_source {
-        RatingRecoveryTransition::AcceptSource
-    } else {
-        RatingRecoveryTransition::Retain
-    }
-}
-
-fn rating_discovery_transition(
-    filter: RatingFilter,
-    worker_active: bool,
-    has_loading_ratings: bool,
-) -> RatingDiscoveryTransition {
-    if filter == RatingFilter::All || !has_loading_ratings {
-        if worker_active {
-            RatingDiscoveryTransition::CancelAndApply
-        } else {
-            RatingDiscoveryTransition::Apply
-        }
-    } else if worker_active {
-        RatingDiscoveryTransition::KeepRunning
-    } else {
-        RatingDiscoveryTransition::Start
-    }
-}
-
-fn rating_write_completion<T>(
-    poll: WorkerPoll<Result<T, RatingWriteError>>,
-    worker_panicked: bool,
-) -> Option<Result<T, RatingWriteError>> {
-    match (poll, worker_panicked) {
-        (WorkerPoll::Pending, _) => None,
-        (WorkerPoll::Ready(result), false) => Some(result),
-        (WorkerPoll::Ready(_) | WorkerPoll::Disconnected, _) => {
-            Some(Err(RatingWriteError::RecoveryFailed))
-        }
-    }
-}
-
-const fn exit_after_rating_write(
-    close_requested: bool,
-    terminal_error: Option<RatingWriteError>,
-) -> bool {
-    close_requested && !matches!(terminal_error, Some(RatingWriteError::RecoveryFailed))
-}
-
 const fn filmstrip_is_available(projected_count: usize) -> bool {
     projected_count > 1
 }
@@ -1938,8 +1846,10 @@ impl App {
         };
         self.session.set_presented(path.to_owned());
         self.presented_rating = next_presented_rating(self.presented_rating, rating_transition);
-        let recovery_transition =
-            rating_recovery_after_presentation(kind, self.current_source.is_some());
+        let recovery_transition = rating_recovery_after_presentation(
+            matches!(kind, PresentationKind::Loaded),
+            self.current_source.is_some(),
+        );
         self.rating_recovery_unsettled =
             next_rating_recovery_state(self.rating_recovery_unsettled, recovery_transition);
         self.external_edit_pending = external_edit_pending_after_frame_transition(
@@ -2397,10 +2307,11 @@ impl App {
         let Some(worker) = self.rating_write_worker.as_ref() else {
             return;
         };
-        let poll = poll_worker(&worker.result_rx);
-        if matches!(poll, WorkerPoll::Pending) {
-            return;
-        }
+        let terminal = match poll_worker(&worker.result_rx) {
+            WorkerPoll::Pending => return,
+            WorkerPoll::Ready(result) => RatingWriteTerminal::Completed(result),
+            WorkerPoll::Disconnected => RatingWriteTerminal::Disconnected,
+        };
         let worker = self
             .rating_write_worker
             .take()
@@ -2409,10 +2320,9 @@ impl App {
         if worker_panicked {
             log::error!("rating write worker panicked after terminal channel state");
         }
-        let result = rating_write_completion(poll, worker_panicked)
-            .expect("terminal rating channel state produces a completion");
+        let result = reconcile_rating_write(terminal, worker_panicked);
         let terminal_error = result.as_ref().err().copied();
-        let should_exit = exit_after_rating_write(
+        let close_disposition = rating_close_disposition(
             std::mem::take(&mut self.close_after_rating_write),
             terminal_error,
         );
@@ -2466,7 +2376,7 @@ impl App {
         }
         self.kick_prefetch();
         self.request_redraw();
-        if should_exit {
+        if matches!(close_disposition, RatingCloseDisposition::Exit) {
             event_loop.exit();
         }
     }
@@ -4203,10 +4113,7 @@ impl App {
             .filter_map(|i| {
                 let position = playlist.visible_position_for_catalog_index(i)?;
                 let path = &playlist.files[i];
-                let name = path.file_name().map_or_else(
-                    || path.display().to_string(),
-                    |s| s.to_string_lossy().into_owned(),
-                );
+                let name = prefetch::privacy_safe_file_name(path);
                 let texture = self.thumb_textures.get(path).cloned();
                 Some(FilmstripItem {
                     index: i,
@@ -4282,7 +4189,9 @@ impl App {
                             thumbnail.dimensions(),
                             thumbnail.rgba(),
                         );
-                        let id = format!("thumb:{}", path.display());
+                        // Texture names stay path-free so debug dumps and inspector
+                        // surfaces cannot retain full filesystem paths.
+                        let id = path_free_texture_id("thumb", &path);
                         let handle =
                             renderer
                                 .egui_ctx
@@ -6041,9 +5950,9 @@ impl ApplicationHandler<UserEvent> for App {
                 let path_str = self
                     .session
                     .presented_path
-                    .as_ref()
-                    .or(self.session.selected_path.as_ref())
-                    .map(|p| p.to_string_lossy().into_owned());
+                    .as_deref()
+                    .or(self.session.selected_path.as_deref())
+                    .map(prefetch::privacy_safe_file_name);
                 let selected_file_name = self
                     .session
                     .selected_path
@@ -6851,6 +6760,18 @@ fn permanent_delete_description(path: &Path) -> String {
     )
 }
 
+/// Stable path-free texture name for in-process GPU/UI caches.
+///
+/// Hashes the retained path bytes so two same-named files from different folders
+/// stay distinct without embedding directory components in debug-facing names.
+fn path_free_texture_id(prefix: &str, path: &Path) -> String {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    format!("{prefix}:{:016x}", hasher.finish())
+}
+
 fn permanent_delete_confirmed(result: &rfd::MessageDialogResult) -> bool {
     matches!(
         result,
@@ -7053,104 +6974,6 @@ mod test {
             ElementState::Pressed,
             true
         ));
-    }
-
-    #[test]
-    fn failed_replacement_load_retains_the_presented_rating() {
-        let rating = RatingState::Rated(crate::ratings::Rating::new(4).unwrap());
-
-        assert_eq!(
-            next_presented_rating(rating, PresentedRatingTransition::Retain),
-            rating
-        );
-        assert_eq!(
-            next_presented_rating(rating, PresentedRatingTransition::Clear),
-            RatingState::Loading
-        );
-        assert_eq!(
-            next_presented_rating(
-                rating,
-                PresentedRatingTransition::Replace(RatingState::Unrated)
-            ),
-            RatingState::Unrated
-        );
-    }
-
-    #[test]
-    fn threshold_changes_reuse_one_active_rating_scan() {
-        let threshold = RatingFilter::AtLeast(crate::ratings::Rating::new(4).unwrap());
-
-        assert_eq!(
-            rating_discovery_transition(threshold, true, true),
-            RatingDiscoveryTransition::KeepRunning
-        );
-        assert_eq!(
-            rating_discovery_transition(threshold, false, true),
-            RatingDiscoveryTransition::Start
-        );
-        assert_eq!(
-            rating_discovery_transition(RatingFilter::All, true, true),
-            RatingDiscoveryTransition::CancelAndApply
-        );
-        assert_eq!(
-            rating_discovery_transition(threshold, true, false),
-            RatingDiscoveryTransition::CancelAndApply
-        );
-    }
-
-    #[test]
-    fn rating_worker_loss_is_indeterminate_and_blocks_deferred_exit() {
-        assert_eq!(
-            rating_write_completion(WorkerPoll::Ready(Ok(7_u8)), false),
-            Some(Ok(7))
-        );
-        assert_eq!(
-            rating_write_completion(WorkerPoll::Ready(Ok(7_u8)), true),
-            Some(Err(RatingWriteError::RecoveryFailed))
-        );
-        assert_eq!(
-            rating_write_completion::<u8>(WorkerPoll::Disconnected, false),
-            Some(Err(RatingWriteError::RecoveryFailed))
-        );
-        assert!(!exit_after_rating_write(
-            true,
-            Some(RatingWriteError::RecoveryFailed)
-        ));
-        assert!(exit_after_rating_write(
-            true,
-            Some(RatingWriteError::WriteFailed)
-        ));
-    }
-
-    #[test]
-    fn rating_recovery_clears_only_after_an_accepted_source() {
-        let unsettled = next_rating_recovery_state(false, RatingRecoveryTransition::MarkUnsettled);
-        assert!(unsettled);
-        assert!(next_rating_recovery_state(
-            unsettled,
-            RatingRecoveryTransition::Retain
-        ));
-        assert!(!next_rating_recovery_state(
-            unsettled,
-            RatingRecoveryTransition::AcceptSource
-        ));
-        assert_eq!(
-            rating_recovery_blocker(unsettled),
-            Some(crate::ui::RATING_RECOVERY_STATUS)
-        );
-        assert_eq!(rating_recovery_blocker(false), None);
-        assert_eq!(
-            rating_recovery_after_presentation(PresentationKind::Cropped, true),
-            RatingRecoveryTransition::Retain
-        );
-        assert_eq!(
-            rating_recovery_after_presentation(PresentationKind::Loaded, false),
-            RatingRecoveryTransition::Retain
-        );
-        assert_eq!(
-            rating_recovery_after_presentation(PresentationKind::Loaded, true),
-            RatingRecoveryTransition::AcceptSource
-        );
     }
 
     #[test]
@@ -7502,6 +7325,26 @@ mod test {
                 SaveCloseDisposition::CancelDeferredClose
             );
         }
+    }
+
+    #[test]
+    fn texture_ids_are_stable_and_path_free() {
+        let left = PathBuf::from("private").join("album").join("one.png");
+        let right = PathBuf::from("other").join("folder").join("one.png");
+        let same_left = PathBuf::from("private").join("album").join("one.png");
+
+        let left_id = path_free_texture_id("thumb", &left);
+        let right_id = path_free_texture_id("thumb", &right);
+        let same_id = path_free_texture_id("thumb", &same_left);
+
+        assert_eq!(left_id, same_id);
+        assert_ne!(left_id, right_id);
+        assert!(left_id.starts_with("thumb:"));
+        assert!(!left_id.contains("private"));
+        assert!(!left_id.contains("album"));
+        assert!(!left_id.contains("one.png"));
+        assert!(!right_id.contains("other"));
+        assert!(!right_id.contains("folder"));
     }
 
     #[test]

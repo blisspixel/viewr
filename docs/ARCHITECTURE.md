@@ -527,6 +527,14 @@ deferred-close disposition from explicit inputs. `App` stores that value, owns
 the worker and all paths, receipts, playlist changes, and visible recovery
 application, and remains the only mutable curation owner.
 
+The covered `rating_state` seam defines presented-rating, recovery, discovery,
+terminal-write, and deferred-close policy. It receives immutable facts after the
+event loop has observed a worker channel state and joined the terminal writer.
+`App` remains the only owner of accepted sources, paths, workers, disclosure,
+playlist mutation, visible recovery, UI dispatch, and close application. A
+worker panic or disconnected terminal channel therefore becomes the same fixed
+indeterminate recovery result without creating another mutable rating store.
+
 The covered `gpu_image` seam owns CPU-only texture sizing, mip planning,
 linear-light alpha-correct preview preparation, and upload selection. The covered
 `gpu_policy` seam owns first-supported sRGB surface selection, full-resolution
@@ -538,11 +546,11 @@ owner and the existing asynchronous preview contract.
 
 The exact-path exclusions remain because the application and renderer must
 exercise native event-loop and wgpu outcomes. Remaining renderer helpers are small
-and coupled to that adapter rather than hidden domain policy. Concentrated rating,
-shortcut, event, and remaining curation-integration transitions in `app.rs`, plus
-pure entry parsing, remain explicit v0.2 extraction debt. Meaningful decisions
-must keep moving behind narrow covered seams before later monitor, watcher, and
-page-state work expands them.
+and coupled to that adapter rather than hidden domain policy. Concentrated
+shortcut, event, remaining rating and curation integration transitions in
+`app.rs`, plus pure entry parsing, remain explicit v0.2 extraction debt.
+Meaningful decisions must keep moving behind narrow covered seams before later
+monitor, watcher, and page-state work expands them.
 
 Source removal and Trash restore retain an explicit event-loop ownership boundary.
 The worker owns strong accepted-source validation, the Trash or permanent-delete

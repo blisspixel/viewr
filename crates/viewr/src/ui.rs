@@ -242,7 +242,7 @@ pub(crate) struct UiFrameOwned {
     pub rating: RatingUiState,
     /// Whether an external handoff may have made the displayed pixels stale.
     pub external_edit_pending: bool,
-    /// Path associated with the currently presented pixels (display only).
+    /// Privacy-safe basename for the currently presented pixels (display only).
     pub file_path: Option<String>,
     /// Privacy-safe basename of the currently selected file.
     pub selected_file_name: Option<String>,
@@ -986,11 +986,8 @@ fn render_top_image_facts(
         );
         has_detail = true;
     }
-    if let Some(name) = frame.file_path.as_ref().and_then(|path| {
-        std::path::Path::new(path)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-    }) {
+    if let Some(path) = frame.file_path.as_ref() {
+        let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
         if has_detail {
             ui.add_space(TOP_METADATA_GAP);
         }
@@ -2181,10 +2178,7 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     ui.label(RichText::new("File").color(colors.muted).small().strong());
     ui.add_space(4.0);
     if let Some(path) = &frame.file_path {
-        let name = std::path::Path::new(path).file_name().map_or_else(
-            || path.clone(),
-            |value| value.to_string_lossy().into_owned(),
-        );
+        let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
         ui.label(RichText::new(name).color(colors.text));
     }
     if let Some((width, height)) = frame.img_size {

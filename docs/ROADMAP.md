@@ -33,13 +33,14 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Immediate focus: v0.2 reliability architecture, followed by v0.3 display
-correctness and v0.4 file coherence. The next product gates are v0.5
-format-contract closure and v0.6 integrated product quality. Artifact-bound human
-accessibility evidence, release hardening, and publisher-authenticated delivery
-close v0.7 through v0.9 after product behavior is mature.** Optional
+**Immediate focus (August 2026): finish v0.2 reliability architecture on `main`,
+then v0.3 display correctness and v0.4 file coherence. The next product gates are
+v0.5 format-contract closure and v0.6 integrated product quality. Artifact-bound
+human accessibility evidence, release hardening, and publisher-authenticated
+delivery close v0.7 through v0.9 after product behavior is mature.** Optional
 model-backed description remains a gated post-1.0 candidate, not active Phase 8
-scope.
+scope. The published GitHub release remains immutable [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0);
+later reliability work lands on `main` until a later tagged gate is ready.
 
 ## Version path to an exceptional 1.0
 
@@ -256,14 +257,19 @@ state before job ownership and test seams are explicit.
   The fifth step moves curation operation identity, recovery priority and copy,
   source-removal preflight, count grammar, status, and deferred-close decisions
   into the 100 percent covered private `curation_state` seam. `App` remains the
-  only worker, path, receipt, playlist, and recovery-application owner. `gpu.rs`
-  retains native resource and frame lifecycle work, while concentrated `app.rs`
-  rating, shortcut, event, and remaining curation-integration transitions and
-  entry surfaces still mix platform integration with pure unit-tested helpers.
-  Move those helpers behind covered seams before closing this item. Preserve the
-  bounded job, thumbnail, prefetch, chrome, preview, presentation, curation, and
-  GPU upload contracts while doing so. The complete measured floor is now 89.79
-  percent, up from 89.70 percent before the curation lifecycle extraction.
+  only worker, path, receipt, playlist, and recovery-application owner. The sixth
+  step moves presented-rating, recovery, discovery, terminal-write, and deferred-
+  close decisions into the 100 percent covered private `rating_state` seam.
+  `App` remains the only accepted-source, path, worker, disclosure, playlist,
+  recovery-application, UI-dispatch, and close owner. `gpu.rs` retains native
+  resource and frame lifecycle work, while concentrated `app.rs` shortcut,
+  event, remaining rating and curation integration transitions and entry
+  surfaces still mix platform integration with pure unit-tested helpers. Move
+  those helpers behind covered seams before closing this item. Preserve the
+  bounded job, thumbnail, prefetch, chrome, preview, presentation, curation,
+  rating, and GPU upload contracts while doing so. The complete measured floor
+  is now 89.89 percent, up from 89.79 percent before the rating lifecycle
+  extraction.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

@@ -1,9 +1,11 @@
 # Accessibility validation
 
-**Status on 2026-07-25:** native AccessKit delivery is implemented on Windows,
+**Status on 2026-08-02:** native AccessKit delivery is implemented on Windows,
 macOS, and Linux. Semantic unit tests, contrast tests, keyboard tests, cross-target
-builds, and an external Windows UI Automation smoke test pass. Manual Narrator,
-VoiceOver, and Orca acceptance remains required before Phase 8 can close.
+builds, and an external Windows UI Automation smoke test pass. Windows CI retries
+transient UI Automation focus rejection without weakening semantic assertions.
+Manual Narrator, VoiceOver, and Orca acceptance remains required before Phase 8
+can close.
 
 ## Product contract
 

@@ -144,12 +144,13 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 ## Project status
 
 v0.1.0 is the first public foundation preview, not a percentage-complete score or
-a claim that the product is finished. The
-[roadmap](docs/ROADMAP.md#version-path-to-an-exceptional-10) defines the logical
-v0.2 through v0.9 reliability, fidelity, coherence, format, product-quality,
-accessibility, release-readiness, and publisher-authenticated candidate gates that
-lead to a broadly recommended 1.0. The
-[release notes](docs/releases/v0.1.0.md) state the exact current limits.
+a claim that the product is finished. As of August 2026, that immutable release is
+the install target, while `main` continues the v0.2 reliability architecture work
+described in the [roadmap](docs/ROADMAP.md#version-path-to-an-exceptional-10). The
+roadmap defines the logical v0.2 through v0.9 reliability, fidelity, coherence,
+format, product-quality, accessibility, release-readiness, and
+publisher-authenticated candidate gates that lead to a broadly recommended 1.0.
+The [release notes](docs/releases/v0.1.0.md) state the exact preview limits.
 
 ## Development
 

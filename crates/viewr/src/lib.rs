@@ -33,6 +33,7 @@ pub mod playlist;
 pub mod prefetch;
 mod presentation;
 pub mod privacy;
+mod rating_state;
 /// Embedded image ratings and session-only rating filters.
 pub mod ratings;
 pub(crate) mod sandbox;

@@ -54,6 +54,11 @@ use crate::rating_state::{
     next_rating_recovery_state, rating_close_disposition, rating_discovery_transition,
     rating_recovery_after_presentation, rating_recovery_blocker, reconcile_rating_write,
 };
+use crate::save_state::{
+    CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
+    folder_scan_blocks_save, save_close_disposition, save_start_blocker,
+    save_start_blocker_message,
+};
 use crate::theme::{Preference, PreferenceRecovery};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
@@ -335,87 +340,6 @@ enum PreviewJobResult {
     Cancelled,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CloseDisposition {
-    Exit,
-    WaitForSave,
-    WaitForCuration,
-    WaitForSaveAndCuration,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SaveTerminalState {
-    Succeeded,
-    Failed,
-    Disconnected,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SaveCloseDisposition {
-    StayOpen,
-    Exit,
-    WaitForCuration,
-    CancelDeferredClose,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SaveStartBlocker {
-    Recovery,
-    FolderOpen,
-    RatingWrite,
-    Preview,
-    SpotHeal,
-    Crop,
-    Save,
-}
-
-const fn close_disposition(save_active: bool, curation_active: bool) -> CloseDisposition {
-    match (save_active, curation_active) {
-        (false, false) => CloseDisposition::Exit,
-        (true, false) => CloseDisposition::WaitForSave,
-        (false, true) => CloseDisposition::WaitForCuration,
-        (true, true) => CloseDisposition::WaitForSaveAndCuration,
-    }
-}
-
-const fn save_close_disposition(
-    close_requested: bool,
-    terminal: SaveTerminalState,
-    curation_active: bool,
-) -> SaveCloseDisposition {
-    if !close_requested {
-        SaveCloseDisposition::StayOpen
-    } else if !matches!(terminal, SaveTerminalState::Succeeded) {
-        SaveCloseDisposition::CancelDeferredClose
-    } else if curation_active {
-        SaveCloseDisposition::WaitForCuration
-    } else {
-        SaveCloseDisposition::Exit
-    }
-}
-
-fn save_start_blocker<const N: usize>(
-    blockers: [Option<SaveStartBlocker>; N],
-) -> Option<SaveStartBlocker> {
-    blockers.into_iter().flatten().next()
-}
-
-const fn save_start_blocker_message(blocker: SaveStartBlocker) -> &'static str {
-    match blocker {
-        SaveStartBlocker::Recovery => crate::ui::SAVE_RECOVERY_STATUS,
-        SaveStartBlocker::FolderOpen => {
-            "Wait for the selected folder to finish opening before saving a copy"
-        }
-        SaveStartBlocker::RatingWrite => {
-            "Wait for the rating update to finish before saving a copy"
-        }
-        SaveStartBlocker::Preview => "Wait for the image preview to finish before saving",
-        SaveStartBlocker::SpotHeal => "Wait for spot heal to finish before saving",
-        SaveStartBlocker::Crop => "Wait for the crop to finish before saving",
-        SaveStartBlocker::Save => "A copy is already being saved",
-    }
-}
-
 impl CurationKind {
     const fn work(self) -> CurrentWork {
         match self {
@@ -523,10 +447,6 @@ struct PendingSave {
 
 fn cancel_pending_save_for_source_change(pending_save: &mut Option<PendingSave>) -> bool {
     pending_save.take().is_some()
-}
-
-const fn folder_scan_blocks_save(purpose: Option<&ScanPurpose>) -> bool {
-    matches!(purpose, Some(ScanPurpose::OpenFolder))
 }
 
 const fn filter_selection_changes_source(
@@ -6811,15 +6731,6 @@ mod test {
     }
 
     #[test]
-    fn only_an_explicit_open_folder_scan_blocks_save_preflight() {
-        let selected = ScanPurpose::SelectedFile(PathBuf::from("selected.png"));
-
-        assert!(folder_scan_blocks_save(Some(&ScanPurpose::OpenFolder)));
-        assert!(!folder_scan_blocks_save(Some(&selected)));
-        assert!(!folder_scan_blocks_save(None));
-    }
-
-    #[test]
     fn every_filter_result_that_can_replace_or_clear_source_revokes_consent() {
         assert!(!filter_selection_changes_source(
             FilterSelection::Stay,
@@ -7192,20 +7103,7 @@ mod test {
     }
 
     #[test]
-    fn close_and_curation_preflight_follow_app_ownership() {
-        assert_eq!(close_disposition(false, false), CloseDisposition::Exit);
-        assert_eq!(
-            close_disposition(true, false),
-            CloseDisposition::WaitForSave
-        );
-        assert_eq!(
-            close_disposition(false, true),
-            CloseDisposition::WaitForCuration
-        );
-        assert_eq!(
-            close_disposition(true, true),
-            CloseDisposition::WaitForSaveAndCuration
-        );
+    fn curation_preflight_follows_app_ownership() {
         assert_eq!(
             curation_action_preflight(
                 Some(CurationKind::Restore),
@@ -7226,105 +7124,6 @@ mod test {
             ),
             Some("Nothing to restore from Trash".to_owned())
         );
-    }
-
-    #[test]
-    fn save_start_preflight_excludes_source_changes_writes_and_unsettled_recovery() {
-        use SaveStartBlocker::{Crop, FolderOpen, Preview, RatingWrite, Recovery, Save, SpotHeal};
-
-        let cases = [
-            (
-                [
-                    Some(Recovery),
-                    Some(FolderOpen),
-                    Some(RatingWrite),
-                    Some(Preview),
-                    Some(SpotHeal),
-                    Some(Crop),
-                    Some(Save),
-                ],
-                Some(Recovery),
-            ),
-            (
-                [None, Some(FolderOpen), None, None, None, None, None],
-                Some(FolderOpen),
-            ),
-            (
-                [None, None, Some(RatingWrite), None, None, None, None],
-                Some(RatingWrite),
-            ),
-            (
-                [
-                    None,
-                    None,
-                    None,
-                    Some(Preview),
-                    Some(SpotHeal),
-                    Some(Crop),
-                    Some(Save),
-                ],
-                Some(Preview),
-            ),
-            (
-                [
-                    None,
-                    None,
-                    None,
-                    None,
-                    Some(SpotHeal),
-                    Some(Crop),
-                    Some(Save),
-                ],
-                Some(SpotHeal),
-            ),
-            (
-                [None, None, None, None, None, Some(Crop), Some(Save)],
-                Some(Crop),
-            ),
-            ([None, None, None, None, None, None, Some(Save)], Some(Save)),
-            ([None; 7], None),
-        ];
-        for (blockers, expected) in cases {
-            assert_eq!(save_start_blocker(blockers), expected);
-        }
-        assert_eq!(
-            save_start_blocker_message(FolderOpen),
-            "Wait for the selected folder to finish opening before saving a copy"
-        );
-        assert_eq!(
-            save_start_blocker_message(RatingWrite),
-            "Wait for the rating update to finish before saving a copy"
-        );
-        assert_eq!(
-            save_start_blocker_message(Recovery),
-            crate::ui::SAVE_RECOVERY_STATUS
-        );
-    }
-
-    #[test]
-    fn deferred_close_requires_a_successful_save_terminal_state() {
-        assert_eq!(
-            save_close_disposition(false, SaveTerminalState::Succeeded, false),
-            SaveCloseDisposition::StayOpen
-        );
-        assert_eq!(
-            save_close_disposition(true, SaveTerminalState::Succeeded, false),
-            SaveCloseDisposition::Exit
-        );
-        assert_eq!(
-            save_close_disposition(true, SaveTerminalState::Succeeded, true),
-            SaveCloseDisposition::WaitForCuration
-        );
-        for terminal in [SaveTerminalState::Failed, SaveTerminalState::Disconnected] {
-            assert_eq!(
-                save_close_disposition(true, terminal, false),
-                SaveCloseDisposition::CancelDeferredClose
-            );
-            assert_eq!(
-                save_close_disposition(true, terminal, true),
-                SaveCloseDisposition::CancelDeferredClose
-            );
-        }
     }
 
     #[test]

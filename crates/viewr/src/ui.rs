@@ -4,7 +4,6 @@
 //! Design intent (see `docs/DESIGN.md`): persistent controls reserve their own
 //! space and never cover the photo. Amber marks active tools only.
 
-pub(crate) use crate::chrome::RATING_RECOVERY_STATUS;
 use crate::chrome::{
     ChromeControl, ChromeInput, ChromeViewModel, DisclosureDirection, DisclosureView, DockInput,
     PanelKind, PositionedPanel, ToolControlView,
@@ -14,6 +13,7 @@ pub use crate::chrome::{
     HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
     viewport_insets,
 };
+pub(crate) use crate::chrome::{RATING_RECOVERY_STATUS, SAVE_RECOVERY_STATUS};
 use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::text::LayoutJob;
 use egui::{
@@ -83,8 +83,6 @@ const EXTERNAL_EDIT_BADGE: &str = "External F5";
 const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
 const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str =
     "External app opened the displayed source. Press F5 to reload possible changes.";
-pub(crate) const SAVE_RECOVERY_STATUS: &str =
-    "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 pub(crate) const CROP_RECOVERY_STATUS: &str =
     "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
 pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";

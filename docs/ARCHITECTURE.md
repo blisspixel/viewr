@@ -535,6 +535,12 @@ playlist mutation, visible recovery, UI dispatch, and close application. A
 worker panic or disconnected terminal channel therefore becomes the same fixed
 indeterminate recovery result without creating another mutable rating store.
 
+The covered `save_state` seam defines Save As start blockers, folder-scan save
+gates, terminal close disposition, and app close wait coordination. `App` remains
+the only owner of destinations, image buffers, Save As workers, native dialogs,
+and close application. Recovery status copy lives beside the other recovery
+strings so chrome and Save As preflight share one fixed message.
+
 The covered `gpu_image` seam owns CPU-only texture sizing, mip planning,
 linear-light alpha-correct preview preparation, and upload selection. The covered
 `gpu_policy` seam owns first-supported sRGB surface selection, full-resolution
@@ -547,8 +553,9 @@ owner and the existing asynchronous preview contract.
 The exact-path exclusions remain because the application and renderer must
 exercise native event-loop and wgpu outcomes. Remaining renderer helpers are small
 and coupled to that adapter rather than hidden domain policy. Concentrated
-shortcut, event, remaining rating and curation integration transitions in
-`app.rs`, plus pure entry parsing, remain explicit v0.2 extraction debt.
+shortcut, event, remaining crop recovery, rating, save, and curation integration
+transitions in `app.rs`, plus pure entry parsing, remain explicit v0.2 extraction
+debt.
 Meaningful decisions must keep moving behind narrow covered seams before later
 monitor, watcher, and page-state work expands them.
 

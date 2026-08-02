@@ -37,6 +37,7 @@ mod rating_state;
 /// Embedded image ratings and session-only rating filters.
 pub mod ratings;
 pub(crate) mod sandbox;
+mod save_state;
 /// State for the selected, loading, and presented image.
 pub mod session;
 pub mod theme;

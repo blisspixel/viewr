@@ -18,6 +18,8 @@ pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
 /// Logical width of the Image Information panel.
 pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
 pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
+pub(crate) const SAVE_RECOVERY_STATUS: &str =
+    "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 
 /// Horizontal edge used by a docked side panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

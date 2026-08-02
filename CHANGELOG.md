@@ -16,6 +16,11 @@ and organized by user-visible concern.
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)
   instead of HTML. CI still regenerates it offline from the locked release graph
   and compares the inventory by meaning. No application runtime change.
+- Save As lifecycle policy now lives in a 100 percent line-covered private seam.
+  Start blockers, folder-scan save gates, terminal close disposition, and app
+  close wait coordination are exhaustive pure transitions. The application
+  remains the sole destination, worker, image, dialog, and close-application
+  owner. User-visible behavior is unchanged.
 - Rating lifecycle policy now lives in a 100 percent line-covered private seam.
   Presented state, indeterminate-recovery handling, filter discovery scheduling,
   terminal writer reconciliation, and deferred-close decisions are exhaustive

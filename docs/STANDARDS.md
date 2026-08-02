@@ -114,8 +114,10 @@ recovery-priority, status, count, and deferred-close policy without creating a
 second mutable application owner. The private `rating_state` seam similarly owns
 presented-rating, recovery, discovery, terminal-write, and deferred-close policy,
 while the application remains the only capability-bearing and mutable rating
-owner. Coverage is a floor and a signal, not the goal. The real goal is that the
-tests would catch a regression, which is why we also run mutation testing.
+owner. The private `save_state` seam owns Save As start blockers, terminal close
+disposition, and app close wait coordination without owning destinations, workers,
+or dialogs. Coverage is a floor and a signal, not the goal. The real goal is that
+the tests would catch a regression, which is why we also run mutation testing.
 
 - `cargo test --workspace --all-targets --locked` is the canonical unit,
   integration, binary, example, and benchmark-target runner. CI separately runs

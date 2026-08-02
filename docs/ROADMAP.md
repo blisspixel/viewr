@@ -264,15 +264,17 @@ state before job ownership and test seams are explicit.
   step moves presented-rating, recovery, discovery, terminal-write, and deferred-
   close decisions into the 100 percent covered private `rating_state` seam.
   `App` remains the only accepted-source, path, worker, disclosure, playlist,
-  recovery-application, UI-dispatch, and close owner. `gpu.rs` retains native
-  resource and frame lifecycle work, while concentrated `app.rs` shortcut,
-  event, remaining rating and curation integration transitions and entry
-  surfaces still mix platform integration with pure unit-tested helpers. Move
-  those helpers behind covered seams before closing this item. Preserve the
-  bounded job, thumbnail, prefetch, chrome, preview, presentation, curation,
-  rating, and GPU upload contracts while doing so. The complete measured floor
-  is now 89.89 percent, up from 89.79 percent before the rating lifecycle
-  extraction.
+  recovery-application, UI-dispatch, and close owner. The seventh step moves
+  Save As start blockers, folder-scan save gates, terminal close disposition,
+  and app close wait coordination into the 100 percent covered private
+  `save_state` seam. `App` remains the only destination, worker, image, dialog,
+  and close-application owner. `gpu.rs` retains native resource and frame
+  lifecycle work, while concentrated `app.rs` shortcut, event, remaining crop
+  recovery, rating and curation integration transitions and entry surfaces
+  still mix platform integration with pure unit-tested helpers. Move those
+  helpers behind covered seams before closing this item. Preserve the bounded
+  job, thumbnail, prefetch, chrome, preview, presentation, curation, rating,
+  save, and GPU upload contracts while doing so.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

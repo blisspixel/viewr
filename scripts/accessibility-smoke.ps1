@@ -574,13 +574,13 @@ function Open-ViewSubmenu {
                     -not $keyboardFallbackSent -and
                     [DateTime]::UtcNow -ge $publishDeadline.AddSeconds(-1)
                 ) {
-                    $focusedSubmenu = Get-Element -Name $Name -Prefix -ControlType (
+                    $preferredFocusElement = Get-Element -Name $Name -Prefix -ControlType (
                         [System.Windows.Automation.ControlType]::Button
                     )
-                    if ($null -ne $focusedSubmenu) {
+                    if ($null -ne $preferredFocusElement) {
                         Send-ApplicationKey `
                             -VirtualKey 0x27 `
-                            -FocusedElement $focusedSubmenu
+                            -PreferredFocusElement $preferredFocusElement
                         $keyboardFallbackSent = $true
                         $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
                     }
@@ -642,15 +642,22 @@ function Send-ApplicationKey {
         [Parameter(Mandatory)]
         [ValidateRange(1, 255)]
         [int]$VirtualKey,
-        [System.Windows.Automation.AutomationElement]$FocusedElement
+        [System.Windows.Automation.AutomationElement]$PreferredFocusElement
     )
 
     $applicationRoot = [System.Windows.Automation.AutomationElement]::FromHandle(
         $script:Window
     )
     $applicationRoot.SetFocus()
-    if ($null -ne $FocusedElement) {
-        $FocusedElement.SetFocus()
+    if ($null -ne $PreferredFocusElement) {
+        try {
+            $PreferredFocusElement.SetFocus()
+        }
+        catch [System.InvalidOperationException] {
+            # AccessKit menu buttons can remain invokable while UIA reports that
+            # they cannot receive focus. Native delivery still targets the active
+            # application after the menu invocation above.
+        }
     }
     Start-Sleep -Milliseconds 50
     if (-not [ViewrAccessibilityNativeMethods]::SendKeyPress(

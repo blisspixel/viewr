@@ -95,6 +95,10 @@ and organized by user-visible concern.
 - The restored-provenance regression now changes an explicit modification-time
   field instead of assuming every filesystem reports a version change for an
   immediate rename round trip.
+- The Windows accessibility smoke now treats submenu-specific UI Automation
+  focus as a best-effort hint. An invokable AccessKit menu node that Windows
+  temporarily marks non-focusable no longer aborts valid window-level keyboard
+  fallback and the remaining semantic checks.
 - Full Windows source-content comparisons now run only in owned background work.
   Windows Open With uses one generation-cancellable verification job before the
   native chooser. Trash and permanent delete use the existing single curation

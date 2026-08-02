@@ -412,6 +412,19 @@ function Activate-Element {
         return
     }
     if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+        [ref]$rawPattern
+    )) {
+        $pattern = [System.Windows.Automation.ExpandCollapsePattern]$rawPattern
+        if (
+            $pattern.Current.ExpandCollapseState -ne
+            [System.Windows.Automation.ExpandCollapseState]::Expanded
+        ) {
+            $pattern.Expand()
+        }
+        return
+    }
+    if ($Element.TryGetCurrentPattern(
         [System.Windows.Automation.TogglePattern]::Pattern,
         [ref]$rawPattern
     )) {
@@ -424,6 +437,30 @@ function Activate-Element {
         "accessible '$($Element.Current.Name)' cannot be activated; supported patterns: " +
         ($supported -join ", ")
     )
+}
+
+function Try-ExpandSubmenuElement {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Element
+    )
+
+    $rawPattern = $null
+    if (-not $Element.TryGetCurrentPattern(
+        [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+        [ref]$rawPattern
+    )) {
+        return $false
+    }
+    $pattern = [System.Windows.Automation.ExpandCollapsePattern]$rawPattern
+    if (
+        $pattern.Current.ExpandCollapseState -eq
+        [System.Windows.Automation.ExpandCollapseState]::Expanded
+    ) {
+        return $true
+    }
+    $pattern.Expand()
+    return $true
 }
 
 function Get-ToggleState {
@@ -554,9 +591,17 @@ function Open-ViewSubmenu {
             )
         }
         Activate-Element -Element $submenu
+        # Nested AccessKit menus sometimes stay collapsed after Invoke. Prefer the
+        # expand pattern when present, then fall back to conventional Right Arrow.
+        $freshSubmenu = Get-Element -Name $Name -Prefix -ControlType (
+            [System.Windows.Automation.ControlType]::Button
+        )
+        if ($null -ne $freshSubmenu) {
+            [void](Try-ExpandSubmenuElement -Element $freshSubmenu)
+        }
 
-        $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
-        $keyboardFallbackSent = $false
+        $publishDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        $keyboardFallbackCount = 0
         while ([DateTime]::UtcNow -lt $publishDeadline) {
             if ($script:Process.HasExited) {
                 throw "viewr exited while opening the '$Name' submenu"
@@ -571,19 +616,19 @@ function Open-ViewSubmenu {
                 }
 
                 if (
-                    -not $keyboardFallbackSent -and
-                    [DateTime]::UtcNow -ge $publishDeadline.AddSeconds(-1)
+                    $keyboardFallbackCount -lt 2 -and
+                    [DateTime]::UtcNow -ge $publishDeadline.AddSeconds(-2.2 + $keyboardFallbackCount)
                 ) {
                     $preferredFocusElement = Get-Element -Name $Name -Prefix -ControlType (
                         [System.Windows.Automation.ControlType]::Button
                     )
-                    if ($null -ne $preferredFocusElement) {
-                        Send-ApplicationKey `
-                            -VirtualKey 0x27 `
-                            -PreferredFocusElement $preferredFocusElement
-                        $keyboardFallbackSent = $true
-                        $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
-                    }
+                    # Prefer the submenu item when available; otherwise still send
+                    # Right Arrow so a focused View menu can expand the current row.
+                    Send-ApplicationKey `
+                        -VirtualKey 0x27 `
+                        -PreferredFocusElement $preferredFocusElement
+                    $keyboardFallbackCount += 1
+                    $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
                 }
             }
             catch [System.Windows.Automation.ElementNotAvailableException] {
@@ -594,10 +639,11 @@ function Open-ViewSubmenu {
 
         if ($attempt -lt 3) {
             # A failed nested-menu invocation can leave View open while AccessKit
-            # publishes no child nodes. Switching through File can only move away
-            # from View, even if View closes between the failed probe and this action.
-            # Wait-ForResult also replaces a UIA element if the tree refreshes before
-            # the invocation reaches it.
+            # publishes no child nodes. Escape dismisses open menus, then File can
+            # only move away from View. Wait-ForResult also replaces a UIA element
+            # if the tree refreshes before the invocation reaches it.
+            Send-ApplicationKey -VirtualKey 0x1B
+            Start-Sleep -Milliseconds 100
             Wait-ForResult -Description "the File menu action before retrying '$Name'" -Probe {
                 $file = Get-Element -Name "File" -ControlType (
                     [System.Windows.Automation.ControlType]::Button

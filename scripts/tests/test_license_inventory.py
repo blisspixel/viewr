@@ -85,13 +85,7 @@ class LicenseInventoryTests(unittest.TestCase):
 
     def test_rejects_missing_license_text(self) -> None:
         malformed = _inventory(
-            "### MIT\n"
-            "name: MIT License\n"
-            "used_by:\n"
-            "  alpha 1.0.0\n"
-            "text:\n"
-            "<<<\n"
-            ">>>\n"
+            "### MIT\nname: MIT License\nused_by:\n  alpha 1.0.0\ntext:\n<<<\n>>>\n"
         )
         with self.assertRaisesRegex(InventoryError, "no license text"):
             self._verify(malformed, malformed)

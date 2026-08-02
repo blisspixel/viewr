@@ -520,6 +520,13 @@ or event-loop state. `App` supplies one snapshot of those facts and remains the
 only owner that applies the decision, mutates selection, schedules work, or
 publishes pixels.
 
+The covered `curation_state` seam defines the value state for Trash, permanent
+delete, and restore lifecycle policy. It derives fixed recovery priority and
+guidance, source-removal preflight, operation status, count grammar, and every
+deferred-close disposition from explicit inputs. `App` stores that value, owns
+the worker and all paths, receipts, playlist changes, and visible recovery
+application, and remains the only mutable curation owner.
+
 The covered `gpu_image` seam owns CPU-only texture sizing, mip planning,
 linear-light alpha-correct preview preparation, and upload selection. The covered
 `gpu_policy` seam owns first-supported sRGB surface selection, full-resolution
@@ -532,10 +539,10 @@ owner and the existing asynchronous preview contract.
 The exact-path exclusions remain because the application and renderer must
 exercise native event-loop and wgpu outcomes. Remaining renderer helpers are small
 and coupled to that adapter rather than hidden domain policy. Concentrated rating,
-curation, recovery, shortcut, and event transitions in `app.rs`, plus pure entry
-parsing, remain explicit v0.2 extraction debt. Meaningful decisions must keep
-moving behind narrow covered seams before later monitor, watcher, and page-state
-work expands them.
+shortcut, event, and remaining curation-integration transitions in `app.rs`, plus
+pure entry parsing, remain explicit v0.2 extraction debt. Meaningful decisions
+must keep moving behind narrow covered seams before later monitor, watcher, and
+page-state work expands them.
 
 Source removal and Trash restore retain an explicit event-loop ownership boundary.
 The worker owns strong accepted-source validation, the Trash or permanent-delete

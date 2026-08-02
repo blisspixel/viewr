@@ -34,6 +34,10 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
+use crate::curation_state::{
+    CurationCloseDisposition, CurationKind, CurationRecovery, CurationTerminalState,
+    curation_close_disposition, curation_recovery_message, curation_status, file_count,
+};
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -334,68 +338,6 @@ enum PreviewJobResult {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CurationKind {
-    Trash,
-    PermanentDelete,
-    Restore,
-}
-
-#[derive(Default)]
-struct CurationRecovery {
-    trash: bool,
-    permanent_delete: bool,
-    restore: bool,
-}
-
-impl CurationRecovery {
-    fn record(&mut self, kind: CurationKind) {
-        match kind {
-            CurationKind::Trash => self.trash = true,
-            CurationKind::PermanentDelete => self.permanent_delete = true,
-            CurationKind::Restore => self.restore = true,
-        }
-    }
-
-    fn clear(&mut self, kind: CurationKind) {
-        match kind {
-            CurationKind::Trash => self.trash = false,
-            CurationKind::PermanentDelete => self.permanent_delete = false,
-            CurationKind::Restore => self.restore = false,
-        }
-    }
-
-    fn contains(&self, kind: CurationKind) -> bool {
-        match kind {
-            CurationKind::Trash => self.trash,
-            CurationKind::PermanentDelete => self.permanent_delete,
-            CurationKind::Restore => self.restore,
-        }
-    }
-
-    fn status(&self) -> Option<String> {
-        [
-            CurationKind::PermanentDelete,
-            CurationKind::Trash,
-            CurationKind::Restore,
-        ]
-        .into_iter()
-        .find(|kind| self.contains(*kind))
-        .map(|kind| curation_recovery_message(kind).to_owned())
-    }
-}
-
-fn source_removal_recovery_preflight(recovery: &CurationRecovery) -> Option<&'static str> {
-    [
-        CurationKind::PermanentDelete,
-        CurationKind::Trash,
-        CurationKind::Restore,
-    ]
-    .into_iter()
-    .find(|kind| recovery.contains(*kind))
-    .map(curation_recovery_message)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CloseDisposition {
     Exit,
     WaitForSave,
@@ -415,20 +357,6 @@ enum SaveCloseDisposition {
     StayOpen,
     Exit,
     WaitForCuration,
-    CancelDeferredClose,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CurationTerminalState {
-    Succeeded,
-    NeedsAttention,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CurationCloseDisposition {
-    StayOpen,
-    Exit,
-    WaitForSave,
     CancelDeferredClose,
 }
 
@@ -468,22 +396,6 @@ const fn save_close_disposition(
     }
 }
 
-const fn curation_close_disposition(
-    close_requested: bool,
-    terminal: CurationTerminalState,
-    save_active: bool,
-) -> CurationCloseDisposition {
-    if !close_requested {
-        CurationCloseDisposition::StayOpen
-    } else if !matches!(terminal, CurationTerminalState::Succeeded) {
-        CurationCloseDisposition::CancelDeferredClose
-    } else if save_active {
-        CurationCloseDisposition::WaitForSave
-    } else {
-        CurationCloseDisposition::Exit
-    }
-}
-
 fn save_start_blocker<const N: usize>(
     blockers: [Option<SaveStartBlocker>; N],
 ) -> Option<SaveStartBlocker> {
@@ -512,20 +424,6 @@ impl CurationKind {
             Self::Trash => CurrentWork::TrashMove,
             Self::PermanentDelete => CurrentWork::PermanentDelete,
             Self::Restore => CurrentWork::TrashRestore,
-        }
-    }
-}
-
-const fn curation_recovery_message(kind: CurationKind) -> &'static str {
-    match kind {
-        CurationKind::Trash => {
-            "Move to Trash stopped unexpectedly. The file may have moved. Review the folder and system Trash, then close and reopen viewr before trying another destructive action."
-        }
-        CurationKind::PermanentDelete => {
-            "Permanent delete stopped unexpectedly. The file may have been deleted. Review the folder, then close and reopen viewr before trying another destructive action."
-        }
-        CurationKind::Restore => {
-            "Trash restore stopped unexpectedly. Some files may have restored. Undo receipts were kept; review the folder and system Trash, then retry U before moving more files to Trash."
         }
     }
 }
@@ -894,26 +792,6 @@ fn curation_action_preflight(
     }
 }
 
-fn curation_status(kind: CurationKind, submitted: usize, closing: bool) -> String {
-    let count = file_count(submitted);
-    match (kind, closing) {
-        (CurationKind::Trash, false) => format!("Moving {count} to Trash..."),
-        (CurationKind::Trash, true) => {
-            format!("Finishing move to Trash for {count} before closing...")
-        }
-        (CurationKind::PermanentDelete, false) => {
-            format!("Permanently deleting {count}...")
-        }
-        (CurationKind::PermanentDelete, true) => {
-            format!("Finishing permanent delete for {count} before closing...")
-        }
-        (CurationKind::Restore, false) => format!("Restoring {count} from Trash..."),
-        (CurationKind::Restore, true) => {
-            format!("Finishing Trash restore for {count} before closing...")
-        }
-    }
-}
-
 fn spawn_curation_thread<T: Send + 'static>(
     name: &'static str,
     work: impl FnOnce() -> T + Send + 'static,
@@ -960,14 +838,6 @@ fn edit_transaction_failure_message<E>(
             format!("{action} failed. Disk source unchanged; reopen it. Edit history was cleared.")
         }
     }
-}
-
-fn file_count(count: usize) -> String {
-    format!("{count} {}", file_noun(count))
-}
-
-fn file_noun(count: usize) -> &'static str {
-    if count == 1 { "file" } else { "files" }
 }
 
 fn single_trash_result_message(has_receipt: bool, previous_undo_preserved: bool) -> &'static str {
@@ -3358,7 +3228,7 @@ impl App {
         if self.block_action_while_busy("moving this file to Trash", true) {
             return;
         }
-        if let Some(message) = source_removal_recovery_preflight(&self.curation_recovery) {
+        if let Some(message) = self.curation_recovery.source_removal_preflight() {
             self.show_toast(message);
             return;
         }
@@ -4489,7 +4359,7 @@ impl App {
         if self.block_action_while_busy("permanently deleting this file", true) {
             return;
         }
-        if let Some(message) = source_removal_recovery_preflight(&self.curation_recovery) {
+        if let Some(message) = self.curation_recovery.source_removal_preflight() {
             self.show_toast(message);
             return;
         }
@@ -7499,23 +7369,7 @@ mod test {
     }
 
     #[test]
-    fn curation_status_and_close_decisions_are_truthful() {
-        assert_eq!(
-            curation_status(CurationKind::Trash, 1, false),
-            "Moving 1 file to Trash..."
-        );
-        assert_eq!(
-            curation_status(CurationKind::PermanentDelete, 1, true),
-            "Finishing permanent delete for 1 file before closing..."
-        );
-        assert_eq!(
-            curation_status(CurationKind::Restore, 1, false),
-            "Restoring 1 file from Trash..."
-        );
-        assert_eq!(
-            curation_status(CurationKind::Restore, 3, true),
-            "Finishing Trash restore for 3 files before closing..."
-        );
+    fn close_and_curation_preflight_follow_app_ownership() {
         assert_eq!(close_disposition(false, false), CloseDisposition::Exit);
         assert_eq!(
             close_disposition(true, false),
@@ -7651,71 +7505,6 @@ mod test {
     }
 
     #[test]
-    fn deferred_close_requires_a_successful_curation_terminal_state() {
-        assert_eq!(
-            curation_close_disposition(false, CurationTerminalState::Succeeded, false),
-            CurationCloseDisposition::StayOpen
-        );
-        assert_eq!(
-            curation_close_disposition(true, CurationTerminalState::Succeeded, false),
-            CurationCloseDisposition::Exit
-        );
-        assert_eq!(
-            curation_close_disposition(true, CurationTerminalState::Succeeded, true),
-            CurationCloseDisposition::WaitForSave
-        );
-        assert_eq!(
-            curation_close_disposition(true, CurationTerminalState::NeedsAttention, false),
-            CurationCloseDisposition::CancelDeferredClose
-        );
-        assert_eq!(
-            curation_close_disposition(true, CurationTerminalState::NeedsAttention, true),
-            CurationCloseDisposition::CancelDeferredClose
-        );
-    }
-
-    #[test]
-    fn unresolved_curation_blocks_source_removal_in_risk_order() {
-        let mut recovery = CurationRecovery::default();
-        assert_eq!(source_removal_recovery_preflight(&recovery), None);
-
-        recovery.record(CurationKind::Restore);
-        assert_eq!(
-            source_removal_recovery_preflight(&recovery),
-            Some(curation_recovery_message(CurationKind::Restore))
-        );
-
-        recovery.record(CurationKind::Trash);
-        assert_eq!(
-            source_removal_recovery_preflight(&recovery),
-            Some(curation_recovery_message(CurationKind::Trash))
-        );
-
-        recovery.record(CurationKind::PermanentDelete);
-        assert_eq!(
-            source_removal_recovery_preflight(&recovery),
-            Some(curation_recovery_message(CurationKind::PermanentDelete))
-        );
-
-        recovery.clear(CurationKind::PermanentDelete);
-        recovery.clear(CurationKind::Trash);
-        recovery.clear(CurationKind::Restore);
-        assert_eq!(source_removal_recovery_preflight(&recovery), None);
-    }
-
-    #[test]
-    fn curation_recovery_clears_after_restore_reconciliation() {
-        let mut recovery = CurationRecovery::default();
-        recovery.record(CurationKind::Restore);
-        assert_eq!(
-            recovery.status().as_deref(),
-            Some(curation_recovery_message(CurationKind::Restore))
-        );
-        recovery.clear(CurationKind::Restore);
-        assert!(recovery.status().is_none());
-    }
-
-    #[test]
     fn permanent_delete_confirmation_is_bounded_path_free_and_control_safe() {
         let path = PathBuf::from("private")
             .join("album")
@@ -7809,13 +7598,6 @@ mod test {
             assert!(!message.contains("private"));
             assert!(!message.contains("album"));
         }
-    }
-
-    #[test]
-    fn file_counts_use_plain_singular_and_plural_copy() {
-        assert_eq!(file_count(0), "0 files");
-        assert_eq!(file_count(1), "1 file");
-        assert_eq!(file_count(2), "2 files");
     }
 
     #[test]

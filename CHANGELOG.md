@@ -7,6 +7,11 @@ and organized by user-visible concern.
 
 ### Changed
 
+- Curation lifecycle policy now lives in a 100 percent line-covered private seam.
+  Trash, permanent-delete, and restore recovery priority, fixed guidance,
+  operation status, count grammar, and deferred-close decisions are exhaustive
+  pure transitions, while the application remains the sole worker, path, receipt,
+  playlist, and visible-recovery owner. User-visible behavior is unchanged.
 - CI now runs the exact locked, all-target formatting, Clippy, test, and build
   contract documented for contributors, with documentation tests kept as a
   separate explicit gate.

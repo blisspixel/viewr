@@ -13,6 +13,7 @@ pub mod cli;
 pub mod color;
 pub mod crop;
 pub mod curate;
+mod curation_state;
 pub mod decode;
 pub mod edit;
 pub mod ephemeral;

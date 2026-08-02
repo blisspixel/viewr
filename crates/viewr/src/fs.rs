@@ -2020,6 +2020,18 @@ mod tests {
         let original_provenance = source.scan_provenance().unwrap();
         fs::rename(&path, &trashed).unwrap();
         fs::rename(&trashed, &path).unwrap();
+        let modified = fs::metadata(&path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .checked_add(std::time::Duration::from_hours(24))
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
 
         assert!(super::ImageSource::open_scanned(&path, original_provenance).is_err());
         let restored_provenance = source.current_scan_provenance().unwrap();

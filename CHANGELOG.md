@@ -92,6 +92,9 @@ and organized by user-visible concern.
   parsed result, stops between segments, and cannot authorize writes. Two
   different malformed or non-JPEG headers can no longer appear stable merely
   because parsing returned the same error category.
+- The restored-provenance regression now changes an explicit modification-time
+  field instead of assuming every filesystem reports a version change for an
+  immediate rename round trip.
 - Full Windows source-content comparisons now run only in owned background work.
   Windows Open With uses one generation-cancellable verification job before the
   native chooser. Trash and permanent delete use the existing single curation

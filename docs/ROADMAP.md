@@ -33,14 +33,17 @@ the refined Spot Heal workflow, a functional accessible About modal, and complet
 System, Light, Dark, and Console appearances. The appearance choice is the only
 persistent UI preference and contains no image or activity data.
 
-**Immediate focus (August 2026): finish v0.2 reliability architecture on `main`,
-then v0.3 display correctness and v0.4 file coherence. The next product gates are
-v0.5 format-contract closure and v0.6 integrated product quality. Artifact-bound
-human accessibility evidence, release hardening, and publisher-authenticated
-delivery close v0.7 through v0.9 after product behavior is mature.** Optional
+**Immediate focus: v0.2 reliability architecture, followed by v0.3 display
+correctness and v0.4 file coherence. The next product gates are v0.5
+format-contract closure and v0.6 integrated product quality. Artifact-bound human
+accessibility evidence, release hardening, and publisher-authenticated delivery
+close v0.7 through v0.9 after product behavior is mature.** Optional
 model-backed description remains a gated post-1.0 candidate, not active Phase 8
-scope. The published GitHub release remains immutable [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0);
-later reliability work lands on `main` until a later tagged gate is ready.
+scope.
+
+As of August 2026, the published GitHub release remains immutable
+[v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0). Later
+reliability work lands on `main` until a later tagged gate is ready.
 
 ## Version path to an exceptional 1.0
 

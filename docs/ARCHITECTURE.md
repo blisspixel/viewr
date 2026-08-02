@@ -175,9 +175,13 @@ Shipped:
 - **`decode`**: opens one source object and turns that exact handle into RGBA
   pixels. The live handle and native object identity travel with every accepted
   foreground or speculative result instead of being reconstructed from its path.
-  Identity and version are captured together. A successful decoder result is
-  discarded if the retained object changed before publication, including an
-  in-place rewrite of the same object while decoding.
+  Identity and version are captured together. The retained handle remains the
+  only byte source. For a markable source, its selected pathname is also retained
+  in memory and reopened without following the final component only to prove that
+  it still resolves to the accepted identity and version. A successful decoder
+  result is discarded if either the retained object changed or its pathname was
+  replaced before publication, including an in-place rewrite of the same object
+  while decoding.
   Pure-Rust formats decode the duplicated handle on background threads via the
   `image` crate. For complex C-backed formats, the main process reads bounded
   encoded bytes from the same handle and delegates them to an

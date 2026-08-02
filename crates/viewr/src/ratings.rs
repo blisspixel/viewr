@@ -1855,10 +1855,8 @@ fn regular_windows_file(metadata: &std::fs::Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_os = "windows")]
     use crate::ephemeral::TempWorkspace;
     use std::fmt::Write as FormatWrite;
-    #[cfg(target_os = "windows")]
     use std::fs;
 
     fn segment(marker: u8, payload: &[u8]) -> Vec<u8> {

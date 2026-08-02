@@ -556,6 +556,7 @@ function Open-ViewSubmenu {
         Activate-Element -Element $submenu
 
         $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        $keyboardFallbackSent = $false
         while ([DateTime]::UtcNow -lt $publishDeadline) {
             if ($script:Process.HasExited) {
                 throw "viewr exited while opening the '$Name' submenu"
@@ -567,6 +568,22 @@ function Open-ViewSubmenu {
                     -ControlType $ExpectedChildControlType
                 if ($null -ne $child) {
                     return
+                }
+
+                if (
+                    -not $keyboardFallbackSent -and
+                    [DateTime]::UtcNow -ge $publishDeadline.AddSeconds(-1)
+                ) {
+                    $focusedSubmenu = Get-Element -Name $Name -Prefix -ControlType (
+                        [System.Windows.Automation.ControlType]::Button
+                    )
+                    if ($null -ne $focusedSubmenu) {
+                        Send-ApplicationKey `
+                            -VirtualKey 0x27 `
+                            -FocusedElement $focusedSubmenu
+                        $keyboardFallbackSent = $true
+                        $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
+                    }
                 }
             }
             catch [System.Windows.Automation.ElementNotAvailableException] {
@@ -624,13 +641,17 @@ function Send-ApplicationKey {
     param(
         [Parameter(Mandatory)]
         [ValidateRange(1, 255)]
-        [int]$VirtualKey
+        [int]$VirtualKey,
+        [System.Windows.Automation.AutomationElement]$FocusedElement
     )
 
     $applicationRoot = [System.Windows.Automation.AutomationElement]::FromHandle(
         $script:Window
     )
     $applicationRoot.SetFocus()
+    if ($null -ne $FocusedElement) {
+        $FocusedElement.SetFocus()
+    }
     Start-Sleep -Milliseconds 50
     if (-not [ViewrAccessibilityNativeMethods]::SendKeyPress(
         $script:Window,

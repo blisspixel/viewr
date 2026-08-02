@@ -252,7 +252,7 @@ state before job ownership and test seams are explicit.
   surfaces still mix platform integration with pure unit-tested helpers. Move
   those helpers behind covered seams before closing this item. Preserve the
   bounded job, thumbnail, prefetch, chrome, preview, presentation, and GPU upload
-  contracts while doing so. The complete measured floor is now 89.63 percent
+  contracts while doing so. The complete measured floor is now 89.62 percent
   after the folder-scan, file-identity, playlist-alignment, modal-ownership, and
   external-handoff reminder regression branches were added.
 

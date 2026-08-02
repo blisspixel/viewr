@@ -124,6 +124,10 @@ A promise you can verify beats a promise you have to trust.
    and do not follow sibling symlinks. Enumeration is checked against a retained
    directory handle, and automatic entries carry the regular object's native
    identity and version into decode, prefetch, thumbnails, and rating inspection.
+   Each markable accepted source also retains its selected pathname only in
+   memory. Version checks reopen that final entry without following links and
+   require the same identity and version, but all image and metadata bytes still
+   come from the accepted handle.
    A symlink chosen directly through Open File remains the explicit selected path
    and does not expand automatic discovery. F5 can explicitly adopt a replacement
    ordinary file but does not follow a link substituted for an automatic entry.
@@ -308,8 +312,10 @@ offset/length tags so retained metadata cannot contradict the exported pixels.
 Automatic inspection and opt-in retention share the same bounded EXIF extractor.
 Reads through the accepted source handle are serialized because duplicate file
 handles can share a cursor. Accepted length, modification time, and operating-
-system change-time evidence are checked before and after extraction. A detected
-rewrite or rename fails closed instead of retaining metadata from uncertain bytes.
+system change-time evidence are checked before and after extraction. A no-follow
+pathname reopen also requires the accepted identity and version, so Windows
+handle metadata caching cannot hide a pathname replacement. A detected rewrite
+or rename fails closed instead of retaining metadata from uncertain bytes.
 Main and worker decode publication, animation discovery, and rating inspection
 apply the same before-and-after version contract before publishing accepted state.
 It limits container chunks, payload bytes, TIFF directories and tags, recursive

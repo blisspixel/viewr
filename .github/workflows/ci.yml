@@ -103,9 +103,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: |
-          cargo test --workspace --all-targets --locked
-          cargo test --workspace --doc --locked
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Documentation tests
+        run: cargo test --workspace --doc --locked
 
       - name: Build workspace binaries
         run: cargo build --workspace --all-targets --locked

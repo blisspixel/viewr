@@ -164,6 +164,15 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, workflow)
                 self.assertIn(command, verification_guide)
+        self.assertIn(
+            "- name: Test\n        run: cargo test --workspace --all-targets --locked",
+            workflow,
+        )
+        self.assertIn(
+            "- name: Documentation tests\n"
+            "        run: cargo test --workspace --doc --locked",
+            workflow,
+        )
         self.assertRegex(workflow, r"cargo llvm-cov --workspace\s+--locked")
         self.assertEqual(workflow.count("--exclude jxl-color"), 1)
         self.assertEqual(workflow.count("--exclude jxl-render"), 1)

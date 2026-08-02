@@ -31,6 +31,7 @@ pub use convert::*;
 pub use error::*;
 pub use ycbcr::ycbcr_to_rgb;
 
+#[cfg(any(test, target_arch = "x86_64"))]
 const fn avx2_fma_dispatch(avx2: bool, fma: bool) -> bool {
     avx2 && fma
 }

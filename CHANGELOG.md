@@ -12,10 +12,12 @@ and organized by user-visible concern.
   separate explicit gate.
 - Windows native accessibility automation now closes an unsuccessfully expanded
   View submenu before retrying it, so each attempt starts from a known menu state
-  while retaining the exact accessible-child assertions. Focused shortcut checks
-  prefer `SendInput` and use a native queued-key fallback only when the runner
-  denies foreground ownership; every key remains verified through the resulting
-  accessible application state.
+  while retaining the exact accessible-child assertions. If UI Automation Invoke
+  leaves the submenu unpublished, the retry focuses that exact accessible item
+  and uses the conventional Right Arrow expansion before checking the child
+  again. Focused shortcut checks prefer `SendInput` and use a native queued-key
+  fallback only when the runner denies foreground ownership; every key remains
+  verified through the resulting accessible application state.
 - Dependency policy now denies every unreviewed duplicate crate version against
   an exact, rationale-backed transitive baseline. Both workspace lockfiles must
   pass cargo-deny without unexplained warnings.
@@ -77,6 +79,10 @@ and organized by user-visible concern.
   identity-plus-version provenance through foreground decode, prefetch,
   thumbnails, ratings, Trash restore, and explicit F5 refresh. Decode and rating
   results are discarded if their accepted object changes before publication.
+  Markable accepted sources also retain their selected pathname in memory and
+  reopen it without following its final component during version checks. This
+  catches pathname replacement even when a Windows retained handle reports
+  unchanged cached timestamps.
 - Save As now binds metadata retention to serialized reads from the accepted
   source handle that supplied the displayed pixels and rejects length,
   modification-time, or operating-system change-time differences around

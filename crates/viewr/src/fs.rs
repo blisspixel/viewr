@@ -123,6 +123,7 @@ pub(crate) struct ImageSource {
     cursor: Mutex<()>,
     identity: Option<FileIdentity>,
     version: Option<FileVersion>,
+    accepted_path: Option<PathBuf>,
     markable: bool,
 }
 
@@ -195,19 +196,23 @@ impl ImageSource {
                 "image source must be a regular file",
             ));
         };
-        Self::from_opened_file(file, markable)
+        Self::from_opened_file(file, markable, Some(path.to_path_buf()))
     }
 
     /// Open a regular object without following its final path component.
     pub(crate) fn open_regular(path: &Path) -> io::Result<Self> {
-        Self::from_opened_file(open_regular_no_follow(path)?, true)
+        Self::from_opened_file(
+            open_regular_no_follow(path)?,
+            true,
+            Some(path.to_path_buf()),
+        )
     }
 
     /// Open an automatically discovered entry without following its final link
     /// and require the same filesystem object observed by the folder scan.
     pub(crate) fn open_scanned(path: &Path, provenance: ScanProvenance) -> io::Result<Self> {
         let file = open_regular_no_follow(path)?;
-        let source = Self::from_opened_file(file, true)?;
+        let source = Self::from_opened_file(file, true, Some(path.to_path_buf()))?;
         if source.identity != Some(provenance.identity)
             || source.version != Some(provenance.version)
         {
@@ -256,7 +261,11 @@ impl ImageSource {
         }
     }
 
-    fn from_opened_file(file: std::fs::File, markable: bool) -> io::Result<Self> {
+    fn from_opened_file(
+        file: std::fs::File,
+        markable: bool,
+        accepted_path: Option<PathBuf>,
+    ) -> io::Result<Self> {
         let opened = file.metadata()?;
         if !opened.is_file() {
             return Err(io::Error::new(
@@ -277,6 +286,7 @@ impl ImageSource {
             cursor: Mutex::new(()),
             identity,
             version,
+            accepted_path,
             markable,
         })
     }
@@ -301,9 +311,13 @@ impl ImageSource {
         let Ok(metadata) = self.file.metadata() else {
             return false;
         };
-        self.version.is_some_and(|expected| {
+        let retained_version_is_current = self.version.is_some_and(|expected| {
             file_version(&self.file, &metadata).is_ok_and(|current| current == expected)
-        })
+        });
+        retained_version_is_current
+            && self.accepted_path.as_deref().is_none_or(|path| {
+                !self.markable || self.matches_path(path) == ImageSourceMatch::Same
+            })
     }
 
     /// Whether another retained source names the exact same filesystem object.
@@ -427,7 +441,7 @@ impl DirectorySource {
     /// Open one regular child relative to this retained directory without
     /// following the child entry or re-resolving the parent pathname.
     pub(crate) fn open_image(&self, name: &OsStr) -> io::Result<ImageSource> {
-        ImageSource::from_opened_file(self.open_regular(name)?, true)
+        ImageSource::from_opened_file(self.open_regular(name)?, true, None)
     }
 
     /// Whether `path` still resolves to the retained directory object.
@@ -1517,7 +1531,8 @@ mod tests {
                 fs::write(selected.join("image.png"), b"replacement object").unwrap();
             },
         )
-        .unwrap_err();
+        .err()
+        .expect("the rebound directory must invalidate its retained scan");
 
         assert_eq!(
             error.to_string(),
@@ -1711,6 +1726,23 @@ mod tests {
         for worker in workers {
             assert!(worker.join().unwrap());
         }
+    }
+
+    #[test]
+    fn source_version_rejects_path_replacement_with_unchanged_retained_metadata() {
+        let workspace = TempWorkspace::new("source_path_replacement").unwrap();
+        let path = workspace.path().join("source.bin");
+        let displaced = workspace.path().join("displaced.bin");
+        fs::write(&path, b"accepted-bytes").unwrap();
+        let mut source = super::ImageSource::open(&path).unwrap();
+
+        fs::rename(&path, &displaced).unwrap();
+        fs::write(&path, b"replaced-bytes").unwrap();
+        let retained_metadata = source.file.metadata().unwrap();
+        source.version = Some(super::file_version(&source.file, &retained_metadata).unwrap());
+
+        assert!(!source.version_is_current());
+        assert_eq!(source.matches_path(&path), super::ImageSourceMatch::Changed);
     }
 
     #[test]

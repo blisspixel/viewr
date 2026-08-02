@@ -66,7 +66,7 @@ esac
             "LICENSE": b"test license\n",
             "NOTICE": b"test notice\n",
             "README.md": b"# test release\n",
-            "THIRD_PARTY_LICENSES.html": b"<p>test licenses</p>\n",
+            "THIRD_PARTY_LICENSES.txt": b"viewr third-party licenses\n",
             "assets/icon.svg": b"<svg xmlns='http://www.w3.org/2000/svg'/>\n",
             "assets/linux/viewr.desktop": b"[Desktop Entry]\nName=viewr\n",
             "bin/viewr": self.executable(viewr),

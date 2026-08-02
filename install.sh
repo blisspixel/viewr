@@ -285,7 +285,7 @@ for required in \
     "LICENSE" \
     "NOTICE" \
     "README.md" \
-    "THIRD_PARTY_LICENSES.html" \
+    "THIRD_PARTY_LICENSES.txt" \
     "release-manifest.json"
 do
     [ -f "$source_root/$required" ] && [ ! -L "$source_root/$required" ] ||
@@ -309,7 +309,7 @@ install -m 0755 "$source_root/bin/viewr-decode" "$stage_dir/viewr-decode"
 install -m 0644 "$source_root/LICENSE" "$stage_dir/LICENSE"
 install -m 0644 "$source_root/NOTICE" "$stage_dir/NOTICE"
 install -m 0644 "$source_root/README.md" "$stage_dir/README.md"
-install -m 0644 "$source_root/THIRD_PARTY_LICENSES.html" "$stage_dir/THIRD_PARTY_LICENSES.html"
+install -m 0644 "$source_root/THIRD_PARTY_LICENSES.txt" "$stage_dir/THIRD_PARTY_LICENSES.txt"
 install -m 0644 "$source_root/release-manifest.json" "$stage_dir/release-manifest.json"
 printf 'repository=%s\nversion=%s\ntarget=%s\n' "$REPOSITORY" "$version" "$target" > "$stage_dir/.viewr-install"
 staged_version=$("$stage_dir/viewr" --version) ||

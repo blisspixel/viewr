@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from html.parser import HTMLParser
 from pathlib import Path
 import sys
 
@@ -32,132 +31,128 @@ class LicenseSection:
 
 @dataclass(frozen=True)
 class LicenseInventory:
-    """Semantic content extracted from cargo-about's HTML report."""
+    """Semantic content extracted from the plain-text cargo-about report."""
 
     summary: tuple[str, ...]
     sections: tuple[LicenseSection, ...]
 
 
-def _normalized_text(parts: list[str]) -> str:
-    return "".join(parts).replace("\r\n", "\n").replace("\r", "\n").strip("\n")
-
-
-class _InventoryParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.summary: list[str] = []
-        self.sections: list[LicenseSection] = []
-        self._heading_tag: str | None = None
-        self._heading_id = ""
-        self._heading_parts: list[str] = []
-        self._summary_area = False
-        self._license_area = False
-        self._summary_parts: list[str] | None = None
-        self._in_section = False
-        self._in_packages = False
-        self._package_parts: list[str] | None = None
-        self._packages: list[str] = []
-        self._pre_parts: list[str] | None = None
-        self._section_text: str | None = None
-        self._license_id = ""
-        self._license_name = ""
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = dict(attrs)
-        if tag in {"h2", "h3"}:
-            self._heading_tag = tag
-            self._heading_id = attributes.get("id") or ""
-            self._heading_parts = []
-        elif tag == "li" and self._summary_area:
-            self._summary_parts = []
-        elif tag == "section" and self._license_area:
-            if self._in_section:
-                raise InventoryError("nested license sections are not supported")
-            self._in_section = True
-            self._packages = []
-            self._section_text = None
-        elif (
-            tag == "div"
-            and self._in_section
-            and "packages" in (attributes.get("class") or "").split()
-        ):
-            self._in_packages = True
-        elif tag == "a" and self._in_packages:
-            self._package_parts = []
-        elif tag == "pre" and self._in_section:
-            if self._pre_parts is not None or self._section_text is not None:
-                raise InventoryError("a license section must contain exactly one text")
-            self._pre_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._heading_tag is not None:
-            self._heading_parts.append(data)
-        if self._summary_parts is not None:
-            self._summary_parts.append(data)
-        if self._package_parts is not None:
-            self._package_parts.append(data)
-        if self._pre_parts is not None:
-            self._pre_parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == self._heading_tag:
-            heading = _normalized_text(self._heading_parts).strip()
-            if tag == "h2":
-                self._summary_area = heading == "License summary"
-                self._license_area = heading == "License texts and packages"
-            elif tag == "h3" and self._in_section:
-                self._license_id = self._heading_id
-                self._license_name = heading
-            self._heading_tag = None
-            self._heading_id = ""
-            self._heading_parts = []
-        elif tag == "li" and self._summary_parts is not None:
-            self.summary.append(_normalized_text(self._summary_parts).strip())
-            self._summary_parts = None
-        elif tag == "a" and self._package_parts is not None:
-            package = _normalized_text(self._package_parts).strip()
-            if package:
-                self._packages.append(package)
-            self._package_parts = None
-        elif tag == "div" and self._in_packages:
-            self._in_packages = False
-        elif tag == "pre" and self._pre_parts is not None:
-            self._section_text = _normalized_text(self._pre_parts)
-            self._pre_parts = None
-        elif tag == "section" and self._in_section:
-            if not self._license_id or not self._license_name:
-                raise InventoryError("license section is missing its license heading")
-            if not self._packages:
-                raise InventoryError("license section has no packages")
-            if not self._section_text:
-                raise InventoryError("license section has no license text")
-            self.sections.append(
-                LicenseSection(
-                    self._license_id,
-                    self._license_name,
-                    tuple(sorted(self._packages)),
-                    self._section_text,
-                )
-            )
-            self._in_section = False
-
-    def inventory(self) -> LicenseInventory:
-        if self._in_section or self._pre_parts is not None:
-            raise InventoryError("license inventory ended inside a section")
-        if not self.summary:
-            raise InventoryError("license inventory has no summary")
-        if not self.sections:
-            raise InventoryError("license inventory has no license sections")
-        return LicenseInventory(
-            tuple(sorted(self.summary)), tuple(sorted(self.sections))
-        )
+def _normalized_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def parse_inventory(path: Path) -> LicenseInventory:
-    parser = _InventoryParser()
-    parser.feed(path.read_text(encoding="utf-8"))
-    parser.close()
-    return parser.inventory()
+    text = _normalized_newlines(path.read_text(encoding="utf-8"))
+    lines = text.split("\n")
+
+    try:
+        summary_start = lines.index("## License summary")
+        sections_start = lines.index("## License texts and packages")
+    except ValueError as error:
+        raise InventoryError(
+            "license inventory is missing required section headings"
+        ) from error
+
+    if sections_start <= summary_start:
+        raise InventoryError("license inventory section order is invalid")
+
+    summary: list[str] = []
+    for line in lines[summary_start + 1 : sections_start]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("- "):
+            raise InventoryError(f"invalid summary line: {stripped}")
+        summary.append(stripped[2:].strip())
+
+    sections: list[LicenseSection] = []
+    index = sections_start + 1
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            index += 1
+            continue
+        if not line.startswith("### "):
+            raise InventoryError(f"expected license section heading, found: {line}")
+        license_id = line[4:].strip()
+        if not license_id:
+            raise InventoryError("license section is missing its id")
+        index += 1
+
+        if index >= len(lines) or not lines[index].startswith("name: "):
+            raise InventoryError(
+                f"license section {license_id} is missing its display name"
+            )
+        license_name = lines[index][len("name: ") :].strip()
+        if not license_name:
+            raise InventoryError(f"license section {license_id} has an empty name")
+        index += 1
+
+        packages: list[str] = []
+        while index < len(lines):
+            current = lines[index]
+            if current == "used_by:":
+                index += 1
+                while index < len(lines):
+                    package_line = lines[index]
+                    if package_line.startswith("  ") and package_line.strip():
+                        packages.append(package_line.strip())
+                        index += 1
+                        continue
+                    break
+                continue
+            if current == "text:":
+                index += 1
+                break
+            if current.startswith("### "):
+                break
+            if not current.strip():
+                index += 1
+                continue
+            raise InventoryError(
+                f"license section {license_id} has unexpected content: {current}"
+            )
+
+        if not packages:
+            raise InventoryError(f"license section {license_id} has no packages")
+        if index >= len(lines) or lines[index] != "<<<":
+            raise InventoryError(
+                f"license section {license_id} is missing its text fence"
+            )
+        index += 1
+
+        body_lines: list[str] = []
+        closed = False
+        while index < len(lines):
+            if lines[index] == ">>>":
+                closed = True
+                index += 1
+                break
+            body_lines.append(lines[index])
+            index += 1
+        if not closed:
+            raise InventoryError(
+                f"license section {license_id} has an unclosed text fence"
+            )
+
+        section_text = "\n".join(body_lines).strip("\n")
+        if not section_text:
+            raise InventoryError(f"license section {license_id} has no license text")
+
+        sections.append(
+            LicenseSection(
+                license_id,
+                license_name,
+                tuple(sorted(packages)),
+                section_text,
+            )
+        )
+
+    if not summary:
+        raise InventoryError("license inventory has no summary")
+    if not sections:
+        raise InventoryError("license inventory has no license sections")
+    return LicenseInventory(tuple(sorted(summary)), tuple(sorted(sections)))
 
 
 def verify_inventories(committed: Path, generated: Path) -> None:
@@ -184,7 +179,7 @@ def verify_inventories(committed: Path, generated: Path) -> None:
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(
-            "usage: verify_license_inventory.py COMMITTED_HTML GENERATED_HTML",
+            "usage: verify_license_inventory.py COMMITTED_INVENTORY GENERATED_INVENTORY",
             file=sys.stderr,
         )
         return 2

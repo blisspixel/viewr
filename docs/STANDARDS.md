@@ -179,7 +179,7 @@ higher standard than the rest of the app.
   unmaintained dependencies; narrow informational exceptions require documented
   reachability analysis in both audit configurations.
 - `cargo-about` renders the locked default release graph into
-  `THIRD_PARTY_LICENSES.html`. CI regenerates it offline and requires an exact match,
+  `THIRD_PARTY_LICENSES.txt`. CI regenerates it offline and requires a semantic match,
   and verified release archives include that inventory with LICENSE and NOTICE.
 - The privacy invariant is layered and deterministic. `cargo-deny` rejects HTTP,
   TLS, websocket, QUIC, and remote-service clients, and permits Linux's generic

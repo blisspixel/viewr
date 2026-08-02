@@ -9,13 +9,16 @@ import unittest
 from scripts.verify_license_inventory import InventoryError, verify_inventories
 
 
-def _inventory(sections: str, summary: str = "MIT License: 2 packages") -> str:
-    return f"""<!doctype html>
-<html><body><main>
-<h2>License summary</h2><ul><li>{summary}</li></ul>
-<h2>License texts and packages</h2>
+def _inventory(sections: str, summary: str = "MIT (MIT License): 2 packages") -> str:
+    return f"""viewr third-party licenses
+
+## License summary
+
+- {summary}
+
+## License texts and packages
+
 {sections}
-</main></body></html>
 """
 
 
@@ -24,26 +27,30 @@ def _section(
     name: str,
     package: str,
     text: str,
-    href: str = "https://crates.io/example",
 ) -> str:
-    return f"""<section>
-<h3 id=\"{license_id}\">{name}</h3>
-<div class=\"packages\"><a href=\"{href}\">{package}</a></div>
-<pre>{text}</pre>
-</section>"""
+    return f"""### {license_id}
+name: {name}
+used_by:
+  {package}
+text:
+<<<
+{text}
+>>>
+
+"""
 
 
 class LicenseInventoryTests(unittest.TestCase):
     def _verify(self, expected: str, actual: str) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            committed = root / "committed.html"
-            generated = root / "generated.html"
+            committed = root / "committed.txt"
+            generated = root / "generated.txt"
             committed.write_bytes(expected.encode("utf-8"))
             generated.write_bytes(actual.encode("utf-8"))
             verify_inventories(committed, generated)
 
-    def test_ignores_repository_links_line_endings_and_section_order(self) -> None:
+    def test_ignores_line_endings_and_section_order(self) -> None:
         alpha = _section("MIT", "MIT License", "alpha 1.0.0", "MIT text\r\nline 2")
         beta = _section("MIT", "MIT License", "beta 2.0.0", "Other MIT text")
         generated_alpha = _section(
@@ -51,14 +58,12 @@ class LicenseInventoryTests(unittest.TestCase):
             "MIT License",
             "alpha 1.0.0",
             "MIT text\nline 2",
-            "https://example.invalid/moved",
         )
         generated_beta = _section(
             "MIT",
             "MIT License",
             "beta 2.0.0",
             "Other MIT text",
-            "https://example.invalid/also-moved",
         )
         self._verify(
             _inventory(alpha + beta), _inventory(generated_beta + generated_alpha)
@@ -80,8 +85,13 @@ class LicenseInventoryTests(unittest.TestCase):
 
     def test_rejects_missing_license_text(self) -> None:
         malformed = _inventory(
-            '<section><h3 id="MIT">MIT License</h3>'
-            '<div class="packages"><a>alpha 1.0.0</a></div></section>'
+            "### MIT\n"
+            "name: MIT License\n"
+            "used_by:\n"
+            "  alpha 1.0.0\n"
+            "text:\n"
+            "<<<\n"
+            ">>>\n"
         )
         with self.assertRaisesRegex(InventoryError, "no license text"):
             self._verify(malformed, malformed)

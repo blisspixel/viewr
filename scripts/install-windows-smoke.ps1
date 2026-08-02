@@ -117,7 +117,7 @@ try {
     [IO.Directory]::CreateDirectory($sourceBin) | Out-Null
     Copy-FixtureFile $mainBinary "bin\viewr.exe"
     Copy-FixtureFile $workerBinary "bin\viewr-decode.exe"
-    foreach ($document in @("LICENSE", "NOTICE", "README.md", "THIRD_PARTY_LICENSES.html")) {
+    foreach ($document in @("LICENSE", "NOTICE", "README.md", "THIRD_PARTY_LICENSES.txt")) {
         Copy-FixtureFile (Join-Path $repositoryRoot $document) $document
     }
 

@@ -64,8 +64,8 @@ cargo build --workspace --all-targets --locked
 cargo deny --locked check --hide-inclusion-graph -D warnings -A license-not-encountered -A unmatched-skip -A unnecessary-skip
 cargo deny --manifest-path fuzz/Cargo.toml --locked check --hide-inclusion-graph -D warnings
 cargo audit -D warnings
-cargo about generate about.hbs --workspace --locked --offline --fail --output-file target/THIRD_PARTY_LICENSES.html
-python -B scripts/verify_license_inventory.py THIRD_PARTY_LICENSES.html target/THIRD_PARTY_LICENSES.html
+cargo about generate about.hbs --workspace --locked --offline --fail --output-file target/THIRD_PARTY_LICENSES.txt
+python -B scripts/verify_license_inventory.py THIRD_PARTY_LICENSES.txt target/THIRD_PARTY_LICENSES.txt
 pwsh -NoProfile -File scripts/privacy-check.ps1
 cargo check --manifest-path fuzz/Cargo.toml --locked
 ```

@@ -178,4 +178,4 @@ user-visible changes.
 viewr is licensed under the [Apache License 2.0](LICENSE), including its express
 patent grant and standard warranty disclaimer. [NOTICE](NOTICE) identifies the
 project distribution. Third-party components retain their own licenses, collected
-in [THIRD_PARTY_LICENSES.html](THIRD_PARTY_LICENSES.html).
+in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt).

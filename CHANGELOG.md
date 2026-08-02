@@ -13,6 +13,9 @@ and organized by user-visible concern.
 
 ### Changed
 
+- The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)
+  instead of HTML. CI still regenerates it offline from the locked release graph
+  and compares the inventory by meaning. No application runtime change.
 - Rating lifecycle policy now lives in a 100 percent line-covered private seam.
   Presented state, indeterminate-recovery handling, filter discovery scheduling,
   terminal writer reconciliation, and deferred-close decisions are exhaustive

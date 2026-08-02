@@ -38,7 +38,7 @@ production environment.
 2. Update the workspace version, CHANGELOG, README status, roadmap gate, and all
    behavior-specific documentation.
 3. Run the complete local checks in [Verification](VERIFY.md).
-4. Confirm `THIRD_PARTY_LICENSES.html` matches a fresh offline `cargo-about`
+4. Confirm `THIRD_PARTY_LICENSES.txt` matches a fresh offline `cargo-about`
    render and the Flatpak source map matches the lockfile.
 5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 

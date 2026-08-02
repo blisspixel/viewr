@@ -192,7 +192,7 @@ try {
         "LICENSE",
         "NOTICE",
         "README.md",
-        "THIRD_PARTY_LICENSES.html",
+        "THIRD_PARTY_LICENSES.txt",
         "release-manifest.json"
     )) {
         $requiredPath = Join-Path $sourceRoot $required
@@ -293,7 +293,7 @@ try {
                 "LICENSE",
                 "NOTICE",
                 "README.md",
-                "THIRD_PARTY_LICENSES.html",
+                "THIRD_PARTY_LICENSES.txt",
                 "release-manifest.json"
             )
             foreach ($child in @(Get-ChildItem -LiteralPath $InstallDir -Force)) {
@@ -312,7 +312,7 @@ try {
     try {
         Copy-Item -LiteralPath (Join-Path $sourceRoot "bin\viewr.exe") -Destination $stage
         Copy-Item -LiteralPath (Join-Path $sourceRoot "bin\viewr-decode.exe") -Destination $stage
-        foreach ($document in @("LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.html", "README.md", "release-manifest.json")) {
+        foreach ($document in @("LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.txt", "README.md", "release-manifest.json")) {
             Copy-Item -LiteralPath (Join-Path $sourceRoot $document) -Destination $stage
         }
         $markerObject = [ordered]@{

@@ -47,7 +47,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "NOTICE",
     "README.md",
     "SECURITY.md",
-    "THIRD_PARTY_LICENSES.html",
+    "THIRD_PARTY_LICENSES.txt",
     "assets/icon.svg",
     "assets/linux/viewr.desktop",
     "docs/ACCESSIBILITY.md",

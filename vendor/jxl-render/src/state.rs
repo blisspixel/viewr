@@ -72,17 +72,74 @@ impl<S: Sample> std::fmt::Debug for FrameRender<S> {
 pub struct FrameRenderHandle<S: Sample> {
     pub(crate) frame: Arc<IndexedFrame>,
     pub(crate) image_region: Region,
-    pub(crate) render: Mutex<FrameRender<S>>,
-    pub(crate) condvar: Condvar,
+    pub(crate) state: RenderState<S>,
     pub(crate) render_op: RenderOp<S>,
     pub(crate) refs: [Option<Reference<S>>; 4],
+}
+
+pub(crate) struct RenderState<S: Sample> {
+    pub(crate) render: Mutex<FrameRender<S>>,
+    condvar: Condvar,
+    #[cfg(test)]
+    waiting: std::sync::atomic::AtomicBool,
+}
+
+impl<S: Sample> RenderState<S> {
+    fn new(render: FrameRender<S>) -> Self {
+        Self {
+            render: Mutex::new(render),
+            condvar: Condvar::new(),
+            #[cfg(test)]
+            waiting: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn wait_until_terminal(&self, frame_index: usize) -> Result<MutexGuard<'_, FrameRender<S>>> {
+        let mut render_ref = self.render.lock().unwrap();
+        loop {
+            let render = std::mem::replace(&mut *render_ref, FrameRender::None);
+            match render {
+                FrameRender::Rendering => {
+                    tracing::trace!(index = frame_index, "Waiting...");
+                    *render_ref = render;
+                    #[cfg(test)]
+                    self.waiting
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    render_ref = self.condvar.wait(render_ref).unwrap();
+                    #[cfg(test)]
+                    self.waiting
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
+                FrameRender::Done(_) | FrameRender::Blended(_) => {
+                    *render_ref = render;
+                    return Ok(render_ref);
+                }
+                FrameRender::None | FrameRender::InProgress(_) => {
+                    return Err(Error::IncompleteFrame);
+                }
+                FrameRender::Err(e) => return Err(e),
+                FrameRender::ErrTaken => return Err(Error::FailedReference),
+            }
+        }
+    }
+
+    fn publish(&self, render: FrameRender<S>) -> MutexGuard<'_, FrameRender<S>> {
+        assert!(!matches!(render, FrameRender::Rendering));
+        let mut guard = self.render.lock().unwrap();
+        *guard = render;
+        self.condvar.notify_all();
+        guard
+    }
+
+    pub(crate) fn publish_composition_error(&self) -> MutexGuard<'_, FrameRender<S>> {
+        self.publish(FrameRender::ErrTaken)
+    }
 }
 
 impl<S: Sample> std::fmt::Debug for FrameRenderHandle<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FrameRenderHandle")
-            .field("render", &self.render)
-            .field("condvar", &self.condvar)
+            .field("render", &self.state.render)
             .finish_non_exhaustive()
     }
 }
@@ -98,8 +155,7 @@ impl<S: Sample> FrameRenderHandle<S> {
         Self {
             frame,
             image_region,
-            render: Mutex::new(FrameRender::None),
-            condvar: Condvar::new(),
+            state: RenderState::new(FrameRender::None),
             render_op,
             refs,
         }
@@ -117,8 +173,7 @@ impl<S: Sample> FrameRenderHandle<S> {
         Self {
             frame,
             image_region,
-            render: Mutex::new(render),
-            condvar: Condvar::new(),
+            state: RenderState::new(render),
             render_op,
             refs,
         }
@@ -159,12 +214,12 @@ impl<S: Sample> FrameRenderHandle<S> {
     }
 
     pub fn reset(&self) -> FrameRender<S> {
-        let mut render_ref = self.render.lock().unwrap();
+        let mut render_ref = self.state.render.lock().unwrap();
         std::mem::replace(&mut *render_ref, FrameRender::None)
     }
 
     fn start_render(&self) -> Result<Option<FrameRender<S>>> {
-        let mut render_ref = self.render.lock().unwrap();
+        let mut render_ref = self.state.render.lock().unwrap();
         let render = std::mem::replace(&mut *render_ref, FrameRender::Rendering);
         match render {
             FrameRender::None | FrameRender::InProgress(_) => Ok(Some(render)),
@@ -184,7 +239,7 @@ impl<S: Sample> FrameRenderHandle<S> {
     }
 
     fn start_render_silent(&self) -> Option<FrameRender<S>> {
-        let mut render_ref = self.render.lock().unwrap();
+        let mut render_ref = self.state.render.lock().unwrap();
         let render = std::mem::replace(&mut *render_ref, FrameRender::Rendering);
         match render {
             FrameRender::None | FrameRender::InProgress(_) => Some(render),
@@ -196,33 +251,43 @@ impl<S: Sample> FrameRenderHandle<S> {
     }
 
     pub(crate) fn wait_until_render(&self) -> Result<MutexGuard<'_, FrameRender<S>>> {
-        let mut render_ref = self.render.lock().unwrap();
-        loop {
-            let render = std::mem::replace(&mut *render_ref, FrameRender::None);
-            match render {
-                FrameRender::Rendering => {
-                    tracing::trace!(index = self.frame.idx, "Waiting...");
-                    *render_ref = render;
-                    render_ref = self.condvar.wait(render_ref).unwrap();
-                }
-                FrameRender::Done(_) | FrameRender::Blended(_) => {
-                    *render_ref = render;
-                    return Ok(render_ref);
-                }
-                FrameRender::None | FrameRender::InProgress(_) => {
-                    return Err(Error::IncompleteFrame);
-                }
-                FrameRender::Err(e) => return Err(e),
-                FrameRender::ErrTaken => return Err(Error::FailedReference),
-            }
-        }
+        self.state.wait_until_terminal(self.frame.idx)
     }
 
     pub(crate) fn done_render(&self, render: FrameRender<S>) -> MutexGuard<'_, FrameRender<S>> {
-        assert!(!matches!(render, FrameRender::Rendering));
-        let mut guard = self.render.lock().unwrap();
-        *guard = render;
-        self.condvar.notify_all();
-        guard
+        self.state.publish(render)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FrameRender, RenderState};
+    use crate::Error;
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn composition_error_transition_releases_a_render_waiter() {
+        let state = Arc::new(RenderState::<i16>::new(FrameRender::Rendering));
+        let waiter_state = Arc::clone(&state);
+        let waiter = std::thread::spawn(move || {
+            matches!(
+                waiter_state.wait_until_terminal(0),
+                Err(Error::FailedReference)
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !state.waiting.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < deadline,
+                "render waiter did not reach the condition variable"
+            );
+            std::thread::yield_now();
+        }
+
+        drop(state.publish_composition_error());
+
+        assert!(waiter.join().unwrap());
     }
 }

@@ -5,6 +5,8 @@ members = [
     "crates/viewr-decode",
     "crates/viewr-protocol",
     "crates/viewr-seccomp",
+    "vendor/jxl-color",
+    "vendor/jxl-render",
 ]
 
 [patch.crates-io]

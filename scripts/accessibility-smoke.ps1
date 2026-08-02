@@ -46,6 +46,12 @@ public static class ViewrAccessibilityNativeMethods {
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AttachThreadInput(uint sourceThread, uint targetThread, bool attach);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int capacity);
 
@@ -54,6 +60,9 @@ public static class ViewrAccessibilityNativeMethods {
 
     [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint code, uint mapType);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MouseInput {
@@ -101,7 +110,38 @@ public static class ViewrAccessibilityNativeMethods {
     private static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    private static bool FocusWindowForInput(IntPtr hwnd) {
+        if (GetForegroundWindow() == hwnd) return true;
+
+        var currentThread = GetCurrentThreadId();
+        uint ignoredProcessId;
+        var foregroundThread = GetWindowThreadProcessId(
+            GetForegroundWindow(),
+            out ignoredProcessId
+        );
+        var attached = foregroundThread != 0 &&
+            foregroundThread != currentThread &&
+            AttachThreadInput(currentThread, foregroundThread, true);
+        try {
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+        }
+        finally {
+            if (attached) {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+
+        for (var attempt = 0; attempt < 50 && GetForegroundWindow() != hwnd; attempt++) {
+            Thread.Sleep(10);
+        }
+        return GetForegroundWindow() == hwnd;
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
@@ -138,11 +178,9 @@ public static class ViewrAccessibilityNativeMethods {
     }
 
     public static bool SendKeyPress(IntPtr hwnd, ushort virtualKey) {
-        if (!SetForegroundWindow(hwnd) && GetForegroundWindow() != hwnd) return false;
-        for (var attempt = 0; attempt < 50 && GetForegroundWindow() != hwnd; attempt++) {
-            Thread.Sleep(10);
+        if (!FocusWindowForInput(hwnd)) {
+            return PostKeyPress(hwnd, virtualKey);
         }
-        if (GetForegroundWindow() != hwnd) return false;
         var inputs = new[] {
             new Input {
                 Type = 1,
@@ -160,8 +198,27 @@ public static class ViewrAccessibilityNativeMethods {
                 }
             }
         };
-        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) ==
-            (uint)inputs.Length;
+        var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
+        if (sent == (uint)inputs.Length) return true;
+        return sent == 0 && PostKeyPress(hwnd, virtualKey);
+    }
+
+    private static bool PostKeyPress(IntPtr hwnd, ushort virtualKey) {
+        const uint keyDown = 0x0100;
+        const uint keyUp = 0x0101;
+        const uint character = 0x0102;
+        var scanCode = MapVirtualKey(virtualKey, 0);
+        var characterCode = MapVirtualKey(virtualKey, 2) & 0x7FFFFFFF;
+        var down = new IntPtr(1L | ((long)scanCode << 16));
+        var up = new IntPtr(
+            1L | ((long)scanCode << 16) | (1L << 30) | (1L << 31)
+        );
+        if (!PostMessage(hwnd, keyDown, new IntPtr(virtualKey), down)) return false;
+        if (
+            characterCode != 0 &&
+            !PostMessage(hwnd, character, new IntPtr(characterCode), down)
+        ) return false;
+        return PostMessage(hwnd, keyUp, new IntPtr(virtualKey), up);
     }
 }
 "@

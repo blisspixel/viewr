@@ -451,6 +451,7 @@ pub(crate) fn pq_table(n: usize) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    const MAX_ENCODE_ERROR: f32 = 1.0 / 65_535.0;
     const M1: f32 = 1305.0 / 8192.0;
     const M2: f32 = 2523.0 / 32.0;
     const C1: f32 = 107.0 / 128.0;
@@ -459,10 +460,9 @@ mod tests {
 
     #[test]
     fn pq_inverse_eotf_100k_generic() {
-        let mut input = Vec::with_capacity(100000);
-        for (idx, v) in input.iter_mut().enumerate() {
-            *v = idx as f32 * 1e-5;
-        }
+        let mut input = (0..100_000)
+            .map(|idx| idx as f32 * 1e-5)
+            .collect::<Vec<_>>();
 
         for v in &mut input {
             *v = super::linear_to_pq_generic(*v, 10000.0);
@@ -473,16 +473,18 @@ mod tests {
             let y_m1 = linear.powf(M1);
             let expected = ((y_m1.mul_add(C2, C1)) / (y_m1.mul_add(C3, 1.0))).powf(M2);
             let diff = (expected - *v).abs();
-            assert!(diff < 1e-6);
+            assert!(
+                diff <= MAX_ENCODE_ERROR,
+                "PQ approximation error {diff} exceeded one 16-bit code value at sample {idx}"
+            );
         }
     }
 
     #[test]
     fn pq_inverse_eotf_100k() {
-        let mut input = Vec::with_capacity(100000);
-        for (idx, v) in input.iter_mut().enumerate() {
-            *v = idx as f32 * 1e-5;
-        }
+        let mut input = (0..100_000)
+            .map(|idx| idx as f32 * 1e-5)
+            .collect::<Vec<_>>();
 
         super::linear_to_pq(&mut input, 10000.0);
 
@@ -491,16 +493,16 @@ mod tests {
             let y_m1 = linear.powf(M1);
             let expected = ((y_m1.mul_add(C2, C1)) / (y_m1.mul_add(C3, 1.0))).powf(M2);
             let diff = (expected - *v).abs();
-            assert!(diff < 1e-6);
+            assert!(
+                diff <= MAX_ENCODE_ERROR,
+                "PQ approximation error {diff} exceeded one 16-bit code value at sample {idx}"
+            );
         }
     }
 
     #[test]
     fn pq_roundtrip_10k_generic() {
-        let mut input = Vec::with_capacity(10000);
-        for (idx, v) in input.iter_mut().enumerate() {
-            *v = idx as f32 * 1e-5;
-        }
+        let mut input = (0..10_000).map(|idx| idx as f32 * 1e-5).collect::<Vec<_>>();
 
         for v in &mut input {
             let t = super::linear_to_pq_generic(*v, 10000.0);
@@ -510,16 +512,16 @@ mod tests {
         for (idx, v) in input.iter().enumerate() {
             let expected = idx as f32 * 1e-4;
             let diff = (expected - *v).abs();
-            assert!(diff < 1e-5);
+            assert!(
+                diff < 1e-5,
+                "PQ round-trip error {diff} exceeded its bound at sample {idx}"
+            );
         }
     }
 
     #[test]
     fn pq_roundtrip_10k() {
-        let mut input = Vec::with_capacity(10000);
-        for (idx, v) in input.iter_mut().enumerate() {
-            *v = idx as f32 * 1e-5;
-        }
+        let mut input = (0..10_000).map(|idx| idx as f32 * 1e-5).collect::<Vec<_>>();
 
         super::linear_to_pq(&mut input, 10000.0);
         super::pq_to_linear(&mut input, 1000.0);
@@ -527,7 +529,10 @@ mod tests {
         for (idx, v) in input.iter().enumerate() {
             let expected = idx as f32 * 1e-4;
             let diff = (expected - *v).abs();
-            assert!(diff < 1e-5);
+            assert!(
+                diff < 1e-5,
+                "PQ round-trip error {diff} exceeded its bound at sample {idx}"
+            );
         }
     }
 }

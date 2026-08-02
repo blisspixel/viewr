@@ -50,23 +50,11 @@ jobs:
         if: runner.os == 'Linux'
         run: python -m pip install --require-hashes -r scripts/requirements-quality.txt
 
-      - name: Lint release tooling
+      - name: Lint Python tooling
         if: runner.os == 'Linux'
         run: |
-          ruff check \
-            scripts/release_artifact.py scripts/performance_gate.py \
-            scripts/verify_license_inventory.py \
-            scripts/tests/test_documentation.py scripts/tests/test_flatpak_sources.py \
-            scripts/tests/test_installers.py scripts/tests/test_license_inventory.py \
-            scripts/tests/test_release_artifact.py \
-            scripts/tests/test_performance_gate.py
-          ruff format --check \
-            scripts/release_artifact.py scripts/performance_gate.py \
-            scripts/verify_license_inventory.py \
-            scripts/tests/test_documentation.py scripts/tests/test_flatpak_sources.py \
-            scripts/tests/test_installers.py scripts/tests/test_license_inventory.py \
-            scripts/tests/test_release_artifact.py \
-            scripts/tests/test_performance_gate.py
+          ruff check scripts
+          ruff format --check scripts
 
       - name: Validate Unix installer syntax
         if: runner.os != 'Windows'
@@ -260,14 +248,17 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # Coverage includes the egui/AccessKit UI adapter. The remaining exact-path
-      # exclusions contain native integration that cannot run honestly here, plus
-      # pure-helper debt still tracked by the v0.2 roadmap. The path-qualified
-      # pattern must not hide similarly named tests or vendored source.
+      # Coverage includes the egui/AccessKit UI adapter. Locally patched vendor
+      # crates run behavioral tests on every platform above but stay outside the
+      # owned-logic percentage, as they did before becoming workspace test members.
+      # The remaining exact-path exclusions contain native integration that cannot
+      # run honestly here, plus pure-helper debt tracked by the v0.2 roadmap.
       - name: Coverage
         run: >
           cargo llvm-cov --workspace
           --locked
+          --exclude jxl-color
+          --exclude jxl-render
           --ignore-filename-regex '(^|[/\\])crates[/\\](viewr[/\\]src[/\\](app|gpu|sandbox|worker_limit|error|main)|viewr-decode[/\\]src[/\\]main)\.rs$'
           --fail-under-lines 85
           --lcov --output-path target/lcov.info

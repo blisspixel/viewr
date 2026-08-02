@@ -92,7 +92,7 @@ jobs:
           retention-days: 30
 
   publish:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     name: Publish verified GitHub Release
     needs: build
     runs-on: ubuntu-latest

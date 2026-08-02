@@ -30,8 +30,6 @@ keywords = [
 categories = ["multimedia::images"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tirr-c/jxl-oxide.git"
-resolver = "2"
-
 [lib]
 name = "jxl_render"
 path = "src/lib.rs"

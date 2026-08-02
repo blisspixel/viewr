@@ -3,7 +3,7 @@
 //! Frames stay in memory only for the current image. Decoding runs through the
 //! same foreground-priority gate as still images and never creates a disk cache.
 
-use std::io::{BufReader, Seek};
+use std::io::{BufReader, Read, Seek};
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
@@ -48,14 +48,39 @@ impl DecodedAnimation {
         current_generation: &AtomicU64,
         generation: u64,
     ) -> Result<Option<Self>, Error> {
+        Self::load_background_if_current_with_hook(
+            path,
+            source,
+            current_generation,
+            generation,
+            || {},
+        )
+    }
+
+    fn load_background_if_current_with_hook(
+        path: &Path,
+        source: &crate::fs::ImageSource,
+        current_generation: &AtomicU64,
+        generation: u64,
+        before_final_version_check: impl FnOnce(),
+    ) -> Result<Option<Self>, Error> {
+        if !source.version_is_current() {
+            return Ok(None);
+        }
         let file = source
             .clone_for_decode()
             .map_err(|error| Error::Decode(error.to_string()))?;
-        crate::decode::with_background_decode_permit(|| {
+        let animation = crate::decode::with_background_decode_permit(|| {
             Self::load_file_with_cancellation(path, file, &|| {
                 current_generation.load(Ordering::Acquire) == generation
             })
-        })
+        })?;
+        before_final_version_check();
+        if current_generation.load(Ordering::Acquire) != generation || !source.version_is_current()
+        {
+            return Ok(None);
+        }
+        Ok(animation)
     }
 
     #[cfg(test)]
@@ -71,19 +96,19 @@ impl DecodedAnimation {
         Self::load_file_with_cancellation(path, file, is_current)
     }
 
-    fn load_file_with_cancellation(
+    fn load_file_with_cancellation<R>(
         _path: &Path,
-        mut file: std::fs::File,
+        mut file: R,
         is_current: &impl Fn() -> bool,
-    ) -> Result<Option<Self>, Error> {
+    ) -> Result<Option<Self>, Error>
+    where
+        R: Read + Seek,
+    {
         if !is_current() {
             return Ok(None);
         }
-        let format = file
-            .try_clone()
-            .map(BufReader::new)
-            .map(image::ImageReader::new)
-            .and_then(image::ImageReader::with_guessed_format)
+        let format = image::ImageReader::new(BufReader::new(&mut file))
+            .with_guessed_format()
             .map_err(|error| Error::Decode(format!("animation format detection failed: {error}")))?
             .format();
         file.rewind()
@@ -100,7 +125,7 @@ impl DecodedAnimation {
     }
 
     fn decode_gif(
-        file: std::fs::File,
+        file: impl Read + Seek,
         is_current: &impl Fn() -> bool,
     ) -> Result<Option<Self>, Error> {
         let reader = BufReader::new(file);
@@ -118,7 +143,7 @@ impl DecodedAnimation {
     }
 
     fn decode_webp(
-        file: std::fs::File,
+        file: impl Read + Seek,
         is_current: &impl Fn() -> bool,
     ) -> Result<Option<Self>, Error> {
         let mut reader = BufReader::new(file);
@@ -140,7 +165,7 @@ impl DecodedAnimation {
     }
 
     fn decode_apng(
-        file: std::fs::File,
+        file: impl Read + Seek,
         is_current: &impl Fn() -> bool,
     ) -> Result<Option<Self>, Error> {
         let mut reader = BufReader::new(file);
@@ -460,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn animation_frames_use_the_accepted_source_handle_after_path_replacement() {
+    fn animation_rejects_an_accepted_source_changed_by_path_replacement() {
         let workspace = TempWorkspace::new("animated_source_identity").unwrap();
         let path = workspace.path().join("animated.gif");
         let retained = workspace.path().join("retained.gif");
@@ -481,14 +506,46 @@ mod tests {
         let generation = AtomicU64::new(1);
 
         let animation =
-            DecodedAnimation::load_background_if_current(&path, &source, &generation, 1)
-                .unwrap()
-                .unwrap();
-        assert_eq!(&animation.frames[0].image.rgba[..4], &[255, 0, 0, 255]);
+            DecodedAnimation::load_background_if_current(&path, &source, &generation, 1).unwrap();
+        assert!(animation.is_none());
+        assert!(!source.version_is_current());
         assert_eq!(
             source.matches_path(&path),
             crate::fs::ImageSourceMatch::Changed
         );
+    }
+
+    #[test]
+    fn animation_is_rejected_if_the_accepted_object_changes_during_decode() {
+        let workspace = TempWorkspace::new("animated_source_version").unwrap();
+        let path = workspace.path().join("animated.gif");
+        let replacement = workspace.path().join("replacement.gif");
+        let encode = |path: &Path, color: image::Rgba<u8>| {
+            let file = File::create(path).unwrap();
+            let mut encoder = image::codecs::gif::GifEncoder::new(file);
+            encoder
+                .encode_frames([
+                    image::Frame::new(image::RgbaImage::from_pixel(1, 1, color)),
+                    image::Frame::new(image::RgbaImage::from_pixel(1, 1, color)),
+                ])
+                .unwrap();
+        };
+        encode(&path, image::Rgba([255, 0, 0, 255]));
+        encode(&replacement, image::Rgba([0, 255, 0, 255]));
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+        let generation = AtomicU64::new(1);
+
+        let animation = DecodedAnimation::load_background_if_current_with_hook(
+            &path,
+            &source,
+            &generation,
+            1,
+            || std::fs::write(&path, std::fs::read(&replacement).unwrap()).unwrap(),
+        )
+        .unwrap();
+
+        assert!(animation.is_none());
+        assert!(!source.version_is_current());
     }
 
     #[test]

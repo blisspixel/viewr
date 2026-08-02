@@ -609,6 +609,17 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("--expected-tag-from-env", workflow)
         self.assertNotIn("--expected-tag ${{", workflow)
 
+    def test_manual_release_workflow_runs_can_never_publish(self) -> None:
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn(
+            "if: github.event_name == 'push' && github.ref_type == 'tag'", workflow
+        )
+        self.assertNotIn("\n    if: github.ref_type == 'tag'\n", workflow)
+
     def test_release_workflow_uses_reviewed_notes_and_immutable_installers(
         self,
     ) -> None:

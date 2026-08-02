@@ -26,7 +26,7 @@ dependency set lean).
 | farbfeld | `.ff` |
 | DDS | `.dds` |
 | JPEG XL | `.jxl` |
-| SVG | `.svg` (vector rasterized to RGBA) |
+| SVG | `.svg` (bounded vector shapes and paths rasterized to RGBA; resource and unbounded-scratch features rejected) |
 
 Golden-file style coverage for many of these lives in `crates/viewr/tests/corpus.rs`
 and unit tests under `decode` / `edit`.
@@ -40,6 +40,22 @@ and unit tests under `decode` / `edit`.
   still image.
 - TIFF and ICO currently expose one decoded image. Listing the container as
   supported does not claim multi-page or icon-frame navigation.
+- SVG decoding accepts bounded vector markup but rejects both embedded raster
+  image data and external image hrefs with an explicit error. A selected SVG can
+  neither read another local image nor expand its resource budget through a
+  resolver. Gzip-compressed SVG is rejected before parsing so decompression cannot
+  bypass the 64 MiB input ceiling. Document type declarations are also rejected
+  before parsing so entity expansion cannot outgrow that ceiling. Markup is capped
+  at 100,000 elements, 100,000 attributes, 4 MiB of cumulative attribute data,
+  and 128 levels, while simultaneously live opacity, blend, and isolation layers
+  have a 256 MiB intermediate-pixel budget. Cumulative path geometry is capped at
+  512 KiB and 100,000 lexical tokens. Parsed nodes, path
+  segments, tile-amplified edge work, and cumulative paint/layer area have
+  independent ceilings. `use`, marker, stylesheet, inline-style, text, gradient, stroke,
+  filter, mask, clipping-path, and paint-pattern features fail closed because
+  their parser expansion, subdivision, or renderer scratch allocation is not
+  independently bounded. Solid-filled shapes, bounded paths, transforms, and
+  bounded opacity groups remain supported.
 - All eight EXIF orientation values are normalized into displayed pixels when the
   decoder exposes orientation metadata. Rotation, flips, and crop are exported in
   their visible orientation rather than copied as a stale orientation tag.
@@ -54,7 +70,12 @@ and unit tests under `decode` / `edit`.
   locally reviewed `jxl-color` boundary rejects encoded, declared, or amplified
   ICC output beyond the same 10 MiB ceiling. The reviewed `jxl-render` boundary
   also skips an unreferenced LF-frame level before table lookup so malformed
-  input returns through the decode path instead of panicking.
+  input returns through the decode path instead of panicking. Its composition
+  state now always becomes terminal and wakes waiters after an error. The
+  reviewed `jxl-color` boundary requires the exact 12-byte CICP tag layout with
+  zero reserved bytes, reads payload fields at their specified tag offset,
+  round-trips PQ and HLG transfer evidence, requires AVX2 plus FMA before AVX2
+  conversion entry points, and preserves the first parallel transform error.
 - Source pixels, normalized working pixels, and presentation are separate typed
   stages. Successful normalization produces only validated RGBA8 sRGB working
   pixels. Crop and pixel transforms preserve that encoding; preview generation,
@@ -95,9 +116,12 @@ and unit tests under `decode` / `edit`.
 - Source metadata is detected from file content, not its extension. The bounded
   reader supports JPEG, PNG text/eXIf variants, WebP, and TIFF metadata whose IFD
   is located beyond the image prefix.
-- Export validates every option before touching the destination, assembles pixels
-  and metadata in a sibling temporary file, and replaces the selected destination
-  only after the complete output succeeds.
+- Export validates every option before touching the destination. Pixels and
+  optional metadata are written through one retained sibling temporary-file
+  handle, whose pathname identity is checked before commit. Existing destinations
+  receive an app-owned, identity-bound overwrite prompt after the native dialog
+  and are replaced only after the complete output succeeds. Destinations confirmed
+  absent use a no-clobber install so a concurrently created file survives.
 
 The Linux desktop entry, macOS application bundle, and Windows AppContainer
 manifest advertise exactly this core extension set. They intentionally omit the

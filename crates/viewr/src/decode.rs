@@ -9,13 +9,33 @@
 use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::color::WorkingColorEncoding;
 use crate::error::Error;
 
 pub(crate) use viewr_protocol::MAX_DECODE_DIMENSION;
 const MAX_SVG_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SVG_ELEMENTS: usize = 100_000;
+const MAX_SVG_ELEMENT_DEPTH: usize = 128;
+const MAX_SVG_ATTRIBUTES: usize = 100_000;
+const MAX_SVG_ATTRIBUTE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SVG_GEOMETRY_BYTES: usize = 512 * 1024;
+const MAX_SVG_GEOMETRY_TOKENS: usize = 100_000;
+const MAX_SVG_RENDER_NODES: usize = 100_000;
+const MAX_SVG_PATH_SEGMENTS: usize = 100_000;
+const MAX_SVG_SEGMENT_TILE_WORK: u64 = 400_000;
+const MAX_SVG_INTERMEDIATE_BYTES: u64 = 256 * 1024 * 1024;
+const SVG_RENDER_WORK_FLOOR_PIXELS: u64 = 16 * 1024 * 1024;
+const SVG_RENDER_WORK_MULTIPLIER: u64 = 8;
+const MAX_SVG_RENDER_WORK_PIXELS: u64 = 512 * 1024 * 1024;
+const SVG_IMAGE_RESOURCE_ERROR: &str =
+    "SVG embedded and external image resources are not supported";
+const SVG_DOCUMENT_TYPE_ERROR: &str = "SVG document type declarations are not supported";
+const SVG_COMPLEX_FEATURE_ERROR: &str = "SVG feature exceeds the supported safety profile";
+const SVG_MARKUP_COMPLEXITY_ERROR: &str = "SVG markup exceeds the supported complexity limit";
+const SVG_RENDER_BUDGET_ERROR: &str = "SVG render layers exceed the memory safety limit";
+const SVG_RENDER_WORK_ERROR: &str = "SVG render work exceeds the supported safety limit";
 const MAX_ICC_PROFILE_BYTES: usize = jxl_color::icc::MAX_EMBEDDED_ICC_BYTES as usize;
 const MAX_PNG_ICC_CHUNK_BYTES: usize = MAX_ICC_PROFILE_BYTES + 64 * 1024;
 // PNG EXIF written as an ImageMagick-compatible raw profile is hex encoded,
@@ -65,6 +85,13 @@ impl DecodeGeneration<'_> {
             ))
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum SourceOpen {
+    Direct,
+    Scanned(crate::fs::ScanProvenance),
+    RefreshedRegular,
 }
 
 /// Reader boundary that turns generation changes into cooperative decoder
@@ -631,6 +658,11 @@ impl ColorNormalizer {
     }
 }
 
+fn take_decoded_image(loaded: LoadedImage) -> Result<DecodedImage, Error> {
+    Arc::try_unwrap(loaded.image)
+        .map_err(|_| Error::Decode("decoded image ownership was unexpectedly shared".into()))
+}
+
 impl DecodedImage {
     /// Decode the image at `path`, choosing the format by content then extension.
     ///
@@ -648,6 +680,23 @@ impl DecodedImage {
         Self::load_file(path)
     }
 
+    /// Decode a scan-bound thumbnail without following a replaced entry.
+    pub(crate) fn load_scanned_background(
+        path: &Path,
+        provenance: crate::fs::ScanProvenance,
+    ) -> Result<Self, Error> {
+        let _permit = acquire_decode_permit(DecodePriority::Background);
+        let loaded = Self::load_file_if_current(
+            path,
+            DecodeGeneration::unconditional(),
+            SourceOpen::Scanned(provenance),
+        )?
+        .ok_or_else(|| {
+            Error::Decode("unconditional image decode stopped before completion".into())
+        })?;
+        take_decoded_image(loaded)
+    }
+
     /// Speculatively decode only while its per-job cancellation generation is current.
     pub(crate) fn load_background_if_current(
         path: &Path,
@@ -658,6 +707,22 @@ impl DecodedImage {
         Self::load_file_if_current(
             path,
             DecodeGeneration::tracked(current_generation, generation),
+            SourceOpen::Direct,
+        )
+    }
+
+    /// Speculatively decode a scan-bound neighbor without following a replaced entry.
+    pub(crate) fn load_scanned_background_if_current(
+        path: &Path,
+        provenance: crate::fs::ScanProvenance,
+        current_generation: &AtomicU64,
+        generation: u64,
+    ) -> Result<Option<LoadedImage>, Error> {
+        let _permit = acquire_decode_permit(DecodePriority::Background);
+        Self::load_file_if_current(
+            path,
+            DecodeGeneration::tracked(current_generation, generation),
+            SourceOpen::Scanned(provenance),
         )
     }
 
@@ -671,21 +736,65 @@ impl DecodedImage {
         Self::load_file_if_current(
             path,
             DecodeGeneration::tracked(current_generation, generation),
+            SourceOpen::Direct,
+        )
+    }
+
+    /// Decode a scan-bound selection only if its original regular object remains.
+    pub(crate) fn load_scanned_if_current(
+        path: &Path,
+        provenance: crate::fs::ScanProvenance,
+        current_generation: &AtomicU64,
+        generation: u64,
+    ) -> Result<Option<LoadedImage>, Error> {
+        let _permit = acquire_decode_permit(DecodePriority::Foreground);
+        Self::load_file_if_current(
+            path,
+            DecodeGeneration::tracked(current_generation, generation),
+            SourceOpen::Scanned(provenance),
+        )
+    }
+
+    /// Explicitly refresh a scan-bound selection from the current regular
+    /// pathname object without following a substituted final link.
+    pub(crate) fn load_refreshed_regular_if_current(
+        path: &Path,
+        current_generation: &AtomicU64,
+        generation: u64,
+    ) -> Result<Option<LoadedImage>, Error> {
+        let _permit = acquire_decode_permit(DecodePriority::Foreground);
+        Self::load_file_if_current(
+            path,
+            DecodeGeneration::tracked(current_generation, generation),
+            SourceOpen::RefreshedRegular,
         )
     }
 
     fn load_file(path: &Path) -> Result<Self, Error> {
-        let loaded = Self::load_file_if_current(path, DecodeGeneration::unconditional())?
-            .ok_or_else(|| {
-                Error::Decode("unconditional image decode stopped before completion".into())
-            })?;
-        Arc::try_unwrap(loaded.image)
-            .map_err(|_| Error::Decode("decoded image ownership was unexpectedly shared".into()))
+        let loaded = Self::load_file_if_current(
+            path,
+            DecodeGeneration::unconditional(),
+            SourceOpen::Direct,
+        )?
+        .ok_or_else(|| {
+            Error::Decode("unconditional image decode stopped before completion".into())
+        })?;
+        take_decoded_image(loaded)
     }
 
     fn load_file_if_current(
         path: &Path,
         generation: DecodeGeneration<'_>,
+        source_open: SourceOpen,
+    ) -> Result<Option<LoadedImage>, Error> {
+        Self::load_file_if_current_with_hook(path, generation, source_open, || {})
+    }
+
+    fn load_file_if_current_with_hook(
+        path: &Path,
+        generation: DecodeGeneration<'_>,
+        source_open: SourceOpen,
+        before_publish: impl FnOnce(),
     ) -> Result<Option<LoadedImage>, Error> {
         if !generation.is_current() {
             return Ok(None);
@@ -696,9 +805,15 @@ impl DecodedImage {
             .unwrap_or("")
             .to_lowercase();
 
+        let opened = match source_open {
+            SourceOpen::Direct => crate::fs::ImageSource::open(path),
+            SourceOpen::Scanned(provenance) => {
+                crate::fs::ImageSource::open_scanned(path, provenance)
+            }
+            SourceOpen::RefreshedRegular => crate::fs::ImageSource::open_regular(path),
+        };
         let source = Arc::new(
-            crate::fs::ImageSource::open(path)
-                .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?,
+            opened.map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?,
         );
         let file = source
             .clone_for_decode()
@@ -714,7 +829,8 @@ impl DecodedImage {
             Self::load_core_image(path, file, generation)
         };
 
-        if !generation.is_current() {
+        before_publish();
+        if !generation.is_current() || !source.version_is_current() {
             return Ok(None);
         }
         result.map(|image| {
@@ -727,7 +843,7 @@ impl DecodedImage {
 
     fn load_core_image(
         path: &Path,
-        file: std::fs::File,
+        file: impl Read + Seek,
         generation: DecodeGeneration<'_>,
     ) -> Result<Self, Error> {
         let mut reader = GenerationReader::new(BufReader::new(file), generation);
@@ -844,7 +960,7 @@ impl DecodedImage {
             .map_err(|error| Error::Decode(error.to_string()))
     }
 
-    fn load_jxl(file: std::fs::File, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
+    fn load_jxl(file: impl Read, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
         Self::decode_jxl(
             GenerationReader::new(BufReader::new(file), generation),
             generation,
@@ -864,7 +980,7 @@ impl DecodedImage {
     }
 
     /// Render an SVG to RGBA8 with pure-Rust `resvg` / `usvg`.
-    fn load_svg(file: std::fs::File, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
+    fn load_svg(file: impl Read, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
         let reader = GenerationReader::new(BufReader::new(file), generation);
         let mut data = Vec::new();
         reader
@@ -885,14 +1001,39 @@ impl DecodedImage {
         if data.len() as u64 > MAX_SVG_BYTES {
             return Err(Error::Decode("SVG input exceeds safety limit".into()));
         }
-        let options = resvg::usvg::Options::default();
+        if data.starts_with(&[0x1f, 0x8b]) {
+            return Err(Error::Decode(
+                "compressed SVG input is not supported".into(),
+            ));
+        }
+        validate_svg_markup(data)?;
+        let rejected_resource = Arc::new(AtomicBool::new(false));
+        let rejected_data = Arc::clone(&rejected_resource);
+        let rejected_string = Arc::clone(&rejected_resource);
+        let options = resvg::usvg::Options {
+            image_href_resolver: resvg::usvg::ImageHrefResolver {
+                resolve_data: Box::new(move |_, _, _| {
+                    rejected_data.store(true, Ordering::Release);
+                    None
+                }),
+                resolve_string: Box::new(move |_, _| {
+                    rejected_string.store(true, Ordering::Release);
+                    None
+                }),
+            },
+            ..Default::default()
+        };
         let tree = resvg::usvg::Tree::from_data(data, &options)
             .map_err(|e| Error::Decode(format!("failed to parse SVG: {e}")))?;
+        if rejected_resource.load(Ordering::Acquire) {
+            return Err(Error::Decode(SVG_IMAGE_RESOURCE_ERROR.into()));
+        }
 
         let size = tree.size();
         let width = positive_f32_to_px(size.width());
         let height = positive_f32_to_px(size.height());
         let expected_size = validate_dimensions(width, height)?;
+        validate_svg_render_budget(&tree, width, height)?;
 
         let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
             .ok_or_else(|| Error::Decode("SVG produced invalid pixel dimensions".into()))?;
@@ -909,6 +1050,330 @@ impl DecodedImage {
             ));
         }
         ColorNormalizer::assumed_srgb().normalize(SourceImage::new(rgba, width, height)?)
+    }
+}
+
+fn validate_svg_markup(data: &[u8]) -> Result<(), Error> {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    let mut reader = Reader::from_reader(data);
+    let mut element_count = 0_usize;
+    let mut depth = 0_usize;
+    let mut attribute_count = 0_usize;
+    let mut attribute_bytes = 0_usize;
+    let mut geometry_bytes = 0_usize;
+    let mut geometry_tokens = 0_usize;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(element)) => {
+                element_count = element_count.saturating_add(1);
+                depth = depth.saturating_add(1);
+                if element_count > MAX_SVG_ELEMENTS || depth > MAX_SVG_ELEMENT_DEPTH {
+                    return Err(Error::Decode(SVG_MARKUP_COMPLEXITY_ERROR.into()));
+                }
+                validate_svg_element(
+                    &element,
+                    &mut attribute_count,
+                    &mut attribute_bytes,
+                    &mut geometry_bytes,
+                    &mut geometry_tokens,
+                )?;
+            }
+            Ok(Event::Empty(element)) => {
+                element_count = element_count.saturating_add(1);
+                if element_count > MAX_SVG_ELEMENTS {
+                    return Err(Error::Decode(SVG_MARKUP_COMPLEXITY_ERROR.into()));
+                }
+                validate_svg_element(
+                    &element,
+                    &mut attribute_count,
+                    &mut attribute_bytes,
+                    &mut geometry_bytes,
+                    &mut geometry_tokens,
+                )?;
+            }
+            Ok(Event::End(_)) => {
+                depth = depth.saturating_sub(1);
+            }
+            Ok(Event::DocType(_)) => {
+                return Err(Error::Decode(SVG_DOCUMENT_TYPE_ERROR.into()));
+            }
+            Ok(Event::Eof) => return Ok(()),
+            Ok(_) => {}
+            Err(error) => {
+                return Err(Error::Decode(format!("failed to parse SVG: {error}")));
+            }
+        }
+    }
+}
+
+fn validate_svg_element(
+    element: &quick_xml::events::BytesStart<'_>,
+    attribute_count: &mut usize,
+    attribute_bytes: &mut usize,
+    geometry_bytes: &mut usize,
+    geometry_tokens: &mut usize,
+) -> Result<(), Error> {
+    let qualified_name = element.name();
+    let local_name = qualified_name
+        .as_ref()
+        .rsplit(|byte| *byte == b':')
+        .next()
+        .unwrap_or_default();
+    match local_name {
+        b"image" => return Err(Error::Decode(SVG_IMAGE_RESOURCE_ERROR.into())),
+        b"use" | b"marker" | b"filter" | b"mask" | b"clipPath" | b"pattern" | b"text"
+        | b"tspan" | b"textPath" | b"tref" | b"style" | b"linearGradient" | b"radialGradient"
+        | b"stop" => {
+            return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
+        }
+        _ => {}
+    }
+
+    for attribute in element.attributes().with_checks(true) {
+        let attribute =
+            attribute.map_err(|error| Error::Decode(format!("failed to parse SVG: {error}")))?;
+        *attribute_count = attribute_count.saturating_add(1);
+        *attribute_bytes = attribute_bytes
+            .saturating_add(attribute.key.as_ref().len())
+            .saturating_add(attribute.value.len());
+        if *attribute_count > MAX_SVG_ATTRIBUTES || *attribute_bytes > MAX_SVG_ATTRIBUTE_BYTES {
+            return Err(Error::Decode(SVG_MARKUP_COMPLEXITY_ERROR.into()));
+        }
+        let local_name = attribute.key.local_name();
+        if matches!(local_name.as_ref(), b"style" | b"stroke-dasharray") {
+            return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
+        }
+        if matches!(local_name.as_ref(), b"d" | b"points") {
+            let value = attribute.value.as_ref();
+            *geometry_bytes = geometry_bytes.saturating_add(value.len());
+            *geometry_tokens = geometry_tokens.saturating_add(svg_geometry_tokens(value));
+            if *geometry_bytes > MAX_SVG_GEOMETRY_BYTES
+                || *geometry_tokens > MAX_SVG_GEOMETRY_TOKENS
+            {
+                return Err(Error::Decode(SVG_MARKUP_COMPLEXITY_ERROR.into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn svg_geometry_tokens(value: &[u8]) -> usize {
+    let mut tokens = 0_usize;
+    let mut in_number = false;
+    let mut has_decimal = false;
+    let mut in_exponent = false;
+    let mut previous = None;
+    for &byte in value {
+        if byte.is_ascii_alphabetic() {
+            if matches!(byte, b'e' | b'E') && in_number {
+                in_exponent = true;
+            } else {
+                tokens = tokens.saturating_add(1);
+                in_number = false;
+                has_decimal = false;
+                in_exponent = false;
+            }
+        } else if byte.is_ascii_digit() {
+            if !in_number {
+                tokens = tokens.saturating_add(1);
+                in_number = true;
+            }
+        } else if byte == b'.' {
+            if !in_number || has_decimal || in_exponent {
+                tokens = tokens.saturating_add(1);
+                in_number = true;
+                in_exponent = false;
+            }
+            has_decimal = true;
+        } else if matches!(byte, b'+' | b'-') {
+            if !matches!(previous, Some(b'e' | b'E')) {
+                tokens = tokens.saturating_add(1);
+                has_decimal = false;
+                in_exponent = false;
+            }
+            in_number = true;
+        } else {
+            in_number = false;
+            has_decimal = false;
+            in_exponent = false;
+        }
+        previous = Some(byte);
+    }
+    tokens
+}
+
+fn validate_svg_render_budget(
+    tree: &resvg::usvg::Tree,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<(), Error> {
+    let mut budget = SvgRenderBudget::new(canvas_width, canvas_height)?;
+    validate_svg_group_budget(tree.root(), 0, &mut budget)
+}
+
+fn validate_svg_group_budget(
+    group: &resvg::usvg::Group,
+    parent_live_bytes: u64,
+    budget: &mut SvgRenderBudget,
+) -> Result<(), Error> {
+    budget.record_node()?;
+    if !group.filters().is_empty() || group.clip_path().is_some() || group.mask().is_some() {
+        return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
+    }
+
+    let live_bytes = if group.should_isolate() {
+        let layer_pixels =
+            svg_group_layer_pixels(group, budget.canvas_width, budget.canvas_height)?;
+        budget.charge_work(layer_pixels)?;
+        parent_live_bytes
+            .checked_add(
+                layer_pixels
+                    .checked_mul(4)
+                    .ok_or_else(|| Error::Decode(SVG_RENDER_BUDGET_ERROR.into()))?,
+            )
+            .ok_or_else(|| Error::Decode(SVG_RENDER_BUDGET_ERROR.into()))?
+    } else {
+        parent_live_bytes
+    };
+    if live_bytes > MAX_SVG_INTERMEDIATE_BYTES {
+        return Err(Error::Decode(SVG_RENDER_BUDGET_ERROR.into()));
+    }
+
+    for node in group.children() {
+        match node {
+            resvg::usvg::Node::Group(child) => {
+                validate_svg_group_budget(child, live_bytes, budget)?;
+            }
+            resvg::usvg::Node::Path(path) => {
+                budget.record_node()?;
+                budget.record_path_segments(path.data().segments().count())?;
+                if let Some(fill) = path.fill() {
+                    validate_svg_paint(fill.paint())?;
+                    if path.is_visible() {
+                        let bounds = path.abs_bounding_box();
+                        budget.charge_paint_bounds(bounds.width(), bounds.height())?;
+                    }
+                }
+                if path.stroke().is_some() {
+                    return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
+                }
+            }
+            resvg::usvg::Node::Image(_) => {
+                return Err(Error::Decode(SVG_IMAGE_RESOURCE_ERROR.into()));
+            }
+            resvg::usvg::Node::Text(_) => {
+                return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_svg_paint(paint: &resvg::usvg::Paint) -> Result<(), Error> {
+    if matches!(paint, resvg::usvg::Paint::Color(_)) {
+        Ok(())
+    } else {
+        Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()))
+    }
+}
+
+fn svg_group_layer_pixels(
+    group: &resvg::usvg::Group,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<u64, Error> {
+    let bounding_box = group.abs_layer_bounding_box();
+    let max_width = u64::from(canvas_width).saturating_mul(5);
+    let max_height = u64::from(canvas_height).saturating_mul(5);
+    let width = u64::from(positive_f32_to_px(bounding_box.width()))
+        .saturating_add(4)
+        .min(max_width);
+    let height = u64::from(positive_f32_to_px(bounding_box.height()))
+        .saturating_add(4)
+        .min(max_height);
+    width
+        .checked_mul(height)
+        .ok_or_else(|| Error::Decode(SVG_RENDER_BUDGET_ERROR.into()))
+}
+
+struct SvgRenderBudget {
+    canvas_width: u32,
+    canvas_height: u32,
+    work_limit: u64,
+    work: u64,
+    nodes: usize,
+    path_segments: usize,
+    segment_tile_work: u64,
+}
+
+impl SvgRenderBudget {
+    fn new(canvas_width: u32, canvas_height: u32) -> Result<Self, Error> {
+        let canvas_pixels = u64::from(canvas_width)
+            .checked_mul(u64::from(canvas_height))
+            .ok_or_else(|| Error::Decode(SVG_RENDER_WORK_ERROR.into()))?;
+        let work_limit = canvas_pixels
+            .saturating_mul(SVG_RENDER_WORK_MULTIPLIER)
+            .clamp(SVG_RENDER_WORK_FLOOR_PIXELS, MAX_SVG_RENDER_WORK_PIXELS);
+        Ok(Self {
+            canvas_width,
+            canvas_height,
+            work_limit,
+            work: 0,
+            nodes: 0,
+            path_segments: 0,
+            segment_tile_work: 0,
+        })
+    }
+
+    fn record_node(&mut self) -> Result<(), Error> {
+        self.nodes = self.nodes.saturating_add(1);
+        if self.nodes > MAX_SVG_RENDER_NODES {
+            return Err(Error::Decode(SVG_RENDER_WORK_ERROR.into()));
+        }
+        Ok(())
+    }
+
+    fn record_path_segments(&mut self, segments: usize) -> Result<(), Error> {
+        self.path_segments = self.path_segments.saturating_add(segments);
+        let horizontal_tiles = u64::from(self.canvas_width).div_ceil(8191);
+        let vertical_tiles = u64::from(self.canvas_height).div_ceil(8191);
+        let tile_work = u64::try_from(segments)
+            .ok()
+            .and_then(|count| count.checked_mul(horizontal_tiles))
+            .and_then(|count| count.checked_mul(vertical_tiles))
+            .ok_or_else(|| Error::Decode(SVG_RENDER_WORK_ERROR.into()))?;
+        self.segment_tile_work = self
+            .segment_tile_work
+            .checked_add(tile_work)
+            .ok_or_else(|| Error::Decode(SVG_RENDER_WORK_ERROR.into()))?;
+        if self.path_segments > MAX_SVG_PATH_SEGMENTS
+            || self.segment_tile_work > MAX_SVG_SEGMENT_TILE_WORK
+        {
+            return Err(Error::Decode(SVG_RENDER_WORK_ERROR.into()));
+        }
+        Ok(())
+    }
+
+    fn charge_paint_bounds(&mut self, width: f32, height: f32) -> Result<(), Error> {
+        let width = u64::from(positive_f32_to_px(width)).min(u64::from(self.canvas_width));
+        let height = u64::from(positive_f32_to_px(height)).min(u64::from(self.canvas_height));
+        let pixels = width
+            .checked_mul(height)
+            .ok_or_else(|| Error::Decode(SVG_RENDER_WORK_ERROR.into()))?;
+        self.charge_work(pixels)
+    }
+
+    fn charge_work(&mut self, pixels: u64) -> Result<(), Error> {
+        self.work = self
+            .work
+            .checked_add(pixels)
+            .ok_or_else(|| Error::Decode(SVG_RENDER_WORK_ERROR.into()))?;
+        if self.work > self.work_limit {
+            return Err(Error::Decode(SVG_RENDER_WORK_ERROR.into()));
+        }
+        Ok(())
     }
 }
 
@@ -1139,9 +1604,11 @@ mod tests {
     use super::{
         ColorNormalizer, ColorProfileStatus, DecodeGate, DecodeGateState, DecodeGeneration,
         DecodePriority, DecodedImage, GenerationReader, LatestJobQueue,
-        MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES, PNG_SIGNATURE,
-        SourceImage, acquire_decode_permit_from, positive_f32_to_px, run_guarded_latest_queue,
-        try_schedule_background, validate_dimensions,
+        MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES,
+        MAX_SVG_ATTRIBUTE_BYTES, MAX_SVG_ATTRIBUTES, MAX_SVG_GEOMETRY_TOKENS, PNG_SIGNATURE,
+        SourceImage, SourceOpen, acquire_decode_permit_from, positive_f32_to_px,
+        run_guarded_latest_queue, svg_geometry_tokens, try_schedule_background,
+        validate_dimensions,
     };
     use crate::color::WorkingColorEncoding;
     use crate::ephemeral::TempWorkspace;
@@ -1173,6 +1640,297 @@ mod tests {
         assert_eq!(img.rgba.len(), 40 * 30 * 4);
         assert_eq!(img.rgba[0], 255);
         assert_eq!(img.rgba[3], 255);
+    }
+
+    #[test]
+    fn svg_rejects_external_image_resources_without_reading_them() {
+        let ws = TempWorkspace::new("decode_svg_external_resource").unwrap();
+        let private = ws.path().join("private.png");
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([211, 17, 29, 255]))
+            .save(&private)
+            .unwrap();
+        let href = private.to_string_lossy().replace('\\', "/");
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image href="{href}" width="1" height="1"/></svg>"#
+        );
+
+        let error = DecodedImage::load_from_memory(svg.as_bytes())
+            .err()
+            .expect("external image href must be rejected");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG embedded and external image resources are not supported"
+        );
+        assert!(!error.to_string().contains(&href));
+    }
+
+    #[test]
+    fn svg_rejects_embedded_raster_resources_explicitly() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <image href="data:image/png;base64,iVBORw0KGgo=" width="1" height="1"/>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("embedded image href must be rejected");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG embedded and external image resources are not supported"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_image_elements_even_when_the_resource_url_is_malformed() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <image href="data:image/png;base64,%%%%" width="1" height="1"/>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("malformed embedded image href must be rejected");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG embedded and external image resources are not supported"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_prefixed_image_elements_before_resource_resolution() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" width="1" height="1">
+            <svg:image href="data:image/png;base64,%%%%" width="1" height="1"/>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("prefixed image element must be rejected");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG embedded and external image resources are not supported"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_internal_entity_expansion_before_usvg_parsing() {
+        let svg = br#"<!DOCTYPE svg [
+            <!ENTITY a "1234567890">
+            <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+            <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+        ]>
+        <svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <text>&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;</text>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory_with_extension(svg, "svg")
+            .err()
+            .expect("SVG document type must be rejected before entity expansion");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG document type declarations are not supported"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_nested_isolating_groups_that_exceed_the_layer_budget() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="4096">
+            <g opacity="0.9"><g opacity="0.9"><g opacity="0.9"><g opacity="0.9">
+                <rect width="4096" height="4096" fill="#123456"/>
+            </g></g></g></g>
+        </svg>"##;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("nested full-canvas layers must be rejected before allocation");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG render layers exceed the memory safety limit"
+        );
+    }
+
+    #[test]
+    fn svg_renders_a_bounded_isolating_group() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30">
+            <g opacity="0.9"><rect width="40" height="30" fill="#ff0000"/></g>
+        </svg>"##;
+
+        let image = DecodedImage::load_from_memory(svg).expect("bounded SVG layer");
+        assert_eq!((image.width, image.height), (40, 30));
+        assert_eq!(image.rgba.len(), 40 * 30 * 4);
+    }
+
+    #[test]
+    fn svg_rejects_features_with_unbounded_renderer_scratch_space() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <filter id="blur"><feGaussianBlur stdDeviation="1"/></filter>
+            <rect width="1" height="1" filter="url(#blur)"/>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("filter scratch allocation must be rejected before parsing");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG feature exceeds the supported safety profile"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_preparse_expansion_features() {
+        let inputs: [&[u8]; 5] = [
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><text>copied text</text></svg>"#,
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect { fill: red; }</style></svg>"#,
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><linearGradient id="g"><stop offset="0"/></linearGradient></svg>"#,
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0H1" stroke-dasharray="1 1"/></svg>"#,
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill: red"/></svg>"#,
+        ];
+
+        for svg in inputs {
+            let error = DecodedImage::load_from_memory(svg)
+                .err()
+                .expect("expansion-heavy SVG feature must be rejected before parsing");
+            assert_eq!(
+                error.to_string(),
+                "could not open image: SVG feature exceeds the supported safety profile"
+            );
+        }
+    }
+
+    #[test]
+    fn svg_rejects_strokes_before_tessellation() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+            <path d="M0 0C5 20 15 0 20 20" fill="none" stroke="black"/>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("stroked path must be rejected before tessellation");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG feature exceeds the supported safety profile"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_excessive_total_sibling_render_work() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="4096">
+            <g opacity="0.9"><rect width="4096" height="4096" fill="#123456"/></g>
+            <g opacity="0.9"><rect width="4096" height="4096" fill="#123456"/></g>
+            <g opacity="0.9"><rect width="4096" height="4096" fill="#123456"/></g>
+            <g opacity="0.9"><rect width="4096" height="4096" fill="#123456"/></g>
+            <g opacity="0.9"><rect width="4096" height="4096" fill="#123456"/></g>
+        </svg>"##;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("repeated full-canvas work must be rejected before allocation");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG render work exceeds the supported safety limit"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_marker_expansion_before_usvg_parsing() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <defs><marker id="dot"><path d="M0 0H1"/></marker></defs>
+            <path d="M0 0H0H0H0" marker-mid="url(#dot)"/>
+        </svg>"#;
+
+        let error = DecodedImage::load_from_memory(svg)
+            .err()
+            .expect("marker-generated groups must be rejected before parsing");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG feature exceeds the supported safety profile"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_excessive_attribute_count_before_tree_allocation() {
+        use std::fmt::Write as _;
+
+        let mut svg = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg""#);
+        for index in 0..MAX_SVG_ATTRIBUTES {
+            write!(svg, " a{index}=\"\"").unwrap();
+        }
+        svg.push_str(" extra=\"\"/>");
+
+        let error = DecodedImage::load_from_memory(svg.as_bytes())
+            .err()
+            .expect("attribute-count amplification must be rejected before tree parsing");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG markup exceeds the supported complexity limit"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_excessive_attribute_bytes_before_tree_allocation() {
+        let value = "x".repeat(MAX_SVG_ATTRIBUTE_BYTES + 1);
+        let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" data-note="{value}"/>"#);
+
+        let error = DecodedImage::load_from_memory(svg.as_bytes())
+            .err()
+            .expect("attribute-byte amplification must be rejected before tree parsing");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG markup exceeds the supported complexity limit"
+        );
+    }
+
+    #[test]
+    fn svg_rejects_geometry_that_exceeds_the_command_budget() {
+        let repeated_segments = "H0".repeat(MAX_SVG_GEOMETRY_TOKENS / 2 + 1);
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path d="M0 0{repeated_segments}"/></svg>"#
+        );
+
+        let error = DecodedImage::load_from_memory(svg.as_bytes())
+            .err()
+            .expect("oversized geometry must be rejected before parsing");
+        assert_eq!(
+            error.to_string(),
+            "could not open image: SVG markup exceeds the supported complexity limit"
+        );
+    }
+
+    #[test]
+    fn svg_geometry_token_count_handles_compact_and_exponent_forms() {
+        assert_eq!(svg_geometry_tokens(b"M0-1H.5 1e-3Z"), 7);
+        assert_eq!(svg_geometry_tokens(b"l30.1.5.1-20z"), 6);
+    }
+
+    #[test]
+    fn svg_rejects_gzip_before_parser_expansion() {
+        let gzip_header = [0x1f, 0x8b, 0x08, 0x00];
+
+        let error = DecodedImage::load_from_memory_with_extension(&gzip_header, "svg")
+            .err()
+            .expect("gzip-compressed SVG must be rejected before parsing");
+
+        assert_eq!(
+            error.to_string(),
+            "could not open image: compressed SVG input is not supported"
+        );
+    }
+
+    #[test]
+    fn synthesized_hdr_icc_profiles_round_trip_their_transfer_function() {
+        use jxl_color::{
+            ColourSpace, EnumColourEncoding, Primaries, RenderingIntent, TransferFunction,
+            WhitePoint,
+        };
+
+        for transfer_function in [TransferFunction::Pq, TransferFunction::Hlg] {
+            let encoding = EnumColourEncoding {
+                colour_space: ColourSpace::Rgb,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Bt2100,
+                tf: transfer_function,
+                rendering_intent: RenderingIntent::Relative,
+            };
+            let profile = jxl_color::icc::try_colour_encoding_to_icc(&encoding).unwrap();
+            assert_eq!(jxl_color::icc::icc_tf(&profile), Some(transfer_function));
+        }
     }
 
     #[test]
@@ -1689,6 +2447,61 @@ mod tests {
             crate::fs::ImageSourceMatch::Changed,
             "identical bytes in a replacement object must not inherit intent"
         );
+    }
+
+    #[test]
+    fn explicit_refresh_rebinds_a_scanned_path_to_its_new_regular_object() {
+        let workspace = TempWorkspace::new("decode_scan_refresh").unwrap();
+        let path = workspace.path().join("source.png");
+        let original = workspace.path().join("original.png");
+        let replacement = workspace.path().join("replacement.png");
+        image::RgbImage::from_pixel(2, 2, image::Rgb([255, 0, 0]))
+            .save(&path)
+            .unwrap();
+        image::RgbImage::from_pixel(2, 2, image::Rgb([0, 0, 255]))
+            .save(&replacement)
+            .unwrap();
+        let original_source = crate::fs::ImageSource::open_regular(&path).unwrap();
+        let original_provenance = original_source.scan_provenance().unwrap();
+        std::fs::rename(&path, &original).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        let generation = AtomicU64::new(1);
+
+        assert!(
+            DecodedImage::load_scanned_if_current(&path, original_provenance, &generation, 1)
+                .is_err()
+        );
+        let refreshed = DecodedImage::load_refreshed_regular_if_current(&path, &generation, 1)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(&refreshed.image.rgba[..4], &[0, 0, 255, 255]);
+        let refreshed_provenance = refreshed.source.scan_provenance().unwrap();
+        assert!(crate::fs::ImageSource::open_scanned(&path, refreshed_provenance).is_ok());
+    }
+
+    #[test]
+    fn foreground_decode_rejects_an_in_place_rewrite_before_publish() {
+        let workspace = TempWorkspace::new("decode_source_version").unwrap();
+        let path = workspace.path().join("source.png");
+        let replacement = workspace.path().join("replacement.png");
+        image::RgbImage::from_pixel(2, 2, image::Rgb([255, 0, 0]))
+            .save(&path)
+            .unwrap();
+        image::RgbImage::from_pixel(3, 2, image::Rgb([0, 0, 255]))
+            .save(&replacement)
+            .unwrap();
+        let replacement_bytes = std::fs::read(&replacement).unwrap();
+
+        let loaded = DecodedImage::load_file_if_current_with_hook(
+            &path,
+            DecodeGeneration::unconditional(),
+            SourceOpen::Direct,
+            || std::fs::write(&path, replacement_bytes).unwrap(),
+        )
+        .unwrap();
+
+        assert!(loaded.is_none());
     }
 
     #[test]

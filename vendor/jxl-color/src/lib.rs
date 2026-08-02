@@ -30,3 +30,20 @@ pub use cms::*;
 pub use convert::*;
 pub use error::*;
 pub use ycbcr::ycbcr_to_rgb;
+
+const fn avx2_fma_dispatch(avx2: bool, fma: bool) -> bool {
+    avx2 && fma
+}
+
+#[cfg(test)]
+mod tests {
+    use super::avx2_fma_dispatch;
+
+    #[test]
+    fn avx2_dispatch_requires_both_avx2_and_fma() {
+        assert!(!avx2_fma_dispatch(false, false));
+        assert!(!avx2_fma_dispatch(false, true));
+        assert!(!avx2_fma_dispatch(true, false));
+        assert!(avx2_fma_dispatch(true, true));
+    }
+}

@@ -12,7 +12,10 @@ and organized by user-visible concern.
   separate explicit gate.
 - Windows native accessibility automation now closes an unsuccessfully expanded
   View submenu before retrying it, so each attempt starts from a known menu state
-  while retaining the exact accessible-child assertions.
+  while retaining the exact accessible-child assertions. Focused shortcut checks
+  prefer `SendInput` and use a native queued-key fallback only when the runner
+  denies foreground ownership; every key remains verified through the resulting
+  accessible application state.
 - Dependency policy now denies every unreviewed duplicate crate version against
   an exact, rationale-backed transitive baseline. Both workspace lockfiles must
   pass cargo-deny without unexplained warnings.
@@ -64,6 +67,60 @@ and organized by user-visible concern.
   owns nothing and remains retryable without a wake loop. Worker diagnostics use
   stable path-free categories while terminal suppression and the five-entry,
   256 MiB decoded cache policy remain unchanged.
+- Folder scanning now has one consuming completion owner, cooperative replacement
+  cancellation during enumeration and natural sorting, an explicit 100,000-image
+  ceiling, and a 64 MiB cumulative encoded-path budget. Oversized folders fail
+  visibly without installing a truncated playlist; opening one selected image
+  still succeeds as a one-item playlist. A lost worker endpoint clears busy state
+  and follows a fixed recovery path. Enumeration and nonblocking child opens are
+  bound to one retained directory handle, and automatic entries carry exact
+  identity-plus-version provenance through foreground decode, prefetch,
+  thumbnails, ratings, Trash restore, and explicit F5 refresh. Decode and rating
+  results are discarded if their accepted object changes before publication.
+- Save As now binds metadata retention to serialized reads from the accepted
+  source handle that supplied the displayed pixels and rejects length,
+  modification-time, or operating-system change-time differences around
+  extraction. It retains the canonical parent identity plus
+  destination absence or exact identity and version after the native dialog.
+  Every captured existing file now receives an app-owned overwrite prompt whose
+  consent is revalidated against that exact object. Its copy accurately describes
+  the final identity recheck without overstating the documented pathname race.
+  The prompt exclusively owns
+  pointer, keyboard, and assistive-technology actions. An operating-system open,
+  dropped file, completed explicit folder open, or rating-filter result that
+  replaces or clears the source cancels it before changing source. Save As cannot
+  begin while an explicit folder open is still being scanned. Save As then rejects
+  a changed parent, created destination, replacement, source alias, or in-place
+  rewrite before commit. Handle identity
+  comparison also covers a
+  directly selected symlink target independently of mutation eligibility. Pixel
+  encoding and EXIF insertion use the retained temporary handle, whose pathname
+  identity is checked before commit. An absent destination uses a no-clobber
+  install so a file created after confirmation is preserved. Default metadata
+  stripping remains intact.
+- SVG rendering now rejects embedded raster resources and external image hrefs
+  explicitly, preventing selected markup from reading another local image or
+  bypassing its input budget. Gzip-compressed SVG and document type declarations
+  are rejected before parser expansion. Markup depth, element count, cumulative
+  attribute count and bytes, and live opacity-layer memory are bounded before
+  raster allocation. Marker and `use`
+  expansion are disabled, while cumulative path geometry has byte and token
+  ceilings. Stylesheets, inline styles, text references, gradients, strokes, and features
+  with unbounded renderer scratch space are rejected explicitly. Parsed nodes,
+  path segments, tiled edge work, and cumulative painted area are also bounded.
+  Solid-filled vector shapes, bounded paths, and bounded opacity groups remain
+  supported.
+- The reviewed JPEG XL patches now require exact zero-reserved 12-byte CICP tags,
+  round-trip PQ and HLG CICP transfer evidence,
+  require an executable AVX2-plus-FMA dispatch predicate before AVX2 color
+  conversion, preserve the first parallel transform error, and publish a terminal
+  render state after composition failure. Previously
+  vacuous PQ vector tests now exercise the optimized upstream paths against
+  explicit accuracy bounds, and both patched vendor crates are workspace-tested.
+- Python CI now lints and format-checks the complete `scripts/` tree so new owned
+  tooling cannot silently fall outside the gate.
+- Manual release workflow runs are inspection-only at the executable job gate;
+  only a tag push can receive the write-enabled publication path.
 - Dock layout and menu presentation now come from one covered, immutable chrome
   model rather than paint-time policy spread across the event loop and UI. One
   captured dock snapshot drives both image-safe viewport insets and visible
@@ -91,6 +148,11 @@ and organized by user-visible concern.
   the near-navigation retention boundary, edited-image rejection, opening-state
   classification, durable loaded-image errors, and exact preview generation/path
   identity while `App` retains all path, cache, session, and job ownership.
+- The Windows external-edit reminder is now owned by the last-good frame. A
+  failed `F5` refresh or navigation keeps both that frame and its path-private
+  reminder instead of implying that the externally handed source was refreshed.
+  Fresh accepted pixels or explicit frame invalidation clears both ownership and
+  the reminder.
 
 ### Documentation
 

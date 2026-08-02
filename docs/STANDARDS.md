@@ -85,9 +85,12 @@ with intent, not as though it was assembled from plausible fragments.
 ## Testing
 
 Target: 85 percent line coverage or higher on the testable logic, measured with
-`cargo-llvm-cov` and enforced in CI. The current exclusions are exact source paths,
-not basename patterns, so similarly named integration tests and vendored files
-cannot be removed by this filename filter:
+`cargo-llvm-cov` and enforced in CI. The locally patched `jxl-color` and
+`jxl-render` dependencies run their executable unit suites as workspace members on
+every platform, but remain outside the owned-logic percentage they were never part
+of as dependency-only packages. The remaining exclusions are exact source paths,
+not basename patterns, so similarly named integration tests cannot be removed by
+this filename filter:
 
 - `app.rs`: windowing and event-loop integration mixed with pure helpers that
   still need extraction under the v0.2 roadmap

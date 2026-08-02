@@ -25,7 +25,7 @@ const MAX_IDLE_WORKERS: usize = 2;
 /// Decode via the isolated `viewr-decode` worker (AVIF / HEIC / RAW paths).
 pub(crate) fn load_via_worker(
     path: &Path,
-    file: std::fs::File,
+    file: crate::fs::ImageSourceReader<'_>,
     generation: DecodeGeneration<'_>,
 ) -> Result<DecodedImage, Error> {
     // Resolve and read the user-selected file before reserving a worker. Host
@@ -103,7 +103,7 @@ fn read_bounded_input(path: &Path) -> Result<Vec<u8>, Error> {
 }
 
 fn read_bounded_input_if_current(
-    file: std::fs::File,
+    file: crate::fs::ImageSourceReader<'_>,
     generation: DecodeGeneration<'_>,
 ) -> Result<Vec<u8>, Error> {
     let metadata = file

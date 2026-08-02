@@ -70,6 +70,13 @@ pwsh -NoProfile -File scripts/privacy-check.ps1
 cargo check --manifest-path fuzz/Cargo.toml --locked
 ```
 
+The locally patched `jxl-color` and `jxl-render` crates are workspace members, so
+the formatting, Clippy, build, and test commands above execute their behavioral
+regression suites rather than relying on source-text patch checks. CI excludes
+those dependency packages from the owned-logic coverage denominator, preserving
+the same application coverage set and 85 percent threshold used before they became
+test members.
+
 Platform package and optional C-decoder checks require their documented local
 SDKs or system libraries. A skipped platform check is an evidence gap, not a pass.
 ## 3. Build the exact target

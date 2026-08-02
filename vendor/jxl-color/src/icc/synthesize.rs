@@ -98,9 +98,7 @@ pub fn colour_encoding_to_icc(colour_encoding: &EnumColourEncoding) -> Vec<u8> {
 /// XYB, unknown color spaces, unknown transfer functions, and zero-valued gamma
 /// curves cannot be represented faithfully and return
 /// [`crate::Error::UnsupportedColorEncoding`].
-pub fn try_colour_encoding_to_icc(
-    colour_encoding: &EnumColourEncoding,
-) -> crate::Result<Vec<u8>> {
+pub fn try_colour_encoding_to_icc(colour_encoding: &EnumColourEncoding) -> crate::Result<Vec<u8>> {
     let &EnumColourEncoding {
         colour_space,
         white_point,
@@ -110,7 +108,10 @@ pub fn try_colour_encoding_to_icc(
     } = colour_encoding;
 
     if !matches!(colour_space, ColourSpace::Rgb | ColourSpace::Grey)
-        || matches!(tf, TransferFunction::Unknown | TransferFunction::Gamma { g: 0, .. })
+        || matches!(
+            tf,
+            TransferFunction::Unknown | TransferFunction::Gamma { g: 0, .. }
+        )
     {
         return Err(crate::Error::UnsupportedColorEncoding);
     }
@@ -255,13 +256,13 @@ pub fn try_colour_encoding_to_icc(
         Primaries::P3 => PRIMARIES_P3,
     };
 
-    if matches!(tf, TransferFunction::Pq | TransferFunction::Hlg) {
-        if let Some(cicp) = colour_encoding.cicp() {
-            let mut cicp_tag = [0u8; 12];
-            cicp_tag[..4].copy_from_slice(b"cicp");
-            cicp_tag[8..].copy_from_slice(&cicp);
-            append_tag_with_data(&mut tags, &mut data, *b"cicp", &cicp_tag);
-        }
+    if matches!(tf, TransferFunction::Pq | TransferFunction::Hlg)
+        && let Some(cicp) = colour_encoding.cicp()
+    {
+        let mut cicp_tag = [0u8; 12];
+        cicp_tag[..4].copy_from_slice(b"cicp");
+        cicp_tag[8..].copy_from_slice(&cicp);
+        append_tag_with_data(&mut tags, &mut data, *b"cicp", &cicp_tag);
     }
 
     match colour_space {
@@ -313,6 +314,22 @@ pub fn try_colour_encoding_to_icc(
 mod tests {
     use super::*;
 
+    fn tag_data<'a>(profile: &'a [u8], tag: &[u8; 4]) -> &'a [u8] {
+        let tag_count = u32::from_be_bytes(profile[0x80..0x84].try_into().unwrap()) as usize;
+        for index in 0..tag_count {
+            let entry = 0x84 + index * 12;
+            if &profile[entry..entry + 4] != tag {
+                continue;
+            }
+            let offset =
+                u32::from_be_bytes(profile[entry + 4..entry + 8].try_into().unwrap()) as usize;
+            let length =
+                u32::from_be_bytes(profile[entry + 8..entry + 12].try_into().unwrap()) as usize;
+            return &profile[offset..offset + length];
+        }
+        panic!("expected ICC tag was not synthesized");
+    }
+
     fn assert_unsupported(encoding: EnumColourEncoding) {
         assert!(matches!(
             try_colour_encoding_to_icc(&encoding),
@@ -343,12 +360,44 @@ mod tests {
 
     #[test]
     fn supported_rgb_encoding_still_synthesizes_a_profile() {
-        let profile = try_colour_encoding_to_icc(&EnumColourEncoding::srgb(
-            RenderingIntent::Relative,
-        ))
-        .expect("sRGB must be representable");
+        let profile =
+            try_colour_encoding_to_icc(&EnumColourEncoding::srgb(RenderingIntent::Relative))
+                .expect("sRGB must be representable");
 
         assert!(profile.len() >= 128);
-        assert_eq!(profile.len(), u32::from_be_bytes(profile[..4].try_into().unwrap()) as usize);
+        assert_eq!(
+            profile.len(),
+            u32::from_be_bytes(profile[..4].try_into().unwrap()) as usize
+        );
+    }
+
+    #[test]
+    fn pq_and_hlg_round_trip_with_exact_cicp_layout_for_rgb_and_gray() {
+        for (colour_space, tf) in [
+            (ColourSpace::Rgb, TransferFunction::Pq),
+            (ColourSpace::Rgb, TransferFunction::Hlg),
+            (ColourSpace::Grey, TransferFunction::Pq),
+            (ColourSpace::Grey, TransferFunction::Hlg),
+        ] {
+            let encoding = EnumColourEncoding {
+                colour_space,
+                white_point: WhitePoint::D65,
+                primaries: Primaries::Bt2100,
+                tf,
+                rendering_intent: RenderingIntent::Relative,
+            };
+            let expected_cicp = encoding.cicp().unwrap();
+            let profile = try_colour_encoding_to_icc(&encoding).unwrap();
+            let cicp = tag_data(&profile, b"cicp");
+
+            assert_eq!(cicp.len(), 12);
+            assert_eq!(&cicp[..4], b"cicp");
+            assert_eq!(&cicp[4..8], &[0; 4]);
+            assert_eq!(&cicp[8..12], &expected_cicp);
+
+            let parsed = crate::icc::parse::parse_icc(&profile).unwrap();
+            assert_eq!(parsed.colour_space, colour_space);
+            assert_eq!(parsed.tf, tf);
+        }
     }
 }

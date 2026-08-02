@@ -1,11 +1,13 @@
 //! Playlist management and scanning logic.
 
+use crate::fs::{ScanProvenance, ScannedImage};
 use crate::ratings::{RatingFilter, RatingState};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub(crate) struct Playlist {
     pub(crate) files: Vec<PathBuf>,
+    provenance: Vec<Option<ScanProvenance>>,
     pub(crate) index: usize,
     ratings: Vec<RatingState>,
     filter: RatingFilter,
@@ -23,11 +25,30 @@ pub(crate) enum FilterSelection {
 
 impl Playlist {
     pub(crate) fn new(files: Vec<PathBuf>, index: usize) -> Self {
+        let provenance = vec![None; files.len()];
+        Self::from_parts(files, provenance, index)
+    }
+
+    pub(crate) fn from_scan(entries: Vec<ScannedImage>, index: usize) -> Self {
+        let (files, provenance) = entries
+            .into_iter()
+            .map(ScannedImage::into_parts)
+            .map(|(path, provenance)| (path, Some(provenance)))
+            .unzip();
+        Self::from_parts(files, provenance, index)
+    }
+
+    fn from_parts(
+        files: Vec<PathBuf>,
+        provenance: Vec<Option<ScanProvenance>>,
+        index: usize,
+    ) -> Self {
         let index = index.min(files.len().saturating_sub(1));
         let ratings = vec![RatingState::Loading; files.len()];
         let visible_indices = (0..files.len()).collect();
         Self {
             files,
+            provenance,
             index,
             ratings,
             filter: RatingFilter::All,
@@ -35,6 +56,36 @@ impl Playlist {
             empty_anchor: index,
             outside_filter: false,
         }
+    }
+
+    pub(crate) fn scan_provenance(&self, path: &std::path::Path) -> Option<ScanProvenance> {
+        self.files
+            .iter()
+            .position(|candidate| candidate == path)
+            .and_then(|index| self.provenance.get(index))
+            .copied()
+            .flatten()
+    }
+
+    pub(crate) fn files_with_provenance(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&std::path::Path, Option<ScanProvenance>)> + '_ {
+        self.files
+            .iter()
+            .map(PathBuf::as_path)
+            .zip(self.provenance.iter().copied())
+    }
+
+    pub(crate) fn set_scan_provenance(
+        &mut self,
+        path: &std::path::Path,
+        provenance: Option<ScanProvenance>,
+    ) -> bool {
+        let Some(index) = self.files.iter().position(|candidate| candidate == path) else {
+            return false;
+        };
+        self.provenance[index] = provenance;
+        true
     }
 
     pub(crate) const fn filter(&self) -> RatingFilter {
@@ -235,14 +286,22 @@ impl Playlist {
     pub(crate) fn remove_paths(&mut self, removed: &[PathBuf], old_index: usize) {
         let mut kept_files = Vec::with_capacity(self.files.len());
         let mut kept_ratings = Vec::with_capacity(self.ratings.len());
-        for (path, rating) in self.files.drain(..).zip(self.ratings.drain(..)) {
+        let mut kept_provenance = Vec::with_capacity(self.provenance.len());
+        for ((path, rating), provenance) in self
+            .files
+            .drain(..)
+            .zip(self.ratings.drain(..))
+            .zip(self.provenance.drain(..))
+        {
             if !removed.contains(&path) {
                 kept_files.push(path);
                 kept_ratings.push(rating);
+                kept_provenance.push(provenance);
             }
         }
         self.files = kept_files;
         self.ratings = kept_ratings;
+        self.provenance = kept_provenance;
         self.index = crate::curate::index_after_removals(&self.files, old_index, removed);
         self.empty_anchor = self.index;
         self.rebuild_visible();
@@ -258,10 +317,17 @@ impl Playlist {
         self.outside_filter = false;
     }
 
-    pub(crate) fn insert_path(&mut self, index: usize, path: PathBuf, rating: RatingState) {
+    pub(crate) fn insert_path(
+        &mut self,
+        index: usize,
+        path: PathBuf,
+        rating: RatingState,
+        provenance: Option<ScanProvenance>,
+    ) {
         let index = index.min(self.files.len());
         self.files.insert(index, path);
         self.ratings.insert(index, rating);
+        self.provenance.insert(index, provenance);
         if index <= self.index && self.files.len() > 1 {
             self.index = self.index.saturating_add(1);
         }
@@ -287,6 +353,7 @@ pub(crate) enum ScanPurpose {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ephemeral::TempWorkspace;
     use crate::ratings::Rating;
 
     fn path(index: usize) -> PathBuf {
@@ -470,5 +537,112 @@ mod tests {
             playlist.rating_for_known_path(std::path::Path::new("missing.jpg")),
             None
         );
+    }
+
+    #[test]
+    fn provenance_iteration_visits_a_maximum_size_playlist_once_in_order() {
+        let files = (0..100_000)
+            .map(|index| PathBuf::from(format!("image-{index}.jpg")))
+            .collect::<Vec<_>>();
+        let playlist = Playlist::new(files, 0);
+        let mut expected = 0_usize;
+
+        for (path, provenance) in playlist.files_with_provenance() {
+            assert_eq!(path, PathBuf::from(format!("image-{expected}.jpg")));
+            assert!(provenance.is_none());
+            expected += 1;
+        }
+
+        assert_eq!(expected, 100_000);
+    }
+
+    #[test]
+    fn scanned_playlist_preserves_provenance_and_clamps_its_selection() {
+        let workspace = TempWorkspace::new("playlist_scan_provenance").unwrap();
+        let first = workspace.path().join("image-2.jpg");
+        let second = workspace.path().join("image-10.jpg");
+        std::fs::write(&first, b"first").unwrap();
+        std::fs::write(&second, b"second").unwrap();
+        let entries = crate::fs::scan_image_entries_while(workspace.path(), || true).unwrap();
+
+        let mut playlist = Playlist::from_scan(entries, usize::MAX);
+
+        assert_eq!(
+            playlist
+                .files
+                .iter()
+                .filter_map(|path| path.file_name())
+                .collect::<Vec<_>>(),
+            ["image-2.jpg", "image-10.jpg"]
+        );
+        assert_eq!(playlist.index, 1);
+        assert_eq!(playlist.filter(), RatingFilter::All);
+        assert!(playlist.has_loading_ratings());
+        let scanned_first = playlist.files[0].clone();
+        let scanned_second = playlist.files[1].clone();
+        assert!(playlist.scan_provenance(&scanned_first).is_some());
+        assert!(playlist.scan_provenance(&scanned_second).is_some());
+        assert!(!playlist.set_scan_provenance(PathBuf::from("missing.jpg").as_path(), None));
+        assert!(playlist.set_scan_provenance(&scanned_first, None));
+        assert!(playlist.scan_provenance(&scanned_first).is_none());
+        assert!(playlist.scan_provenance(&scanned_second).is_some());
+    }
+
+    #[test]
+    fn empty_playlist_operations_are_total_and_non_mutating() {
+        let mut playlist = Playlist::new(Vec::new(), usize::MAX);
+        let threshold = RatingFilter::AtLeast(Rating::new(5).unwrap());
+
+        assert_eq!(playlist.current_rating(), RatingState::Loading);
+        assert!(!playlist.has_loading_ratings());
+        assert_eq!(playlist.visible_position(), None);
+        assert_eq!(playlist.set_filter(threshold), FilterSelection::Empty);
+        assert_eq!(playlist.show_all(), FilterSelection::Empty);
+        assert_eq!(playlist.navigation_target(1), None);
+        assert_eq!(playlist.navigation_target(0), None);
+        assert!(!playlist.dismiss_outside_filter());
+        assert!(!playlist.select(0));
+        assert!(!playlist.set_rating(PathBuf::from("missing.jpg").as_path(), RatingState::Unrated));
+        assert!(playlist.visible_catalog_range().is_empty());
+        assert!(playlist.visible_neighbor_paths(4).is_empty());
+    }
+
+    #[test]
+    fn insertion_removal_and_filter_recovery_keep_parallel_state_aligned() {
+        let mut playlist = rated_playlist(1);
+        let threshold = RatingFilter::AtLeast(Rating::new(4).unwrap());
+        assert_eq!(playlist.set_filter(threshold), FilterSelection::Select(2));
+        playlist.index = 2;
+        assert_eq!(playlist.show_all(), FilterSelection::Select(1));
+        assert!(playlist.select(1));
+
+        assert_eq!(playlist.set_filter(threshold), FilterSelection::Select(2));
+        assert!(playlist.select(2));
+        playlist.insert_path(
+            0,
+            path(99),
+            RatingState::Rated(Rating::new(5).unwrap()),
+            None,
+        );
+        assert_eq!(playlist.index, 3);
+        assert_eq!(playlist.files[playlist.index], path(2));
+        assert_eq!(
+            playlist.current_rating(),
+            RatingState::Rated(Rating::new(4).unwrap())
+        );
+
+        playlist.index = 4;
+        playlist.remove_paths(&[path(0), path(1)], 4);
+        assert_eq!(
+            playlist.files,
+            [path(99), path(2), path(3), path(4), path(5), path(6)]
+        );
+        assert_eq!(playlist.files[playlist.index], path(4));
+        assert_eq!(
+            playlist.current_rating(),
+            RatingState::Rated(Rating::new(5).unwrap())
+        );
+        assert_eq!(playlist.provenance.len(), playlist.files.len());
+        assert_eq!(playlist.ratings.len(), playlist.files.len());
     }
 }

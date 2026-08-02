@@ -180,13 +180,16 @@ state before job ownership and test seams are explicit.
 - [x] Extract explicit `PerformanceProbe` state and transitions into a covered
   module.
 - [x] Extract bounded job coordination for image details, animation, crop, save,
-  thumbnails, and prefetch, leaving `App` responsible for platform events. The
-  first covered slice now owns the one-result image-details, animation-discovery,
+  folder scans, thumbnails, and prefetch, leaving `App` responsible for platform
+  events. The first covered slice now owns the one-result image-details, animation-discovery,
   and rating-observation lifecycle, including closed-completion wakeup and exact
   path/generation rejection. The second slice gives Save As a one-item consuming
   completion, fail-closed terminal disconnect handling, and success-only close
   reconciliation; its captured output transaction cannot overlap rating mutation
-  or mutate foreground image state. The third slice gives crop the same bounded,
+  or mutate foreground image state. A captured existing destination receives an
+  app-owned overwrite confirmation and identity revalidation before the job can
+  start, so native-dialog timing cannot adopt an unconfirmed file. The third
+  slice gives crop the same bounded,
   consuming completion owner, retains cooperative cancellation and exact
   generation/path/pixel-allocation recovery checks, rejects late publication,
   restores retryable typed failures, and persistently blocks another crop after
@@ -213,6 +216,17 @@ state before job ownership and test seams are explicit.
   the existing terminal-retry policy. A shared acceptance-armed wake contract
   makes fast completion and accepted endpoint loss observable while rejected work
   owns nothing and remains retryable.
+  The seventh slice gives each folder scan one event-loop-owned result endpoint
+  and context-owned cancellation. Replacing or dropping the owner stops obsolete
+  enumeration cooperatively, including cancellation observation during natural
+  sorting. Endpoint loss is visible, and more than 100,000 supported regular files
+  or 64 MiB of cumulative encoded path storage produces an explicit safe failure
+  instead of unbounded allocation or a silently truncated playlist. Enumeration
+  and nonblocking child opens are bound to one retained directory identity;
+  identity-plus-version provenance now reaches foreground decode, prefetch,
+  thumbnails, ratings, restore, and explicit F5 replacement refresh. Accepted
+  decode, animation, details, and rating results reject an in-place rewrite before
+  publication.
 - [x] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window. One immutable projection now
   derives dock layout, control readiness, selected state, labels, shortcuts, and
@@ -232,13 +246,15 @@ state before job ownership and test seams are explicit.
   measured floor was 89.30 percent. The fourth step moves pristine-pixel reuse,
   selected-versus-presented navigation planning, opening-state classification,
   durable load errors, and exact preview identity into the 100 percent covered
-  private `presentation` seam. The complete measured floor is now 89.36 percent.
+  private `presentation` seam. The complete measured floor was 89.36 percent.
   `gpu.rs` retains native resource and frame lifecycle work, while concentrated
   `app.rs` rating, curation, recovery, shortcut, and event transitions and entry
   surfaces still mix platform integration with pure unit-tested helpers. Move
   those helpers behind covered seams before closing this item. Preserve the
   bounded job, thumbnail, prefetch, chrome, preview, presentation, and GPU upload
-  contracts while doing so.
+  contracts while doing so. The complete measured floor is now 89.63 percent
+  after the folder-scan, file-identity, playlist-alignment, modal-ownership, and
+  external-handoff reminder regression branches were added.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

@@ -79,8 +79,10 @@ const OPEN_FOLDER_SCOPE_HELP: &str =
 const OPEN_WITH_HELP: &str = "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. Press F5 to reload possible changes.";
 const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.";
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
-const EXTERNAL_EDIT_STATUS: &str =
-    "External app opened source. Press F5 to reload possible changes.";
+const EXTERNAL_EDIT_BADGE: &str = "External F5";
+const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
+const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str =
+    "External app opened the displayed source. Press F5 to reload possible changes.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 pub(crate) const CROP_RECOVERY_STATUS: &str =
@@ -89,6 +91,7 @@ pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation st
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
+const SAVE_OVERWRITE_FOCUS_STATE: &str = "save_overwrite_focus_initialized";
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub enum UiAction {
@@ -100,6 +103,10 @@ pub enum UiAction {
     Reload,
     /// Open a save as dialog.
     SaveAs,
+    /// Confirm replacement of the exact captured Save As destination.
+    ConfirmSaveOverwrite,
+    /// Cancel a pending Save As overwrite without changing the destination.
+    CancelSaveOverwrite,
     /// Ask the operating system which external app should open the current source.
     OpenWith,
     /// Move the current file to the trash.
@@ -283,6 +290,8 @@ pub(crate) struct UiFrameOwned {
     pub load_error: Option<String>,
     /// An explicit Save As encode is running.
     pub save_busy: bool,
+    /// An existing captured destination awaits app-owned overwrite consent.
+    pub save_overwrite_pending: bool,
     /// A lost Save As completion requires restart before another export.
     pub save_recovery_unsettled: bool,
     /// A full-resolution crop is being applied off the UI thread.
@@ -432,59 +441,109 @@ pub struct FilmstripItem {
     pub texture: Option<egui::TextureHandle>,
 }
 
+#[must_use]
+pub(crate) const fn save_overwrite_action_allowed(action: &UiAction) -> bool {
+    matches!(
+        action,
+        UiAction::ConfirmSaveOverwrite | UiAction::CancelSaveOverwrite
+    )
+}
+
+fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> Vec<UiAction> {
+    if frame.save_overwrite_pending {
+        actions.retain(save_overwrite_action_allowed);
+    } else if frame.rating.pending_disclosure.is_some() {
+        actions.retain(|action| {
+            matches!(
+                action,
+                UiAction::ConfirmRatingDisclosure | UiAction::CancelRatingDisclosure
+            )
+        });
+    } else if frame.show_update {
+        actions.retain(|action| matches!(action, UiAction::CloseUpdate));
+    } else if frame.show_about {
+        actions.retain(|action| matches!(action, UiAction::CloseAbout));
+    }
+    actions
+}
+
 /// Render the UI overlays and return a list of actions triggered by the user.
 pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let mut actions = Vec::new();
     apply_chrome_theme(ui.ctx(), frame.theme_mode);
     let colors = chrome_colors(ui);
     let chrome = frame.chrome_view_model();
+    let modal_active = frame.save_overwrite_pending
+        || frame.rating.pending_disclosure.is_some()
+        || frame.show_update
+        || frame.show_about;
 
-    render_top_menu(ui, &mut actions, frame, chrome);
-    if frame.rating.pending_disclosure.is_some() {
+    ui.add_enabled_ui(!modal_active, |ui| {
+        render_background(ui, &mut actions, frame, chrome, colors);
+    });
+
+    if frame.save_overwrite_pending {
+        render_save_overwrite_confirmation(ui, &mut actions);
+    } else if frame.rating.pending_disclosure.is_some() {
         render_rating_disclosure(ui, &mut actions, frame);
-    } else {
-        ui.ctx().data_mut(|data| {
-            data.remove_temp::<bool>(egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE));
-        });
-        if frame.show_update {
-            render_update(ui, &mut actions);
-        } else if frame.show_about {
-            render_about(ui, &mut actions);
-        }
+    } else if frame.show_update {
+        render_update(ui, &mut actions);
+    } else if frame.show_about {
+        render_about(ui, &mut actions);
     }
+    ui.ctx().data_mut(|data| {
+        if !frame.save_overwrite_pending {
+            data.remove_temp::<bool>(egui::Id::new(SAVE_OVERWRITE_FOCUS_STATE));
+        }
+        if frame.rating.pending_disclosure.is_none() {
+            data.remove_temp::<bool>(egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE));
+        }
+    });
+
+    actions_owned_by_modal(actions, frame)
+}
+
+fn render_background(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+    colors: ChromeColors,
+) {
+    render_top_menu(ui, actions, frame, chrome);
 
     if rating_filter_is_empty(frame) {
-        render_filtered_empty_state(ui, &mut actions, frame);
+        render_filtered_empty_state(ui, actions, frame);
         if let Some(msg) = &frame.toast {
             render_toast(ui, msg, frame);
         }
-        return actions;
+        return;
     }
 
     if !frame.dock.has_image {
-        render_empty_state(ui, &mut actions, frame, chrome);
+        render_empty_state(ui, actions, frame, chrome);
         if let Some(msg) = &frame.toast {
             render_toast(ui, msg, frame);
         }
-        return actions;
+        return;
     }
 
-    render_context_menu(ui, &mut actions, frame, chrome, colors);
+    render_context_menu(ui, actions, frame, chrome, colors);
 
     if let Some(side) = chrome.dock.image_info {
-        render_image_info_panel(ui, &mut actions, frame, side);
+        render_image_info_panel(ui, actions, frame, side);
     }
 
     if chrome.dock.filmstrip.state != DockState::Hidden {
-        render_filmstrip(ui, &mut actions, frame, chrome);
+        render_filmstrip(ui, actions, frame, chrome);
     }
 
     if chrome.dock.tools.state != DockState::Hidden {
-        render_tools_panel(ui, &mut actions, frame, chrome);
+        render_tools_panel(ui, actions, frame, chrome);
     }
 
     if frame.dock.heal_active {
-        render_heal_panel(ui, &mut actions, frame, chrome);
+        render_heal_panel(ui, actions, frame, chrome);
         render_heal_overlay(ui, frame);
     }
 
@@ -493,11 +552,10 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     }
 
     if frame.is_cropping {
-        render_crop_overlay(ui, frame, chrome, &mut actions);
+        render_crop_overlay(ui, frame, chrome, actions);
     }
 
     apply_cursor(ui, frame);
-    actions
 }
 
 fn render_context_menu(
@@ -738,58 +796,61 @@ fn render_top_operation_status(
     chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
+    let add_status = |ui: &mut egui::Ui, status: &str| {
+        add_top_status_with_external_edit(ui, status, frame.external_edit_pending, colors);
+    };
     if let Some(status) = frame.curation_status.as_deref() {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_top_status(ui, status, colors);
+        add_status(ui, status);
     } else if frame.rating.write_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_top_status(ui, "Saving rating...", colors);
+        add_status(ui, "Saving rating...");
     } else if frame.rating.discovery_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_top_status(ui, "Reading folder ratings...", colors);
+        add_status(ui, "Reading folder ratings...");
     } else if frame.dock.has_image && frame.load_error.is_some() {
         ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RetryLoad), |ui| {
             add_retry_button(ui, actions, frame.selected_file_name.as_deref());
         });
         if frame.save_recovery_unsettled {
-            add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
+            add_status(ui, SAVE_RECOVERY_STATUS);
         } else if frame.crop_recovery_unsettled {
-            add_top_status(ui, CROP_RECOVERY_STATUS, colors);
+            add_status(ui, CROP_RECOVERY_STATUS);
         } else if frame.preview_recovery_unsettled {
-            add_top_status(ui, PREVIEW_RECOVERY_STATUS, colors);
+            add_status(ui, PREVIEW_RECOVERY_STATUS);
         } else if frame.rating.recovery_unsettled {
-            add_top_status(ui, RATING_RECOVERY_STATUS, colors);
+            add_status(ui, RATING_RECOVERY_STATUS);
         } else if let Some(status) =
             image_open_status(false, true, frame.selected_file_name.as_deref())
         {
-            add_top_status(ui, &status, colors);
+            add_status(ui, &status);
         }
     } else if frame.dock.has_image && frame.is_opening {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         if let Some(status) = image_open_status(true, false, frame.selected_file_name.as_deref()) {
-            add_top_status(ui, &status, colors);
+            add_status(ui, &status);
         }
     } else if frame.dock.has_image && frame.is_loading {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_top_status(ui, "Preparing preview...", colors);
+        add_status(ui, "Preparing preview...");
     } else if frame.dock.has_image && frame.save_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_top_status(ui, "Saving...", colors);
+        add_status(ui, "Saving...");
     } else if frame.dock.has_image && frame.crop_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_top_status(ui, "Applying crop...", colors);
+        add_status(ui, "Applying crop...");
     } else if frame.save_recovery_unsettled {
-        add_top_status(ui, SAVE_RECOVERY_STATUS, colors);
+        add_status(ui, SAVE_RECOVERY_STATUS);
     } else if frame.crop_recovery_unsettled {
-        add_top_status(ui, CROP_RECOVERY_STATUS, colors);
+        add_status(ui, CROP_RECOVERY_STATUS);
     } else if frame.preview_recovery_unsettled {
-        add_top_status(ui, PREVIEW_RECOVERY_STATUS, colors);
+        add_status(ui, PREVIEW_RECOVERY_STATUS);
     } else if frame.rating.recovery_unsettled {
-        add_top_status(ui, RATING_RECOVERY_STATUS, colors);
+        add_status(ui, RATING_RECOVERY_STATUS);
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
-        add_top_status(ui, status, colors);
+        add_status(ui, status);
     } else if frame.external_edit_pending {
-        add_top_status(ui, EXTERNAL_EDIT_STATUS, colors);
+        add_top_status_with_external_edit(ui, EXTERNAL_EDIT_STANDALONE_STATUS, true, colors);
     } else if frame.rating.outside_filter {
         add_top_status(
             ui,
@@ -797,6 +858,53 @@ fn render_top_operation_status(
             colors,
         );
     }
+}
+
+fn add_top_status_with_external_edit(
+    ui: &mut egui::Ui,
+    status: &str,
+    external_edit_pending: bool,
+    colors: ChromeColors,
+) -> Option<(egui::Response, egui::Response)> {
+    if !external_edit_pending {
+        add_top_status(ui, status, colors);
+        return None;
+    }
+    let accessible_status = if status == EXTERNAL_EDIT_STANDALONE_STATUS {
+        EXTERNAL_EDIT_ACCESSIBLE_STATUS.to_owned()
+    } else {
+        format!("{EXTERNAL_EDIT_ACCESSIBLE_STATUS} {status}")
+    };
+    let max_width = top_status_max_width(ui);
+    let responses = ui.scope(|ui| {
+        ui.set_max_width(max_width);
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.horizontal(|ui| {
+            let badge = ui
+                .add(egui::Label::new(
+                    RichText::new(EXTERNAL_EDIT_BADGE)
+                        .size(11.5)
+                        .color(colors.accent),
+                ))
+                .on_hover_text(EXTERNAL_EDIT_ACCESSIBLE_STATUS);
+            badge.ctx.accesskit_node_builder(badge.id, |node| {
+                node.set_hidden();
+            });
+            let response = ui
+                .add(
+                    egui::Label::new(RichText::new(status).size(12.5).color(colors.muted))
+                        .truncate(),
+                )
+                .on_hover_text(&accessible_status);
+            response.ctx.accesskit_node_builder(response.id, |node| {
+                node.set_value(accessible_status);
+                node.set_live(egui::accesskit::Live::Polite);
+            });
+            (badge, response)
+        })
+        .inner
+    });
+    Some(responses.inner)
 }
 
 fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
@@ -1149,12 +1257,7 @@ fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: 
 }
 
 fn add_top_status(ui: &mut egui::Ui, status: &str, colors: ChromeColors) {
-    let responsive_limit = if ui.ctx().content_rect().width() < 720.0 {
-        TOP_STATUS_COMPACT_MAX_WIDTH
-    } else {
-        TOP_STATUS_MAX_WIDTH
-    };
-    let max_width = ui.available_width().min(responsive_limit);
+    let max_width = top_status_max_width(ui);
     ui.scope(|ui| {
         ui.set_max_width(max_width);
         let response = ui.add(
@@ -1164,6 +1267,15 @@ fn add_top_status(ui: &mut egui::Ui, status: &str, colors: ChromeColors) {
         );
         mark_as_polite_status(&response);
     });
+}
+
+fn top_status_max_width(ui: &egui::Ui) -> f32 {
+    let responsive_limit = if ui.ctx().content_rect().width() < 720.0 {
+        TOP_STATUS_COMPACT_MAX_WIDTH
+    } else {
+        TOP_STATUS_MAX_WIDTH
+    };
+    ui.available_width().min(responsive_limit)
 }
 
 fn mark_as_polite_status(response: &egui::Response) {
@@ -1668,6 +1780,78 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     });
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseUpdate);
+    }
+}
+
+fn render_save_overwrite_confirmation(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+    let colors = chrome_colors(ui);
+    let mut confirm_clicked = false;
+    let mut cancel_clicked = false;
+    let focus_state_id = egui::Id::new(SAVE_OVERWRITE_FOCUS_STATE);
+    let focus_cancel = ui.ctx().data_mut(|data| {
+        if data.get_temp::<bool>(focus_state_id).unwrap_or(false) {
+            false
+        } else {
+            data.insert_temp(focus_state_id, true);
+            true
+        }
+    });
+    let response = egui::Modal::new(egui::Id::new("save_overwrite_confirmation"))
+        .backdrop_color(Color32::from_black_alpha(140))
+        .frame(
+            Frame::new()
+                .fill(colors.panel)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20)),
+        )
+        .show(ui.ctx(), |ui| {
+            ui.set_max_width(430.0);
+            ui.heading(
+                RichText::new("Replace existing file?")
+                    .size(25.0)
+                    .color(colors.text),
+            );
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(
+                    "The selected Save As destination exists. Replace that exact file with this exported copy?",
+                )
+                .size(13.5)
+                .color(colors.text),
+            );
+            ui.label(
+                RichText::new(
+                    "viewr rechecks this exact file immediately before replacement and stops if that check detects a change.",
+                )
+                .size(12.5)
+                .color(colors.muted),
+            );
+            ui.add_space(14.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Replace file").clicked() {
+                    confirm_clicked = true;
+                }
+                let cancel = ui.button("Cancel");
+                if focus_cancel {
+                    cancel.request_focus();
+                }
+                if cancel.clicked() {
+                    cancel_clicked = true;
+                }
+            });
+        });
+    response.response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Window,
+            true,
+            "Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.",
+        )
+    });
+    if confirm_clicked {
+        actions.push(UiAction::ConfirmSaveOverwrite);
+    } else if cancel_clicked || response.should_close() {
+        actions.push(UiAction::CancelSaveOverwrite);
     }
 }
 
@@ -3369,11 +3553,12 @@ mod tests {
     use super::OPEN_WITH_HELP;
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
-        FilmstripItem, LOCAL_PRIVACY_SUMMARY, OPEN_SCOPE_SUMMARY, PREVIEW_RECOVERY_STATUS,
-        SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
-        appearance_menu, chrome_colors_for, context_tool_button, crop_pixel_bounds,
-        image_open_status, menu_tool_button, panels_menu, rating_filter_menu, rating_menu,
-        rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
+        EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
+        OPEN_SCOPE_SUMMARY, PREVIEW_RECOVERY_STATUS, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
+        TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
+        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
+        crop_pixel_bounds, image_open_status, menu_tool_button, panels_menu, rating_filter_menu,
+        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3460,6 +3645,7 @@ mod tests {
             is_opening: false,
             load_error: None,
             save_busy: false,
+            save_overwrite_pending: false,
             save_recovery_unsettled: false,
             crop_busy: false,
             crop_recovery_unsettled: false,
@@ -3986,6 +4172,8 @@ mod tests {
     fn ui_action_variants_exist_for_toolbar() {
         let _ = UiAction::OpenFolder;
         let _ = UiAction::Reload;
+        let _ = UiAction::ConfirmSaveOverwrite;
+        let _ = UiAction::CancelSaveOverwrite;
         let _ = UiAction::ToggleCrop;
         let _ = UiAction::ApplyCrop;
         let _ = UiAction::CancelCrop;
@@ -4505,6 +4693,90 @@ mod tests {
     }
 
     #[test]
+    fn save_overwrite_confirmation_is_explicit_and_focuses_cancel() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.save_overwrite_pending = true;
+
+        let _ = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("Save As overwrite AccessKit update should be generated");
+        let cancel_id = update
+            .nodes
+            .iter()
+            .find_map(|(id, node)| {
+                (node.role() == egui::accesskit::Role::Button && node.label() == Some("Cancel"))
+                    .then_some(*id)
+            })
+            .expect("Save As overwrite Cancel button");
+        assert_eq!(
+            update.focus, cancel_id,
+            "the non-destructive overwrite action should receive initial keyboard focus"
+        );
+        let mut enabled_buttons = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| {
+                (node.role() == egui::accesskit::Role::Button && !node.is_disabled())
+                    .then(|| node.label().map(str::to_owned))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        enabled_buttons.sort_unstable();
+        assert_eq!(
+            enabled_buttons,
+            ["Cancel", "Replace file"],
+            "only the overwrite dialog may expose enabled accessibility actions"
+        );
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Replace existing file?",
+            "The selected Save As destination exists.",
+            "viewr rechecks this exact file immediately before replacement",
+            "Replace file",
+            "Cancel",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing Save As overwrite content: {expected}; exposed: {exposed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn save_overwrite_modal_discards_every_background_action() {
+        let mut frame = accessibility_test_frame();
+        frame.save_overwrite_pending = true;
+        let actions = actions_owned_by_modal(
+            vec![
+                UiAction::Open,
+                UiAction::Trash,
+                UiAction::ConfirmSaveOverwrite,
+                UiAction::CancelSaveOverwrite,
+                UiAction::ToggleHeal,
+            ],
+            &frame,
+        );
+
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(actions[0], UiAction::ConfirmSaveOverwrite));
+        assert!(matches!(actions[1], UiAction::CancelSaveOverwrite));
+    }
+
+    #[test]
     fn first_rating_write_discloses_file_metadata_effects_and_actions() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -4866,10 +5138,105 @@ mod tests {
             .expect("AccessKit update should be generated");
         assert!(update.nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Label
-                && node.value()
-                    == Some("External app opened source. Press F5 to reload possible changes.")
+                && node.value() == Some(EXTERNAL_EDIT_ACCESSIBLE_STATUS)
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
+    }
+
+    #[test]
+    fn failed_reload_keeps_the_external_handoff_reminder_visible() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.external_edit_pending = true;
+        frame.selected_file_name = Some("target.png".to_owned());
+        frame.load_error = Some("Could not decode this image".to_owned());
+        let mut input = accessibility_input();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(640.0, 480.0),
+        ));
+        let mut badge_text_width = 0.0;
+        let mut primary_token_width = 0.0;
+        let output = context.run_ui(input, |ui| {
+            badge_text_width = ui
+                .painter()
+                .layout_no_wrap(
+                    EXTERNAL_EDIT_BADGE.to_owned(),
+                    egui::FontId::proportional(11.5),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x;
+            primary_token_width = ui
+                .painter()
+                .layout_no_wrap(
+                    "Could not".to_owned(),
+                    egui::FontId::proportional(12.5),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x;
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(EXTERNAL_EDIT_BADGE)),
+            "the visual badge must not duplicate speech"
+        );
+        let status = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Label
+                    && node.value()
+                        == Some(
+                            "External app opened the displayed source. Press F5 to reload possible changes. Could not open target.png",
+                        )
+                    && node.live() == Some(egui::accesskit::Live::Polite)
+            })
+            .expect("combined external-edit and failed-reload status");
+        let status_bounds = status.bounds().expect("top status bounds");
+        assert!(
+            f64::from(primary_token_width) <= status_bounds.x1 - status_bounds.x0,
+            "the compact primary status token must fit beside the external badge"
+        );
+
+        let layout_context = egui::Context::default();
+        let mut layout_input = accessibility_input();
+        layout_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(TOP_STATUS_COMPACT_MAX_WIDTH, 48.0),
+        ));
+        let mut responses = None;
+        let _ = layout_context.run_ui(layout_input, |ui| {
+            responses = add_top_status_with_external_edit(
+                ui,
+                "Could not open target.png",
+                true,
+                chrome_colors_for(crate::theme::Mode::Dark),
+            );
+        });
+        let (badge, primary) = responses.expect("external badge and primary status responses");
+        assert!(
+            badge_text_width <= badge.rect.width(),
+            "the complete external badge must be visible"
+        );
+        assert!(
+            primary_token_width <= primary.rect.width(),
+            "the recognizable primary status token must be visible"
+        );
+        assert!(
+            badge.rect.width() + primary.rect.width() + 4.0 <= TOP_STATUS_COMPACT_MAX_WIDTH + 1.0,
+            "both visible status signals must stay inside the compact allocation"
+        );
     }
 
     #[test]

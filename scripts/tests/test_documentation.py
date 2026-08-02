@@ -165,6 +165,8 @@ class DocumentationTests(unittest.TestCase):
                 self.assertIn(command, workflow)
                 self.assertIn(command, verification_guide)
         self.assertRegex(workflow, r"cargo llvm-cov --workspace\s+--locked")
+        self.assertEqual(workflow.count("--exclude jxl-color"), 1)
+        self.assertEqual(workflow.count("--exclude jxl-render"), 1)
         exclusion_matches = re.findall(
             r"--ignore-filename-regex '([^']+)'",
             workflow,

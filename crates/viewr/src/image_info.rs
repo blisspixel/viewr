@@ -82,6 +82,9 @@ impl ImageDetails {
     /// Inspect facts through the retained handle that supplied the accepted pixels.
     #[must_use]
     pub(crate) fn load_from_source(path: &Path, source: &crate::fs::ImageSource) -> Self {
+        if !source.version_is_current() {
+            return Self::default();
+        }
         let mut details = Self {
             file_bytes: source
                 .clone_for_decode()
@@ -91,16 +94,20 @@ impl ImageDetails {
             format: detected_format_from_source(path, source),
             ..Self::default()
         };
-        let Some(metadata) = source
-            .clone_for_decode()
-            .ok()
-            .and_then(load_bounded_metadata_from_file)
-        else {
+        let metadata = load_bounded_metadata_from_source(source);
+        if !source.version_is_current() {
+            return Self::default();
+        }
+        let Some(metadata) = metadata else {
             return details;
         };
 
         inspect_metadata(&mut details, &metadata);
-        details
+        if source.version_is_current() {
+            details
+        } else {
+            Self::default()
+        }
     }
 }
 
@@ -214,7 +221,17 @@ pub(crate) fn load_bounded_metadata(path: &Path) -> Option<Metadata> {
     load_bounded_metadata_from_file(file)
 }
 
-fn load_bounded_metadata_from_file(file: std::fs::File) -> Option<Metadata> {
+pub(crate) fn load_bounded_metadata_from_source(
+    source: &crate::fs::ImageSource,
+) -> Option<Metadata> {
+    if !source.version_is_current() {
+        return None;
+    }
+    let metadata = load_bounded_metadata_from_file(source.clone_for_decode().ok()?);
+    source.version_is_current().then_some(metadata).flatten()
+}
+
+fn load_bounded_metadata_from_file(file: impl Read + Seek) -> Option<Metadata> {
     let tiff = read_bounded_exif_file(file)?;
     if !validate_tiff_payload(&tiff) {
         return None;
@@ -230,7 +247,7 @@ fn read_bounded_exif(path: &Path) -> Option<Vec<u8>> {
     read_bounded_exif_file(file)
 }
 
-fn read_bounded_exif_file(file: std::fs::File) -> Option<Vec<u8>> {
+fn read_bounded_exif_file(file: impl Read + Seek) -> Option<Vec<u8>> {
     let mut reader = BufReader::new(file);
     let mut signature = [0_u8; 12];
     let signature_len = reader.read(&mut signature).ok()?;
@@ -1383,7 +1400,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_source_details_ignore_a_later_path_replacement() {
+    fn accepted_source_details_fail_closed_after_a_later_path_replacement() {
         let workspace = TempWorkspace::new("image_details_source_binding").unwrap();
         let path = workspace.path().join("details.jpg");
         image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
@@ -1403,8 +1420,36 @@ mod tests {
         replacement_metadata.write_to_file(&path).unwrap();
 
         let details = ImageDetails::load_from_source(&path, &source);
-        assert_eq!(details.camera.as_deref(), Some("Original Camera"));
-        assert_ne!(details.camera.as_deref(), Some("Replacement Camera"));
+        assert_eq!(details, ImageDetails::default());
+    }
+
+    #[test]
+    fn accepted_source_details_reject_an_in_place_rewrite() {
+        let workspace = TempWorkspace::new("image_details_source_version").unwrap();
+        let path = workspace.path().join("details.jpg");
+        let replacement = workspace.path().join("replacement.jpg");
+        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
+            .save(&path)
+            .unwrap();
+        let mut original_metadata = Metadata::new();
+        original_metadata.set_tag(ExifTag::Model("Original Camera".into()));
+        original_metadata.write_to_file(&path).unwrap();
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+
+        image::RgbImage::from_pixel(4, 3, image::Rgb([9, 8, 7]))
+            .save(&replacement)
+            .unwrap();
+        let mut replacement_metadata = Metadata::new();
+        replacement_metadata.set_tag(ExifTag::Model("Replacement Camera".into()));
+        replacement_metadata.write_to_file(&replacement).unwrap();
+        std::fs::write(&path, std::fs::read(&replacement).unwrap()).unwrap();
+
+        assert_eq!(
+            source.matches_path(&path),
+            crate::fs::ImageSourceMatch::Changed
+        );
+        let details = ImageDetails::load_from_source(&path, &source);
+        assert_eq!(details, ImageDetails::default());
     }
 
     #[test]

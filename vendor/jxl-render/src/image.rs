@@ -747,13 +747,16 @@ impl<S: Sample> RenderedImage<S> {
         *grid_lock = FrameRender::Rendering;
         drop(grid_lock);
 
-        composite(
+        if let Err(error) = composite(
             &self.image.frame,
             &mut grid,
             self.image.refs.clone(),
             oriented_image_region,
             pool,
-        )?;
+        ) {
+            drop(self.image.state.publish_composition_error());
+            return Err(error);
+        }
 
         let image = Arc::new(grid);
         drop(
@@ -764,7 +767,7 @@ impl<S: Sample> RenderedImage<S> {
     }
 
     pub(crate) fn try_take_blended(&self) -> Option<ImageWithRegion> {
-        let mut grid_lock = self.image.render.lock().unwrap();
+        let mut grid_lock = self.image.state.render.lock().unwrap();
         match std::mem::take(&mut *grid_lock) {
             FrameRender::Blended(image) => {
                 let cloned_image = Arc::clone(&image);

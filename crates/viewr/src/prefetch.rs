@@ -125,6 +125,24 @@ impl PrefetchSchedule {
         })
     }
 
+    /// Submit a speculative decode bound to the regular object observed by scanning.
+    pub(crate) fn request_scanned<N, S>(
+        &mut self,
+        path: PathBuf,
+        provenance: crate::fs::ScanProvenance,
+        notify: N,
+        schedule: S,
+    ) -> bool
+    where
+        N: FnOnce() + Send + 'static,
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
+    {
+        self.request_with(path, notify, schedule, move |path, cancellation| {
+            DecodedImage::load_scanned_background_if_current(path, provenance, cancellation, 0)
+                .map_err(|_| PrefetchFailure::Decode)
+        })
+    }
+
     fn request_with<N, S, W>(&mut self, path: PathBuf, notify: N, schedule: S, worker: W) -> bool
     where
         N: FnOnce() + Send + 'static,

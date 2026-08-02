@@ -3,13 +3,43 @@
 //! unit-tested, and never block the UI thread when used by the scanner.
 
 use std::cmp::Ordering;
+use std::ffi::OsStr;
 #[cfg(target_os = "windows")]
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io;
-use std::io::{Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
 use std::str::Chars;
+use std::sync::{Mutex, MutexGuard};
+
+pub(crate) const MAX_FOLDER_IMAGES: usize = 100_000;
+pub(crate) const MAX_FOLDER_PATH_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+pub(crate) enum ScanImagesError {
+    Io(io::Error),
+    Cancelled,
+    LimitExceeded,
+    PathBudgetExceeded,
+    WorkerStopped,
+}
+
+impl std::fmt::Display for ScanImagesError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => error.fmt(formatter),
+            Self::Cancelled => formatter.write_str("folder scan was superseded"),
+            Self::LimitExceeded => formatter.write_str("folder image limit exceeded"),
+            Self::PathBudgetExceeded => {
+                formatter.write_str("folder path-data safety limit exceeded")
+            }
+            Self::WorkerStopped => formatter.write_str("folder scan worker stopped unexpectedly"),
+        }
+    }
+}
+
+impl std::error::Error for ScanImagesError {}
 
 /// Result of comparing an accepted decode source with a current pathname entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +70,32 @@ struct FileIdentity {
     file_id: [u8; 16],
 }
 
+/// Opaque identity evidence captured while a regular folder entry is scanned.
+#[derive(Clone, Copy)]
+pub(crate) struct ScanProvenance {
+    identity: FileIdentity,
+    version: FileVersion,
+}
+
+/// One automatically discovered image and the object identity observed at scan time.
+#[derive(Clone)]
+pub(crate) struct ScannedImage {
+    path: PathBuf,
+    provenance: ScanProvenance,
+}
+
+impl ScannedImage {
+    #[must_use]
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[must_use]
+    pub(crate) fn into_parts(self) -> (PathBuf, ScanProvenance) {
+        (self.path, self.provenance)
+    }
+}
+
 #[cfg(unix)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileVersion {
@@ -64,9 +120,46 @@ struct FileVersion {
 /// cached, or prepared for a guarded action. Identity values and paths are deliberately never exposed.
 pub(crate) struct ImageSource {
     file: std::fs::File,
+    cursor: Mutex<()>,
     identity: Option<FileIdentity>,
     version: Option<FileVersion>,
     markable: bool,
+}
+
+/// Serialized reader for one retained source handle.
+///
+/// `File::try_clone` duplicates a handle but shares its cursor on supported
+/// platforms. Retaining this guard for the reader lifetime prevents concurrent
+/// seeks from corrupting accepted-source decode, inspection, or export reads.
+pub(crate) struct ImageSourceReader<'a> {
+    file: std::fs::File,
+    _cursor: MutexGuard<'a, ()>,
+}
+
+impl std::ops::Deref for ImageSourceReader<'_> {
+    type Target = std::fs::File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.file
+    }
+}
+
+impl Read for ImageSourceReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.file.read(buffer)
+    }
+}
+
+impl Seek for ImageSourceReader<'_> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.file.seek(position)
+    }
+}
+
+/// Retained identity of the directory selected as a Save As parent.
+pub(crate) struct DirectorySource {
+    file: std::fs::File,
+    identity: FileIdentity,
 }
 
 impl std::fmt::Debug for ImageSource {
@@ -102,6 +195,68 @@ impl ImageSource {
                 "image source must be a regular file",
             ));
         };
+        Self::from_opened_file(file, markable)
+    }
+
+    /// Open a regular object without following its final path component.
+    pub(crate) fn open_regular(path: &Path) -> io::Result<Self> {
+        Self::from_opened_file(open_regular_no_follow(path)?, true)
+    }
+
+    /// Open an automatically discovered entry without following its final link
+    /// and require the same filesystem object observed by the folder scan.
+    pub(crate) fn open_scanned(path: &Path, provenance: ScanProvenance) -> io::Result<Self> {
+        let file = open_regular_no_follow(path)?;
+        let source = Self::from_opened_file(file, true)?;
+        if source.identity != Some(provenance.identity)
+            || source.version != Some(provenance.version)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "scanned image source changed before it was opened",
+            ));
+        }
+        Ok(source)
+    }
+
+    /// Return scan-compatible identity evidence for this retained regular source.
+    #[must_use]
+    pub(crate) fn scan_provenance(&self) -> Option<ScanProvenance> {
+        self.markable.then_some(())?;
+        self.identity
+            .zip(self.version)
+            .map(|(identity, version)| ScanProvenance { identity, version })
+    }
+
+    /// Snapshot the retained handle's current identity and version. Restore
+    /// uses this after a completed Trash round trip because rename operations
+    /// legitimately change version evidence while preserving object identity.
+    #[must_use]
+    pub(crate) fn current_scan_provenance(&self) -> Option<ScanProvenance> {
+        self.markable.then_some(())?;
+        let metadata = self.file.metadata().ok()?;
+        metadata_is_markable_regular(&metadata).then_some(())?;
+        Some(ScanProvenance {
+            identity: file_identity(&self.file, &metadata).ok()?,
+            version: file_version(&self.file, &metadata).ok()?,
+        })
+    }
+
+    /// Reopen the current regular pathname and require it to be this retained
+    /// object, producing a fresh independent cursor and version snapshot.
+    pub(crate) fn reopen_current_regular(&self, path: &Path) -> io::Result<Self> {
+        let refreshed = Self::open_regular(path)?;
+        if self.same_object(&refreshed) {
+            Ok(refreshed)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "restored path does not name the retained source object",
+            ))
+        }
+    }
+
+    fn from_opened_file(file: std::fs::File, markable: bool) -> io::Result<Self> {
         let opened = file.metadata()?;
         if !opened.is_file() {
             return Err(io::Error::new(
@@ -119,17 +274,44 @@ impl ImageSource {
         let version = file_version(&file, &opened).ok();
         Ok(Self {
             file,
+            cursor: Mutex::new(()),
             identity,
             version,
             markable,
         })
     }
 
-    /// Duplicate the accepted source handle and rewind it for a decoder.
-    pub(crate) fn clone_for_decode(&self) -> io::Result<std::fs::File> {
+    /// Duplicate and rewind the accepted source while owning its shared cursor.
+    pub(crate) fn clone_for_decode(&self) -> io::Result<ImageSourceReader<'_>> {
+        let cursor = self
+            .cursor
+            .lock()
+            .map_err(|_| io::Error::other("image source reader lock was poisoned"))?;
         let mut file = self.file.try_clone()?;
         file.seek(SeekFrom::Start(0))?;
-        Ok(file)
+        Ok(ImageSourceReader {
+            file,
+            _cursor: cursor,
+        })
+    }
+
+    /// Whether all available version evidence still matches the accepted object.
+    #[must_use]
+    pub(crate) fn version_is_current(&self) -> bool {
+        let Ok(metadata) = self.file.metadata() else {
+            return false;
+        };
+        self.version.is_some_and(|expected| {
+            file_version(&self.file, &metadata).is_ok_and(|current| current == expected)
+        })
+    }
+
+    /// Whether another retained source names the exact same filesystem object.
+    #[must_use]
+    pub(crate) fn same_object(&self, other: &Self) -> bool {
+        self.identity
+            .zip(other.identity)
+            .is_some_and(|(left, right)| left == right)
     }
 
     #[cfg(test)]
@@ -216,6 +398,84 @@ impl ImageSource {
     }
 }
 
+impl DirectorySource {
+    /// Open a canonical directory without following its final component.
+    pub(crate) fn open(path: &Path) -> io::Result<Self> {
+        let entry = std::fs::symlink_metadata(path)?;
+        if !metadata_is_plain_directory(&entry) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Save As parent must be an ordinary directory",
+            ));
+        }
+        let file = open_directory_no_follow(path)?;
+        let opened = file.metadata()?;
+        if !metadata_is_plain_directory(&opened) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Save As parent changed while it was opened",
+            ));
+        }
+        let identity = file_identity(&file, &opened)?;
+        Ok(Self { file, identity })
+    }
+
+    fn open_regular(&self, name: &OsStr) -> io::Result<std::fs::File> {
+        open_regular_at(&self.file, name)
+    }
+
+    /// Open one regular child relative to this retained directory without
+    /// following the child entry or re-resolving the parent pathname.
+    pub(crate) fn open_image(&self, name: &OsStr) -> io::Result<ImageSource> {
+        ImageSource::from_opened_file(self.open_regular(name)?, true)
+    }
+
+    /// Whether `path` still resolves to the retained directory object.
+    #[must_use]
+    pub(crate) fn matches_path(&self, path: &Path) -> bool {
+        let Ok(entry) = std::fs::symlink_metadata(path) else {
+            return false;
+        };
+        if !metadata_is_plain_directory(&entry) {
+            return false;
+        }
+        let Ok(file) = open_directory_no_follow(path) else {
+            return false;
+        };
+        let Ok(opened) = file.metadata() else {
+            return false;
+        };
+        metadata_is_plain_directory(&opened)
+            && file_identity(&file, &opened).is_ok_and(|identity| identity == self.identity)
+    }
+}
+
+/// Whether `path` still names the exact retained regular file without
+/// following its final component.
+#[must_use]
+pub(crate) fn regular_path_matches_file(path: &Path, retained: &std::fs::File) -> bool {
+    let Ok(retained_metadata) = retained.metadata() else {
+        return false;
+    };
+    if !metadata_is_markable_regular(&retained_metadata) {
+        return false;
+    }
+    let Ok(candidate) = open_regular_no_follow(path) else {
+        return false;
+    };
+    let Ok(candidate_metadata) = candidate.metadata() else {
+        return false;
+    };
+    metadata_is_markable_regular(&candidate_metadata)
+        && matches!(
+            (
+                file_identity(retained, &retained_metadata),
+                file_identity(&candidate, &candidate_metadata)
+            ),
+            (Ok(expected), Ok(actual)) if expected == actual
+        )
+}
+
 #[cfg(target_os = "windows")]
 fn metadata_is_markable_regular(metadata: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
@@ -224,9 +484,22 @@ fn metadata_is_markable_regular(metadata: &std::fs::Metadata) -> bool {
     metadata.is_file() && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
 }
 
+#[cfg(target_os = "windows")]
+fn metadata_is_plain_directory(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    metadata.is_dir() && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
 #[cfg(not(target_os = "windows"))]
 fn metadata_is_markable_regular(metadata: &std::fs::Metadata) -> bool {
     metadata.is_file()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn metadata_is_plain_directory(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_dir()
 }
 
 #[cfg(unix)]
@@ -241,9 +514,10 @@ fn open_regular_no_follow(path: &Path) -> io::Result<std::fs::File> {
 
     #[cfg(target_os = "linux")]
     {
-        open_with(libc::O_NOFOLLOW | libc::O_NOATIME).or_else(|error| {
+        let base_flags = libc::O_NOFOLLOW | libc::O_NONBLOCK;
+        open_with(base_flags | libc::O_NOATIME).or_else(|error| {
             if error.kind() == io::ErrorKind::PermissionDenied {
-                open_with(libc::O_NOFOLLOW)
+                open_with(base_flags)
             } else {
                 Err(error)
             }
@@ -252,7 +526,108 @@ fn open_regular_no_follow(path: &Path) -> io::Result<std::fs::File> {
 
     #[cfg(not(target_os = "linux"))]
     {
-        open_with(libc::O_NOFOLLOW)
+        open_with(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+    }
+}
+
+#[cfg(unix)]
+fn open_directory_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
+    options.open(path)
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)] // one audited handle-relative, no-follow folder-entry open
+fn open_regular_at(directory: &std::fs::File, name: &OsStr) -> io::Result<std::fs::File> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let name = CString::new(name.as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "folder entry name contains an interior NUL",
+        )
+    })?;
+    let open_with = |flags| {
+        // SAFETY: `directory` owns a live directory descriptor, `name` is a
+        // NUL-terminated single entry name from `read_dir`, and a successful
+        // descriptor is transferred immediately into `File` ownership.
+        let descriptor = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+        if descriptor < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            // SAFETY: `openat` returned a new owned descriptor on success.
+            Ok(unsafe { std::fs::File::from_raw_fd(descriptor) })
+        }
+    };
+    let base_flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK;
+    #[cfg(target_os = "linux")]
+    {
+        open_with(base_flags | libc::O_NOATIME).or_else(|error| {
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                open_with(base_flags)
+            } else {
+                Err(error)
+            }
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        open_with(base_flags)
+    }
+}
+
+/// Atomically replace an existing Windows file, optionally retaining a backup.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // one audited failure-atomic Windows replacement boundary
+pub(crate) fn replace_file(
+    target: &Path,
+    replacement: &Path,
+    backup: Option<&Path>,
+) -> io::Result<()> {
+    use std::iter;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let replacement = replacement
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let backup = backup.map(|path| {
+        path.as_os_str()
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>()
+    });
+    let backup_pointer = backup.as_ref().map_or(std::ptr::null(), Vec::as_ptr);
+    // SAFETY: All three paths are stable, NUL-terminated UTF-16 buffers for the
+    // duration of the call. Flags are zero, and no reserved pointers are used.
+    let succeeded = unsafe {
+        ReplaceFileW(
+            target.as_ptr(),
+            replacement.as_ptr(),
+            backup_pointer,
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if succeeded == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -269,6 +644,100 @@ fn open_regular_no_follow(path: &Path) -> io::Result<std::fs::File> {
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     options.open(path)
+}
+
+#[cfg(target_os = "windows")]
+fn open_directory_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    options.open(path)
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // one audited handle-relative, no-follow folder-entry open
+fn open_regular_at(directory: &std::fs::File, name: &OsStr) -> io::Result<std::fs::File> {
+    use std::mem::{MaybeUninit, size_of};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
+    use windows_sys::Wdk::Storage::FileSystem::{
+        FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
+        NtCreateFile,
+    };
+    use windows_sys::Win32::Foundation::{HANDLE, RtlNtStatusToDosError, UNICODE_STRING};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
+    };
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+
+    let mut name = name.encode_wide().collect::<Vec<_>>();
+    let byte_length = name
+        .len()
+        .checked_mul(size_of::<u16>())
+        .and_then(|length| u16::try_from(length).ok())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "folder entry name is too long")
+        })?;
+    let unicode_name = UNICODE_STRING {
+        Length: byte_length,
+        MaximumLength: byte_length,
+        Buffer: name.as_mut_ptr(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>())
+            .map_err(|_| io::Error::other("object attribute structure is too large"))?,
+        RootDirectory: directory.as_raw_handle() as HANDLE,
+        ObjectName: &raw const unicode_name,
+        Attributes: 0x40,
+        SecurityDescriptor: std::ptr::null(),
+        SecurityQualityOfService: std::ptr::null(),
+    };
+    let mut handle: HANDLE = std::ptr::null_mut();
+    let mut status_block = MaybeUninit::<IO_STATUS_BLOCK>::zeroed();
+    // SAFETY: The directory handle, UTF-16 name, object attributes, output
+    // handle, and status storage remain valid for the synchronous call. The
+    // root handle scopes resolution to the enumerated directory object, and
+    // the create options open neither directories nor reparse targets.
+    let status = unsafe {
+        NtCreateFile(
+            &raw mut handle,
+            FILE_GENERIC_READ,
+            &raw const attributes,
+            status_block.as_mut_ptr(),
+            std::ptr::null(),
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if status < 0 {
+        // SAFETY: Converting an NTSTATUS returned by `NtCreateFile` is a pure
+        // platform error-code translation.
+        let code = unsafe { RtlNtStatusToDosError(status) };
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(code).unwrap_or(i32::MAX),
+        ));
+    }
+    if handle.is_null() {
+        return Err(io::Error::other(
+            "handle-relative folder entry open returned no handle",
+        ));
+    }
+    // SAFETY: A successful `NtCreateFile` returned a new owned file handle.
+    Ok(unsafe { std::fs::File::from_raw_handle(handle) })
 }
 
 #[cfg(unix)]
@@ -547,25 +1016,173 @@ fn windows_os_str_eq_ignore_case(left: &OsStr, right: &OsStr) -> bool {
 /// # Errors
 /// Returns the filesystem error from opening `directory`.
 pub fn scan_images(directory: &Path) -> io::Result<Vec<PathBuf>> {
-    let directory = directory.canonicalize()?;
-    let entries = std::fs::read_dir(directory)?;
-    let mut files = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            if !is_supported_image(&path) {
-                return None;
+    scan_images_with_limit(directory, MAX_FOLDER_IMAGES, MAX_FOLDER_PATH_BYTES, || true).map_err(
+        |error| match error {
+            ScanImagesError::Io(error) => error,
+            ScanImagesError::Cancelled => {
+                io::Error::new(io::ErrorKind::Interrupted, "folder scan was superseded")
             }
-            let file_type = entry.file_type().ok()?;
-            file_type.is_file().then_some(path)
-        })
-        .collect::<Vec<_>>();
-    files.sort_by(|a, b| {
-        let a_name = a.file_name().and_then(|name| name.to_str()).unwrap_or("");
-        let b_name = b.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            ScanImagesError::LimitExceeded => {
+                io::Error::new(io::ErrorKind::InvalidData, "folder image limit exceeded")
+            }
+            ScanImagesError::PathBudgetExceeded => io::Error::new(
+                io::ErrorKind::InvalidData,
+                "folder path-data safety limit exceeded",
+            ),
+            ScanImagesError::WorkerStopped => {
+                io::Error::other("folder scan worker stopped unexpectedly")
+            }
+        },
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn scan_images_while(
+    directory: &Path,
+    keep_going: impl FnMut() -> bool,
+) -> Result<Vec<PathBuf>, ScanImagesError> {
+    scan_images_with_limit(
+        directory,
+        MAX_FOLDER_IMAGES,
+        MAX_FOLDER_PATH_BYTES,
+        keep_going,
+    )
+}
+
+pub(crate) fn scan_image_entries_while(
+    directory: &Path,
+    keep_going: impl FnMut() -> bool,
+) -> Result<Vec<ScannedImage>, ScanImagesError> {
+    scan_image_entries_with_limit(
+        directory,
+        MAX_FOLDER_IMAGES,
+        MAX_FOLDER_PATH_BYTES,
+        keep_going,
+    )
+}
+
+fn scan_images_with_limit(
+    directory: &Path,
+    max_files: usize,
+    max_path_bytes: usize,
+    keep_going: impl FnMut() -> bool,
+) -> Result<Vec<PathBuf>, ScanImagesError> {
+    scan_image_entries_with_limit(directory, max_files, max_path_bytes, keep_going)
+        .map(|entries| entries.into_iter().map(|entry| entry.path).collect())
+}
+
+fn scan_image_entries_with_limit(
+    directory: &Path,
+    max_files: usize,
+    max_path_bytes: usize,
+    keep_going: impl FnMut() -> bool,
+) -> Result<Vec<ScannedImage>, ScanImagesError> {
+    scan_image_entries_with_hook(directory, max_files, max_path_bytes, keep_going, || {})
+}
+
+fn scan_image_entries_with_hook(
+    directory: &Path,
+    max_files: usize,
+    max_path_bytes: usize,
+    mut keep_going: impl FnMut() -> bool,
+    after_directory_open: impl FnOnce(),
+) -> Result<Vec<ScannedImage>, ScanImagesError> {
+    if !keep_going() {
+        return Err(ScanImagesError::Cancelled);
+    }
+    let directory = directory.canonicalize().map_err(ScanImagesError::Io)?;
+    let directory_source = DirectorySource::open(&directory).map_err(ScanImagesError::Io)?;
+    after_directory_open();
+    let entries = std::fs::read_dir(&directory).map_err(ScanImagesError::Io)?;
+    if !directory_source.matches_path(&directory) {
+        return Err(ScanImagesError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "folder changed while its entries were opened",
+        )));
+    }
+    let mut files = Vec::new();
+    let mut path_bytes = 0_usize;
+    for entry in entries {
+        if !keep_going() {
+            return Err(ScanImagesError::Cancelled);
+        }
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        if !is_supported_image(&path) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let Ok(file) = directory_source.open_regular(&entry.file_name()) else {
+            continue;
+        };
+        let Ok(opened) = file.metadata() else {
+            continue;
+        };
+        if !metadata_is_markable_regular(&opened) {
+            continue;
+        }
+        let Ok(identity) = file_identity(&file, &opened) else {
+            continue;
+        };
+        let Ok(version) = file_version(&file, &opened) else {
+            continue;
+        };
+        if files.len() == max_files {
+            return Err(ScanImagesError::LimitExceeded);
+        }
+        path_bytes = path_bytes
+            .checked_add(path.as_os_str().as_encoded_bytes().len())
+            .filter(|bytes| *bytes <= max_path_bytes)
+            .ok_or(ScanImagesError::PathBudgetExceeded)?;
+        files.push(ScannedImage {
+            path,
+            provenance: ScanProvenance { identity, version },
+        });
+    }
+    if !keep_going() {
+        return Err(ScanImagesError::Cancelled);
+    }
+    let completed_sort = sort_while(&mut files, &mut keep_going, |a, b| {
+        let a_name = a
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let b_name = b
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         natural_cmp(a_name, b_name)
     });
+    if !completed_sort || !keep_going() {
+        return Err(ScanImagesError::Cancelled);
+    }
     Ok(files)
+}
+
+fn sort_while<T>(
+    values: &mut [T],
+    keep_going: &mut impl FnMut() -> bool,
+    mut compare: impl FnMut(&T, &T) -> Ordering,
+) -> bool {
+    let mut cancelled = false;
+    values.sort_by(|left, right| {
+        if cancelled || !keep_going() {
+            cancelled = true;
+            Ordering::Equal
+        } else {
+            compare(left, right)
+        }
+    });
+    !cancelled
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -652,14 +1269,19 @@ pub fn open_file_no_atime(path: &Path) -> io::Result<std::fs::File> {
 mod tests {
     #[cfg(windows)]
     use super::canonical_existing_file_path;
+    #[cfg(unix)]
+    use super::scan_image_entries_with_hook;
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_file_path, is_core_format,
-        is_supported_image, is_worker_format, natural_cmp, scan_images, supported_extensions,
+        is_supported_image, is_worker_format, natural_cmp, scan_image_entries_while, scan_images,
+        scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
     use std::fs;
+    use std::io::Read;
     use std::path::Path;
+    use std::sync::{Arc, Barrier};
 
     #[test]
     fn recognizes_common_images() {
@@ -791,11 +1413,323 @@ mod tests {
     }
 
     #[test]
+    fn scanned_entry_rejects_an_in_place_rewrite() {
+        let workspace = TempWorkspace::new("folder_scan_version").unwrap();
+        let path = workspace.path().join("image.png");
+        fs::write(&path, b"scanned object").unwrap();
+        let entry = scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let (scanned_path, provenance) = entry.into_parts();
+
+        fs::write(&path, b"rewritten object with a different length").unwrap();
+
+        assert!(super::ImageSource::open_scanned(&scanned_path, provenance).is_err());
+    }
+
+    #[test]
+    fn restored_handle_can_capture_fresh_version_bound_provenance() {
+        let workspace = TempWorkspace::new("restored_source_version").unwrap();
+        let path = workspace.path().join("image.png");
+        let trashed = workspace.path().join("trashed.png");
+        fs::write(&path, b"restored object").unwrap();
+        let source = super::ImageSource::open_regular(&path).unwrap();
+        let original_provenance = source.scan_provenance().unwrap();
+        fs::rename(&path, &trashed).unwrap();
+        fs::rename(&trashed, &path).unwrap();
+
+        assert!(super::ImageSource::open_scanned(&path, original_provenance).is_err());
+        let restored_provenance = source.current_scan_provenance().unwrap();
+        assert!(super::ImageSource::open_scanned(&path, restored_provenance).is_ok());
+        let refreshed = source.reopen_current_regular(&path).unwrap();
+        assert!(refreshed.version_is_current());
+        assert!(source.same_object(&refreshed));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(unsafe_code)] // creates one local FIFO fixture through the POSIX API
+    fn no_follow_regular_opens_reject_a_fifo_without_blocking() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::time::{Duration, Instant};
+
+        let workspace = TempWorkspace::new("regular_open_fifo").unwrap();
+        let path = workspace.path().join("image.png");
+        let raw_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `raw_path` is a live NUL-terminated local test path and the
+        // mode grants access only to the current user.
+        assert_eq!(unsafe { libc::mkfifo(raw_path.as_ptr(), 0o600) }, 0);
+        let directory = super::DirectorySource::open(workspace.path()).unwrap();
+
+        let started = Instant::now();
+        assert!(super::ImageSource::open_regular(&path).is_err());
+        assert!(directory.open_image(path.file_name().unwrap()).is_err());
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scanned_entry_rejects_a_later_final_symlink_substitution() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = TempWorkspace::new("folder_scan_child_swap").unwrap();
+        let path = workspace.path().join("image.png");
+        let outside = workspace.path().join("outside.png");
+        fs::write(&path, b"scanned object").unwrap();
+        fs::write(&outside, b"outside object").unwrap();
+        let entry = scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let (scanned_path, provenance) = entry.into_parts();
+
+        fs::remove_file(&path).unwrap();
+        symlink(&outside, &path).unwrap();
+
+        assert!(super::ImageSource::open_scanned(&scanned_path, provenance).is_err());
+        let explicit_source = super::ImageSource::open(&scanned_path).unwrap();
+        let mut explicit = explicit_source.clone_for_decode().unwrap();
+        let mut bytes = Vec::new();
+        explicit.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"outside object");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_identity_stays_bound_to_the_retained_directory_after_rebind() {
+        let workspace = TempWorkspace::new("folder_scan_parent_rebind").unwrap();
+        let selected = workspace.path().join("selected");
+        let moved = workspace.path().join("moved");
+        fs::create_dir(&selected).unwrap();
+        fs::write(selected.join("image.png"), b"original object").unwrap();
+
+        let error = scan_image_entries_with_hook(
+            &selected,
+            2,
+            usize::MAX,
+            || true,
+            || {
+                fs::rename(&selected, &moved).unwrap();
+                fs::create_dir(&selected).unwrap();
+                fs::write(selected.join("image.png"), b"replacement object").unwrap();
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "folder changed while its entries were opened"
+        );
+    }
+
+    #[test]
     fn scan_reports_an_unopenable_directory() {
         let workspace = TempWorkspace::new("folder_scan_file").unwrap();
         let file = workspace.path().join("image.png");
         fs::write(&file, b"fixture").unwrap();
         assert!(scan_images(&file).is_err());
+    }
+
+    #[test]
+    fn bounded_scan_rejects_excess_images_instead_of_truncating() {
+        let workspace = TempWorkspace::new("folder_scan_limit").unwrap();
+        for name in ["one.png", "two.jpg", "three.webp"] {
+            fs::write(workspace.path().join(name), b"fixture").unwrap();
+        }
+
+        let error = scan_images_with_limit(workspace.path(), 2, usize::MAX, || true).unwrap_err();
+        assert!(matches!(error, super::ScanImagesError::LimitExceeded));
+    }
+
+    #[test]
+    fn bounded_scan_rejects_cumulative_deep_parent_path_storage() {
+        let workspace = TempWorkspace::new("folder_scan_path_budget").unwrap();
+        let directory = workspace
+            .path()
+            .join("deep-parent-component")
+            .join("another-deep-component")
+            .join("third-deep-component");
+        fs::create_dir_all(&directory).unwrap();
+        let paths = ["one.png", "two.jpg", "three.webp"].map(|name| directory.join(name));
+        for path in &paths {
+            fs::write(path, b"fixture").unwrap();
+        }
+        let two_path_budget = paths[..2]
+            .iter()
+            .map(|path| path.as_os_str().as_encoded_bytes().len())
+            .sum();
+
+        let error = scan_images_with_limit(&directory, 3, two_path_budget, || true).unwrap_err();
+
+        assert!(matches!(error, super::ScanImagesError::PathBudgetExceeded));
+    }
+
+    #[test]
+    fn cancelled_scan_stops_before_opening_the_directory() {
+        let error = scan_images_while(Path::new("must-not-be-opened"), || false).unwrap_err();
+        assert!(matches!(error, super::ScanImagesError::Cancelled));
+    }
+
+    #[test]
+    fn scan_observes_cancellation_during_and_after_enumeration() {
+        let workspace = TempWorkspace::new("folder_scan_cancellation_points").unwrap();
+        fs::write(workspace.path().join("one.png"), b"fixture").unwrap();
+
+        let mut checks = 0;
+        let during = scan_images_with_limit(workspace.path(), 2, usize::MAX, || {
+            checks += 1;
+            checks == 1
+        });
+        assert!(matches!(during, Err(super::ScanImagesError::Cancelled)));
+
+        fs::remove_file(workspace.path().join("one.png")).unwrap();
+        let mut checks = 0;
+        let before_sort = scan_images_with_limit(workspace.path(), 2, usize::MAX, || {
+            checks += 1;
+            checks < 2
+        });
+        assert!(matches!(
+            before_sort,
+            Err(super::ScanImagesError::Cancelled)
+        ));
+
+        let mut checks = 0;
+        let after_sort = scan_images_with_limit(workspace.path(), 2, usize::MAX, || {
+            checks += 1;
+            checks < 3
+        });
+        assert!(matches!(after_sort, Err(super::ScanImagesError::Cancelled)));
+    }
+
+    #[test]
+    fn scan_observes_cancellation_during_natural_sort() {
+        let workspace = TempWorkspace::new("folder_scan_sort_cancellation").unwrap();
+        fs::write(workspace.path().join("two.png"), b"fixture").unwrap();
+        fs::write(workspace.path().join("one.png"), b"fixture").unwrap();
+        let mut checks = 0;
+
+        let result = scan_images_with_limit(workspace.path(), 2, usize::MAX, || {
+            checks += 1;
+            checks != 5
+        });
+
+        assert!(matches!(result, Err(super::ScanImagesError::Cancelled)));
+    }
+
+    #[test]
+    fn cancelled_sort_stops_all_remaining_comparisons() {
+        let mut values = [6, 5, 4, 3, 2, 1];
+        let mut cancellation_checks = 0_usize;
+        let mut comparisons = 0_usize;
+
+        let completed = sort_while(
+            &mut values,
+            &mut || {
+                cancellation_checks += 1;
+                cancellation_checks < 3
+            },
+            |left, right| {
+                comparisons += 1;
+                left.cmp(right)
+            },
+        );
+
+        assert!(!completed);
+        assert_eq!(cancellation_checks, 3);
+        assert_eq!(comparisons, 2);
+    }
+
+    #[test]
+    fn scan_errors_have_fixed_specific_messages() {
+        let cases = [
+            (
+                super::ScanImagesError::Io(std::io::Error::other("read failed")),
+                "read failed",
+            ),
+            (
+                super::ScanImagesError::Cancelled,
+                "folder scan was superseded",
+            ),
+            (
+                super::ScanImagesError::LimitExceeded,
+                "folder image limit exceeded",
+            ),
+            (
+                super::ScanImagesError::PathBudgetExceeded,
+                "folder path-data safety limit exceeded",
+            ),
+            (
+                super::ScanImagesError::WorkerStopped,
+                "folder scan worker stopped unexpectedly",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn concurrent_source_readers_each_observe_the_complete_accepted_bytes() {
+        let workspace = TempWorkspace::new("source_reader_serialization").unwrap();
+        let path = workspace.path().join("source.bin");
+        let expected = Arc::new(
+            (0..512 * 1024)
+                .map(|index| u8::try_from(index % 251).unwrap())
+                .collect::<Vec<_>>(),
+        );
+        fs::write(&path, expected.as_slice()).unwrap();
+        let source = Arc::new(super::ImageSource::open(&path).unwrap());
+        let barrier = Arc::new(Barrier::new(5));
+        let mut workers = Vec::new();
+
+        for _ in 0..4 {
+            let source = Arc::clone(&source);
+            let expected = Arc::clone(&expected);
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                let mut reader = source.clone_for_decode().unwrap();
+                let mut actual = Vec::with_capacity(expected.len());
+                let mut chunk = [0_u8; 4096];
+                loop {
+                    let read = reader.read(&mut chunk).unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    actual.extend_from_slice(&chunk[..read]);
+                    std::thread::yield_now();
+                }
+                actual == *expected
+            }));
+        }
+
+        barrier.wait();
+        for worker in workers {
+            assert!(worker.join().unwrap());
+        }
+    }
+
+    #[test]
+    fn source_version_rejects_same_length_rewrite_with_restored_modified_time() {
+        let workspace = TempWorkspace::new("source_version_change_time").unwrap();
+        let path = workspace.path().join("source.bin");
+        fs::write(&path, b"accepted-bytes").unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        let source = super::ImageSource::open(&path).unwrap();
+
+        fs::write(&path, b"replaced-bytes").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+
+        assert!(!source.version_is_current());
     }
 
     #[cfg(unix)]

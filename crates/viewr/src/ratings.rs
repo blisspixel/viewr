@@ -240,16 +240,27 @@ impl JpegHeader {
 /// Read the current rating and determine whether the exact accepted source is writable.
 #[must_use]
 pub(crate) fn observe_source(source: &ImageSource, path: &Path) -> RatingObservation {
+    observe_source_with_hook(source, path, || {})
+}
+
+fn observe_source_with_hook(
+    source: &ImageSource,
+    path: &Path,
+    before_final_version_check: impl FnOnce(),
+) -> RatingObservation {
+    if !source.version_is_current() {
+        return unsafe_rating_observation();
+    }
     let mut reader = match source.clone_for_decode() {
         Ok(file) => BufReader::new(file),
-        Err(_) => {
-            return RatingObservation {
-                state: RatingState::Unreadable,
-                capability: RatingWriteCapability::UnsafeSource,
-            };
-        }
+        Err(_) => return unsafe_rating_observation(),
     };
-    let header = match read_jpeg_header(&mut reader) {
+    let header = read_jpeg_header(&mut reader);
+    before_final_version_check();
+    if !source.version_is_current() {
+        return unsafe_rating_observation();
+    }
+    let header = match header {
         Ok(header) => header,
         Err(MetadataError::NotJpeg) => {
             return RatingObservation {
@@ -283,10 +294,32 @@ pub(crate) fn observe_source(source: &ImageSource, path: &Path) -> RatingObserva
     RatingObservation { state, capability }
 }
 
+const fn unsafe_rating_observation() -> RatingObservation {
+    RatingObservation {
+        state: RatingState::Unreadable,
+        capability: RatingWriteCapability::UnsafeSource,
+    }
+}
+
 /// Read a folder entry without retaining it or creating any persistent index.
 #[must_use]
 pub(crate) fn observe_path(path: &Path) -> RatingObservation {
     match ImageSource::open(path) {
+        Ok(source) => observe_source(&source, path),
+        Err(_) => RatingObservation {
+            state: RatingState::Unreadable,
+            capability: RatingWriteCapability::UnsafeSource,
+        },
+    }
+}
+
+/// Read a scanned entry only when it remains the same regular filesystem object.
+#[must_use]
+pub(crate) fn observe_scanned_path(
+    path: &Path,
+    provenance: crate::fs::ScanProvenance,
+) -> RatingObservation {
+    match ImageSource::open_scanned(path, provenance) {
         Ok(source) => observe_source(&source, path),
         Err(_) => RatingObservation {
             state: RatingState::Unreadable,
@@ -1201,6 +1234,7 @@ fn write_rating_windows(
     }
     let mut security_descriptor =
         file_security_descriptor(&source_file).map_err(|error| map_io_error(&error))?;
+    drop(source_file);
 
     let pristine_temp = secured_named_temp_file(
         parent,
@@ -1279,7 +1313,7 @@ fn write_rating_windows(
     let backup_path = vacant_transaction_path(parent, ".viewr-rating-backup-")
         .map_err(|error| map_io_error(&error))?;
     let work_path = work.into_temp_path();
-    if let Err(error) = replace_file(path, &work_path, Some(&backup_path)) {
+    if let Err(error) = crate::fs::replace_file(path, &work_path, Some(&backup_path)) {
         let recovery = reconcile_failed_replace(path, &backup_path, source, &pristine, &error);
         if recovery == RatingWriteError::RecoveryFailed {
             let _ = work_path.keep();
@@ -1305,15 +1339,16 @@ fn write_rating_windows(
     let verified_file = verified.clone_for_decode().map_err(|_| {
         rollback_after_verification_failure(path, &backup_path, source, &pristine, Some(&verified))
     })?;
-    if verify_candidate(
+    let candidate_is_valid = verify_candidate(
         &verified_file,
         &pristine,
         original_header.encoded_len,
         &expected_header,
         assignment,
     )
-    .is_err()
-    {
+    .is_ok();
+    drop(verified_file);
+    if !candidate_is_valid {
         return Err(rollback_after_verification_failure(
             path,
             &backup_path,
@@ -1683,49 +1718,6 @@ fn create_secured_file(
     } else {
         // SAFETY: `CreateFileW` returned one uniquely owned valid handle.
         Ok(unsafe { File::from_raw_handle(handle) })
-    }
-}
-
-#[cfg(target_os = "windows")]
-#[allow(unsafe_code)] // one audited failure-atomic Win32 replacement boundary
-fn replace_file(target: &Path, replacement: &Path, backup: Option<&Path>) -> io::Result<()> {
-    use std::iter;
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
-
-    let target = target
-        .as_os_str()
-        .encode_wide()
-        .chain(iter::once(0))
-        .collect::<Vec<_>>();
-    let replacement = replacement
-        .as_os_str()
-        .encode_wide()
-        .chain(iter::once(0))
-        .collect::<Vec<_>>();
-    let backup = backup.map(|path| {
-        path.as_os_str()
-            .encode_wide()
-            .chain(iter::once(0))
-            .collect::<Vec<_>>()
-    });
-    let backup_pointer = backup.as_ref().map_or(std::ptr::null(), Vec::as_ptr);
-    // SAFETY: All three paths are stable, NUL-terminated UTF-16 buffers for the
-    // duration of the call. Flags are zero, and no reserved pointers are used.
-    let succeeded = unsafe {
-        ReplaceFileW(
-            target.as_ptr(),
-            replacement.as_ptr(),
-            backup_pointer,
-            0,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if succeeded == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
     }
 }
 
@@ -2213,6 +2205,26 @@ mod tests {
             read_jpeg_header(&mut truncated),
             Err(MetadataError::Unreadable)
         ));
+    }
+
+    #[test]
+    fn accepted_rating_is_rejected_if_the_source_changes_during_inspection() {
+        let workspace = TempWorkspace::new("rating_source_version").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        let replacement = jpeg(&[
+            segment(0xe1, &xmp_with_rating("5")),
+            segment(0xfe, b"replacement source version"),
+        ]);
+        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("2"))])).unwrap();
+        let source = ImageSource::open(&path).unwrap();
+
+        let observation = observe_source_with_hook(&source, &path, || {
+            fs::write(&path, replacement).unwrap();
+        });
+
+        assert_eq!(observation.state, RatingState::Unreadable);
+        assert_eq!(observation.capability, RatingWriteCapability::UnsafeSource);
+        assert!(!source.version_is_current());
     }
 
     #[test]

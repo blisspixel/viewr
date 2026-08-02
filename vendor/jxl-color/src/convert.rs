@@ -630,14 +630,11 @@ impl ColorTransform {
             .iter_mut()
             .map(|ch| ch.chunks_mut(65536))
             .collect::<Vec<_>>();
-        loop {
-            let Some(chunk) = it
-                .iter_mut()
-                .map(|it| it.next())
-                .collect::<Option<Vec<_>>>()
-            else {
-                break;
-            };
+        while let Some(chunk) = it
+            .iter_mut()
+            .map(|it| it.next())
+            .collect::<Option<Vec<_>>>()
+        {
             chunks.push(chunk);
         }
 
@@ -650,12 +647,18 @@ impl ColorTransform {
                         num_channels = x;
                     }
                     err => {
-                        *ret.lock().unwrap() = err;
+                        let mut result = ret.lock().unwrap();
+                        if result.is_ok() {
+                            *result = err;
+                        }
                         return;
                     }
                 }
             }
-            *ret.lock().unwrap() = Ok(num_channels);
+            let mut result = ret.lock().unwrap();
+            if result.is_ok() {
+                *result = Ok(num_channels);
+            }
         });
         ret.into_inner().unwrap()
     }
@@ -864,9 +867,7 @@ impl ColorTransformOp {
         if num_input_channels > channel_count {
             return Err(Error::UnsupportedColorEncoding);
         }
-        if self
-            .inputs()
-            .is_some_and(|inputs| channel_count < inputs)
+        if self.inputs().is_some_and(|inputs| channel_count < inputs)
             || self
                 .outputs()
                 .is_some_and(|outputs| channel_count < outputs)
@@ -1143,6 +1144,31 @@ fn apply_inverse_transfer_function(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct FailFirstChunk;
+
+    impl PreparedTransform for FailFirstChunk {
+        fn num_input_channels(&self) -> usize {
+            1
+        }
+
+        fn num_output_channels(&self) -> usize {
+            1
+        }
+
+        fn transform(
+            &self,
+            channels: &mut [&mut [f32]],
+        ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+            if channels[0].first() == Some(&0.0) {
+                Err(Box::new(std::io::Error::other("first chunk rejected")))
+            } else {
+                Ok(())
+            }
+        }
+    }
 
     fn grey_hlg() -> ColorEncodingWithProfile {
         let mut encoding = EnumColourEncoding::srgb(RenderingIntent::Relative);
@@ -1163,12 +1189,9 @@ mod tests {
 
     #[test]
     fn grayscale_hlg_is_rejected_in_both_transform_directions() {
-        let xyb = ColorEncodingWithProfile::new(EnumColourEncoding::xyb(
-            RenderingIntent::Relative,
-        ));
-        let srgb = ColorEncodingWithProfile::new(EnumColourEncoding::srgb(
-            RenderingIntent::Relative,
-        ));
+        let xyb = ColorEncodingWithProfile::new(EnumColourEncoding::xyb(RenderingIntent::Relative));
+        let srgb =
+            ColorEncodingWithProfile::new(EnumColourEncoding::srgb(RenderingIntent::Relative));
         let grey_hlg = grey_hlg();
 
         assert_unsupported_transform_pair(&xyb, &grey_hlg);
@@ -1194,5 +1217,21 @@ mod tests {
             apply_inverse_transfer_function(&mut channels, TransferFunction::Hlg, params),
             Err(Error::UnsupportedColorEncoding)
         ));
+    }
+
+    #[test]
+    fn a_later_success_cannot_overwrite_a_parallel_chunk_error() {
+        let transform = ColorTransform {
+            begin_channels: 1,
+            ops: vec![ColorTransformOp::IccToIcc(Arc::new(FailFirstChunk))],
+        };
+        let mut samples = vec![1.0_f32; 65_537];
+        samples[0] = 0.0;
+        let mut channels = [&mut samples[..]];
+
+        let result =
+            transform.run_with_threads(&mut channels, &jxl_threadpool::JxlThreadPool::none());
+
+        assert!(matches!(result, Err(Error::CmsFailure(_))));
     }
 }

@@ -5,11 +5,13 @@
 //! property. Users can opt in to retain EXIF for a session via
 //! [`SaveOptions::retain_exif`]. See `docs/PRIVACY.md`.
 
-use std::path::Path;
+use std::io::{BufWriter, Read, Seek, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use image::{ColorType, ImageFormat};
 use little_exif::exif_tag::ExifTag;
+use little_exif::filetype::FileExtension;
 use little_exif::metadata::Metadata;
 
 use crate::color::WorkingColorEncoding;
@@ -176,6 +178,158 @@ pub enum MetadataDisposition {
     NotPresent,
 }
 
+enum DestinationState {
+    Absent,
+    Present(crate::fs::ImageSource),
+}
+
+/// Destination identity captured immediately after the native overwrite
+/// decision and rechecked immediately before commit.
+pub(crate) struct SaveDestination {
+    path: PathBuf,
+    parent_path: PathBuf,
+    parent: crate::fs::DirectorySource,
+    state: DestinationState,
+}
+
+impl SaveDestination {
+    fn capture(path: &Path) -> Result<Self, Error> {
+        let file_name = path
+            .file_name()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| Error::Encode("Save As destination requires a filename".into()))?;
+        let requested_parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let parent_path = requested_parent
+            .canonicalize()
+            .map_err(|_| Error::Encode("could not verify the Save As destination parent".into()))?;
+        let parent = crate::fs::DirectorySource::open(&parent_path)
+            .map_err(|_| Error::Encode("could not verify the Save As destination parent".into()))?;
+        let path = parent_path.join(file_name);
+        let state = match parent.open_image(file_name) {
+            Ok(source) if source.matches_path(&path) == crate::fs::ImageSourceMatch::Same => {
+                DestinationState::Present(source)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => DestinationState::Absent,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                return Err(Error::Encode(
+                    "Save As destination must be an ordinary file path".into(),
+                ));
+            }
+            Ok(_) | Err(_) => {
+                if std::fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.is_file()) {
+                    return Err(Error::Encode(
+                        "Save As destination must be an ordinary file path".into(),
+                    ));
+                }
+                return Err(Error::Encode(
+                    "could not verify the Save As destination".into(),
+                ));
+            }
+        };
+        if !parent.matches_path(&parent_path) {
+            return Err(Error::Encode(
+                "Save As destination parent changed during confirmation".into(),
+            ));
+        }
+        Ok(Self {
+            path,
+            parent_path,
+            parent,
+            state,
+        })
+    }
+
+    /// Return whether the captured destination names an existing file and
+    /// therefore requires an app-owned overwrite confirmation.
+    #[must_use]
+    pub(crate) const fn requires_overwrite_confirmation(&self) -> bool {
+        matches!(&self.state, DestinationState::Present(_))
+    }
+
+    /// Revalidate the exact existing file after the user confirms overwrite.
+    ///
+    /// The save transaction performs the same check again before commit. This
+    /// earlier check binds consent to the object captured after the native file
+    /// dialog instead of trusting what happened to occupy that path later.
+    pub(crate) fn confirm_overwrite(&self) -> Result<(), Error> {
+        if !self.requires_overwrite_confirmation() {
+            return Err(Error::Encode(
+                "Save As overwrite confirmation did not name an existing file".into(),
+            ));
+        }
+        self.verify_unchanged().map_err(|_| {
+            Error::Encode(
+                "Save As destination changed before overwrite confirmation; nothing was replaced"
+                    .into(),
+            )
+        })
+    }
+
+    fn verify_parent_unchanged(&self) -> Result<(), Error> {
+        if self.parent.matches_path(&self.parent_path) {
+            Ok(())
+        } else {
+            Err(Error::Encode(
+                "Save As destination parent changed after confirmation; nothing was replaced"
+                    .into(),
+            ))
+        }
+    }
+
+    fn verify_unchanged(&self) -> Result<(), Error> {
+        self.verify_parent_unchanged()?;
+        let unchanged = match &self.state {
+            DestinationState::Absent => std::fs::symlink_metadata(&self.path)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+            DestinationState::Present(source) => {
+                source.matches_path(&self.path) == crate::fs::ImageSourceMatch::Same
+            }
+        };
+        if unchanged {
+            Ok(())
+        } else {
+            Err(Error::Encode(
+                "Save As destination changed after confirmation; nothing was replaced".into(),
+            ))
+        }
+    }
+
+    fn aliases(&self, source: &crate::fs::ImageSource) -> bool {
+        match &self.state {
+            DestinationState::Absent => false,
+            DestinationState::Present(destination) => destination.same_object(source),
+        }
+    }
+}
+
+enum ExportMetadataSource<'a> {
+    Path(&'a Path),
+    Accepted(&'a crate::fs::ImageSource),
+}
+
+impl ExportMetadataSource<'_> {
+    fn load_bounded(&self) -> Option<Metadata> {
+        match self {
+            Self::Path(path) => crate::image_info::load_bounded_metadata(path),
+            Self::Accepted(source) => crate::image_info::load_bounded_metadata_from_source(source),
+        }
+    }
+
+    fn version_is_current(&self) -> bool {
+        match self {
+            Self::Path(_) => true,
+            Self::Accepted(source) => source.version_is_current(),
+        }
+    }
+}
+
+pub(crate) fn prepare_save_destination(path: &Path) -> Result<SaveDestination, Error> {
+    SaveDestination::capture(path)
+}
+
 impl SaveOptions {
     /// Privacy default: re-encode pixels only, drop all metadata.
     #[must_use]
@@ -295,16 +449,55 @@ pub fn save_with_options(
     source: Option<&Path>,
     opts: SaveOptions,
 ) -> Result<MetadataDisposition, Error> {
-    if source.is_some_and(|source| paths_refer_to_same_file(source, dest)) {
+    let destination = prepare_save_destination(dest)?;
+    save_to_destination(
+        image,
+        &destination,
+        source,
+        None,
+        source.map(ExportMetadataSource::Path),
+        opts,
+    )
+}
+
+pub(crate) fn save_with_accepted_source(
+    image: &DecodedImage,
+    destination: &SaveDestination,
+    source_path: &Path,
+    source: Option<&crate::fs::ImageSource>,
+    opts: SaveOptions,
+) -> Result<MetadataDisposition, Error> {
+    save_to_destination(
+        image,
+        destination,
+        Some(source_path),
+        source,
+        source.map(ExportMetadataSource::Accepted),
+        opts,
+    )
+}
+
+fn save_to_destination(
+    image: &DecodedImage,
+    destination: &SaveDestination,
+    source_path: Option<&Path>,
+    accepted_source: Option<&crate::fs::ImageSource>,
+    metadata_source: Option<ExportMetadataSource<'_>>,
+    opts: SaveOptions,
+) -> Result<MetadataDisposition, Error> {
+    let dest = &destination.path;
+    if accepted_source.is_some_and(|source| destination.aliases(source))
+        || source_path.is_some_and(|source| paths_refer_to_same_file(source, dest))
+    {
         return Err(Error::Encode(
             "Save As destination must differ from the open source file".into(),
         ));
     }
     let (format, expected_len) = validate_export(image, dest)?;
     let mut retained_metadata = if opts.retain_exif {
-        let Some(src) = source else {
+        let Some(source) = metadata_source else {
             return Err(Error::Encode(
-                "retain EXIF requested but no source path was provided".into(),
+                "retain EXIF requested but no accepted source was available".into(),
             ));
         };
         if !path_supports_exif(dest) {
@@ -313,7 +506,18 @@ pub fn save_with_options(
                     .into(),
             ));
         }
-        crate::image_info::load_bounded_metadata(src).map(|mut metadata| {
+        if !source.version_is_current() {
+            return Err(Error::Encode(
+                "open source changed before metadata could be retained; nothing was saved".into(),
+            ));
+        }
+        let metadata = source.load_bounded();
+        if !source.version_is_current() {
+            return Err(Error::Encode(
+                "open source changed while metadata was read; nothing was saved".into(),
+            ));
+        }
+        metadata.map(|mut metadata| {
             normalize_export_metadata(&mut metadata, image.width, image.height);
             metadata
         })
@@ -321,22 +525,19 @@ pub fn save_with_options(
         None
     };
 
-    let parent = dest
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
+    destination.verify_parent_unchanged()?;
     let suffix = dest
         .extension()
         .and_then(|extension| extension.to_str())
         .ok_or_else(|| Error::Encode("output filename requires a supported extension".into()))?;
-    let temporary = tempfile::Builder::new()
+    let mut temporary = tempfile::Builder::new()
         .prefix(".viewr-save-")
         .suffix(&format!(".{suffix}"))
-        .tempfile_in(parent)
+        .tempfile_in(&destination.parent_path)
         .map_err(|_| {
             Error::Encode("could not create a temporary output beside the destination".into())
-        })?
-        .into_temp_path();
+        })?;
+    destination.verify_parent_unchanged()?;
 
     let metadata_disposition = if retained_metadata.is_some() {
         MetadataDisposition::Retained
@@ -345,16 +546,64 @@ pub fn save_with_options(
     } else {
         MetadataDisposition::Stripped
     };
-    encode_pixels_only(image, &temporary, format, expected_len)?;
+    encode_pixels_only(image, temporary.as_file_mut(), dest, format, expected_len)?;
     if let Some(metadata) = retained_metadata.as_mut() {
-        metadata
-            .write_to_file(&temporary)
-            .map_err(|_| Error::Encode("could not write EXIF to the temporary output".into()))?;
+        write_metadata_to_open_file(metadata, temporary.as_file_mut(), format)?;
     }
-    temporary.persist(dest).map_err(|_| {
-        Error::Encode("could not replace the destination with the completed output".into())
-    })?;
+    commit_temporary(destination, temporary)?;
     Ok(metadata_disposition)
+}
+
+fn commit_temporary(
+    destination: &SaveDestination,
+    temporary: tempfile::NamedTempFile,
+) -> Result<(), Error> {
+    commit_temporary_with_hook(destination, temporary, || {})
+}
+
+fn commit_temporary_with_hook(
+    destination: &SaveDestination,
+    temporary: tempfile::NamedTempFile,
+    before_install: impl FnOnce(),
+) -> Result<(), Error> {
+    destination.verify_unchanged()?;
+    if !crate::fs::regular_path_matches_file(temporary.path(), temporary.as_file()) {
+        return Err(Error::Encode(
+            "temporary output changed before commit; nothing was replaced".into(),
+        ));
+    }
+    before_install();
+    match &destination.state {
+        DestinationState::Absent => temporary
+            .persist_noclobber(&destination.path)
+            .map_err(|_| {
+                Error::Encode(
+                    "could not install the completed output without overwriting a new file".into(),
+                )
+            })
+            .map(|_| ()),
+        DestinationState::Present(_) => {
+            #[cfg(target_os = "windows")]
+            {
+                let temporary = temporary.into_temp_path();
+                crate::fs::replace_file(&destination.path, &temporary, None).map_err(|_| {
+                    Error::Encode(
+                        "could not replace the destination with the completed output".into(),
+                    )
+                })?;
+                Ok(())
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                temporary.persist(&destination.path).map_err(|_| {
+                    Error::Encode(
+                        "could not replace the destination with the completed output".into(),
+                    )
+                })?;
+                Ok(())
+            }
+        }
+    }
 }
 
 fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
@@ -382,20 +631,22 @@ fn validate_export(image: &DecodedImage, path: &Path) -> Result<(ImageFormat, us
     Ok((format, expected_len))
 }
 
-/// Encode RGBA pixels to `path` with no metadata written.
+/// Encode RGBA pixels to an already-open staging file with no metadata written.
 fn encode_pixels_only(
     image: &DecodedImage,
-    path: &Path,
+    writer: &mut (impl Write + Seek),
+    output_path: &Path,
     format: ImageFormat,
     expected_len: usize,
 ) -> Result<(), Error> {
-    let name = path
+    let name = output_path
         .file_name()
         .map_or_else(|| "output".into(), |s| s.to_string_lossy().into_owned());
     let encode = |e: image::ImageError| Error::Encode(format!("{name}: {e}"));
-    if supports_alpha(format) {
-        image::save_buffer_with_format(
-            path,
+    let mut writer = BufWriter::new(writer);
+    let encoded = if supports_alpha(format) {
+        image::write_buffer_with_format(
+            &mut writer,
             &image.rgba,
             image.width,
             image.height,
@@ -414,8 +665,8 @@ fn encode_pixels_only(
         for pixel in image.rgba.chunks_exact(4) {
             rgb.extend_from_slice(&pixel[..3]);
         }
-        image::save_buffer_with_format(
-            path,
+        image::write_buffer_with_format(
+            &mut writer,
             &rgb,
             image.width,
             image.height,
@@ -423,7 +674,52 @@ fn encode_pixels_only(
             format,
         )
         .map_err(encode)
-    }
+    };
+    encoded?;
+    writer
+        .flush()
+        .map_err(|_| Error::Encode("could not flush the temporary output".into()))
+}
+
+fn write_metadata_to_open_file(
+    metadata: &Metadata,
+    file: &mut std::fs::File,
+    format: ImageFormat,
+) -> Result<(), Error> {
+    let file_type = match format {
+        ImageFormat::Jpeg => FileExtension::JPEG,
+        ImageFormat::Png => FileExtension::PNG {
+            as_zTXt_chunk: true,
+        },
+        ImageFormat::WebP => FileExtension::WEBP,
+        _ => {
+            return Err(Error::Encode("destination format cannot carry EXIF".into()));
+        }
+    };
+    file.rewind()
+        .map_err(|_| Error::Encode("could not read the temporary output for EXIF".into()))?;
+    let encoded_len = usize::try_from(
+        file.metadata()
+            .map_err(|_| Error::Encode("could not inspect the temporary output".into()))?
+            .len(),
+    )
+    .map_err(|_| Error::Encode("temporary output is too large to retain EXIF".into()))?;
+    let mut encoded = Vec::new();
+    encoded
+        .try_reserve_exact(encoded_len)
+        .map_err(|error| Error::Encode(format!("could not allocate EXIF output: {error}")))?;
+    file.read_to_end(&mut encoded)
+        .map_err(|_| Error::Encode("could not read the temporary output for EXIF".into()))?;
+    metadata
+        .write_to_vec(&mut encoded, file_type)
+        .map_err(|_| Error::Encode("could not write EXIF to the temporary output".into()))?;
+    file.set_len(0)
+        .map_err(|_| Error::Encode("could not rewrite the temporary EXIF output".into()))?;
+    file.rewind()
+        .map_err(|_| Error::Encode("could not rewrite the temporary EXIF output".into()))?;
+    file.write_all(&encoded)
+        .and_then(|()| file.flush())
+        .map_err(|_| Error::Encode("could not rewrite the temporary EXIF output".into()))
 }
 
 /// Whether `path`'s extension is a container that can carry EXIF via `little_exif`.
@@ -471,13 +767,19 @@ fn supports_alpha(format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        MetadataDisposition, PixelTransform, Rect, SaveOptions, crop, crop_cancellable, crop_while,
-        path_supports_exif, save, save_with_options,
+        MetadataDisposition, PixelTransform, Rect, SaveOptions, commit_temporary_with_hook, crop,
+        crop_cancellable, crop_while, encode_pixels_only, path_supports_exif,
+        prepare_save_destination, save, save_with_accepted_source, save_with_options,
     };
+    #[cfg(unix)]
+    use super::{commit_temporary, write_metadata_to_open_file};
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
     use crate::ephemeral::TempWorkspace;
+    use image::ImageFormat;
     use little_exif::exif_tag::ExifTag;
+    #[cfg(unix)]
+    use little_exif::filetype::FileExtension;
     use little_exif::metadata::Metadata;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
@@ -943,6 +1245,354 @@ mod tests {
             image::open(destination).unwrap().to_rgba8().dimensions(),
             (3, 2)
         );
+    }
+
+    #[test]
+    fn save_rejects_a_destination_created_after_confirmation() {
+        let ws = TempWorkspace::new("edit_destination_created").unwrap();
+        let destination_path = ws.path().join("copy.png");
+        let destination = prepare_save_destination(&destination_path).unwrap();
+        std::fs::write(&destination_path, b"valuable replacement").unwrap();
+
+        let result = save_with_accepted_source(
+            &solid_rgba(3, 2),
+            &destination,
+            Path::new("source.png"),
+            None,
+            SaveOptions::strip(),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&destination_path).unwrap(),
+            b"valuable replacement"
+        );
+    }
+
+    #[test]
+    fn absent_destination_never_clobbers_a_file_created_after_final_verification() {
+        let ws = TempWorkspace::new("edit_destination_noclobber").unwrap();
+        let destination_path = ws.path().join("copy.png");
+        let destination = prepare_save_destination(&destination_path).unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".viewr-save-")
+            .suffix(".png")
+            .tempfile_in(ws.path())
+            .unwrap();
+        let image = solid_rgba(3, 2);
+        encode_pixels_only(
+            &image,
+            temporary.as_file_mut(),
+            &destination_path,
+            ImageFormat::Png,
+            image.rgba.len(),
+        )
+        .unwrap();
+
+        let result = commit_temporary_with_hook(&destination, temporary, || {
+            std::fs::write(&destination_path, b"concurrent valuable file").unwrap();
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&destination_path).unwrap(),
+            b"concurrent valuable file"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staging_path_substitution_cannot_redirect_pixels_or_exif() {
+        use std::io::{Read, Seek};
+        use std::os::unix::fs::symlink;
+
+        let ws = TempWorkspace::new("edit_staging_identity").unwrap();
+        let destination_path = ws.path().join("copy.jpg");
+        let victim = ws.path().join("victim.txt");
+        std::fs::write(&victim, b"valuable victim").unwrap();
+        let destination = prepare_save_destination(&destination_path).unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".viewr-save-")
+            .suffix(".jpg")
+            .tempfile_in(ws.path())
+            .unwrap();
+        let image = solid_rgba(3, 2);
+        encode_pixels_only(
+            &image,
+            temporary.as_file_mut(),
+            &destination_path,
+            ImageFormat::Jpeg,
+            image.rgba.len(),
+        )
+        .unwrap();
+        let mut metadata = Metadata::new();
+        metadata.set_tag(ExifTag::ImageDescription("retained-handle".into()));
+        write_metadata_to_open_file(&metadata, temporary.as_file_mut(), ImageFormat::Jpeg).unwrap();
+        let mut retained = temporary.as_file().try_clone().unwrap();
+        let temporary_path = temporary.path().to_owned();
+        std::fs::remove_file(&temporary_path).unwrap();
+        symlink(&victim, &temporary_path).unwrap();
+
+        let error = commit_temporary(&destination, temporary).unwrap_err();
+
+        assert_eq!(std::fs::read(&victim).unwrap(), b"valuable victim");
+        assert!(error.to_string().contains("temporary output changed"));
+        retained.rewind().unwrap();
+        let mut encoded = Vec::new();
+        retained.read_to_end(&mut encoded).unwrap();
+        assert_eq!(
+            image::load_from_memory_with_format(&encoded, ImageFormat::Jpeg)
+                .unwrap()
+                .to_rgba8()
+                .dimensions(),
+            (3, 2)
+        );
+        let metadata = Metadata::new_from_vec(&encoded, FileExtension::JPEG).unwrap();
+        assert!(metadata.into_iter().any(|tag| {
+            matches!(tag, ExifTag::ImageDescription(value) if value.contains("retained-handle"))
+        }));
+    }
+
+    #[test]
+    fn save_destination_rejects_a_non_file_entry() {
+        let ws = TempWorkspace::new("edit_destination_directory").unwrap();
+        let destination = ws.path().join("folder.png");
+        std::fs::create_dir(&destination).unwrap();
+
+        let error = prepare_save_destination(&destination)
+            .err()
+            .expect("a directory cannot be a Save As destination");
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: Save As destination must be an ordinary file path"
+        );
+    }
+
+    #[test]
+    fn overwrite_confirmation_is_bound_to_the_captured_existing_file() {
+        let ws = TempWorkspace::new("edit_overwrite_confirmation").unwrap();
+        let destination_path = ws.path().join("copy.png");
+        let displaced = ws.path().join("displaced.png");
+
+        let absent = prepare_save_destination(&destination_path).unwrap();
+        assert!(!absent.requires_overwrite_confirmation());
+
+        save(&solid_rgba(1, 1), &destination_path).unwrap();
+        let present = prepare_save_destination(&destination_path).unwrap();
+        assert!(present.requires_overwrite_confirmation());
+        present.confirm_overwrite().unwrap();
+
+        std::fs::rename(&destination_path, &displaced).unwrap();
+        std::fs::write(&destination_path, b"unconfirmed replacement").unwrap();
+        let error = present.confirm_overwrite().unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: Save As destination changed before overwrite confirmation; nothing was replaced"
+        );
+        assert_eq!(
+            std::fs::read(&destination_path).unwrap(),
+            b"unconfirmed replacement"
+        );
+    }
+
+    #[test]
+    fn save_rejects_a_destination_replaced_after_confirmation() {
+        let ws = TempWorkspace::new("edit_destination_replaced").unwrap();
+        let destination_path = ws.path().join("copy.png");
+        let displaced = ws.path().join("displaced.png");
+        save(&solid_rgba(1, 1), &destination_path).unwrap();
+        let destination = prepare_save_destination(&destination_path).unwrap();
+        std::fs::rename(&destination_path, &displaced).unwrap();
+        std::fs::write(&destination_path, b"valuable replacement").unwrap();
+
+        let result = save_with_accepted_source(
+            &solid_rgba(3, 2),
+            &destination,
+            Path::new("source.png"),
+            None,
+            SaveOptions::strip(),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&destination_path).unwrap(),
+            b"valuable replacement"
+        );
+    }
+
+    #[test]
+    fn save_replaces_the_exact_confirmed_destination() {
+        let ws = TempWorkspace::new("edit_destination_confirmed").unwrap();
+        let destination_path = ws.path().join("copy.png");
+        save(&solid_rgba(1, 1), &destination_path).unwrap();
+        let destination = prepare_save_destination(&destination_path).unwrap();
+
+        save_with_accepted_source(
+            &solid_rgba(3, 2),
+            &destination,
+            Path::new("source.png"),
+            None,
+            SaveOptions::strip(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            image::open(destination_path)
+                .unwrap()
+                .to_rgba8()
+                .dimensions(),
+            (3, 2)
+        );
+    }
+
+    #[test]
+    fn save_rejects_a_replaced_destination_parent() {
+        let ws = TempWorkspace::new("edit_destination_parent").unwrap();
+        let parent = ws.path().join("selected");
+        let displaced_parent = ws.path().join("displaced");
+        std::fs::create_dir(&parent).unwrap();
+        let destination_path = parent.join("copy.png");
+        let destination = prepare_save_destination(&destination_path).unwrap();
+        std::fs::rename(&parent, &displaced_parent).unwrap();
+        std::fs::create_dir(&parent).unwrap();
+
+        let error = save_with_accepted_source(
+            &solid_rgba(3, 2),
+            &destination,
+            Path::new("source.png"),
+            None,
+            SaveOptions::strip(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: Save As destination parent changed after confirmation; nothing was replaced"
+        );
+        assert!(!parent.join("copy.png").exists());
+        assert!(!displaced_parent.join("copy.png").exists());
+    }
+
+    #[test]
+    fn save_rejects_an_alias_of_the_accepted_source_after_rename() {
+        let ws = TempWorkspace::new("edit_accepted_source_alias").unwrap();
+        let source_path = ws.path().join("source.png");
+        let accepted_alias = ws.path().join("accepted.png");
+        let image = solid_rgba(3, 2);
+        save(&image, &source_path).unwrap();
+        let source = crate::fs::ImageSource::open(&source_path).unwrap();
+        std::fs::rename(&source_path, &accepted_alias).unwrap();
+        save(&solid_rgba(1, 1), &source_path).unwrap();
+        let accepted_bytes = std::fs::read(&accepted_alias).unwrap();
+        let destination = prepare_save_destination(&accepted_alias).unwrap();
+
+        let error = save_with_accepted_source(
+            &image,
+            &destination,
+            &source_path,
+            Some(&source),
+            SaveOptions::strip(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: Save As destination must differ from the open source file"
+        );
+        assert_eq!(std::fs::read(&accepted_alias).unwrap(), accepted_bytes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_rejects_a_retargeted_symlink_sources_accepted_object() {
+        use std::os::unix::fs::symlink;
+
+        let ws = TempWorkspace::new("edit_symlink_source_alias").unwrap();
+        let accepted_path = ws.path().join("accepted.png");
+        let source_path = ws.path().join("source.png");
+        let image = solid_rgba(3, 2);
+        save(&image, &accepted_path).unwrap();
+        symlink(&accepted_path, &source_path).unwrap();
+        let source = crate::fs::ImageSource::open(&source_path).unwrap();
+        let accepted_bytes = std::fs::read(&accepted_path).unwrap();
+        std::fs::remove_file(&source_path).unwrap();
+        save(&solid_rgba(1, 1), &source_path).unwrap();
+        let destination = prepare_save_destination(&accepted_path).unwrap();
+
+        let error = save_with_accepted_source(
+            &image,
+            &destination,
+            &source_path,
+            Some(&source),
+            SaveOptions::strip(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: Save As destination must differ from the open source file"
+        );
+        assert_eq!(std::fs::read(&accepted_path).unwrap(), accepted_bytes);
+    }
+
+    #[test]
+    fn retained_exif_fails_closed_after_the_accepted_source_is_renamed() {
+        let ws = TempWorkspace::new("edit_accepted_metadata_source").unwrap();
+        let source_path = ws.path().join("source.jpg");
+        let original_path = ws.path().join("original.jpg");
+        let destination_path = ws.path().join("copy.jpg");
+        let image = solid_rgba(3, 2);
+        encode_and_stamp_description(&image, &source_path, "accepted-original");
+        let source = crate::fs::ImageSource::open(&source_path).unwrap();
+        std::fs::rename(&source_path, &original_path).unwrap();
+        encode_and_stamp_description(&image, &source_path, "replacement-metadata");
+        let destination = prepare_save_destination(&destination_path).unwrap();
+
+        let error = save_with_accepted_source(
+            &image,
+            &destination,
+            &source_path,
+            Some(&source),
+            SaveOptions::retain_exif(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: open source changed before metadata could be retained; nothing was saved"
+        );
+        assert!(!destination_path.exists());
+    }
+
+    #[test]
+    fn retained_exif_rejects_an_in_place_source_rewrite() {
+        let ws = TempWorkspace::new("edit_accepted_source_version").unwrap();
+        let source_path = ws.path().join("source.jpg");
+        let replacement_path = ws.path().join("replacement.jpg");
+        let destination_path = ws.path().join("copy.jpg");
+        let image = solid_rgba(3, 2);
+        encode_and_stamp_description(&image, &source_path, "accepted-original");
+        let source = crate::fs::ImageSource::open(&source_path).unwrap();
+        encode_and_stamp_description(&image, &replacement_path, "replacement-metadata");
+        std::fs::write(&source_path, std::fs::read(&replacement_path).unwrap()).unwrap();
+        let destination = prepare_save_destination(&destination_path).unwrap();
+
+        let error = save_with_accepted_source(
+            &image,
+            &destination,
+            &source_path,
+            Some(&source),
+            SaveOptions::retain_exif(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "could not save image: open source changed before metadata could be retained; nothing was saved"
+        );
+        assert!(!destination_path.exists());
     }
 
     fn encode_and_stamp_description(img: &DecodedImage, path: &Path, text: &str) {

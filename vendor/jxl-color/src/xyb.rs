@@ -1,7 +1,10 @@
 pub(crate) fn run(xyb: [&mut [f32]; 3], ob: [f32; 3], intensity_target: f32) {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma") {
+        if crate::avx2_fma_dispatch(
+            is_x86_feature_detected!("avx2"),
+            is_x86_feature_detected!("fma"),
+        ) {
             // SAFETY: Feature set is checked above.
             return unsafe { run_x86_64_avx2(xyb, ob, intensity_target) };
         }

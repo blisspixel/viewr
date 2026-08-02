@@ -37,9 +37,18 @@ or independently mutable UI model.
             └────────────┘
 ```
 
-Image decoding and folder scanning run off the event thread. Their results return
-through channels, wake the event loop through a typed `UserEvent`, request a
-redraw, and are applied only if they still match the current path or generation.
+Image decoding and folder scanning run off the event thread. Folder scans use one
+event-loop-owned completion and cooperative cancellation, reject more than
+100,000 supported entries or 64 MiB of cumulative encoded path storage instead of
+truncating, and surface endpoint loss. Enumeration and child opens are checked
+against one retained directory identity. Each admitted child is opened relative
+to that handle without following its final component, and its native identity
+plus version travels with the playlist entry. Automatic decode, prefetch,
+thumbnail, and rating work must match both fields. An explicit F5 refresh may
+adopt a new ordinary file at the same path, but it still does not follow a newly
+substituted link.
+Results wake the event loop through a typed `UserEvent`, request a redraw, and are
+applied only if they still match the current path or generation.
 The initial decode and folder scan start before renderer initialization, so GPU
 setup does not unnecessarily serialize first-pixel work. Native dialogs and Trash
 or permanent-delete calls for one current file remain synchronous,
@@ -77,8 +86,9 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // Auxiliary, Save As, crop, and display-preview work each has a one-result,
-    // event-loop-owned job.
+    // Folder scan, auxiliary, Save As, crop, and display-preview work each has a
+    // one-result, event-loop-owned job.
+    folder_scan_job: Option<OneShotJob<FolderScanContext, FolderScanResult>>,
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     save_job: Option<OneShotJob<(), SaveResult>>,
     close_after_save: bool,
@@ -122,9 +132,9 @@ Shipped:
   It opens command-line and native file requests, schedules background work, and
   feeds one immutable frame snapshot to the UI.
 - **`job`**: the bounded, one-result ownership boundary used by current-image
-  details, animation discovery, rating observation, Save As, crop, over-limit
-  display previews, each active filmstrip thumbnail, and each speculative
-  neighbor decode. The event loop retains operation context while the worker
+  details, animation discovery, rating observation, folder scans, Save As, crop,
+  over-limit display previews, each active filmstrip thumbnail, and each
+  speculative neighbor decode. The event loop retains operation context while the worker
   receives one non-cloneable completion endpoint. Replaced work cannot publish,
   context-owned cancellation flags stop obsolete crop or prefetch work, and an
   endpoint that closes without a result wakes the event loop so it becomes a
@@ -165,6 +175,9 @@ Shipped:
 - **`decode`**: opens one source object and turns that exact handle into RGBA
   pixels. The live handle and native object identity travel with every accepted
   foreground or speculative result instead of being reconstructed from its path.
+  Identity and version are captured together. A successful decoder result is
+  discarded if the retained object changed before publication, including an
+  in-place rewrite of the same object while decoding.
   Pure-Rust formats decode the duplicated handle on background threads via the
   `image` crate. For complex C-backed formats, the main process reads bounded
   encoded bytes from the same handle and delegates them to an
@@ -205,12 +218,32 @@ Shipped:
   container, and the reviewed `jxl-color` patch enforces the same 10 MiB encoded
   and decoded ICC ceiling while JPEG XL is still initializing. Decoder dimensions
   and declared output bytes are checked before `DynamicImage` allocates pixels.
+  SVG installs a fail-closed href resolver: vector shapes and paths remain
+  supported, while embedded raster data and external file references return one
+  fixed error before rendering. A streaming preflight also rejects image elements
+  before URL decoding and rejects document type declarations before entity
+  expansion, caps markup depth, element count, cumulative attribute count, and
+  cumulative parsed-attribute bytes, and excludes expansion-heavy `use` and
+  marker nodes. Cumulative `d` and `points` payloads have byte and token ceilings
+  before usvg can materialize path segments. A parsed-tree walk bounds
+  simultaneously live opacity, blend, and isolation layers, total painted and
+  layer area, parsed nodes, path segments, and tile-amplified edge work.
+  Stylesheets, inline styles, text, gradients, strokes, filters, masks, clipping paths,
+  and paint patterns fail closed because their expansion, subdivision, or scratch
+  allocation is not independently fallible and bounded. The local JPEG XL color
+  patch requires the exact 12-byte CICP tag layout, including zero reserved
+  bytes, preserves PQ and HLG transfer evidence without relying on LUT parsing,
+  checks exact AVX2 dispatch requirements, and gives transform errors precedence
+  over successful parallel chunks. Composition errors publish a terminal render
+  state and notify waiters.
 - **`animated`**: bounded GIF, WebP, and APNG frame decode plus deterministic
   deadline, pause/resume, and finite/infinite loop state. It is current-image-only
   RAM state and never a disk cache. Containers are identified by content after
   any misleading rename, APNG receives allocation limits at decoder construction,
-  superseded work exits between frames, and replacement frames duplicate the
-  already accepted source handle rather than reopening its path.
+  superseded work exits between frames, and frame decoding duplicates the already
+  accepted source handle rather than reopening its path. Source version is
+  checked before and after the full frame decode; a rewrite or rename discards
+  the animation instead of pairing it with stale accepted pixels.
 - **`image_info`**: best-effort local format, size, camera, lens, exposure,
   aperture, ISO, focal length, date, and privacy-category inspection. Auxiliary
   work duplicates the retained `ImageSource` handle that supplied accepted pixels
@@ -238,11 +271,29 @@ Shipped:
   until restart instead of promising recovery from an unsupervised thread.
   Save As rejects a destination that aliases the open source before encoding and
   builds the complete output in a sibling temporary file before one atomic
-  replacement attempt. Explicit session-only EXIF retention is content-driven,
-  supports JPEG, PNG, and WebP destinations, uses the bounded metadata reader,
-  and normalizes orientation, output dimensions, and stale thumbnail offsets
-  before writing supported tags. The event loop owns one bounded Save As result
-  slot while the worker receives a non-cloneable consuming completion endpoint.
+  replacement attempt. The event loop retains the canonical destination parent
+  identity plus whether the destination was absent or the exact identity and
+  version present after the native dialog. Every captured existing file receives
+  a second, app-owned overwrite prompt, and its identity and version are checked
+  after that consent, during staging, and immediately before commit. The prompt
+  exclusively owns UI and assistive-technology actions. Every source transition,
+  including an operating-system open, drag and drop, completed explicit folder
+  open, or rating-filter result that replaces or clears the selection, cancels it
+  before changing the selected source. Save As is unavailable while an explicit
+  folder-open scan can still install a new source. Explicit
+  session-only EXIF retention reads through a
+  serialized duplicate of the accepted source handle
+  that supplied the displayed pixels and rejects any available length,
+  modification-time, or change-time evidence of a rewrite or rename before or
+  during extraction. It supports JPEG, PNG, and WebP destinations, uses the bounded
+  metadata reader, and normalizes orientation, output dimensions, and stale
+  thumbnail offsets before writing supported tags. Pixel encoding and optional
+  EXIF insertion both write through the retained temporary-file handle. Its final
+  pathname must still identify that handle before commit, and an absent confirmed
+  destination installs with a no-clobber primitive so a concurrently created file
+  is never overwritten. The event loop owns one bounded
+  Save As result slot while the worker receives a non-cloneable consuming
+  completion endpoint.
   Rating replacement and Save As exclude each other at their method boundaries.
   A normal close waits for a successful captured output transaction; failure
   cancels deferred close so its guidance remains visible. Completion updates only
@@ -276,7 +327,10 @@ Shipped:
   handle open to prevent identity reuse, and restore repeats the identity check
   before selecting the identifier. A Windows or Linux batch restore enumerates
   Trash once and consumes each exact identifier from that shared snapshot. It
-  never falls back to pathname matching.
+  never falls back to pathname matching. After success, the restored pathname is
+  reopened without following its final component and must match the retained
+  object identity. That fresh handle supplies rating observation and new
+  identity-plus-version playlist provenance.
   External platform errors are mapped to fixed path-free user categories and
   retry dispositions before they leave this boundary. Identifiers are not logged
   or persisted.
@@ -287,7 +341,9 @@ Shipped:
   `SHOpenWithDialog` with `OAIF_EXEC`, a parent HWND, and one NUL-terminated UTF-16
   path. No shell command, editor preference, path log, or completion inference is
   introduced. Successful delegation sets only a session-local, path-free `F5`
-  reminder that clears when a new load starts.
+  reminder owned by the last-good frame. A failed reload or navigation retains
+  both the pixels and reminder. Fresh accepted pixels or explicit invalidation of
+  the displayed frame clears that ownership and the reminder together.
 - **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; platform-specific
   Job Object, process-group, seccomp, package-sandbox, memory, hard-deadline, and
   generation-cancellation controls for helpers.
@@ -368,6 +424,11 @@ treatment.
    for the scan or GPU setup before starting image work. If an OS sandbox grants only
    the selected file, viewr keeps that file openable as a one-item playlist and asks
    the user to choose **Open Folder** for explicit, session-scoped sibling access.
+   Starting another scan cancels ownership of the previous scan. Enumeration is
+   nonrecursive and capped at 100,000 supported regular files plus 64 MiB of
+   cumulative encoded path storage. Cancellation is observed during enumeration
+   and natural-sort comparisons. Exceeding either cap is visible and never
+   installs a silently truncated playlist.
 2. **Decode is prioritized:** the *current* image is decoded at highest priority.
    Async image decoding runs on background work using `std::sync::mpsc`, so file
    reads and decode do not freeze navigation. When navigation reaches a neighbor

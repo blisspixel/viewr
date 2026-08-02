@@ -40,7 +40,8 @@ use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
 use crate::prefetch::{self, PrefetchCache};
 use crate::presentation::{
-    ImageReuseEligibility, NavigationImagePlan, PresentationKind, durable_presentation_error,
+    ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
+    durable_presentation_error, external_edit_pending_after_frame_transition,
     image_open_in_progress, navigation_image_plan, preview_job_matches,
 };
 use crate::theme::{Preference, PreferenceRecovery};
@@ -119,7 +120,7 @@ fn run_internal(
         renderer: None,
         playlist: None,
         playlist_scope: None,
-        scanner_rx: None,
+        folder_scan_job: None,
         rating_scan_worker: None,
         rating_generation: 0,
         rating_write_disclosed: false,
@@ -141,6 +142,7 @@ fn run_internal(
         animation: None,
         image_details: None,
         auxiliary_job: None,
+        pending_save: None,
         save_job: None,
         close_after_save: false,
         save_recovery_unsettled: false,
@@ -263,9 +265,15 @@ impl From<accesskit_winit::Event> for UserEvent {
     }
 }
 
-struct FolderScan {
-    purpose: ScanPurpose,
-    files: std::io::Result<Vec<PathBuf>>,
+struct FolderScanContext {
+    purpose: Option<ScanPurpose>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for FolderScanContext {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+    }
 }
 
 struct RatingScanWorker {
@@ -390,6 +398,7 @@ enum SaveCloseDisposition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SaveStartBlocker {
     Recovery,
+    FolderOpen,
     RatingWrite,
     Preview,
     SpotHeal,
@@ -431,6 +440,9 @@ fn save_start_blocker<const N: usize>(
 const fn save_start_blocker_message(blocker: SaveStartBlocker) -> &'static str {
     match blocker {
         SaveStartBlocker::Recovery => crate::ui::SAVE_RECOVERY_STATUS,
+        SaveStartBlocker::FolderOpen => {
+            "Wait for the selected folder to finish opening before saving a copy"
+        }
         SaveStartBlocker::RatingWrite => {
             "Wait for the rating update to finish before saving a copy"
         }
@@ -511,6 +523,33 @@ type AuxiliaryLoadResult = (
 );
 
 type SaveResult = Result<crate::edit::MetadataDisposition, String>;
+
+struct PendingSave {
+    source_path: PathBuf,
+    source_image: Arc<DecodedImage>,
+    source: Option<Arc<crate::fs::ImageSource>>,
+    destination: crate::edit::SaveDestination,
+    pixel_transform: crate::edit::PixelTransform,
+    options: crate::edit::SaveOptions,
+}
+
+fn cancel_pending_save_for_source_change(pending_save: &mut Option<PendingSave>) -> bool {
+    pending_save.take().is_some()
+}
+
+const fn folder_scan_blocks_save(purpose: Option<&ScanPurpose>) -> bool {
+    matches!(purpose, Some(ScanPurpose::OpenFolder))
+}
+
+const fn filter_selection_changes_source(
+    selection: FilterSelection,
+    has_current_image: bool,
+) -> bool {
+    match selection {
+        FilterSelection::Stay => !has_current_image,
+        FilterSelection::Select(_) | FilterSelection::Empty => true,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PresentedRatingTransition {
@@ -1032,7 +1071,12 @@ struct App {
     session: crate::session::Session,
     playlist: Option<Playlist>,
     playlist_scope: Option<Arc<PlaylistScope>>,
-    scanner_rx: Option<Receiver<FolderScan>>,
+    folder_scan_job: Option<
+        OneShotJob<
+            FolderScanContext,
+            Result<Vec<crate::fs::ScannedImage>, crate::fs::ScanImagesError>,
+        >,
+    >,
     /// Cancellable, generation-tagged in-memory rating discovery for one folder.
     rating_scan_worker: Option<RatingScanWorker>,
     /// Monotonic owner token for folder rating results.
@@ -1069,6 +1113,8 @@ struct App {
     image_details: Option<crate::image_info::ImageDetails>,
     /// Replace-latest animation and metadata result for the current source.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
+    /// Captured existing destination awaiting object-bound overwrite consent.
+    pending_save: Option<PendingSave>,
     /// At most one explicit Save As encode with bounded completion ownership.
     save_job: Option<OneShotJob<(), SaveResult>>,
     /// A normal close request waiting for Save As to reach a terminal state.
@@ -1185,8 +1231,17 @@ fn rating_assignment_for_key(key: &str, repeat: bool) -> Option<RatingAssignment
     }
 }
 
-fn application_shortcuts_blocked(owners: [bool; 5]) -> bool {
+fn application_shortcuts_blocked<const N: usize>(owners: [bool; N]) -> bool {
     owners.into_iter().any(|owner| owner)
+}
+
+fn save_overwrite_dispatch_allows(
+    owns_dispatch: &mut bool,
+    overwrite_pending: bool,
+    action: &crate::ui::UiAction,
+) -> bool {
+    *owns_dispatch |= overwrite_pending;
+    !*owns_dispatch || crate::ui::save_overwrite_action_allowed(action)
 }
 
 fn is_space_key(key: &winit::keyboard::Key) -> bool {
@@ -1448,7 +1503,7 @@ impl App {
     }
 
     fn begin_image_load(&mut self, path: PathBuf) {
-        self.external_edit_pending = false;
+        self.cancel_save_overwrite_for_source_change();
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
         self.spawn_image_load(path);
@@ -1480,18 +1535,29 @@ impl App {
     }
 
     fn start_folder_scan(&mut self, directory: PathBuf, purpose: ScanPurpose) {
-        self.scanner_rx = None;
-        let (sender, receiver) = mpsc::channel();
+        self.folder_scan_job = None;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
         let event_proxy = self.event_proxy.clone();
+        let (completion, job) = OneShotJob::new(
+            FolderScanContext {
+                purpose: Some(purpose),
+                cancel,
+            },
+            move || {
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            },
+        );
         let spawn_result = std::thread::Builder::new()
             .name("viewr-folder-scan".into())
             .spawn(move || {
-                let files = crate::fs::scan_images(&directory);
-                let _ = sender.send(FolderScan { purpose, files });
-                let _ = event_proxy.send_event(UserEvent::Wake);
+                let files = crate::fs::scan_image_entries_while(&directory, || {
+                    !worker_cancel.load(Ordering::Acquire)
+                });
+                let _ = completion.complete(files);
             });
         match spawn_result {
-            Ok(_) => self.scanner_rx = Some(receiver),
+            Ok(_) => self.folder_scan_job = Some(job),
             Err(error) => {
                 log::error!("failed to start folder scan");
                 self.show_toast(format!("Could not scan folder: {error}"));
@@ -1531,6 +1597,14 @@ impl App {
     }
 
     fn replace_playlist(&mut self, files: Vec<PathBuf>, index: usize) {
+        self.install_playlist(Playlist::new(files, index));
+    }
+
+    fn replace_playlist_from_scan(&mut self, entries: Vec<crate::fs::ScannedImage>, index: usize) {
+        self.install_playlist(Playlist::from_scan(entries, index));
+    }
+
+    fn install_playlist(&mut self, playlist: Playlist) {
         if let Some(worker) = self.rating_scan_worker.take() {
             worker.cancel.store(true, Ordering::Release);
         }
@@ -1540,37 +1614,85 @@ impl App {
         self.thumbnail_schedule.reset();
         self.thumb_textures.clear();
         self.playlist_scope = Some(Arc::new(PlaylistScope));
-        self.playlist = Some(Playlist::new(files, index));
+        self.playlist = Some(playlist);
     }
 
-    fn finish_folder_scan(&mut self, scan: FolderScan) -> bool {
-        if let ScanPurpose::SelectedFile(selected) = &scan.purpose
+    fn preserve_presented_source_provenance(&mut self, selected: &Path) {
+        if self.session.presented_path.as_deref() != Some(selected) {
+            return;
+        }
+        let Some(source) = self.current_source.as_deref() else {
+            return;
+        };
+        if let Some(playlist) = self.playlist.as_mut() {
+            bind_playlist_source_provenance(playlist, selected, source, false);
+        }
+    }
+
+    fn finish_folder_scan(
+        &mut self,
+        purpose: ScanPurpose,
+        files: Result<Vec<crate::fs::ScannedImage>, crate::fs::ScanImagesError>,
+    ) -> bool {
+        if let ScanPurpose::SelectedFile(selected) = &purpose
             && !selected_scan_is_current(self.session.selected_path.as_deref(), selected)
         {
             return false;
         }
-        match (scan.purpose, scan.files) {
+        match (purpose, files) {
             (ScanPurpose::SelectedFile(selected), Ok(files)) => {
-                if let Some(index) = selected_file_index(&files, &selected) {
-                    self.replace_playlist(files, index);
+                if let Some(index) =
+                    selected_file_index_by(&files, &selected, crate::fs::ScannedImage::path)
+                {
+                    self.replace_playlist_from_scan(files, index);
                 } else {
-                    self.replace_playlist(vec![selected], 0);
+                    self.replace_playlist(vec![selected.clone()], 0);
                 }
+                self.preserve_presented_source_provenance(&selected);
                 self.kick_prefetch();
+            }
+            (
+                ScanPurpose::SelectedFile(selected),
+                Err(
+                    crate::fs::ScanImagesError::LimitExceeded
+                    | crate::fs::ScanImagesError::PathBudgetExceeded,
+                ),
+            ) => {
+                self.replace_playlist(vec![selected.clone()], 0);
+                self.preserve_presented_source_provenance(&selected);
+                self.show_toast(
+                    "Folder is too large for safe automatic browsing. Opened only the selected image",
+                );
+            }
+            (
+                ScanPurpose::SelectedFile(_) | ScanPurpose::OpenFolder,
+                Err(crate::fs::ScanImagesError::Cancelled),
+            ) => {
+                return false;
             }
             (ScanPurpose::SelectedFile(selected), Err(error)) => {
                 log::warn!("folder scan unavailable: {error}");
-                self.replace_playlist(vec![selected], 0);
-                self.show_toast("Open Folder to allow next and previous image access");
+                self.replace_playlist(vec![selected.clone()], 0);
+                self.preserve_presented_source_provenance(&selected);
+                self.show_toast("Folder browsing is unavailable. Opened only the selected image");
             }
             (ScanPurpose::OpenFolder, Ok(files)) if files.is_empty() => {
                 self.show_toast("The selected folder contains no supported images");
             }
             (ScanPurpose::OpenFolder, Ok(files)) => {
-                let first = files[0].clone();
-                self.replace_playlist(files, 0);
+                let first = files[0].path().to_owned();
+                self.replace_playlist_from_scan(files, 0);
                 self.begin_image_load(first);
                 self.kick_prefetch();
+            }
+            (
+                ScanPurpose::OpenFolder,
+                Err(
+                    crate::fs::ScanImagesError::LimitExceeded
+                    | crate::fs::ScanImagesError::PathBudgetExceeded,
+                ),
+            ) => {
+                self.show_toast("The selected folder exceeds safe browsing limits");
             }
             (ScanPurpose::OpenFolder, Err(error)) => {
                 log::warn!("selected folder scan failed: {error}");
@@ -1580,7 +1702,34 @@ impl App {
         true
     }
 
+    fn poll_folder_scan(&mut self) -> bool {
+        let Some(completed_scan) = self.folder_scan_job.as_ref().map(OneShotJob::poll) else {
+            return false;
+        };
+        if matches!(completed_scan, JobPoll::Pending) {
+            return false;
+        }
+        let mut context = self
+            .folder_scan_job
+            .take()
+            .expect("folder scan job exists after polling it")
+            .into_context();
+        let purpose = context
+            .purpose
+            .take()
+            .expect("active folder scan retains its purpose");
+        let files = match completed_scan {
+            JobPoll::Ready(files) => files,
+            JobPoll::Disconnected => Err(crate::fs::ScanImagesError::WorkerStopped),
+            JobPoll::Pending => unreachable!("pending folder scan returned early"),
+        };
+        self.finish_folder_scan(purpose, files)
+    }
+
     fn display_loaded_image(&mut self, path: &Path, loaded: LoadedImage) {
+        if let Some(playlist) = self.playlist.as_mut() {
+            bind_playlist_source_provenance(playlist, path, &loaded.source, true);
+        }
         self.present_image(
             path,
             loaded.image,
@@ -1775,6 +1924,10 @@ impl App {
             rating_recovery_after_presentation(kind, self.current_source.is_some());
         self.rating_recovery_unsettled =
             next_rating_recovery_state(self.rating_recovery_unsettled, recovery_transition);
+        self.external_edit_pending = external_edit_pending_after_frame_transition(
+            self.external_edit_pending,
+            PresentedFrameTransition::Present(kind),
+        );
         match kind {
             PresentationKind::Loaded => {
                 self.prefetch_schedule.allow(path);
@@ -1864,6 +2017,10 @@ impl App {
     }
 
     fn invalidate_displayed_image(&mut self) {
+        self.external_edit_pending = external_edit_pending_after_frame_transition(
+            self.external_edit_pending,
+            PresentedFrameTransition::Invalidate,
+        );
         self.heal.reset_for_image();
         self.cancel_crop_work();
         self.preview_job = None;
@@ -1887,6 +2044,10 @@ impl App {
     /// Stop work and edit state tied to the old image while leaving its last
     /// good pixels on screen until a replacement has decoded successfully.
     fn prepare_for_image_load(&mut self) {
+        self.external_edit_pending = external_edit_pending_after_frame_transition(
+            self.external_edit_pending,
+            PresentedFrameTransition::RetainForReplacement,
+        );
         self.heal.reset_for_image();
         self.cancel_crop_work();
         self.preview_job = None;
@@ -2160,7 +2321,7 @@ impl App {
     }
 
     fn start_rating_write(&mut self, pending: &PendingRatingWrite) {
-        if self.save_job.is_some() {
+        if self.save_transaction_active() {
             self.show_toast("Wait for Save As to finish before changing the rating");
             return;
         }
@@ -2229,6 +2390,9 @@ impl App {
                 self.remove_prefetched_image(&worker.path);
                 if let Some(playlist) = self.playlist.as_mut() {
                     playlist.set_rating(&worker.path, verified.state);
+                    if let Some(provenance) = verified.source.scan_provenance() {
+                        playlist.set_scan_provenance(&worker.path, Some(provenance));
+                    }
                 }
                 if self.session.presented_path.as_ref() == Some(&worker.path) {
                     self.presented_rating = next_presented_rating(
@@ -2318,7 +2482,10 @@ impl App {
         let Some(playlist) = self.playlist.as_ref() else {
             return;
         };
-        let files = playlist.files.clone();
+        let files = playlist
+            .files_with_provenance()
+            .map(|(path, provenance)| (path.to_owned(), provenance))
+            .collect::<Vec<_>>();
         let generation = self.rating_generation;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
@@ -2328,11 +2495,15 @@ impl App {
             .name("viewr-rating-scan".into())
             .spawn(move || {
                 let mut ratings = Vec::with_capacity(files.len());
-                for path in files {
+                for (path, provenance) in files {
                     if worker_cancel.load(Ordering::Acquire) {
                         return;
                     }
-                    ratings.push((path.clone(), crate::ratings::observe_path(&path).state));
+                    let observation = provenance.map_or_else(
+                        || crate::ratings::observe_path(&path),
+                        |provenance| crate::ratings::observe_scanned_path(&path, provenance),
+                    );
+                    ratings.push((path, observation.state));
                 }
                 if !worker_cancel.load(Ordering::Acquire) {
                     let _ = sender.send(ratings);
@@ -2398,6 +2569,9 @@ impl App {
     }
 
     fn apply_filter_selection(&mut self, selection: FilterSelection) {
+        if filter_selection_changes_source(selection, self.current_image.is_some()) {
+            self.cancel_save_overwrite_for_source_change();
+        }
         self.reset_prefetch_for_playlist_change();
         match selection {
             FilterSelection::Stay => {
@@ -2461,7 +2635,7 @@ impl App {
             self.show_toast("Wait for the crop to finish before reloading");
             return;
         }
-        if self.save_job.is_some() {
+        if self.save_transaction_active() {
             self.show_toast("Wait for Save As to finish before reloading");
             return;
         }
@@ -2483,7 +2657,7 @@ impl App {
         self.thumb_textures.remove(&path);
         self.transform = Transform::default();
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
-        self.spawn_image_load(path);
+        self.spawn_refreshed_image_load(path);
         self.show_toast("Reloading file from disk");
         self.request_redraw();
     }
@@ -2832,7 +3006,7 @@ impl App {
             // trusted pixels retained above.
             self.prefetch_schedule.allow(&path);
         }
-        self.spawn_image_load_with_cached(next_path, cached_target);
+        self.spawn_image_load_with_cached(next_path, cached_target, false);
         self.kick_prefetch();
     }
 
@@ -2841,24 +3015,38 @@ impl App {
         let Some(playlist) = &self.playlist else {
             return;
         };
-        let targets: Vec<PathBuf> = playlist
+        let targets: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)> = playlist
             .visible_neighbor_paths(2)
             .into_iter()
             .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))
+            .map(|path| {
+                let provenance = playlist.scan_provenance(&path);
+                (path, provenance)
+            })
             .collect();
         if targets.is_empty() {
             return;
         }
 
-        for path in targets {
+        for (path, provenance) in targets {
             let event_proxy = self.event_proxy.clone();
-            let _ = self.prefetch_schedule.request(
-                path,
-                move || {
-                    let _ = event_proxy.send_event(UserEvent::Wake);
-                },
-                crate::decode::schedule_background_decode,
-            );
+            let notify = move || {
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            };
+            let _ = if let Some(provenance) = provenance {
+                self.prefetch_schedule.request_scanned(
+                    path,
+                    provenance,
+                    notify,
+                    crate::decode::schedule_background_decode,
+                )
+            } else {
+                self.prefetch_schedule.request(
+                    path,
+                    notify,
+                    crate::decode::schedule_background_decode,
+                )
+            };
         }
     }
 
@@ -2997,10 +3185,12 @@ impl App {
             self.curation_worker
                 .as_ref()
                 .map(|worker| worker.context.kind().work()),
-            self.scanner_rx.is_some().then_some(CurrentWork::FolderScan),
+            self.folder_scan_job
+                .is_some()
+                .then_some(CurrentWork::FolderScan),
             image_preparation_work(self.session.is_loading(), self.preview_job.is_some()),
             crop_work(self.transform.is_cropping, self.crop_job.is_some()),
-            self.save_job.is_some().then_some(CurrentWork::Save),
+            self.save_transaction_active().then_some(CurrentWork::Save),
             self.rating_write_worker
                 .is_some()
                 .then_some(CurrentWork::RatingWrite),
@@ -3103,7 +3293,7 @@ impl App {
             self.show_toast("A crop is already being applied");
             return;
         }
-        if self.save_job.is_some() {
+        if self.save_transaction_active() {
             self.show_toast("Wait for the current save to finish before cropping");
             return;
         }
@@ -3257,7 +3447,7 @@ impl App {
             self.show_toast("Wait for the image preview to finish before using Spot Heal");
             return;
         }
-        if !self.heal.active && self.save_job.is_some() {
+        if !self.heal.active && self.save_transaction_active() {
             self.show_toast("Wait for the current save to finish before using Spot Heal");
             return;
         }
@@ -3322,7 +3512,7 @@ impl App {
     fn refresh_heal_source(&mut self) {
         if self.heal.is_busy()
             || self.crop_job.is_some()
-            || self.save_job.is_some()
+            || self.save_transaction_active()
             || self.preview_job.is_some()
         {
             return;
@@ -3401,7 +3591,7 @@ impl App {
         if !self.heal.active
             || self.heal.is_busy()
             || self.crop_job.is_some()
-            || self.save_job.is_some()
+            || self.save_transaction_active()
             || self.preview_job.is_some()
         {
             return;
@@ -3920,14 +4110,28 @@ impl App {
             if self.thumb_textures.contains_key(&path) {
                 continue;
             }
+            let provenance = self
+                .playlist
+                .as_ref()
+                .and_then(|playlist| playlist.scan_provenance(&path));
             let event_proxy = self.event_proxy.clone();
-            self.thumbnail_schedule.request(
-                path,
-                move || {
-                    let _ = event_proxy.send_event(UserEvent::Wake);
-                },
-                crate::decode::schedule_background_decode,
-            );
+            let notify = move || {
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            };
+            if let Some(provenance) = provenance {
+                self.thumbnail_schedule.request_scanned(
+                    path,
+                    provenance,
+                    notify,
+                    crate::decode::schedule_background_decode,
+                );
+            } else {
+                self.thumbnail_schedule.request(
+                    path,
+                    notify,
+                    crate::decode::schedule_background_decode,
+                );
+            }
         }
     }
 
@@ -4197,8 +4401,22 @@ impl App {
                     .min(playlist.files.len());
                 focused_index.get_or_insert(index);
                 let path = record.receipt.original_path().to_owned();
-                let rating = crate::ratings::observe_path(&path).state;
-                playlist.insert_path(index, path, rating);
+                let restored_source = record.receipt.open_restored_source();
+                let rating = restored_source
+                    .as_ref()
+                    .map_or(crate::ratings::RatingState::Unreadable, |source| {
+                        crate::ratings::observe_source(source, &path).state
+                    });
+                let provenance = restored_source
+                    .as_ref()
+                    .and_then(crate::fs::ImageSource::scan_provenance)
+                    .or_else(|| {
+                        record
+                            .receipt
+                            .restore_source()
+                            .and_then(crate::fs::ImageSource::current_scan_provenance)
+                    });
+                playlist.insert_path(index, path, rating, provenance);
             }
             if let Some(index) = focused_index {
                 playlist.index = index.min(playlist.files.len().saturating_sub(1));
@@ -4251,10 +4469,19 @@ impl App {
 
     fn spawn_image_load(&mut self, path: PathBuf) {
         let cached_image = self.take_prefetched_image(&path);
-        self.spawn_image_load_with_cached(path, cached_image);
+        self.spawn_image_load_with_cached(path, cached_image, false);
     }
 
-    fn spawn_image_load_with_cached(&mut self, path: PathBuf, cached_image: Option<LoadedImage>) {
+    fn spawn_refreshed_image_load(&mut self, path: PathBuf) {
+        self.spawn_image_load_with_cached(path, None, true);
+    }
+
+    fn spawn_image_load_with_cached(
+        &mut self,
+        path: PathBuf,
+        cached_image: Option<LoadedImage>,
+        refresh_scanned: bool,
+    ) {
         let generation = self
             .session
             .generation
@@ -4276,8 +4503,26 @@ impl App {
         self.session.receiver = Some(rx);
         let event_proxy = self.event_proxy.clone();
         let current_generation = Arc::clone(&self.session.generation);
+        let provenance = self
+            .playlist
+            .as_ref()
+            .and_then(|playlist| playlist.scan_provenance(&path));
         let scheduled = crate::decode::schedule_foreground_decode(move || {
-            let res = match DecodedImage::load_if_current(&path, &current_generation, generation) {
+            let loaded = match (refresh_scanned, provenance) {
+                (true, Some(_)) => DecodedImage::load_refreshed_regular_if_current(
+                    &path,
+                    &current_generation,
+                    generation,
+                ),
+                (_, Some(provenance)) => DecodedImage::load_scanned_if_current(
+                    &path,
+                    provenance,
+                    &current_generation,
+                    generation,
+                ),
+                (_, None) => DecodedImage::load_if_current(&path, &current_generation, generation),
+            };
+            let res = match loaded {
                 Ok(Some(image)) => Ok(image),
                 Ok(None) => return,
                 Err(error) => Err(error.to_string()),
@@ -4294,6 +4539,18 @@ impl App {
         }
     }
 
+    fn save_transaction_active(&self) -> bool {
+        self.pending_save.is_some() || self.save_job.is_some()
+    }
+
+    fn cancel_save_overwrite_for_source_change(&mut self) {
+        if cancel_pending_save_for_source_change(&mut self.pending_save) {
+            self.show_toast(
+                "Pending Save As overwrite canceled because the active image selection changed.",
+            );
+        }
+    }
+
     fn save_as(&mut self) {
         if self.block_action_while_curating("saving a copy") {
             return;
@@ -4301,6 +4558,12 @@ impl App {
         if let Some(blocker) = save_start_blocker([
             self.save_recovery_unsettled
                 .then_some(SaveStartBlocker::Recovery),
+            folder_scan_blocks_save(
+                self.folder_scan_job
+                    .as_ref()
+                    .and_then(|job| job.context().purpose.as_ref()),
+            )
+            .then_some(SaveStartBlocker::FolderOpen),
             self.rating_write_worker
                 .is_some()
                 .then_some(SaveStartBlocker::RatingWrite),
@@ -4309,7 +4572,8 @@ impl App {
                 .then_some(SaveStartBlocker::Preview),
             (self.heal.is_busy() || self.heal.painting).then_some(SaveStartBlocker::SpotHeal),
             self.crop_job.is_some().then_some(SaveStartBlocker::Crop),
-            self.save_job.is_some().then_some(SaveStartBlocker::Save),
+            self.save_transaction_active()
+                .then_some(SaveStartBlocker::Save),
         ]) {
             self.show_toast(save_start_blocker_message(blocker));
             return;
@@ -4339,12 +4603,60 @@ impl App {
         else {
             return;
         };
-        let retain_exif = self.retain_exif;
-        let options = if retain_exif {
+        let destination = match crate::edit::prepare_save_destination(&save_path) {
+            Ok(destination) => destination,
+            Err(error) => {
+                self.show_toast(format!("Save failed: {error}"));
+                return;
+            }
+        };
+        let options = if self.retain_exif {
             crate::edit::SaveOptions::retain_exif()
         } else {
             crate::edit::SaveOptions::strip()
         };
+        let pending = PendingSave {
+            source_path: path,
+            source_image: image,
+            source: self.current_source.as_ref().map(Arc::clone),
+            destination,
+            pixel_transform,
+            options,
+        };
+        if pending.destination.requires_overwrite_confirmation() {
+            self.pending_save = Some(pending);
+            self.request_redraw();
+        } else {
+            self.start_save(pending);
+        }
+    }
+
+    fn confirm_save_overwrite(&mut self) {
+        let Some(pending) = self.pending_save.take() else {
+            return;
+        };
+        if let Err(error) = pending.destination.confirm_overwrite() {
+            self.show_toast(format!("Save failed: {error}"));
+            return;
+        }
+        self.start_save(pending);
+    }
+
+    fn cancel_save_overwrite(&mut self) {
+        if self.pending_save.take().is_some() {
+            self.show_toast("Save canceled. No file was changed.");
+        }
+    }
+
+    fn start_save(&mut self, pending: PendingSave) {
+        let PendingSave {
+            source_path,
+            source_image,
+            source,
+            destination,
+            pixel_transform,
+            options,
+        } = pending;
         let event_proxy = self.event_proxy.clone();
         let (completion, job) = OneShotJob::new((), move || {
             let _ = event_proxy.send_event(UserEvent::Wake);
@@ -4354,12 +4666,18 @@ impl App {
             .spawn(move || {
                 let result = (|| {
                     let transformed = (!pixel_transform.is_identity())
-                        .then(|| pixel_transform.apply(image.as_ref()))
+                        .then(|| pixel_transform.apply(source_image.as_ref()))
                         .transpose()
                         .map_err(|error| error.to_string())?;
-                    let export_image = transformed.as_ref().unwrap_or(image.as_ref());
-                    crate::edit::save_with_options(export_image, &save_path, Some(&path), options)
-                        .map_err(|error| error.to_string())
+                    let export_image = transformed.as_ref().unwrap_or(source_image.as_ref());
+                    crate::edit::save_with_accepted_source(
+                        export_image,
+                        &destination,
+                        &source_path,
+                        source.as_deref(),
+                        options,
+                    )
+                    .map_err(|error| error.to_string())
                 })();
                 let _ = completion.complete(result);
             });
@@ -4516,7 +4834,7 @@ impl App {
             self.show_toast("Wait for the image preview to finish before cropping");
             return;
         }
-        if self.save_job.is_some() {
+        if self.save_transaction_active() {
             self.show_toast("Wait for the current save to finish before cropping");
             return;
         }
@@ -4652,7 +4970,7 @@ impl App {
             || self.preview_job.is_some()
             || self.auxiliary_job.is_some()
             || self.crop_job.is_some()
-            || self.scanner_rx.is_some()
+            || self.folder_scan_job.is_some()
         {
             return false;
         }
@@ -4709,7 +5027,7 @@ impl App {
                 "ready_thumbnails={}/{})"
             ),
             PERFORMANCE_PROBE_TIMEOUT.as_secs(),
-            self.scanner_rx.is_some(),
+            self.folder_scan_job.is_some(),
             self.session.receiver.is_some() || self.preview_job.is_some(),
             self.auxiliary_job.is_some(),
             self.performance_probe
@@ -4986,6 +5304,7 @@ impl ApplicationHandler<UserEvent> for App {
                         || (!application_shortcuts_blocked([
                             self.show_about,
                             self.show_update,
+                            self.pending_save.is_some(),
                             self.pending_rating_write.is_some(),
                             egui_popup_open,
                             self.context_menu_pos.is_some(),
@@ -5061,7 +5380,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::DroppedFile(path) => {
-                self.load_and_scan(path);
+                self.open_file_request(path);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let steps = match delta {
@@ -5265,6 +5584,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if application_shortcuts_blocked([
                     self.show_about,
                     self.show_update,
+                    self.pending_save.is_some(),
                     self.pending_rating_write.is_some(),
                     egui_popup_open,
                     self.context_menu_pos.is_some(),
@@ -5466,6 +5786,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
                 let load_error = self.session.load_error.clone();
                 let save_busy = self.save_job.is_some();
+                let save_overwrite_pending = self.pending_save.is_some();
                 let save_recovery_unsettled = self.save_recovery_unsettled;
                 let crop_busy = self.crop_job.is_some();
                 let crop_recovery_unsettled = self.crop_recovery_unsettled;
@@ -5478,7 +5799,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let curation_recovery_status = self.curation_recovery.status();
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
-                let folder_scan_busy = self.scanner_rx.is_some();
+                let folder_scan_busy = self.folder_scan_job.is_some();
                 let path_str = self
                     .session
                     .presented_path
@@ -5637,6 +5958,7 @@ impl ApplicationHandler<UserEvent> for App {
                     is_opening,
                     load_error,
                     save_busy,
+                    save_overwrite_pending,
                     save_recovery_unsettled,
                     crop_busy,
                     crop_recovery_unsettled,
@@ -5680,7 +6002,15 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
+                let mut save_overwrite_owns_dispatch = false;
                 for action in ui_actions {
+                    if !save_overwrite_dispatch_allows(
+                        &mut save_overwrite_owns_dispatch,
+                        self.pending_save.is_some(),
+                        &action,
+                    ) {
+                        continue;
+                    }
                     match action {
                         crate::ui::UiAction::Open => {
                             self.open_image_dialog();
@@ -5689,6 +6019,12 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::Reload => self.reload_current_image(),
                         crate::ui::UiAction::OpenWith => self.open_current_with(),
                         crate::ui::UiAction::SaveAs => self.save_as(),
+                        crate::ui::UiAction::ConfirmSaveOverwrite => {
+                            self.confirm_save_overwrite();
+                        }
+                        crate::ui::UiAction::CancelSaveOverwrite => {
+                            self.cancel_save_overwrite();
+                        }
                         crate::ui::UiAction::Trash => {
                             self.trash_current();
                             if let Some(r) = self.renderer.as_mut() {
@@ -5975,17 +6311,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        let completed_scan = self
-            .scanner_rx
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok());
-        if let Some(scan) = completed_scan {
-            self.scanner_rx = None;
-            if self.finish_folder_scan(scan)
-                && let Some(renderer) = self.renderer.as_ref()
-            {
-                renderer.window().request_redraw();
-            }
+        if self.poll_folder_scan()
+            && let Some(renderer) = self.renderer.as_ref()
+        {
+            renderer.window().request_redraw();
         }
 
         self.advance_animation(Instant::now());
@@ -6063,13 +6392,35 @@ fn prefetch_destination(
     }
 }
 
-fn selected_file_index(files: &[PathBuf], selected: &Path) -> Option<usize> {
-    files.iter().position(|path| path == selected).or_else(|| {
-        let selected_name = selected.file_name()?;
-        files
-            .iter()
-            .position(|path| path.file_name() == Some(selected_name))
-    })
+fn selected_file_index_by<T>(
+    files: &[T],
+    selected: &Path,
+    path: impl Fn(&T) -> &Path + Copy,
+) -> Option<usize> {
+    files
+        .iter()
+        .position(|entry| path(entry) == selected)
+        .or_else(|| {
+            let selected_name = selected.file_name()?;
+            files
+                .iter()
+                .position(|entry| path(entry).file_name() == Some(selected_name))
+        })
+}
+
+fn bind_playlist_source_provenance(
+    playlist: &mut Playlist,
+    path: &Path,
+    source: &crate::fs::ImageSource,
+    require_existing_provenance: bool,
+) -> bool {
+    if require_existing_provenance && playlist.scan_provenance(path).is_none() {
+        return false;
+    }
+    let Some(provenance) = source.scan_provenance() else {
+        return false;
+    };
+    playlist.set_scan_provenance(path, Some(provenance))
 }
 
 fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
@@ -6272,6 +6623,136 @@ mod test {
     use super::*;
 
     #[test]
+    fn source_change_cancels_pending_overwrite_without_touching_destination() {
+        let workspace = crate::ephemeral::TempWorkspace::new("cancel_pending_save").unwrap();
+        let destination_path = workspace.path().join("existing.png");
+        let original = b"existing destination";
+        std::fs::write(&destination_path, original).unwrap();
+        let mut pending_save = Some(PendingSave {
+            source_path: workspace.path().join("source.png"),
+            source_image: Arc::new(DecodedImage {
+                rgba: vec![10, 20, 30, 255],
+                width: 1,
+                height: 1,
+                color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+                working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            }),
+            source: None,
+            destination: crate::edit::prepare_save_destination(&destination_path).unwrap(),
+            pixel_transform: crate::edit::PixelTransform::default(),
+            options: crate::edit::SaveOptions::default(),
+        });
+
+        assert!(cancel_pending_save_for_source_change(&mut pending_save));
+        assert!(pending_save.is_none());
+        assert_eq!(std::fs::read(&destination_path).unwrap(), original);
+        assert!(!cancel_pending_save_for_source_change(&mut pending_save));
+    }
+
+    #[test]
+    fn only_an_explicit_open_folder_scan_blocks_save_preflight() {
+        let selected = ScanPurpose::SelectedFile(PathBuf::from("selected.png"));
+
+        assert!(folder_scan_blocks_save(Some(&ScanPurpose::OpenFolder)));
+        assert!(!folder_scan_blocks_save(Some(&selected)));
+        assert!(!folder_scan_blocks_save(None));
+    }
+
+    #[test]
+    fn every_filter_result_that_can_replace_or_clear_source_revokes_consent() {
+        assert!(!filter_selection_changes_source(
+            FilterSelection::Stay,
+            true
+        ));
+        assert!(filter_selection_changes_source(
+            FilterSelection::Stay,
+            false
+        ));
+        assert!(filter_selection_changes_source(
+            FilterSelection::Select(4),
+            true
+        ));
+        assert!(filter_selection_changes_source(
+            FilterSelection::Empty,
+            true
+        ));
+    }
+
+    #[test]
+    fn overwrite_dispatch_ownership_is_sticky_when_an_action_opens_the_modal() {
+        let mut owns_dispatch = false;
+
+        assert!(save_overwrite_dispatch_allows(
+            &mut owns_dispatch,
+            false,
+            &crate::ui::UiAction::SaveAs,
+        ));
+        assert!(!save_overwrite_dispatch_allows(
+            &mut owns_dispatch,
+            true,
+            &crate::ui::UiAction::Trash,
+        ));
+        assert!(save_overwrite_dispatch_allows(
+            &mut owns_dispatch,
+            true,
+            &crate::ui::UiAction::CancelSaveOverwrite,
+        ));
+        assert!(!save_overwrite_dispatch_allows(
+            &mut owns_dispatch,
+            false,
+            &crate::ui::UiAction::Open,
+        ));
+    }
+
+    fn assert_selected_replacement_stays_bound_to_accepted_source(
+        fixture: &str,
+        require_existing_provenance: bool,
+    ) {
+        let workspace = crate::ephemeral::TempWorkspace::new(fixture).unwrap();
+        let path = workspace.path().join("selected.png");
+        let original = workspace.path().join("original.png");
+        let replacement = workspace.path().join("replacement.png");
+        image::RgbImage::from_pixel(1, 1, image::Rgb([255, 0, 0]))
+            .save(&path)
+            .unwrap();
+        image::RgbImage::from_pixel(1, 1, image::Rgb([0, 0, 255]))
+            .save(&replacement)
+            .unwrap();
+        let accepted = crate::fs::ImageSource::open_regular(&path).unwrap();
+        std::fs::rename(&path, &original).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        let replacement_source = crate::fs::ImageSource::open_regular(&path).unwrap();
+        let mut playlist = Playlist::new(vec![path.clone()], 0);
+        playlist.set_scan_provenance(&path, replacement_source.scan_provenance());
+
+        assert!(bind_playlist_source_provenance(
+            &mut playlist,
+            &path,
+            &accepted,
+            require_existing_provenance,
+        ));
+
+        let provenance = playlist.scan_provenance(&path).unwrap();
+        assert!(crate::fs::ImageSource::open_scanned(&path, provenance).is_err());
+    }
+
+    #[test]
+    fn scan_before_display_preserves_the_explicitly_accepted_source() {
+        assert_selected_replacement_stays_bound_to_accepted_source(
+            "selected_scan_before_display",
+            true,
+        );
+    }
+
+    #[test]
+    fn display_before_scan_preserves_the_explicitly_accepted_source() {
+        assert_selected_replacement_stays_bound_to_accepted_source(
+            "selected_display_before_scan",
+            false,
+        );
+    }
+
+    #[test]
     fn bare_digits_assign_ratings_and_repeat_never_writes() {
         assert_eq!(
             rating_assignment_for_key("0", false),
@@ -6303,9 +6784,9 @@ mod test {
 
     #[test]
     fn menus_modals_and_popups_own_keyboard_shortcuts() {
-        assert!(!application_shortcuts_blocked([false; 5]));
-        for owner in 0..5 {
-            let mut owners = [false; 5];
+        assert!(!application_shortcuts_blocked([false; 6]));
+        for owner in 0..6 {
+            let mut owners = [false; 6];
             owners[owner] = true;
             assert!(application_shortcuts_blocked(owners));
         }
@@ -6688,13 +7169,14 @@ mod test {
     }
 
     #[test]
-    fn save_start_preflight_excludes_rating_writes_and_unsettled_recovery() {
-        use SaveStartBlocker::{Crop, Preview, RatingWrite, Recovery, Save, SpotHeal};
+    fn save_start_preflight_excludes_source_changes_writes_and_unsettled_recovery() {
+        use SaveStartBlocker::{Crop, FolderOpen, Preview, RatingWrite, Recovery, Save, SpotHeal};
 
         let cases = [
             (
                 [
                     Some(Recovery),
+                    Some(FolderOpen),
                     Some(RatingWrite),
                     Some(Preview),
                     Some(SpotHeal),
@@ -6704,11 +7186,16 @@ mod test {
                 Some(Recovery),
             ),
             (
-                [None, Some(RatingWrite), None, None, None, None],
+                [None, Some(FolderOpen), None, None, None, None, None],
+                Some(FolderOpen),
+            ),
+            (
+                [None, None, Some(RatingWrite), None, None, None, None],
                 Some(RatingWrite),
             ),
             (
                 [
+                    None,
                     None,
                     None,
                     Some(Preview),
@@ -6719,16 +7206,31 @@ mod test {
                 Some(Preview),
             ),
             (
-                [None, None, None, Some(SpotHeal), Some(Crop), Some(Save)],
+                [
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(SpotHeal),
+                    Some(Crop),
+                    Some(Save),
+                ],
                 Some(SpotHeal),
             ),
-            ([None, None, None, None, Some(Crop), Some(Save)], Some(Crop)),
-            ([None, None, None, None, None, Some(Save)], Some(Save)),
-            ([None; 6], None),
+            (
+                [None, None, None, None, None, Some(Crop), Some(Save)],
+                Some(Crop),
+            ),
+            ([None, None, None, None, None, None, Some(Save)], Some(Save)),
+            ([None; 7], None),
         ];
         for (blockers, expected) in cases {
             assert_eq!(save_start_blocker(blockers), expected);
         }
+        assert_eq!(
+            save_start_blocker_message(FolderOpen),
+            "Wait for the selected folder to finish opening before saving a copy"
+        );
         assert_eq!(
             save_start_blocker_message(RatingWrite),
             "Wait for the rating update to finish before saving a copy"
@@ -7614,8 +8116,14 @@ mod test {
     #[test]
     fn selected_file_matches_relative_scan_results_by_name() {
         let files = vec![PathBuf::from("./img1.png"), PathBuf::from("./img2.png")];
-        assert_eq!(selected_file_index(&files, Path::new("img2.png")), Some(1));
-        assert_eq!(selected_file_index(&files, Path::new("missing.png")), None);
+        assert_eq!(
+            selected_file_index_by(&files, Path::new("img2.png"), PathBuf::as_path),
+            Some(1)
+        );
+        assert_eq!(
+            selected_file_index_by(&files, Path::new("missing.png"), PathBuf::as_path),
+            None
+        );
     }
 
     #[test]

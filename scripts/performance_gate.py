@@ -444,8 +444,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         folder_growth_mib=args.folder_growth_mib,
     )
 
-    # The application intentionally scrubs stale `viewr-*` temp names at launch.
-    # This harness owns and cleans its directory, so use a disjoint prefix.
+    # This harness owns and cleans its directory. Keep a disjoint prefix so
+    # performance-probe artifacts remain unambiguous during a failed run.
     with tempfile.TemporaryDirectory(prefix="performance-gate-") as temp:
         root = Path(temp)
         source = root / "source.png"

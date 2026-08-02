@@ -11,6 +11,13 @@ pub(super) enum PresentationKind {
     Cropped,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PresentedFrameTransition {
+    RetainForReplacement,
+    Invalidate,
+    Present(PresentationKind),
+}
+
 impl PresentationKind {
     pub(super) const fn image_reuse(self) -> ImageReuseEligibility {
         match self {
@@ -62,6 +69,18 @@ pub(super) const fn image_open_in_progress(
     foreground_decode_pending || matches!(preview_kind, Some(PresentationKind::Loaded))
 }
 
+pub(super) const fn external_edit_pending_after_frame_transition(
+    was_pending: bool,
+    transition: PresentedFrameTransition,
+) -> bool {
+    match transition {
+        PresentedFrameTransition::RetainForReplacement
+        | PresentedFrameTransition::Present(PresentationKind::Cropped) => was_pending,
+        PresentedFrameTransition::Invalidate
+        | PresentedFrameTransition::Present(PresentationKind::Loaded) => false,
+    }
+}
+
 pub(super) fn durable_presentation_error(kind: PresentationKind, message: &str) -> Option<String> {
     matches!(kind, PresentationKind::Loaded).then(|| message.to_owned())
 }
@@ -78,7 +97,8 @@ pub(super) fn preview_job_matches(
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageReuseEligibility, NavigationImagePlan, PresentationKind, durable_presentation_error,
+        ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
+        durable_presentation_error, external_edit_pending_after_frame_transition,
         image_open_in_progress, navigation_image_plan, preview_job_matches,
     };
     use std::path::Path;
@@ -171,6 +191,42 @@ mod tests {
             Some(PresentationKind::Cropped)
         ));
         assert!(!image_open_in_progress(false, None));
+    }
+
+    #[test]
+    fn external_edit_reminder_follows_presented_frame_ownership() {
+        assert!(external_edit_pending_after_frame_transition(
+            true,
+            PresentedFrameTransition::RetainForReplacement
+        ));
+        assert!(!external_edit_pending_after_frame_transition(
+            true,
+            PresentedFrameTransition::Invalidate
+        ));
+        assert!(!external_edit_pending_after_frame_transition(
+            true,
+            PresentedFrameTransition::Present(PresentationKind::Loaded)
+        ));
+        assert!(external_edit_pending_after_frame_transition(
+            true,
+            PresentedFrameTransition::Present(PresentationKind::Cropped)
+        ));
+        assert!(!external_edit_pending_after_frame_transition(
+            false,
+            PresentedFrameTransition::RetainForReplacement
+        ));
+        assert!(!external_edit_pending_after_frame_transition(
+            false,
+            PresentedFrameTransition::Invalidate
+        ));
+        assert!(!external_edit_pending_after_frame_transition(
+            false,
+            PresentedFrameTransition::Present(PresentationKind::Loaded)
+        ));
+        assert!(!external_edit_pending_after_frame_transition(
+            false,
+            PresentedFrameTransition::Present(PresentationKind::Cropped)
+        ));
     }
 
     #[test]

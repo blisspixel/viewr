@@ -103,6 +103,22 @@ impl TrashReceipt {
         self.capture_status
     }
 
+    /// Retained handle for the exact object named by a successful restore
+    /// receipt. This handle stays valid across the Trash round trip.
+    #[must_use]
+    pub(crate) fn restore_source(&self) -> Option<&crate::fs::ImageSource> {
+        self.restore_source.as_deref()
+    }
+
+    /// Reopen the restored pathname only when it still names the receipt's
+    /// exact retained object, refreshing version evidence after the rename.
+    pub(crate) fn open_restored_source(&self) -> Option<crate::fs::ImageSource> {
+        self.restore_source
+            .as_deref()?
+            .reopen_current_regular(&self.original_path)
+            .ok()
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test(
         original_path: PathBuf,

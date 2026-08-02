@@ -152,6 +152,23 @@ impl ThumbnailSchedule {
         self.request_with(path, notify, schedule, generate_thumb)
     }
 
+    /// Schedule a thumbnail bound to the regular object observed by folder scanning.
+    pub(crate) fn request_scanned<N, S>(
+        &mut self,
+        path: PathBuf,
+        provenance: crate::fs::ScanProvenance,
+        notify: N,
+        schedule: S,
+    ) -> bool
+    where
+        N: FnOnce() + Send + 'static,
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
+    {
+        self.request_with(path, notify, schedule, move |path| {
+            generate_scanned_thumb(path, provenance)
+        })
+    }
+
     fn request_with<N, S, W>(&mut self, path: PathBuf, notify: N, schedule: S, worker: W) -> bool
     where
         N: FnOnce() + Send + 'static,
@@ -251,6 +268,12 @@ impl ThumbnailSchedule {
 fn generate_thumb(path: &Path) -> ThumbnailResult {
     let decoded =
         crate::decode::DecodedImage::load_background(path).map_err(|_| ThumbnailFailure::Decode)?;
+    resize_decoded(decoded)
+}
+
+fn generate_scanned_thumb(path: &Path, provenance: crate::fs::ScanProvenance) -> ThumbnailResult {
+    let decoded = crate::decode::DecodedImage::load_scanned_background(path, provenance)
+        .map_err(|_| ThumbnailFailure::Decode)?;
     resize_decoded(decoded)
 }
 

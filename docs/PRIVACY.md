@@ -21,9 +21,11 @@ code, and where possible it's enforced in CI so it can't quietly regress.
 - Your photos, filenames, and folder structure **never leave your machine.**
   viewr does **not** build or retain a library index, thumbnail database, or
   "recent folders" list of your collection.
-- **Native dialog and external-app boundary.** Open, Open Folder, Save As, and
-  destructive-action confirmation use native operating-system dialogs. Windows
-  Open With also delegates the exact current source to an application the user
+- **Native dialog and external-app boundary.** Open, Open Folder, Save As path
+  choice, and permanent-delete confirmation use native operating-system dialogs.
+  When a captured Save As destination already exists, viewr adds an app-owned,
+  identity-bound overwrite confirmation. Windows Open With also delegates the
+  exact current source to an application the user
   explicitly selects. That application receives the original file, path, and
   embedded metadata and may read, transmit, modify, or replace it under its own
   privacy and security rules. viewr constructs no shell command, remembers no
@@ -34,11 +36,12 @@ code, and where possible it's enforced in CI so it can't quietly regress.
   memory, GPU drivers may retain copies, and viewr does not claim secure erasure
   against a live-system or forensic adversary. Full-disk encryption and operating-
   system controls are the relevant at-rest protections for that threat model.
-- **Zero product temp debris.** The GUI never writes under the system temp folder
-  for probes. `viewr doctor` and `viewr benchmark` (without a directory) run
-  fully **in memory**. On launch, viewr also scrubs any leftover `viewr_*` names
-  it may have left under temp from older builds or crashes. Unit tests use a
-  RAII temp workspace that deletes itself on drop.
+- **Zero routine product temp debris.** The GUI never writes under the system
+  temp folder for probes. `viewr doctor` and `viewr benchmark` (without a
+  directory) run fully **in memory**. viewr never sweeps matching names from the
+  shared temporary directory because name patterns cannot prove ownership.
+  Current verification workspaces are uniquely named, atomically created,
+  RAII-owned directories that are removed when their owner exits normally.
 - The developer/CI performance probe runs only when explicitly invoked, emits one
   path-free measurement record to its caller, and retains no history. Its Python
   harness owns and removes the temporary deterministic image corpus it creates.
@@ -118,8 +121,12 @@ A promise you can verify beats a promise you have to trust.
    for sibling navigation. Outside a file-access sandbox, opening one file also
    scans its containing folder for navigation when normal operating-system
    permissions allow it. Automatic scans include only regular directory entries
-   and do not follow sibling symlinks. A symlink chosen directly through Open File
-   remains the explicit selected path and does not expand automatic discovery.
+   and do not follow sibling symlinks. Enumeration is checked against a retained
+   directory handle, and automatic entries carry the regular object's native
+   identity and version into decode, prefetch, thumbnails, and rating inspection.
+   A symlink chosen directly through Open File remains the explicit selected path
+   and does not expand automatic discovery. F5 can explicitly adopt a replacement
+   ordinary file but does not follow a link substituted for an automatic entry.
    After sibling access succeeds, prefetch selects at most four nearby paths for
    each current position. The shared executor separately caps queued and
    concurrent decoding, and decoded neighbors remain only in memory; viewr writes
@@ -134,8 +141,16 @@ A promise you can verify beats a promise you have to trust.
    configure. This is also enforced by the dependency audit above.
 4. **Split decode boundary.** Common pure-Rust formats decode in the main process
    under shape, allocation, and concurrency limits, with a pre-parse input cap for
-   SVG. PNG text, EXIF, and ICC fields plus WebP EXIF and ICC fields are bounded
-   before their decoders allocate them. JPEG XL initialization rejects encoded,
+   SVG. SVG image hrefs are rejected, including embedded raster data and external
+   file references, so selected markup cannot read another local image through
+   the renderer. DTD expansion, expansion-heavy references, markers, stylesheets,
+   inline styles, text references, gradients, strokes, excessive path geometry, unbounded
+   renderer scratch features, excessive tree depth, excessive element or attribute count,
+   excessive cumulative attribute bytes,
+   excessive paint work, and excessive simultaneously live layers also fail closed
+   before raster allocation. PNG text, EXIF, and ICC fields plus WebP EXIF and ICC
+   fields are bounded before their decoders allocate them. JPEG XL initialization
+   rejects encoded,
    declared, or command-amplified ICC output beyond 10 MiB. For optional C-backed
    formats, the main process opens the selected file
    and sends bounded encoded bytes to the worker. The worker receives no path and
@@ -204,8 +219,17 @@ A promise you can verify beats a promise you have to trust.
   restores the selection, while a stale generation cannot present or restore it.
 - **Save As / convert** only writes the file path you choose in the save dialog.
   It validates the source, destination format, pixels, and metadata option first,
-  builds a sibling temporary output, and replaces the destination only after both
-  pixel encoding and optional metadata writing succeed.
+  retains the canonical destination parent identity, captures the confirmed
+  destination's absence or exact identity and version, and presents an app-owned
+  overwrite prompt for every captured existing file. After consent, it rechecks
+  that exact file before starting work, during staging, and immediately before
+  replacement. Pixel encoding and optional EXIF insertion use
+  the retained temporary-file handle, and the temporary pathname must still name
+  that handle before commit. A destination confirmed absent is installed with a
+  no-clobber operation. If a recheck detects that another process created,
+  replaced, or changed either boundary, viewr leaves the destination untouched
+  and reports failure. A narrow final pathname and parent-resolution race remains
+  between that recheck and the operating-system replacement call.
 - Deletes go to the **system trash**, so your OS (not viewr) holds the recoverable
   copy under its normal rules. Permanent delete requires an explicit confirmation
   dialog with Delete permanently and Cancel actions, then skips the trash. Its
@@ -225,7 +249,10 @@ A promise you can verify beats a promise you have to trust.
   macOS receipts contain the exact resulting URL and the same handle. The handle
   prevents identity reuse, and restore repeats the identity check. These values
   are never logged, displayed, or persisted, and restore never falls back to
-  matching an original pathname. Missing items end the in-app retry, while
+  matching an original pathname. After restore, viewr reopens the ordinary final
+  path without following a link, requires the same retained identity, and captures
+  a fresh version before rating or automatic navigation. Missing items end the
+  in-app retry, while
   ambiguous or invalid receipts direct manual system Trash review.
   The File menu exposes only whether Undo Trash is available or unsettled, never a
   filename, original path, Trash identifier, native identity, or history count.
@@ -279,6 +306,12 @@ so the panel states the privacy consequence directly. Before writing the new cop
 viewr sets Orientation to 1, updates image dimensions, and removes stale thumbnail
 offset/length tags so retained metadata cannot contradict the exported pixels.
 Automatic inspection and opt-in retention share the same bounded EXIF extractor.
+Reads through the accepted source handle are serialized because duplicate file
+handles can share a cursor. Accepted length, modification time, and operating-
+system change-time evidence are checked before and after extraction. A detected
+rewrite or rename fails closed instead of retaining metadata from uncertain bytes.
+Main and worker decode publication, animation discovery, and rating inspection
+apply the same before-and-after version contract before publishing accepted state.
 It limits container chunks, payload bytes, TIFF directories and tags, recursive
 offsets, embedded thumbnails, and allocation-driving component counts before the
 metadata library parses the payload. Malformed or over-limit metadata is ignored;
@@ -291,9 +324,12 @@ destinations supported by the transactional export path.
 On Windows, Open With passes the unmodified original source to the native chooser.
 It does not pass viewr's unsaved crop, rotation, flip, or Spot Heal state and does
 not sanitize metadata first. After a successful handoff, a path-private status
-remains visible until the user invokes `F5` or loads another image. The status says
-only that the external app may have changed the source. viewr does not infer edit
-completion from another process lifetime and does not reload automatically.
+remains owned by the last-good frame. An explicit `F5` refresh or another image
+load clears it only after fresh accepted pixels are presented. A failed reload or
+navigation retains the status with the last-good frame; clearing or removing that
+frame clears the reminder as well. The status says only that the external app may
+have changed the source. viewr does not infer edit completion from another
+process lifetime and does not reload automatically.
 
 ## Updates
 

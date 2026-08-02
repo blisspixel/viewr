@@ -274,18 +274,17 @@ pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile<'_>> {
     let tag_list_end = 0x84usize
         .checked_add(tag_bytes_len)
         .ok_or(Error::IccParseFailure("ICC tag table end overflow"))?;
-    let tag_bytes = profile.get(0x84..tag_list_end).ok_or(Error::IccParseFailure(
-        "unexpected end of profile while reading tag list",
-    ))?;
+    let tag_bytes = profile
+        .get(0x84..tag_list_end)
+        .ok_or(Error::IccParseFailure(
+            "unexpected end of profile while reading tag list",
+        ))?;
 
     let mut tags = Vec::new();
     for raw_tag in tag_bytes.chunks_exact(12) {
         let tag = [raw_tag[0], raw_tag[1], raw_tag[2], raw_tag[3]];
         let offset = usize::try_from(u32::from_be_bytes([
-            raw_tag[4],
-            raw_tag[5],
-            raw_tag[6],
-            raw_tag[7],
+            raw_tag[4], raw_tag[5], raw_tag[6], raw_tag[7],
         ]))
         .map_err(|_| Error::IccParseFailure("ICC tag offset is not representable"))?;
         let tag_size = usize::try_from(u32::from_be_bytes([
@@ -302,10 +301,7 @@ pub(crate) fn parse_icc_raw(profile: &[u8]) -> Result<IccProfile<'_>> {
             "unexpected end of profile while reading tag data",
         ))?;
 
-        tags.push(RawTag {
-            tag,
-            data,
-        });
+        tags.push(RawTag { tag, data });
     }
 
     Ok(IccProfile { header, tags })
@@ -485,7 +481,7 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
                 return Err(Error::UnsupportedIccProfile);
             }
             [b'c', b'i', b'c', b'p'] => {
-                cicp = data[..4].try_into().ok();
+                cicp = Some(parse_cicp_tag(data)?);
             }
             _ => {}
         }
@@ -498,16 +494,14 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
     } else {
         None
     };
-    let trc_rgb = if let [Some(r), Some(g), Some(b), _] = trcs {
-        if let Some(trc) = override_trc {
-            Some([trc; 3])
-        } else {
+    let trc_rgb = override_trc.map(|trc| [trc; 3]).or({
+        if let [Some(r), Some(g), Some(b), _] = trcs {
             Some([r, g, b])
+        } else {
+            None
         }
-    } else {
-        None
-    };
-    let trc_k = trcs[3].map(|k| override_trc.unwrap_or(k));
+    });
+    let trc_k = override_trc.or(trcs[3]);
     let xyz_rgb = if let [Some(r), Some(g), Some(b)] = xyzs {
         Some([r, g, b])
     } else {
@@ -523,6 +517,15 @@ pub fn detect_profile_info(profile: &[u8]) -> Result<IccProfileInfo> {
         trc_rgb,
         xyz_rgb,
     })
+}
+
+fn parse_cicp_tag(data: &[u8]) -> Result<[u8; 4]> {
+    if data.len() != 12 || &data[..4] != b"cicp" || data[4..8] != [0; 4] {
+        return Err(Error::IccParseFailure("invalid cicp tag"));
+    }
+    data[8..12]
+        .try_into()
+        .map_err(|_| Error::IccParseFailure("invalid cicp tag"))
 }
 
 fn validate_xyz(xyz_s15fixed16: [i32; 3]) -> Result<()> {
@@ -589,7 +592,7 @@ pub fn icc_tf(profile: &[u8]) -> Option<TransferFunction> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_icc;
+    use super::{parse_cicp_tag, parse_icc};
     use crate::*;
 
     fn empty_profile(size: usize) -> Vec<u8> {
@@ -622,6 +625,25 @@ mod tests {
             parse_icc(&profile),
             Err(Error::IccParseFailure(_))
         ));
+    }
+
+    #[test]
+    fn cicp_tag_requires_the_exact_zero_reserved_layout() {
+        assert_eq!(
+            parse_cicp_tag(b"cicp\0\0\0\0\x09\x10\0\x01").unwrap(),
+            [9, 16, 0, 1]
+        );
+        for malformed in [
+            b"cicp\0\0\0\0\x09\x10\0".as_slice(),
+            b"nope\0\0\0\0\x09\x10\0\x01".as_slice(),
+            b"cicp\0\0\0\x01\x09\x10\0\x01".as_slice(),
+            b"cicp\0\0\0\0\x09\x10\0\x01\0".as_slice(),
+        ] {
+            assert!(matches!(
+                parse_cicp_tag(malformed),
+                Err(Error::IccParseFailure("invalid cicp tag"))
+            ));
+        }
     }
 
     #[test]

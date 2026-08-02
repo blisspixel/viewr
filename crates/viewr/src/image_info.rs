@@ -82,7 +82,17 @@ impl ImageDetails {
     /// Inspect facts through the retained handle that supplied the accepted pixels.
     #[must_use]
     pub(crate) fn load_from_source(path: &Path, source: &crate::fs::ImageSource) -> Self {
-        if !source.version_is_current() {
+        Self::load_from_source_while(path, source, || true)
+    }
+
+    /// Inspect retained facts while cooperatively stopping superseded work.
+    #[must_use]
+    pub(crate) fn load_from_source_while(
+        path: &Path,
+        source: &crate::fs::ImageSource,
+        mut keep_going: impl FnMut() -> bool,
+    ) -> Self {
+        if !source.version_is_current_while(&mut keep_going) {
             return Self::default();
         }
         let mut details = Self {
@@ -94,8 +104,8 @@ impl ImageDetails {
             format: detected_format_from_source(path, source),
             ..Self::default()
         };
-        let metadata = load_bounded_metadata_from_source(source);
-        if !source.version_is_current() {
+        let metadata = load_bounded_metadata_from_source_while(source, &mut keep_going);
+        if !source.version_is_current_while(&mut keep_going) {
             return Self::default();
         }
         let Some(metadata) = metadata else {
@@ -103,7 +113,7 @@ impl ImageDetails {
         };
 
         inspect_metadata(&mut details, &metadata);
-        if source.version_is_current() {
+        if source.version_is_current_while(&mut keep_going) {
             details
         } else {
             Self::default()
@@ -224,11 +234,21 @@ pub(crate) fn load_bounded_metadata(path: &Path) -> Option<Metadata> {
 pub(crate) fn load_bounded_metadata_from_source(
     source: &crate::fs::ImageSource,
 ) -> Option<Metadata> {
-    if !source.version_is_current() {
+    load_bounded_metadata_from_source_while(source, || true)
+}
+
+fn load_bounded_metadata_from_source_while(
+    source: &crate::fs::ImageSource,
+    mut keep_going: impl FnMut() -> bool,
+) -> Option<Metadata> {
+    if !source.version_is_current_while(&mut keep_going) {
         return None;
     }
     let metadata = load_bounded_metadata_from_file(source.clone_for_decode().ok()?);
-    source.version_is_current().then_some(metadata).flatten()
+    source
+        .version_is_current_while(&mut keep_going)
+        .then_some(metadata)
+        .flatten()
 }
 
 fn load_bounded_metadata_from_file(file: impl Read + Seek) -> Option<Metadata> {
@@ -1449,6 +1469,26 @@ mod tests {
             crate::fs::ImageSourceMatch::Changed
         );
         let details = ImageDetails::load_from_source(&path, &source);
+        assert_eq!(details, ImageDetails::default());
+    }
+
+    #[test]
+    fn accepted_source_details_stop_at_a_superseded_version_boundary() {
+        let workspace = TempWorkspace::new("image_details_cancellation").unwrap();
+        let path = workspace.path().join("details.jpg");
+        image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
+            .save(&path)
+            .unwrap();
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+        let checks = std::cell::Cell::new(0_u8);
+
+        let details = ImageDetails::load_from_source_while(&path, &source, || {
+            let next = checks.get().saturating_add(1);
+            checks.set(next);
+            next < 3
+        });
+
+        assert_eq!(checks.get(), 3);
         assert_eq!(details, ImageDetails::default());
     }
 

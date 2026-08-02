@@ -127,7 +127,14 @@ A promise you can verify beats a promise you have to trust.
    Each markable accepted source also retains its selected pathname only in
    memory. Version checks reopen that final entry without following links and
    require the same identity and version, but all image and metadata bytes still
-   come from the accepted handle.
+   come from the accepted handle. Windows additionally keeps a SHA-256 witness of
+   those bytes only in memory because same-length rewrites can preserve every
+   writable timestamp. The witness is never persisted, logged, or exposed.
+   Accepted encoded sources are limited to 512 MiB before witness work, and
+   superseded decode work stops between fixed 64 KiB chunks. Folder-rating scans
+   use a separate read-only, native-version-bound header reader. It is capped at
+   16 MiB per pass, requires the exact consumed bytes and parsed results from two
+   reads to match, stops between segments, and cannot authorize file mutation.
    A symlink chosen directly through Open File remains the explicit selected path
    and does not expand automatic discovery. F5 can explicitly adopt a replacement
    ordinary file but does not follow a link substituted for an automatic entry.
@@ -224,8 +231,9 @@ A promise you can verify beats a promise you have to trust.
 - **Save As / convert** only writes the file path you choose in the save dialog.
   It validates the source, destination format, pixels, and metadata option first,
   retains the canonical destination parent identity, captures the confirmed
-  destination's absence or exact identity and version, and presents an app-owned
-  overwrite prompt for every captured existing file. After consent, it rechecks
+  destination's absence or exact native identity and version, and presents an
+  app-owned overwrite prompt for every captured existing file. That event-loop
+  capability exposes no reader and performs no full-file hash. After consent, it rechecks
   that exact file before starting work, during staging, and immediately before
   replacement. Pixel encoding and optional EXIF insertion use
   the retained temporary-file handle, and the temporary pathname must still name
@@ -238,9 +246,10 @@ A promise you can verify beats a promise you have to trust.
   copy under its normal rules. Permanent delete requires an explicit confirmation
   dialog with Delete permanently and Cancel actions, then skips the trash. Its
   filename is bounded, path-free, control-safe, bidi-safe, and quote-safe.
-  Single Trash verifies the retained source that supplied accepted pixels before
-  calling the platform. Permanent delete verifies it before confirmation and
-  again after confirmation immediately before deletion. Missing, replaced,
+  Single Trash verifies the retained source that supplied accepted pixels on its
+  worker before calling the platform. Permanent delete applies a bounded native
+  check before confirmation, then its worker applies the full check immediately
+  before deletion. Missing, replaced,
   linked, and identity-unavailable entries remain untouched. Fixed rejection
   copy and diagnostics contain neither paths nor native identifiers.
   External Trash errors can contain paths and arbitrary platform descriptions,
@@ -264,7 +273,7 @@ A promise you can verify beats a promise you have to trust.
   valid `U` action; neither claims the new action can be restored in-app. The final
   Trash and permanent-delete operations remain pathname based. Restore also
   makes a later platform call with the checked Trash identifier on Windows and
-  Linux or the checked Trash URL on macOS. The immediate identity checks narrow
+  Linux or the checked Trash URL on macOS. The final source and receipt checks narrow
   but do not eliminate a hostile final swap before the operating system consumes
   that path, identifier, or URL.
   The Windows dialog manifest requests the current user's privilege, not elevation.
@@ -315,7 +324,18 @@ handles can share a cursor. Accepted length, modification time, and operating-
 system change-time evidence are checked before and after extraction. A no-follow
 pathname reopen also requires the accepted identity and version, so Windows
 handle metadata caching cannot hide a pathname replacement. A detected rewrite
-or rename fails closed instead of retaining metadata from uncertain bytes.
+or rename fails closed instead of retaining metadata from uncertain bytes. The
+in-memory Windows SHA-256 witness also rejects an in-place rewrite whose length
+and writable timestamps were restored. The shared 512 MiB encoded-input limit is
+enforced before hashing, and generation cancellation is checked throughout the
+bounded stream. Replace-latest animation, details, and rating inspection exits
+between stages and propagates that cancellation through every full comparison.
+Full content comparisons run on owned background work, including the Windows Open
+With verification and final destructive-action checks. Folder-rating discovery
+reads only the bounded JPEG header twice through a retained source, requires the
+exact consumed bytes and parsed result to match, and
+rechecks native identity and version afterward. Rating writes always return to
+the full content-witness boundary.
 Main and worker decode publication, animation discovery, and rating inspection
 apply the same before-and-after version contract before publishing accepted state.
 It limits container chunks, payload bytes, TIFF directories and tags, recursive
@@ -327,9 +347,11 @@ pixel-strip locators, so large ordinary TIFF pixel data does not need to enter t
 metadata parser. Retention is content-driven and writes only JPEG, PNG, or WebP
 destinations supported by the transactional export path.
 
-On Windows, Open With passes the unmodified original source to the native chooser.
-It does not pass viewr's unsaved crop, rotation, flip, or Spot Heal state and does
-not sanitize metadata first. After a successful handoff, a path-private status
+On Windows, Open With first verifies the unmodified original source on a
+generation-cancellable background job, then passes that exact path to the native
+chooser. Navigation cancels obsolete verification. It does not pass viewr's
+unsaved crop, rotation, flip, or Spot Heal state and does not sanitize metadata
+first. After a successful handoff, a path-private status
 remains owned by the last-good frame. An explicit `F5` refresh or another image
 load clears it only after fresh accepted pixels are presented. A failed reload or
 navigation retains the status with the last-good frame; clearing or removing that

@@ -31,6 +31,19 @@ dependency set lean).
 Golden-file style coverage for many of these lives in `crates/viewr/tests/corpus.rs`
 and unit tests under `decode` / `edit`.
 
+Every accepted encoded source is capped at 512 MiB before decode or Windows
+content-witness work. A larger file fails with an explicit load error. This is an
+encoded-file ceiling, independent of the stricter decoded-pixel, dimension,
+animation, SVG, metadata, and worker-response limits below. Superseded decode and
+full content-witness work stops between fixed 64 KiB chunks rather than reading
+the remainder of a bounded but obsolete source. The replace-latest animation,
+details, and rating task also exits between stages after navigation, and all full
+comparisons run off the UI thread. Folder-rating discovery does not
+hash each complete image. Its read-only seam checks native identity and version
+around two JPEG header reads capped at 16 MiB each, requires the exact consumed
+bytes and parsed results to match, polls cancellation between segments, and
+returns no authority for file mutation.
+
 ## Container behavior
 
 - GIF, animated WebP, and APNG decode off the UI thread and play with bounded

@@ -806,12 +806,21 @@ impl DecodedImage {
             .to_lowercase();
 
         let opened = match source_open {
-            SourceOpen::Direct => crate::fs::ImageSource::open(path),
-            SourceOpen::Scanned(provenance) => {
-                crate::fs::ImageSource::open_scanned(path, provenance)
+            SourceOpen::Direct => {
+                crate::fs::ImageSource::open_while(path, || generation.is_current())
             }
-            SourceOpen::RefreshedRegular => crate::fs::ImageSource::open_regular(path),
+            SourceOpen::Scanned(provenance) => {
+                crate::fs::ImageSource::open_scanned_while(path, provenance, || {
+                    generation.is_current()
+                })
+            }
+            SourceOpen::RefreshedRegular => {
+                crate::fs::ImageSource::open_regular_while(path, || generation.is_current())
+            }
         };
+        if !generation.is_current() {
+            return Ok(None);
+        }
         let source = Arc::new(
             opened.map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?,
         );
@@ -830,7 +839,7 @@ impl DecodedImage {
         };
 
         before_publish();
-        if !generation.is_current() || !source.version_is_current() {
+        if !source.version_is_current_while(|| generation.is_current()) {
             return Ok(None);
         }
         result.map(|image| {

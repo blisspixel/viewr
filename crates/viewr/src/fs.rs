@@ -15,6 +15,7 @@ use std::sync::{Mutex, MutexGuard};
 
 pub(crate) const MAX_FOLDER_IMAGES: usize = 100_000;
 pub(crate) const MAX_FOLDER_PATH_BYTES: usize = 64 * 1024 * 1024;
+const MAX_ACCEPTED_SOURCE_BYTES: u64 = viewr_protocol::MAX_ENCODED_INPUT_BYTES;
 
 #[derive(Debug)]
 pub(crate) enum ScanImagesError {
@@ -114,6 +115,204 @@ struct FileVersion {
     change_time: i64,
 }
 
+#[cfg(target_os = "windows")]
+const SHA256_BYTES: usize = 32;
+#[cfg(target_os = "windows")]
+pub(crate) const CONTENT_WITNESS_CHUNK_BYTES: usize = 64 * 1024;
+
+#[cfg(target_os = "windows")]
+struct Sha256Algorithm(windows_sys::Win32::Security::Cryptography::BCRYPT_ALG_HANDLE);
+
+#[cfg(target_os = "windows")]
+impl Sha256Algorithm {
+    #[allow(unsafe_code)] // opens one SHA-256 provider through Windows CNG
+    fn open() -> io::Result<Self> {
+        use windows_sys::Win32::Security::Cryptography::{
+            BCRYPT_SHA256_ALGORITHM, BCryptOpenAlgorithmProvider,
+        };
+
+        let mut algorithm = std::ptr::null_mut();
+        // SAFETY: `algorithm` is writable handle storage, the SHA-256 identifier
+        // is process-lifetime data, and no provider string is supplied.
+        let status = unsafe {
+            BCryptOpenAlgorithmProvider(
+                &raw mut algorithm,
+                BCRYPT_SHA256_ALGORITHM,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if status < 0 {
+            return Err(cng_status_error(status));
+        }
+        if algorithm.is_null() {
+            return Err(io::Error::other(
+                "SHA-256 provider returned no algorithm handle",
+            ));
+        }
+        Ok(Self(algorithm))
+    }
+
+    #[allow(unsafe_code)] // reads one fixed-size property from a live CNG provider
+    fn property_u32(&self, name: windows_sys::core::PCWSTR) -> io::Result<u32> {
+        use std::mem::size_of;
+        use windows_sys::Win32::Security::Cryptography::BCryptGetProperty;
+
+        let expected = u32::try_from(size_of::<u32>()).unwrap_or(u32::MAX);
+        let mut output = 0_u32;
+        let mut returned = 0_u32;
+        // SAFETY: The provider handle is live, `output` has exactly the stated
+        // capacity, and CNG does not retain any supplied pointer.
+        let status = unsafe {
+            BCryptGetProperty(
+                self.0,
+                name,
+                std::ptr::from_mut(&mut output).cast(),
+                expected,
+                &raw mut returned,
+                0,
+            )
+        };
+        if status < 0 {
+            return Err(cng_status_error(status));
+        }
+        if returned != expected {
+            return Err(io::Error::other(
+                "SHA-256 provider returned an invalid property size",
+            ));
+        }
+        Ok(output)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for Sha256Algorithm {
+    #[allow(unsafe_code)] // releases one exclusively owned Windows CNG provider handle
+    fn drop(&mut self) {
+        // SAFETY: This wrapper exclusively owns the successful provider handle.
+        unsafe {
+            windows_sys::Win32::Security::Cryptography::BCryptCloseAlgorithmProvider(self.0, 0);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct Sha256Hash {
+    handle: windows_sys::Win32::Security::Cryptography::BCRYPT_HASH_HANDLE,
+    _object: Vec<u8>,
+}
+
+#[cfg(target_os = "windows")]
+impl Sha256Hash {
+    #[allow(unsafe_code)] // creates one SHA-256 state object through Windows CNG
+    fn new(algorithm: &Sha256Algorithm) -> io::Result<Self> {
+        use windows_sys::Win32::Security::Cryptography::{
+            BCRYPT_HASH_LENGTH, BCRYPT_OBJECT_LENGTH, BCryptCreateHash,
+        };
+
+        let digest_bytes = algorithm.property_u32(BCRYPT_HASH_LENGTH)?;
+        if usize::try_from(digest_bytes).ok() != Some(SHA256_BYTES) {
+            return Err(io::Error::other(
+                "SHA-256 provider returned an invalid digest size",
+            ));
+        }
+        let object_bytes = usize::try_from(algorithm.property_u32(BCRYPT_OBJECT_LENGTH)?)
+            .ok()
+            .filter(|bytes| (1..=1024 * 1024).contains(bytes))
+            .ok_or_else(|| io::Error::other("SHA-256 provider returned an invalid object size"))?;
+        let mut object = Vec::new();
+        object
+            .try_reserve_exact(object_bytes)
+            .map_err(|_| io::Error::other("SHA-256 object allocation failed"))?;
+        object.resize(object_bytes, 0);
+
+        let mut hash = std::ptr::null_mut();
+        // SAFETY: The provider is live, `hash` is writable handle storage, and
+        // the object buffer remains stable and owned by the resulting wrapper.
+        let status = unsafe {
+            BCryptCreateHash(
+                algorithm.0,
+                &raw mut hash,
+                object.as_mut_ptr(),
+                u32::try_from(object.len()).unwrap_or(u32::MAX),
+                std::ptr::null(),
+                0,
+                0,
+            )
+        };
+        if status < 0 {
+            return Err(cng_status_error(status));
+        }
+        if hash.is_null() {
+            return Err(io::Error::other("SHA-256 provider returned no hash handle"));
+        }
+        Ok(Self {
+            handle: hash,
+            _object: object,
+        })
+    }
+
+    #[allow(unsafe_code)] // submits one initialized byte slice to a live CNG hash
+    fn update(&self, bytes: &[u8]) -> io::Result<()> {
+        use windows_sys::Win32::Security::Cryptography::BCryptHashData;
+
+        let length = u32::try_from(bytes.len())
+            .map_err(|_| io::Error::other("SHA-256 input chunk is too large"))?;
+        // SAFETY: The hash handle is live and `bytes` remains initialized for
+        // the duration of this synchronous call.
+        let status = unsafe { BCryptHashData(self.handle, bytes.as_ptr(), length, 0) };
+        if status < 0 {
+            Err(cng_status_error(status))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[allow(unsafe_code)] // writes one fixed-size SHA-256 result from a live CNG hash
+    fn finish(&self) -> io::Result<[u8; SHA256_BYTES]> {
+        use windows_sys::Win32::Security::Cryptography::BCryptFinishHash;
+
+        let mut digest = [0_u8; SHA256_BYTES];
+        // SAFETY: The hash handle is live and `digest` is writable storage of
+        // the exact provider-reported SHA-256 digest length.
+        let status = unsafe {
+            BCryptFinishHash(
+                self.handle,
+                digest.as_mut_ptr(),
+                u32::try_from(digest.len()).unwrap_or(u32::MAX),
+                0,
+            )
+        };
+        if status < 0 {
+            Err(cng_status_error(status))
+        } else {
+            Ok(digest)
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for Sha256Hash {
+    #[allow(unsafe_code)] // releases one exclusively owned Windows CNG hash handle
+    fn drop(&mut self) {
+        // SAFETY: This wrapper exclusively owns the successful hash handle, and
+        // `_object` remains allocated until after this destructor returns.
+        unsafe {
+            windows_sys::Win32::Security::Cryptography::BCryptDestroyHash(self.handle);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // converts one CNG NTSTATUS into the corresponding OS error
+fn cng_status_error(status: i32) -> io::Error {
+    use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
+
+    // SAFETY: `status` came from a CNG call; conversion retains no pointers.
+    let code = unsafe { RtlNtStatusToDosError(status) };
+    io::Error::from_raw_os_error(i32::try_from(code).unwrap_or(i32::MAX))
+}
+
 /// Live ownership of the filesystem object used to produce accepted image pixels.
 ///
 /// The open handle prevents object-identifier reuse while the source is presented,
@@ -123,6 +322,8 @@ pub(crate) struct ImageSource {
     cursor: Mutex<()>,
     identity: Option<FileIdentity>,
     version: Option<FileVersion>,
+    #[cfg(target_os = "windows")]
+    content_digest: Option<[u8; SHA256_BYTES]>,
     accepted_path: Option<PathBuf>,
     markable: bool,
 }
@@ -135,6 +336,44 @@ pub(crate) struct ImageSource {
 pub(crate) struct ImageSourceReader<'a> {
     file: std::fs::File,
     _cursor: MutexGuard<'a, ()>,
+}
+
+/// Read-only source used for cancellable folder-rating discovery.
+///
+/// It exposes retained bytes and native identity/version validation, but cannot
+/// authorize writes, exports, or destructive actions. Those boundaries require
+/// a full [`ImageSource`] content witness.
+pub(crate) struct RatingScanSource(ImageSource);
+
+/// Retained native identity for a pathname selected as a Save As destination.
+///
+/// Destination consent binds to the existing filesystem object, not to bytes
+/// displayed by viewr. This type therefore exposes no reader and performs no
+/// full-file content witness on the UI thread.
+pub(crate) struct PathIdentitySource(ImageSource);
+
+impl PathIdentitySource {
+    fn from_opened_file(file: std::fs::File) -> io::Result<Self> {
+        let opened = file.metadata()?;
+        if !metadata_is_markable_regular(&opened) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Save As destination must be an ordinary file",
+            ));
+        }
+        let identity = file_identity(&file, &opened)?;
+        let version = file_version(&file, &opened)?;
+        Ok(Self(ImageSource {
+            file,
+            cursor: Mutex::new(()),
+            identity: Some(identity),
+            version: Some(version),
+            #[cfg(target_os = "windows")]
+            content_digest: None,
+            accepted_path: None,
+            markable: true,
+        }))
+    }
 }
 
 impl std::ops::Deref for ImageSourceReader<'_> {
@@ -178,6 +417,20 @@ impl ImageSource {
     /// A directly selected final symlink remains viewable for compatibility, but
     /// is never markable because its displayed target and Trash entry differ.
     pub(crate) fn open(path: &Path) -> io::Result<Self> {
+        Self::open_while(path, || true)
+    }
+
+    /// Open one source while cooperatively stopping superseded background work.
+    pub(crate) fn open_while(path: &Path, keep_going: impl FnMut() -> bool) -> io::Result<Self> {
+        Self::open_with_witness_while(path, true, keep_going)
+    }
+
+    fn open_with_witness_while(
+        path: &Path,
+        capture_content_witness: bool,
+        mut keep_going: impl FnMut() -> bool,
+    ) -> io::Result<Self> {
+        ensure_source_work_current(&mut keep_going)?;
         let entry = std::fs::symlink_metadata(path)?;
         let markable = metadata_is_markable_regular(&entry);
         let file = if markable {
@@ -196,23 +449,66 @@ impl ImageSource {
                 "image source must be a regular file",
             ));
         };
-        Self::from_opened_file(file, markable, Some(path.to_path_buf()))
+        Self::from_opened_file(
+            file,
+            markable,
+            Some(path.to_path_buf()),
+            capture_content_witness,
+            keep_going,
+        )
     }
 
     /// Open a regular object without following its final path component.
     pub(crate) fn open_regular(path: &Path) -> io::Result<Self> {
+        Self::open_regular_while(path, || true)
+    }
+
+    /// Open a regular object while cooperatively stopping superseded work.
+    pub(crate) fn open_regular_while(
+        path: &Path,
+        keep_going: impl FnMut() -> bool,
+    ) -> io::Result<Self> {
         Self::from_opened_file(
             open_regular_no_follow(path)?,
             true,
             Some(path.to_path_buf()),
+            true,
+            keep_going,
         )
     }
 
     /// Open an automatically discovered entry without following its final link
     /// and require the same filesystem object observed by the folder scan.
+    #[cfg(test)]
     pub(crate) fn open_scanned(path: &Path, provenance: ScanProvenance) -> io::Result<Self> {
+        Self::open_scanned_while(path, provenance, || true)
+    }
+
+    /// Open a scanned entry while cooperatively stopping superseded work.
+    pub(crate) fn open_scanned_while(
+        path: &Path,
+        provenance: ScanProvenance,
+        keep_going: impl FnMut() -> bool,
+    ) -> io::Result<Self> {
+        Self::open_scanned_with_witness_while(path, provenance, true, keep_going)
+    }
+
+    fn open_scanned_with_witness_while(
+        path: &Path,
+        provenance: ScanProvenance,
+        capture_content_witness: bool,
+        mut keep_going: impl FnMut() -> bool,
+    ) -> io::Result<Self> {
+        ensure_source_work_current(&mut keep_going)?;
         let file = open_regular_no_follow(path)?;
-        let source = Self::from_opened_file(file, true, Some(path.to_path_buf()))?;
+        let source = Self::from_opened_file(
+            file,
+            true,
+            Some(path.to_path_buf()),
+            capture_content_witness,
+            &mut keep_going,
+        )?;
+        ensure_source_work_current(&mut keep_going)?;
         if source.identity != Some(provenance.identity)
             || source.version != Some(provenance.version)
         {
@@ -265,7 +561,10 @@ impl ImageSource {
         file: std::fs::File,
         markable: bool,
         accepted_path: Option<PathBuf>,
+        capture_content_witness: bool,
+        mut keep_going: impl FnMut() -> bool,
     ) -> io::Result<Self> {
+        ensure_source_work_current(&mut keep_going)?;
         let opened = file.metadata()?;
         if !opened.is_file() {
             return Err(io::Error::new(
@@ -279,13 +578,34 @@ impl ImageSource {
                 "image source changed while it was opened",
             ));
         }
+        if opened.len() > MAX_ACCEPTED_SOURCE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "image source exceeds the encoded input limit",
+            ));
+        }
         let identity = file_identity(&file, &opened).ok();
         let version = file_version(&file, &opened).ok();
+        #[cfg(target_os = "windows")]
+        let content_digest = if capture_content_witness {
+            Some(sha256_file_while(
+                &file,
+                MAX_ACCEPTED_SOURCE_BYTES,
+                &mut keep_going,
+            )?)
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "windows"))]
+        let _ = capture_content_witness;
+        ensure_source_work_current(&mut keep_going)?;
         Ok(Self {
             file,
             cursor: Mutex::new(()),
             identity,
             version,
+            #[cfg(target_os = "windows")]
+            content_digest,
             accepted_path,
             markable,
         })
@@ -308,16 +628,65 @@ impl ImageSource {
     /// Whether all available version evidence still matches the accepted object.
     #[must_use]
     pub(crate) fn version_is_current(&self) -> bool {
-        let Ok(metadata) = self.file.metadata() else {
+        self.version_is_current_while(|| true)
+    }
+
+    /// Check version evidence while cooperatively stopping superseded work.
+    #[must_use]
+    pub(crate) fn version_is_current_while(&self, mut keep_going: impl FnMut() -> bool) -> bool {
+        self.retained_version_is_current_while(&mut keep_going)
+            && self.accepted_path.as_deref().is_none_or(|path| {
+                !self.markable
+                    || self.matches_path_inner(path, false, &mut keep_going)
+                        == ImageSourceMatch::Same
+            })
+    }
+
+    fn native_version_is_current_while(&self, keep_going: &mut impl FnMut() -> bool) -> bool {
+        let Some(expected_version) = self.version else {
             return false;
         };
-        let retained_version_is_current = self.version.is_some_and(|expected| {
-            file_version(&self.file, &metadata).is_ok_and(|current| current == expected)
+        if !keep_going() {
+            return false;
+        }
+        let Ok(_cursor) = self.cursor.lock() else {
+            return false;
+        };
+        let matches = self.file.metadata().is_ok_and(|metadata| {
+            file_version(&self.file, &metadata).is_ok_and(|current| current == expected_version)
         });
-        retained_version_is_current
-            && self.accepted_path.as_deref().is_none_or(|path| {
-                !self.markable || self.matches_path(path) == ImageSourceMatch::Same
+        matches && keep_going()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn retained_version_is_current_while(&self, keep_going: &mut impl FnMut() -> bool) -> bool {
+        self.native_version_is_current_while(keep_going)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn retained_version_is_current_while(&self, keep_going: &mut impl FnMut() -> bool) -> bool {
+        let Some(expected_version) = self.version else {
+            return false;
+        };
+        let Some(expected_digest) = self.content_digest else {
+            return false;
+        };
+        if !keep_going() {
+            return false;
+        }
+        let Ok(_cursor) = self.cursor.lock() else {
+            return false;
+        };
+        let version_matches = || {
+            self.file.metadata().is_ok_and(|metadata| {
+                file_version(&self.file, &metadata).is_ok_and(|current| current == expected_version)
             })
+        };
+        version_matches()
+            && sha256_file_while(&self.file, MAX_ACCEPTED_SOURCE_BYTES, &mut *keep_going)
+                .is_ok_and(|digest| digest == expected_digest)
+            && version_matches()
+            && keep_going()
     }
 
     /// Whether another retained source names the exact same filesystem object.
@@ -340,6 +709,38 @@ impl ImageSource {
     /// following a link or accepting a non-regular object.
     #[must_use]
     pub(crate) fn matches_path(&self, path: &Path) -> ImageSourceMatch {
+        self.matches_path_while(path, || true)
+    }
+
+    /// Compare only retained native identity and version evidence.
+    ///
+    /// This bounded check is suitable for non-mutating UI handoffs. Operations
+    /// that publish or mutate accepted image bytes must use [`Self::matches_path`]
+    /// from owned background work.
+    #[must_use]
+    pub(crate) fn matches_path_native(&self, path: &Path) -> ImageSourceMatch {
+        self.matches_path_inner(path, false, &mut || true)
+    }
+
+    /// Compare a pathname while cooperatively stopping superseded work.
+    #[must_use]
+    pub(crate) fn matches_path_while(
+        &self,
+        path: &Path,
+        mut keep_going: impl FnMut() -> bool,
+    ) -> ImageSourceMatch {
+        self.matches_path_inner(path, true, &mut keep_going)
+    }
+
+    fn matches_path_inner(
+        &self,
+        path: &Path,
+        require_content_match: bool,
+        keep_going: &mut impl FnMut() -> bool,
+    ) -> ImageSourceMatch {
+        if !keep_going() {
+            return ImageSourceMatch::Unavailable;
+        }
         if !self.markable {
             return ImageSourceMatch::Unsupported;
         }
@@ -373,6 +774,34 @@ impl ImageSource {
         };
         match (file_identity(&file, &opened), file_version(&file, &opened)) {
             (Ok(identity), Ok(version))
+                if identity == expected_identity && version == expected_version => {}
+            (Ok(_), Ok(_)) => return ImageSourceMatch::Changed,
+            _ => return ImageSourceMatch::Unavailable,
+        }
+        if require_content_match {
+            if !keep_going() {
+                return ImageSourceMatch::Unavailable;
+            }
+            #[cfg(target_os = "windows")]
+            match self.content_matches_while(&file, keep_going) {
+                Ok(true) => {}
+                Ok(false) => return ImageSourceMatch::Changed,
+                Err(_) => return ImageSourceMatch::Unavailable,
+            }
+        }
+        if !keep_going() {
+            return ImageSourceMatch::Unavailable;
+        }
+        let refreshed = match file.metadata() {
+            Ok(refreshed) if metadata_is_markable_regular(&refreshed) => refreshed,
+            Ok(_) => return ImageSourceMatch::Unsupported,
+            Err(_) => return ImageSourceMatch::Unavailable,
+        };
+        match (
+            file_identity(&file, &refreshed),
+            file_version(&file, &refreshed),
+        ) {
+            (Ok(identity), Ok(version))
                 if identity == expected_identity && version == expected_version =>
             {
                 ImageSourceMatch::Same
@@ -380,6 +809,19 @@ impl ImageSource {
             (Ok(_), Ok(_)) => ImageSourceMatch::Changed,
             _ => ImageSourceMatch::Unavailable,
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn content_matches_while(
+        &self,
+        file: &std::fs::File,
+        keep_going: &mut impl FnMut() -> bool,
+    ) -> io::Result<bool> {
+        let expected_digest = self
+            .content_digest
+            .ok_or_else(|| io::Error::other("accepted source has no full content witness"))?;
+        sha256_file_while(file, MAX_ACCEPTED_SOURCE_BYTES, keep_going)
+            .map(|digest| digest == expected_digest)
     }
 
     /// Whether `path` currently names the retained filesystem object, ignoring
@@ -412,6 +854,55 @@ impl ImageSource {
     }
 }
 
+impl RatingScanSource {
+    /// Open a read-only rating source, retaining scan provenance when available.
+    pub(crate) fn open_while(
+        path: &Path,
+        provenance: Option<ScanProvenance>,
+        keep_going: impl FnMut() -> bool,
+    ) -> io::Result<Self> {
+        let source = if let Some(provenance) = provenance {
+            ImageSource::open_scanned_with_witness_while(path, provenance, false, keep_going)?
+        } else {
+            ImageSource::open_with_witness_while(path, false, keep_going)?
+        };
+        Ok(Self(source))
+    }
+
+    /// Duplicate and rewind the retained source for bounded header inspection.
+    pub(crate) fn clone_for_read(&self) -> io::Result<ImageSourceReader<'_>> {
+        self.0.clone_for_decode()
+    }
+
+    /// Validate native identity and version evidence without granting write authority.
+    #[must_use]
+    pub(crate) fn native_version_is_current_while(
+        &self,
+        mut keep_going: impl FnMut() -> bool,
+    ) -> bool {
+        self.0.native_version_is_current_while(&mut keep_going)
+            && self.0.accepted_path.as_deref().is_none_or(|path| {
+                !self.0.markable
+                    || self.0.matches_path_inner(path, false, &mut keep_going)
+                        == ImageSourceMatch::Same
+            })
+    }
+}
+
+impl PathIdentitySource {
+    /// Compare the destination pathname using native identity/version evidence.
+    #[must_use]
+    pub(crate) fn matches_path(&self, path: &Path) -> ImageSourceMatch {
+        self.0.matches_path_native(path)
+    }
+
+    /// Whether this destination is the exact accepted source filesystem object.
+    #[must_use]
+    pub(crate) fn same_object(&self, source: &ImageSource) -> bool {
+        self.0.same_object(source)
+    }
+}
+
 impl DirectorySource {
     /// Open a canonical directory without following its final component.
     pub(crate) fn open(path: &Path) -> io::Result<Self> {
@@ -438,10 +929,10 @@ impl DirectorySource {
         open_regular_at(&self.file, name)
     }
 
-    /// Open one regular child relative to this retained directory without
-    /// following the child entry or re-resolving the parent pathname.
-    pub(crate) fn open_image(&self, name: &OsStr) -> io::Result<ImageSource> {
-        ImageSource::from_opened_file(self.open_regular(name)?, true, None)
+    /// Open a retained regular destination identity without following its final
+    /// entry, re-resolving the parent pathname, or hashing its contents.
+    pub(crate) fn open_image_identity(&self, name: &OsStr) -> io::Result<PathIdentitySource> {
+        PathIdentitySource::from_opened_file(self.open_regular(name)?)
     }
 
     /// Whether `path` still resolves to the retained directory object.
@@ -851,6 +1342,81 @@ fn file_version(file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Resul
         last_write_time: info.LastWriteTime,
         change_time: info.ChangeTime,
     })
+}
+
+#[cfg(all(target_os = "windows", test))]
+fn sha256_file(file: &std::fs::File) -> io::Result<[u8; SHA256_BYTES]> {
+    sha256_file_while(file, MAX_ACCEPTED_SOURCE_BYTES, || true)
+}
+
+#[cfg(target_os = "windows")]
+fn sha256_file_while(
+    file: &std::fs::File,
+    max_bytes: u64,
+    mut keep_going: impl FnMut() -> bool,
+) -> io::Result<[u8; SHA256_BYTES]> {
+    ensure_source_work_current(&mut keep_going)?;
+    let declared_bytes = file.metadata()?.len();
+    if declared_bytes > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "image source exceeds the content-witness limit",
+        ));
+    }
+    let algorithm = Sha256Algorithm::open()?;
+    let hash = Sha256Hash::new(&algorithm)?;
+    let mut reader = file.try_clone()?;
+    reader.seek(SeekFrom::Start(0))?;
+    let digest = (|| {
+        let mut buffer = vec![0_u8; CONTENT_WITNESS_CHUNK_BYTES];
+        let mut remaining = declared_bytes;
+        while remaining != 0 {
+            ensure_source_work_current(&mut keep_going)?;
+            let buffer_bytes = u64::try_from(buffer.len()).unwrap_or(u64::MAX);
+            let chunk = usize::try_from(remaining.min(buffer_bytes))
+                .map_err(|_| io::Error::other("content-witness chunk is not representable"))?;
+            let read = reader.read(&mut buffer[..chunk])?;
+            ensure_source_work_current(&mut keep_going)?;
+            if read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "image source shrank while its content witness was computed",
+                ));
+            }
+            hash.update(&buffer[..read])?;
+            let read = u64::try_from(read)
+                .map_err(|_| io::Error::other("content-witness read is not representable"))?;
+            remaining = remaining
+                .checked_sub(read)
+                .ok_or_else(|| io::Error::other("content-witness read exceeded its bound"))?;
+        }
+        ensure_source_work_current(&mut keep_going)?;
+        let mut extra = [0_u8; 1];
+        if reader.read(&mut extra)? != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "image source grew while its content witness was computed",
+            ));
+        }
+        ensure_source_work_current(&mut keep_going)?;
+        hash.finish()
+    })();
+    let rewind = reader.seek(SeekFrom::Start(0));
+    match (digest, rewind) {
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        (Ok(digest), Ok(_)) => Ok(digest),
+    }
+}
+
+fn ensure_source_work_current(keep_going: &mut impl FnMut() -> bool) -> io::Result<()> {
+    if keep_going() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "image source work was superseded",
+        ))
+    }
 }
 
 /// File extensions decoded by the always-on pure-Rust core.
@@ -1294,6 +1860,8 @@ mod tests {
     use std::cmp::Ordering;
     use std::fs;
     use std::io::Read;
+    #[cfg(windows)]
+    use std::io::{Seek, SeekFrom, Write};
     use std::path::Path;
     use std::sync::{Arc, Barrier};
 
@@ -1479,7 +2047,11 @@ mod tests {
 
         let started = Instant::now();
         assert!(super::ImageSource::open_regular(&path).is_err());
-        assert!(directory.open_image(path.file_name().unwrap()).is_err());
+        assert!(
+            directory
+                .open_image_identity(path.file_name().unwrap())
+                .is_err()
+        );
 
         assert!(started.elapsed() < Duration::from_secs(1));
     }
@@ -1490,8 +2062,9 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let workspace = TempWorkspace::new("folder_scan_child_swap").unwrap();
+        let outside_workspace = TempWorkspace::new("folder_scan_child_swap_outside").unwrap();
         let path = workspace.path().join("image.png");
-        let outside = workspace.path().join("outside.png");
+        let outside = outside_workspace.path().join("outside.png");
         fs::write(&path, b"scanned object").unwrap();
         fs::write(&outside, b"outside object").unwrap();
         let entry = scan_image_entries_while(workspace.path(), || true)
@@ -1762,6 +2335,159 @@ mod tests {
             .unwrap();
 
         assert!(!source.version_is_current());
+        assert_eq!(source.matches_path(&path), super::ImageSourceMatch::Changed);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn strong_match_rejects_rewritten_content_after_native_evidence_is_rebased() {
+        let workspace = TempWorkspace::new("source_content_witness").unwrap();
+        let path = workspace.path().join("source.bin");
+        fs::write(&path, b"accepted-bytes").unwrap();
+        let mut source = super::ImageSource::open(&path).unwrap();
+
+        fs::write(&path, b"replaced-bytes").unwrap();
+        let retained_metadata = source.file.metadata().unwrap();
+        source.version = Some(super::file_version(&source.file, &retained_metadata).unwrap());
+
+        assert_eq!(
+            source.matches_path_native(&path),
+            super::ImageSourceMatch::Same
+        );
+        assert_eq!(source.matches_path(&path), super::ImageSourceMatch::Changed);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn destination_identity_does_not_capture_a_content_witness() {
+        let workspace = TempWorkspace::new("destination_identity").unwrap();
+        let path = workspace.path().join("destination.png");
+        fs::write(&path, b"existing destination").unwrap();
+        let directory = super::DirectorySource::open(workspace.path()).unwrap();
+
+        let destination = directory
+            .open_image_identity(path.file_name().unwrap())
+            .unwrap();
+
+        assert!(destination.0.content_digest.is_none());
+        assert_eq!(
+            destination.matches_path(&path),
+            super::ImageSourceMatch::Same
+        );
+    }
+
+    #[test]
+    fn destination_identity_does_not_inherit_the_source_size_limit() {
+        let workspace = TempWorkspace::new("destination_identity_size").unwrap();
+        let path = workspace.path().join("destination.png");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(super::MAX_ACCEPTED_SOURCE_BYTES + 1).unwrap();
+        drop(file);
+        let directory = super::DirectorySource::open(workspace.path()).unwrap();
+
+        let destination = directory
+            .open_image_identity(path.file_name().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            destination.matches_path(&path),
+            super::ImageSourceMatch::Same
+        );
+    }
+
+    #[test]
+    fn source_open_rejects_a_sparse_file_above_the_encoded_input_limit() {
+        let workspace = TempWorkspace::new("source_encoded_limit").unwrap();
+        let path = workspace.path().join("source.bin");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(super::MAX_ACCEPTED_SOURCE_BYTES + 1).unwrap();
+        drop(file);
+
+        let error = super::ImageSource::open(&path).err().unwrap();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_sha256_matches_the_standard_vector_and_rewinds() {
+        let workspace = TempWorkspace::new("sha256_vector").unwrap();
+        let path = workspace.path().join("source.bin");
+        fs::write(&path, b"abc").unwrap();
+        let mut file = std::fs::File::open(path).unwrap();
+        file.seek(SeekFrom::End(0)).unwrap();
+
+        assert_eq!(
+            super::sha256_file(&file).unwrap(),
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+        assert_eq!(file.stream_position().unwrap(), 0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_sha256_stops_between_bounded_chunks_and_rewinds() {
+        let workspace = TempWorkspace::new("sha256_cancel").unwrap();
+        let path = workspace.path().join("source.bin");
+        fs::write(&path, vec![0x5a; 3 * super::CONTENT_WITNESS_CHUNK_BYTES]).unwrap();
+        let mut file = std::fs::File::open(path).unwrap();
+        let mut checks = 0_u8;
+
+        let error = super::sha256_file_while(&file, u64::MAX, || {
+            checks = checks.saturating_add(1);
+            checks < 4
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(checks, 4);
+        assert_eq!(file.stream_position().unwrap(), 0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_sha256_rejects_growth_past_the_declared_bound_and_rewinds() {
+        let workspace = TempWorkspace::new("sha256_growth").unwrap();
+        let path = workspace.path().join("source.bin");
+        fs::write(&path, b"abc").unwrap();
+        let mut file = std::fs::File::open(&path).unwrap();
+        let mut writer = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        file.seek(SeekFrom::End(0)).unwrap();
+        let mut checks = 0_u8;
+
+        let error = super::sha256_file_while(&file, 3, || {
+            checks = checks.saturating_add(1);
+            if checks == 4 {
+                writer.write_all(b"d").unwrap();
+                writer.flush().unwrap();
+            }
+            true
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(checks, 4);
+        assert_eq!(file.stream_position().unwrap(), 0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn rating_scan_source_cannot_pass_a_full_content_witness_check() {
+        let workspace = TempWorkspace::new("rating_scan_capability").unwrap();
+        let path = workspace.path().join("source.jpg");
+        fs::write(&path, b"rating header bytes").unwrap();
+        let source = super::RatingScanSource::open_while(&path, None, || true).unwrap();
+
+        assert!(source.native_version_is_current_while(|| true));
+        assert!(!source.0.version_is_current());
+        assert_eq!(
+            source.0.matches_path(&path),
+            super::ImageSourceMatch::Unavailable
+        );
     }
 
     #[cfg(unix)]

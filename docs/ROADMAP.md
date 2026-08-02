@@ -226,7 +226,13 @@ state before job ownership and test seams are explicit.
   identity-plus-version provenance now reaches foreground decode, prefetch,
   thumbnails, ratings, restore, and explicit F5 replacement refresh. Accepted
   decode, animation, details, and rating results reject an in-place rewrite before
-  publication.
+  publication. The eighth slice keeps full Windows content-witness comparisons
+  off the event loop: Open With owns one generation-cancellable job; Trash,
+  permanent delete, and restored-file inspection use the single typed curation
+  worker; replace-latest animation, details, and rating inspection propagates
+  generation cancellation through every full witness comparison; Save As
+  destination consent retains only native identity and version. Failed or partial
+  curation cancels deferred close so recovery remains visible.
 - [x] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window. One immutable projection now
   derives dock layout, control readiness, selected state, labels, shortcuts, and
@@ -252,7 +258,7 @@ state before job ownership and test seams are explicit.
   surfaces still mix platform integration with pure unit-tested helpers. Move
   those helpers behind covered seams before closing this item. Preserve the
   bounded job, thumbnail, prefetch, chrome, preview, presentation, and GPU upload
-  contracts while doing so. The complete measured floor is now 89.62 percent
+  contracts while doing so. The complete measured floor is now 89.70 percent
   after the folder-scan, file-identity, playlist-alignment, modal-ownership, and
   external-handoff reminder regression branches were added.
 
@@ -325,9 +331,11 @@ makes the application feel unreliable even when the decoder technically succeede
 - [x] Keep the last good image visible during a cache miss or failed replacement.
 - [x] Add File > Reload File (`F5`) with cache bypass and no blank frame.
 - [x] Add a Windows-native Open With handoff in File and the image context surface.
-  It passes only the accepted current source through `SHOpenWithDialog`, persists
-  no editor or history, exposes the external-app privacy boundary, and keeps a
-  path-private `F5` reminder after successful delegation.
+  A generation-cancellable background job first verifies the exact accepted
+  current source, then passes it through `SHOpenWithDialog`. Navigation discards
+  obsolete work. The handoff persists no editor or history, exposes the external-
+  app privacy boundary, and keeps a path-private `F5` reminder after successful
+  delegation.
 - [ ] Add equivalent user-mediated chooser behavior on macOS and Linux only
   through supported workspace or desktop-portal APIs, with package-sandbox and
   native accessibility evidence. Do not substitute a shell command or silently
@@ -520,29 +528,34 @@ The feature that makes viewr a daily tool, done carefully.
   no pathname fallback. Receiptless moves preserve a prior valid action, and only
   transient or resolvable failures remain retryable. Cross-folder Undo restores on
   disk without inserting the source-folder path into an unrelated current view.
-- [x] Nonblocking restore ownership: native restore runs through one typed worker
-  and one-result wake channel. The event loop retains playlist scope, indices,
-  prior Undo ownership, and the only commit. Conflicting mutations wait while view
-  controls repaint. Fixed operation status avoids false percentage, estimate, or
-  cancellation claims. Normal close defers through terminal reconciliation and
-  join; spawn failure changes no state; worker loss retains the receipt with
-  durable polite guidance; new Trash waits for `U` to settle uncertain ownership.
+- [x] Nonblocking curation ownership: Trash, permanent delete after confirmation,
+  and native restore run through one typed worker and one-result wake channel.
+  The worker owns final strong source validation, platform operations, and
+  restored rating/provenance inspection. The event loop retains playlist scope,
+  indices, prior Undo ownership, and the only commit. Conflicting mutations wait
+  while view controls repaint. Fixed operation status avoids false percentage,
+  estimate, or cancellation claims. Normal close exits only after successful
+  reconciliation and join; failure stays visible; spawn failure changes no state;
+  worker loss retains durable guidance; indeterminate Trash or permanent delete
+  requires a process restart after filesystem inspection, while indeterminate
+  restore retains `U`; new Trash waits for uncertain ownership to settle.
 - [x] Source-bound single destructive actions: the displayed image retains the
   handle that supplied accepted pixels. Delete verifies matching no-follow
-  regular-file identity immediately before Trash. Missing, replaced, linked, and
-  unverifiable entries fail closed with fixed path-free categories and do not
-  mutate playlist or Undo state.
+  identity, version, and available content evidence on its worker immediately
+  before Trash. Missing, replaced, linked, and unverifiable entries fail closed
+  with fixed path-free categories and do not mutate playlist or Undo state.
 - [x] `Shift+Delete` permanent delete with an explicit bounded confirmation.
-  Source identity is verified before confirmation and again after acceptance
-  immediately before removal. Cancel performs no filesystem action, and permanent
-  delete preserves any prior valid Trash action.
+  Native source identity and version are checked before confirmation. After
+  acceptance, the worker repeats the full check immediately before removal.
+  Cancel performs no filesystem action, and permanent delete preserves any prior
+  valid Trash action.
 - [x] Destructive-action readiness: foreground load and preview work, Crop, Save
   As, active Spot Heal strokes, and heal workers block Trash, permanent delete,
   and restore with a specific visible reason. External platform errors cross a
   fixed path-free boundary before interface copy or diagnostics.
 - [ ] Security and reliability debt: investigate platform-specific staged or
   handle-relative Trash and restore operations that can close the remaining races
-  between the immediate identity comparison and later pathname or Trash-identifier
+  between the final worker comparison and later pathname or Trash-identifier
   consumption by the operating system. Do not describe the current portable
   preflight as atomic.
 
@@ -778,6 +791,14 @@ install from source or a simple GitHub-style release artifact.
 - [x] Security hardening: automatic sibling scans include regular files only and
   never follow a symlink entry outside the selected directory; direct Open File
   selection remains unchanged.
+- [x] Accepted-source integrity hardening: retained Windows sources keep an
+  in-memory SHA-256 witness so same-length timestamp-restored rewrites fail
+  closed. The shared 512 MiB encoded-input ceiling is enforced before hashing,
+  file growth is rejected cumulatively, and decode-generation cancellation stops
+  between fixed 64 KiB chunks. Folder-rating discovery instead uses a read-only
+  retained source, validates native scan identity/version around the bounded
+  16 MiB header, requires two exact header snapshots to match, stops between
+  segments, and exposes no write capability.
 - [x] Reliability debt: stabilize the Windows local settled-idle probe. On
   2026-07-28 repeated optimized runs met every other budget but one final run
   recorded 23 and 30 redraws during the 500 ms idle windows. Preserve the limit

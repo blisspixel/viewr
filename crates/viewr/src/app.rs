@@ -142,6 +142,8 @@ fn run_internal(
         animation: None,
         image_details: None,
         auxiliary_job: None,
+        #[cfg(target_os = "windows")]
+        open_with_job: None,
         pending_save: None,
         save_job: None,
         close_after_save: false,
@@ -333,43 +335,64 @@ enum PreviewJobResult {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CurationKind {
+    Trash,
+    PermanentDelete,
     Restore,
 }
 
 #[derive(Default)]
 struct CurationRecovery {
+    trash: bool,
+    permanent_delete: bool,
     restore: bool,
 }
 
 impl CurationRecovery {
     fn record(&mut self, kind: CurationKind) {
         match kind {
+            CurationKind::Trash => self.trash = true,
+            CurationKind::PermanentDelete => self.permanent_delete = true,
             CurationKind::Restore => self.restore = true,
         }
     }
 
     fn clear(&mut self, kind: CurationKind) {
         match kind {
+            CurationKind::Trash => self.trash = false,
+            CurationKind::PermanentDelete => self.permanent_delete = false,
             CurationKind::Restore => self.restore = false,
         }
     }
 
     fn contains(&self, kind: CurationKind) -> bool {
         match kind {
+            CurationKind::Trash => self.trash,
+            CurationKind::PermanentDelete => self.permanent_delete,
             CurationKind::Restore => self.restore,
         }
     }
 
     fn status(&self) -> Option<String> {
-        self.restore
-            .then(|| curation_recovery_message(CurationKind::Restore).to_owned())
+        [
+            CurationKind::PermanentDelete,
+            CurationKind::Trash,
+            CurationKind::Restore,
+        ]
+        .into_iter()
+        .find(|kind| self.contains(*kind))
+        .map(|kind| curation_recovery_message(kind).to_owned())
     }
 }
 
-fn trash_replacement_preflight(recovery: &CurationRecovery) -> Option<&'static str> {
-    recovery.contains(CurationKind::Restore).then_some(
-        "Review the folder and system Trash, then retry U before moving more files to Trash.",
-    )
+fn source_removal_recovery_preflight(recovery: &CurationRecovery) -> Option<&'static str> {
+    [
+        CurationKind::PermanentDelete,
+        CurationKind::Trash,
+        CurationKind::Restore,
+    ]
+    .into_iter()
+    .find(|kind| recovery.contains(*kind))
+    .map(curation_recovery_message)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -392,6 +415,20 @@ enum SaveCloseDisposition {
     StayOpen,
     Exit,
     WaitForCuration,
+    CancelDeferredClose,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CurationTerminalState {
+    Succeeded,
+    NeedsAttention,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CurationCloseDisposition {
+    StayOpen,
+    Exit,
+    WaitForSave,
     CancelDeferredClose,
 }
 
@@ -431,6 +468,22 @@ const fn save_close_disposition(
     }
 }
 
+const fn curation_close_disposition(
+    close_requested: bool,
+    terminal: CurationTerminalState,
+    save_active: bool,
+) -> CurationCloseDisposition {
+    if !close_requested {
+        CurationCloseDisposition::StayOpen
+    } else if !matches!(terminal, CurationTerminalState::Succeeded) {
+        CurationCloseDisposition::CancelDeferredClose
+    } else if save_active {
+        CurationCloseDisposition::WaitForSave
+    } else {
+        CurationCloseDisposition::Exit
+    }
+}
+
 fn save_start_blocker<const N: usize>(
     blockers: [Option<SaveStartBlocker>; N],
 ) -> Option<SaveStartBlocker> {
@@ -456,6 +509,8 @@ const fn save_start_blocker_message(blocker: SaveStartBlocker) -> &'static str {
 impl CurationKind {
     const fn work(self) -> CurrentWork {
         match self {
+            Self::Trash => CurrentWork::TrashMove,
+            Self::PermanentDelete => CurrentWork::PermanentDelete,
             Self::Restore => CurrentWork::TrashRestore,
         }
     }
@@ -463,10 +518,22 @@ impl CurationKind {
 
 const fn curation_recovery_message(kind: CurationKind) -> &'static str {
     match kind {
+        CurationKind::Trash => {
+            "Move to Trash stopped unexpectedly. The file may have moved. Review the folder and system Trash, then close and reopen viewr before trying another destructive action."
+        }
+        CurationKind::PermanentDelete => {
+            "Permanent delete stopped unexpectedly. The file may have been deleted. Review the folder, then close and reopen viewr before trying another destructive action."
+        }
         CurationKind::Restore => {
             "Trash restore stopped unexpectedly. Some files may have restored. Undo receipts were kept; review the folder and system Trash, then retry U before moving more files to Trash."
         }
     }
+}
+
+struct RemovalContext {
+    path: PathBuf,
+    playlist_index: usize,
+    scope: Option<Arc<PlaylistScope>>,
 }
 
 struct RestoreContext {
@@ -475,26 +542,44 @@ struct RestoreContext {
 }
 
 enum CurationContext {
+    Trash(RemovalContext),
+    PermanentDelete(RemovalContext),
     Restore(RestoreContext),
 }
 
 impl CurationContext {
     const fn kind(&self) -> CurationKind {
         match self {
+            Self::Trash(_) => CurationKind::Trash,
+            Self::PermanentDelete(_) => CurationKind::PermanentDelete,
             Self::Restore(_) => CurationKind::Restore,
         }
     }
 
     const fn submitted(&self) -> usize {
         match self {
+            Self::Trash(_) | Self::PermanentDelete(_) => 1,
             Self::Restore(context) => context.submitted,
         }
     }
 }
 
+struct RestoredEntryEvidence {
+    path: PathBuf,
+    rating: RatingState,
+    provenance: Option<crate::fs::ScanProvenance>,
+}
+
 enum CurationCompletion {
+    Trash {
+        result: Result<crate::curate::TrashReceipt, GuardedActionError>,
+    },
+    PermanentDelete {
+        result: Result<(), GuardedActionError>,
+    },
     Restore {
         outcome: crate::curate::TrashRestoreOutcome,
+        evidence: Vec<RestoredEntryEvidence>,
         elapsed: Duration,
     },
 }
@@ -514,6 +599,13 @@ impl CurationWorker {
 struct AuxiliaryLoadContext {
     path: PathBuf,
     generation: u64,
+}
+
+#[cfg(target_os = "windows")]
+struct OpenWithContext {
+    path: PathBuf,
+    generation: u64,
+    cancel: Arc<AtomicBool>,
 }
 
 type AuxiliaryLoadResult = (
@@ -690,7 +782,11 @@ enum HealStrokeUpdate {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CurrentWork {
+    TrashMove,
+    PermanentDelete,
     TrashRestore,
+    #[cfg(target_os = "windows")]
+    SourceVerification,
     FolderScan,
     ImagePreparation,
     Crop,
@@ -768,7 +864,11 @@ fn current_work_blocker<const N: usize>(work: [Option<CurrentWork>; N]) -> Optio
 
 fn blocked_action_message(action: &str, blocker: CurrentWork) -> String {
     let work = match blocker {
+        CurrentWork::TrashMove => "the move to Trash",
+        CurrentWork::PermanentDelete => "the permanent delete",
         CurrentWork::TrashRestore => "the Trash restore",
+        #[cfg(target_os = "windows")]
+        CurrentWork::SourceVerification => "source verification",
         CurrentWork::FolderScan => "the folder scan",
         CurrentWork::ImagePreparation => "image preparation",
         CurrentWork::Crop => "the crop",
@@ -797,6 +897,16 @@ fn curation_action_preflight(
 fn curation_status(kind: CurationKind, submitted: usize, closing: bool) -> String {
     let count = file_count(submitted);
     match (kind, closing) {
+        (CurationKind::Trash, false) => format!("Moving {count} to Trash..."),
+        (CurationKind::Trash, true) => {
+            format!("Finishing move to Trash for {count} before closing...")
+        }
+        (CurationKind::PermanentDelete, false) => {
+            format!("Permanently deleting {count}...")
+        }
+        (CurationKind::PermanentDelete, true) => {
+            format!("Finishing permanent delete for {count} before closing...")
+        }
         (CurationKind::Restore, false) => format!("Restoring {count} from Trash..."),
         (CurationKind::Restore, true) => {
             format!("Finishing Trash restore for {count} before closing...")
@@ -1113,6 +1223,9 @@ struct App {
     image_details: Option<crate::image_info::ImageDetails>,
     /// Replace-latest animation and metadata result for the current source.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
+    /// Generation-cancellable Windows source verification before native handoff.
+    #[cfg(target_os = "windows")]
+    open_with_job: Option<OneShotJob<OpenWithContext, crate::fs::ImageSourceMatch>>,
     /// Captured existing destination awaiting object-bound overwrite consent.
     pending_save: Option<PendingSave>,
     /// At most one explicit Save As encode with bounded completion ownership.
@@ -1131,7 +1244,7 @@ struct App {
     preview_recovery_unsettled: bool,
     /// The current load cannot retry because it requires the lost preview executor.
     preview_load_retry_blocked: bool,
-    /// At most one native restore operation running off-thread.
+    /// At most one source-bound Trash, permanent-delete, or restore operation.
     curation_worker: Option<CurationWorker>,
     /// A normal close request waiting for destructive work to reconcile.
     close_after_curation: bool,
@@ -1347,6 +1460,39 @@ fn restore_targets_active_playlist(
     playlist.is_some() && same_playlist_scope(active, trashed)
 }
 
+fn inspect_restored_entries(
+    outcome: &mut crate::curate::TrashRestoreOutcome,
+) -> Vec<RestoredEntryEvidence> {
+    outcome.restored.sort_by_key(|record| record.playlist_index);
+    outcome
+        .restored
+        .iter()
+        .map(|record| {
+            let path = record.receipt.original_path().to_owned();
+            let restored_source = record.receipt.open_restored_source();
+            let rating = restored_source
+                .as_ref()
+                .map_or(RatingState::Unreadable, |source| {
+                    crate::ratings::observe_source(source, &path).state
+                });
+            let provenance = restored_source
+                .as_ref()
+                .and_then(crate::fs::ImageSource::scan_provenance)
+                .or_else(|| {
+                    record
+                        .receipt
+                        .restore_source()
+                        .and_then(crate::fs::ImageSource::current_scan_provenance)
+                });
+            RestoredEntryEvidence {
+                path,
+                rating,
+                provenance,
+            }
+        })
+        .collect()
+}
+
 fn same_playlist_scope(
     active: Option<&Arc<PlaylistScope>>,
     trashed: Option<&Arc<PlaylistScope>>,
@@ -1503,6 +1649,8 @@ impl App {
     }
 
     fn begin_image_load(&mut self, path: PathBuf) {
+        #[cfg(target_os = "windows")]
+        self.cancel_open_with_check();
         self.cancel_save_overwrite_for_source_change();
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
@@ -2096,14 +2244,27 @@ impl App {
             }
             let details = source.as_ref().map_or_else(
                 || crate::image_info::ImageDetails::load(&job_path),
-                |source| crate::image_info::ImageDetails::load_from_source(&job_path, source),
+                |source| {
+                    crate::image_info::ImageDetails::load_from_source_while(
+                        &job_path,
+                        source,
+                        || current_generation.load(Ordering::Acquire) == generation,
+                    )
+                },
             );
+            if current_generation.load(Ordering::Acquire) != generation {
+                return;
+            }
             let rating = source.as_ref().map_or(
                 RatingObservation {
                     state: RatingState::Unreadable,
                     capability: RatingWriteCapability::UnsafeSource,
                 },
-                |source| crate::ratings::observe_source(source, &job_path),
+                |source| {
+                    crate::ratings::observe_source_while(source, &job_path, || {
+                        current_generation.load(Ordering::Acquire) == generation
+                    })
+                },
             );
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
@@ -2499,11 +2660,10 @@ impl App {
                     if worker_cancel.load(Ordering::Acquire) {
                         return;
                     }
-                    let observation = provenance.map_or_else(
-                        || crate::ratings::observe_path(&path),
-                        |provenance| crate::ratings::observe_scanned_path(&path, provenance),
-                    );
-                    ratings.push((path, observation.state));
+                    let rating = crate::ratings::scan_path_rating_while(&path, provenance, || {
+                        !worker_cancel.load(Ordering::Acquire)
+                    });
+                    ratings.push((path, rating));
                 }
                 if !worker_cancel.load(Ordering::Acquire) {
                     let _ = sender.send(ratings);
@@ -2646,6 +2806,8 @@ impl App {
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
+        #[cfg(target_os = "windows")]
+        self.cancel_open_with_check();
 
         // A reload is an explicit disk refresh. Drop any speculative copy,
         // invalidate older speculative work, and remove the stale filmstrip
@@ -2664,20 +2826,85 @@ impl App {
 
     #[cfg(target_os = "windows")]
     fn open_current_with(&mut self) {
-        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
         if self.block_action_while_busy("opening the source in another app", true) {
+            return;
+        }
+        if self.open_with_job.is_some() {
+            self.show_toast("Source verification for Open With is already running");
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             self.show_toast("Open With requires the current image to finish loading");
             return;
         };
-        let Some(source) = self.current_source.as_ref() else {
+        let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
             self.show_toast("Could not verify the current source for Open With");
             return;
         };
-        match source.matches_path(&path) {
+        let generation = self.session.generation.load(Ordering::Acquire);
+        let current_generation = Arc::clone(&self.session.generation);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let context = OpenWithContext {
+            path: path.clone(),
+            generation,
+            cancel: Arc::clone(&cancel),
+        };
+        let event_proxy = self.event_proxy.clone();
+        let (completion, job) = OneShotJob::new(context, move || {
+            let _ = event_proxy.send_event(UserEvent::Wake);
+        });
+        let spawn = std::thread::Builder::new()
+            .name("viewr-open-with-check".into())
+            .spawn(move || {
+                let source_match = source.matches_path_while(&path, || {
+                    !cancel.load(Ordering::Acquire)
+                        && current_generation.load(Ordering::Acquire) == generation
+                });
+                let _ = completion.complete(source_match);
+            });
+        if spawn.is_err() {
+            self.show_toast("Could not start source verification for Open With");
+            return;
+        }
+        self.open_with_job = Some(job);
+        self.show_toast("Verifying source for Open With");
+    }
+
+    #[cfg(target_os = "windows")]
+    fn cancel_open_with_check(&mut self) {
+        if let Some(job) = self.open_with_job.take() {
+            job.context().cancel.store(true, Ordering::Release);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn finish_open_with_check(&mut self) {
+        let Some(job) = self.open_with_job.as_ref() else {
+            return;
+        };
+        let polled = job.poll();
+        if matches!(polled, JobPoll::Pending) {
+            return;
+        }
+        let context = self
+            .open_with_job
+            .take()
+            .expect("Open With job exists after terminal poll")
+            .into_context();
+        if self.session.generation.load(Ordering::Acquire) != context.generation
+            || self.current_loaded_path() != Some(context.path.as_path())
+        {
+            return;
+        }
+        let source_match = match polled {
+            JobPoll::Ready(source_match) => source_match,
+            JobPoll::Disconnected => {
+                self.show_toast("Could not finish source verification for Open With");
+                return;
+            }
+            JobPoll::Pending => unreachable!("pending Open With check returned early"),
+        };
+        match source_match {
             crate::fs::ImageSourceMatch::Same => {}
             crate::fs::ImageSourceMatch::Changed | crate::fs::ImageSourceMatch::Missing => {
                 self.show_toast("Source changed on disk. Press F5 before Open With");
@@ -2692,6 +2919,12 @@ impl App {
                 return;
             }
         }
+        self.show_open_with_dialog(&context.path);
+    }
+
+    #[cfg(target_os = "windows")]
+    fn show_open_with_dialog(&mut self, path: &Path) {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
         let parent = self
             .renderer
@@ -2705,7 +2938,7 @@ impl App {
             })
             .unwrap_or(std::ptr::null_mut());
         self.context_menu_pos = None;
-        match show_windows_open_with_dialog(&path, parent) {
+        match show_windows_open_with_dialog(path, parent) {
             OpenWithOutcome::Launched => {
                 self.external_edit_pending = true;
                 self.show_toast(
@@ -2944,6 +3177,8 @@ impl App {
     }
 
     fn go_to_index(&mut self, new_index: usize) {
+        #[cfg(target_os = "windows")]
+        self.cancel_open_with_check();
         if self.block_action_while_busy("browsing to another image", true) {
             return;
         }
@@ -3123,7 +3358,7 @@ impl App {
         if self.block_action_while_busy("moving this file to Trash", true) {
             return;
         }
-        if let Some(message) = trash_replacement_preflight(&self.curation_recovery) {
+        if let Some(message) = source_removal_recovery_preflight(&self.curation_recovery) {
             self.show_toast(message);
             return;
         }
@@ -3137,54 +3372,66 @@ impl App {
             ));
             return;
         };
-
-        let receipt = match crate::curate::move_source_to_trash(&path, &source) {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                log_guarded_action_failure(GuardedActionKind::Trash, &error);
-                self.show_toast(guarded_action_failure_message(
-                    GuardedActionKind::Trash,
-                    &error,
-                ));
-                return;
-            }
-        };
-
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        let has_receipt = receipt.can_restore_in_app();
-        if !has_receipt {
-            log::warn!(
-                "trash receipt unavailable: category={}",
-                receipt.capture_status().category()
-            );
+        let context = CurationContext::Trash(RemovalContext {
+            path: path.clone(),
+            playlist_index,
+            scope: self.playlist_scope.clone(),
+        });
+        let started = self.start_curation_worker(
+            "viewr-trash-move",
+            context,
+            move || CurationCompletion::Trash {
+                result: crate::curate::move_source_to_trash(&path, &source),
+            },
+            "Could not start the move to Trash. Nothing was moved.",
+        );
+        if started {
+            self.show_toast("Moving file to Trash in the background");
         }
-        let previous_undo_preserved = !has_receipt && !self.last_trashed.is_empty();
-        if has_receipt {
-            self.last_trashed = vec![TrashedFile {
-                receipt,
-                playlist_index,
-            }];
-            self.last_trashed_scope.clone_from(&self.playlist_scope);
-        } else if previous_undo_preserved {
-            rebase_preserved_trash_action(
-                &mut self.last_trashed,
-                self.playlist_scope.as_ref(),
-                self.last_trashed_scope.as_ref(),
-                &[playlist_index],
-            );
-        }
-        self.after_paths_removed(&[path], playlist_index);
-        self.show_toast(single_trash_result_message(
-            has_receipt,
-            previous_undo_preserved,
-        ));
+    }
+
+    fn start_curation_worker(
+        &mut self,
+        name: &'static str,
+        context: CurationContext,
+        work: impl FnOnce() -> CurationCompletion + Send + 'static,
+        spawn_failure: &'static str,
+    ) -> bool {
+        let kind = context.kind();
+        let submitted = context.submitted();
+        let event_proxy = self.event_proxy.clone();
+        let spawn = spawn_curation_thread(name, work, move || {
+            let _ = event_proxy.send_event(UserEvent::Wake);
+        });
+        let Ok((result_rx, join)) = spawn else {
+            log::error!("curation worker spawn failed: operation={kind:?}, submitted={submitted}");
+            self.show_toast(spawn_failure);
+            return false;
+        };
+        log::info!("curation worker started: operation={kind:?}, submitted={submitted}");
+        self.curation_worker = Some(CurationWorker {
+            context,
+            result_rx,
+            join: Some(join),
+        });
+        self.request_redraw();
+        true
     }
 
     fn block_action_while_busy(&mut self, action: &str, include_spot_heal: bool) -> bool {
+        #[cfg(target_os = "windows")]
+        let source_verification = self
+            .open_with_job
+            .is_some()
+            .then_some(CurrentWork::SourceVerification);
+        #[cfg(not(target_os = "windows"))]
+        let source_verification = None;
         let blocker = current_work_blocker([
             self.curation_worker
                 .as_ref()
                 .map(|worker| worker.context.kind().work()),
+            source_verification,
             self.folder_scan_job
                 .is_some()
                 .then_some(CurrentWork::FolderScan),
@@ -4242,6 +4489,10 @@ impl App {
         if self.block_action_while_busy("permanently deleting this file", true) {
             return;
         }
+        if let Some(message) = source_removal_recovery_preflight(&self.curation_recovery) {
+            self.show_toast(message);
+            return;
+        }
         let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
             let error = GuardedActionError::Unavailable;
             log_guarded_action_failure(GuardedActionKind::PermanentDelete, &error);
@@ -4251,7 +4502,7 @@ impl App {
             ));
             return;
         };
-        if let Err(error) = crate::curate::verify_accepted_source(&path, &source) {
+        if let Err(error) = crate::curate::verify_accepted_source_native(&path, &source) {
             log_guarded_action_failure(GuardedActionKind::PermanentDelete, &error);
             self.show_toast(guarded_action_failure_message(
                 GuardedActionKind::PermanentDelete,
@@ -4271,26 +4522,111 @@ impl App {
         if !permanent_delete_confirmed(&confirmed) {
             return;
         }
-        if let Err(error) = crate::curate::permanent_delete_source(&path, &source) {
+        let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
+        let context = CurationContext::PermanentDelete(RemovalContext {
+            path: path.clone(),
+            playlist_index,
+            scope: self.playlist_scope.clone(),
+        });
+        let started = self.start_curation_worker(
+            "viewr-permanent-delete",
+            context,
+            move || CurationCompletion::PermanentDelete {
+                result: crate::curate::permanent_delete_source(&path, &source),
+            },
+            "Could not start permanent delete. Nothing was deleted.",
+        );
+        if started {
+            self.show_toast("Permanently deleting file in the background");
+        }
+    }
+
+    fn finish_trash_move(
+        &mut self,
+        context: &RemovalContext,
+        result: Result<crate::curate::TrashReceipt, GuardedActionError>,
+    ) -> CurationTerminalState {
+        let receipt = match result {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                log_guarded_action_failure(GuardedActionKind::Trash, &error);
+                self.show_toast(guarded_action_failure_message(
+                    GuardedActionKind::Trash,
+                    &error,
+                ));
+                return CurationTerminalState::NeedsAttention;
+            }
+        };
+        let has_receipt = receipt.can_restore_in_app();
+        if !has_receipt {
+            log::warn!(
+                "trash receipt unavailable: category={}",
+                receipt.capture_status().category()
+            );
+        }
+        let previous_undo_preserved = !has_receipt && !self.last_trashed.is_empty();
+        if has_receipt {
+            self.last_trashed = vec![TrashedFile {
+                receipt,
+                playlist_index: context.playlist_index,
+            }];
+            self.last_trashed_scope.clone_from(&context.scope);
+        } else if previous_undo_preserved {
+            rebase_preserved_trash_action(
+                &mut self.last_trashed,
+                context.scope.as_ref(),
+                self.last_trashed_scope.as_ref(),
+                &[context.playlist_index],
+            );
+        }
+        if restore_targets_active_playlist(
+            self.playlist.as_ref(),
+            self.playlist_scope.as_ref(),
+            context.scope.as_ref(),
+        ) {
+            self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
+        }
+        self.show_toast(single_trash_result_message(
+            has_receipt,
+            previous_undo_preserved,
+        ));
+        CurationTerminalState::Succeeded
+    }
+
+    fn finish_permanent_delete(
+        &mut self,
+        context: &RemovalContext,
+        result: Result<(), GuardedActionError>,
+    ) -> CurationTerminalState {
+        if let Err(error) = result {
             log_guarded_action_failure(GuardedActionKind::PermanentDelete, &error);
             self.show_toast(guarded_action_failure_message(
                 GuardedActionKind::PermanentDelete,
                 &error,
             ));
-            return;
+            return CurationTerminalState::NeedsAttention;
         }
         let previous_trash_undo = !self.last_trashed.is_empty();
-        let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
         if previous_trash_undo {
             rebase_preserved_trash_action(
                 &mut self.last_trashed,
-                self.playlist_scope.as_ref(),
+                context.scope.as_ref(),
                 self.last_trashed_scope.as_ref(),
-                &[playlist_index],
+                &[context.playlist_index],
             );
         }
-        self.after_paths_removed(std::slice::from_ref(&path), playlist_index);
-        self.show_toast(permanent_delete_success_message(&path, previous_trash_undo));
+        if restore_targets_active_playlist(
+            self.playlist.as_ref(),
+            self.playlist_scope.as_ref(),
+            context.scope.as_ref(),
+        ) {
+            self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
+        }
+        self.show_toast(permanent_delete_success_message(
+            &context.path,
+            previous_trash_undo,
+        ));
+        CurationTerminalState::Succeeded
     }
 
     fn after_paths_removed(&mut self, removed: &[PathBuf], old_index: usize) {
@@ -4349,9 +4685,11 @@ impl App {
             "viewr-trash-restore",
             move || {
                 let restore_started = Instant::now();
-                let outcome = crate::curate::restore_trash_batch(records);
+                let mut outcome = crate::curate::restore_trash_batch(records);
+                let evidence = inspect_restored_entries(&mut outcome);
                 CurationCompletion::Restore {
                     outcome,
+                    evidence,
                     elapsed: restore_started.elapsed(),
                 }
             },
@@ -4379,14 +4717,14 @@ impl App {
         &mut self,
         context: RestoreContext,
         mut outcome: crate::curate::TrashRestoreOutcome,
+        evidence: Vec<RestoredEntryEvidence>,
         restore_elapsed: Duration,
-    ) {
+    ) -> CurationTerminalState {
         let restores_active_playlist = restore_targets_active_playlist(
             self.playlist.as_ref(),
             self.playlist_scope.as_ref(),
             context.scope.as_ref(),
         );
-        outcome.restored.sort_by_key(|record| record.playlist_index);
         let restored_count = outcome.restored.len();
         if restored_count > 0 && restores_active_playlist {
             self.reset_prefetch_for_playlist_change();
@@ -4395,27 +4733,21 @@ impl App {
         if restores_active_playlist && let Some(playlist) = &mut self.playlist {
             let previously_selected = playlist.index;
             let mut focused_index = None;
+            let mut evidence = evidence.into_iter();
             for record in &outcome.restored {
                 let index = outcome
                     .restored_playlist_index(record.playlist_index)
                     .min(playlist.files.len());
                 focused_index.get_or_insert(index);
                 let path = record.receipt.original_path().to_owned();
-                let restored_source = record.receipt.open_restored_source();
-                let rating = restored_source
-                    .as_ref()
-                    .map_or(crate::ratings::RatingState::Unreadable, |source| {
-                        crate::ratings::observe_source(source, &path).state
-                    });
-                let provenance = restored_source
-                    .as_ref()
-                    .and_then(crate::fs::ImageSource::scan_provenance)
-                    .or_else(|| {
-                        record
-                            .receipt
-                            .restore_source()
-                            .and_then(crate::fs::ImageSource::current_scan_provenance)
-                    });
+                let evidence = evidence.next();
+                let (rating, provenance) = if let Some(evidence) = evidence
+                    && evidence.path == path
+                {
+                    (evidence.rating, evidence.provenance)
+                } else {
+                    (RatingState::Unreadable, None)
+                };
                 playlist.insert_path(index, path, rating, provenance);
             }
             if let Some(index) = focused_index {
@@ -4465,6 +4797,11 @@ impl App {
             first_failure,
             restores_active_playlist,
         ));
+        if failure_total == 0 {
+            CurationTerminalState::Succeeded
+        } else {
+            CurationTerminalState::NeedsAttention
+        }
     }
 
     fn spawn_image_load(&mut self, path: PathBuf) {
@@ -4770,22 +5107,53 @@ impl App {
 
         match poll {
             WorkerPoll::Ready(completion) => {
-                match (worker.context, completion) {
+                let terminal = match (worker.context, completion) {
+                    (CurationContext::Trash(context), CurationCompletion::Trash { result }) => {
+                        self.curation_recovery.clear(CurationKind::Trash);
+                        self.finish_trash_move(&context, result)
+                    }
+                    (
+                        CurationContext::PermanentDelete(context),
+                        CurationCompletion::PermanentDelete { result },
+                    ) => {
+                        self.curation_recovery.clear(CurationKind::PermanentDelete);
+                        self.finish_permanent_delete(&context, result)
+                    }
                     (
                         CurationContext::Restore(context),
-                        CurationCompletion::Restore { outcome, elapsed },
+                        CurationCompletion::Restore {
+                            outcome,
+                            evidence,
+                            elapsed,
+                        },
                     ) => {
                         self.curation_recovery.clear(CurationKind::Restore);
-                        self.finish_trash_restore(context, outcome, elapsed);
+                        self.finish_trash_restore(context, outcome, evidence, elapsed)
                     }
-                }
+                    _ => {
+                        self.close_after_curation = false;
+                        self.close_after_save = false;
+                        log::error!(
+                            "curation worker returned a mismatched completion: operation={kind:?}, submitted={submitted}"
+                        );
+                        let message = curation_recovery_message(kind);
+                        self.curation_recovery.record(kind);
+                        self.show_toast(message);
+                        return;
+                    }
+                };
                 log::info!("curation worker reconciled: operation={kind:?}, submitted={submitted}");
                 self.request_redraw();
-                if std::mem::take(&mut self.close_after_curation) {
-                    if self.save_job.is_some() {
-                        self.close_after_save = true;
-                    } else {
-                        event_loop.exit();
+                match curation_close_disposition(
+                    std::mem::take(&mut self.close_after_curation),
+                    terminal,
+                    self.save_job.is_some(),
+                ) {
+                    CurationCloseDisposition::StayOpen => {}
+                    CurationCloseDisposition::Exit => event_loop.exit(),
+                    CurationCloseDisposition::WaitForSave => self.close_after_save = true,
+                    CurationCloseDisposition::CancelDeferredClose => {
+                        self.close_after_save = false;
                     }
                 }
             }
@@ -5374,7 +5742,7 @@ impl ApplicationHandler<UserEvent> for App {
                         self.close_after_save = true;
                         self.close_after_curation = true;
                         self.show_toast(
-                            "Finishing Save As and the Trash restore before closing...",
+                            "Finishing Save As and the file operation before closing...",
                         );
                     }
                 }
@@ -6273,6 +6641,8 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "windows")]
+        self.finish_open_with_check();
         self.poll_rating_write(event_loop);
         self.poll_rating_discovery();
         self.poll_curation_result(event_loop);
@@ -7063,6 +7433,11 @@ mod test {
             blocked_action_message("moving this file to Trash", CurrentWork::SpotHeal),
             "Wait for Spot Heal to finish before moving this file to Trash"
         );
+        #[cfg(target_os = "windows")]
+        assert_eq!(
+            blocked_action_message("saving a copy", CurrentWork::SourceVerification),
+            "Wait for source verification to finish before saving a copy"
+        );
     }
 
     #[test]
@@ -7125,6 +7500,14 @@ mod test {
 
     #[test]
     fn curation_status_and_close_decisions_are_truthful() {
+        assert_eq!(
+            curation_status(CurationKind::Trash, 1, false),
+            "Moving 1 file to Trash..."
+        );
+        assert_eq!(
+            curation_status(CurationKind::PermanentDelete, 1, true),
+            "Finishing permanent delete for 1 file before closing..."
+        );
         assert_eq!(
             curation_status(CurationKind::Restore, 1, false),
             "Restoring 1 file from Trash..."
@@ -7268,20 +7651,56 @@ mod test {
     }
 
     #[test]
-    fn unresolved_restore_blocks_only_receipt_replacing_trash_actions() {
+    fn deferred_close_requires_a_successful_curation_terminal_state() {
+        assert_eq!(
+            curation_close_disposition(false, CurationTerminalState::Succeeded, false),
+            CurationCloseDisposition::StayOpen
+        );
+        assert_eq!(
+            curation_close_disposition(true, CurationTerminalState::Succeeded, false),
+            CurationCloseDisposition::Exit
+        );
+        assert_eq!(
+            curation_close_disposition(true, CurationTerminalState::Succeeded, true),
+            CurationCloseDisposition::WaitForSave
+        );
+        assert_eq!(
+            curation_close_disposition(true, CurationTerminalState::NeedsAttention, false),
+            CurationCloseDisposition::CancelDeferredClose
+        );
+        assert_eq!(
+            curation_close_disposition(true, CurationTerminalState::NeedsAttention, true),
+            CurationCloseDisposition::CancelDeferredClose
+        );
+    }
+
+    #[test]
+    fn unresolved_curation_blocks_source_removal_in_risk_order() {
         let mut recovery = CurationRecovery::default();
-        assert_eq!(trash_replacement_preflight(&recovery), None);
+        assert_eq!(source_removal_recovery_preflight(&recovery), None);
 
         recovery.record(CurationKind::Restore);
         assert_eq!(
-            trash_replacement_preflight(&recovery),
-            Some(
-                "Review the folder and system Trash, then retry U before moving more files to Trash."
-            )
+            source_removal_recovery_preflight(&recovery),
+            Some(curation_recovery_message(CurationKind::Restore))
         );
 
+        recovery.record(CurationKind::Trash);
+        assert_eq!(
+            source_removal_recovery_preflight(&recovery),
+            Some(curation_recovery_message(CurationKind::Trash))
+        );
+
+        recovery.record(CurationKind::PermanentDelete);
+        assert_eq!(
+            source_removal_recovery_preflight(&recovery),
+            Some(curation_recovery_message(CurationKind::PermanentDelete))
+        );
+
+        recovery.clear(CurationKind::PermanentDelete);
+        recovery.clear(CurationKind::Trash);
         recovery.clear(CurationKind::Restore);
-        assert_eq!(trash_replacement_preflight(&recovery), None);
+        assert_eq!(source_removal_recovery_preflight(&recovery), None);
     }
 
     #[test]

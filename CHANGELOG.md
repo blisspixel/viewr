@@ -82,12 +82,35 @@ and organized by user-visible concern.
   Markable accepted sources also retain their selected pathname in memory and
   reopen it without following its final component during version checks. This
   catches pathname replacement even when a Windows retained handle reports
-  unchanged cached timestamps.
+  unchanged cached timestamps. Windows accepted sources also keep a SHA-256
+  content witness only in memory, so an in-place rewrite is rejected even when
+  its length and writable timestamp fields are restored. Source acceptance
+  rejects encoded files above the shared 512 MiB limit before hashing, and
+  superseded decode work stops between fixed 64 KiB witness chunks. Folder
+  rating discovery uses a separate read-only native-version seam, reads at most
+  the 16 MiB JPEG header twice, compares the exact bytes consumed as well as the
+  parsed result, stops between segments, and cannot authorize writes. Two
+  different malformed or non-JPEG headers can no longer appear stable merely
+  because parsing returned the same error category.
+- Full Windows source-content comparisons now run only in owned background work.
+  Windows Open With uses one generation-cancellable verification job before the
+  native chooser. Trash and permanent delete use the existing single curation
+  worker for final strong validation and the platform operation, while restored
+  rating and provenance evidence is prepared on that same worker. The event loop
+  remains the only playlist and Undo owner. Conflicting mutations wait, ordinary
+  navigation cancels Open With verification and every strong content comparison
+  in the replace-latest animation, details, and rating task. Indeterminate Trash
+  or permanent delete explicitly requires closing and reopening viewr, and a
+  failed or partial curation result cancels deferred close so the result remains
+  visible.
 - Save As now binds metadata retention to serialized reads from the accepted
   source handle that supplied the displayed pixels and rejects length,
   modification-time, or operating-system change-time differences around
-  extraction. It retains the canonical parent identity plus
-  destination absence or exact identity and version after the native dialog.
+  extraction. It retains the canonical parent identity plus destination absence
+  or an exact native identity and version after the native dialog. The event-loop
+  destination capability exposes no reader, performs no content hash, and does
+  not inherit the encoded-source size ceiling; the worker retains every
+  source-byte and output-transaction check.
   Every captured existing file now receives an app-owned overwrite prompt whose
   consent is revalidated against that exact object. Its copy accurately describes
   the final identity recheck without overstating the documented pathname race.

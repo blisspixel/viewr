@@ -5,7 +5,7 @@
 //! existing valid mirror in place but never grow or relocate a TIFF IFD. This
 //! keeps MakerNote and unknown offset-bearing metadata byte-for-byte intact.
 
-use crate::fs::{ImageSource, ImageSourceMatch};
+use crate::fs::{ImageSource, ImageSourceMatch, RatingScanSource};
 #[cfg(any(target_os = "windows", test))]
 use quick_xml::Writer;
 use quick_xml::events::BytesStart;
@@ -201,7 +201,7 @@ enum MetadataError {
     Unreadable,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct JpegSegment {
     marker: u8,
     payload_offset: usize,
@@ -214,11 +214,56 @@ impl JpegSegment {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct JpegHeader {
     segments: Vec<JpegSegment>,
     #[cfg(any(target_os = "windows", test))]
     encoded_len: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RatingHeaderSnapshot {
+    bytes: Vec<u8>,
+    parsed: Result<JpegHeader, MetadataError>,
+}
+
+struct SnapshotReader<R> {
+    inner: R,
+    bytes: Vec<u8>,
+}
+
+impl<R> SnapshotReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            bytes: Vec::new(),
+        }
+    }
+
+    fn finish(self, parsed: Result<JpegHeader, MetadataError>) -> RatingHeaderSnapshot {
+        RatingHeaderSnapshot {
+            bytes: self.bytes,
+            parsed,
+        }
+    }
+}
+
+impl<R: Read> Read for SnapshotReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        let next_len = self
+            .bytes
+            .len()
+            .checked_add(read)
+            .filter(|length| *length <= MAX_HEADER_BYTES)
+            .ok_or_else(|| std::io::Error::other("rating header snapshot exceeds its bound"))?;
+        self.bytes
+            .try_reserve(read)
+            .map_err(|_| std::io::Error::other("rating header snapshot allocation failed"))?;
+        self.bytes.extend_from_slice(&buffer[..read]);
+        debug_assert_eq!(self.bytes.len(), next_len);
+        Ok(read)
+    }
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -240,15 +285,35 @@ impl JpegHeader {
 /// Read the current rating and determine whether the exact accepted source is writable.
 #[must_use]
 pub(crate) fn observe_source(source: &ImageSource, path: &Path) -> RatingObservation {
-    observe_source_with_hook(source, path, || {})
+    observe_source_while(source, path, || true)
 }
 
+/// Inspect one accepted rating while cooperatively stopping superseded work.
+#[must_use]
+pub(crate) fn observe_source_while(
+    source: &ImageSource,
+    path: &Path,
+    keep_going: impl FnMut() -> bool,
+) -> RatingObservation {
+    observe_source_while_with_hook(source, path, || {}, keep_going)
+}
+
+#[cfg(test)]
 fn observe_source_with_hook(
     source: &ImageSource,
     path: &Path,
     before_final_version_check: impl FnOnce(),
 ) -> RatingObservation {
-    if !source.version_is_current() {
+    observe_source_while_with_hook(source, path, before_final_version_check, || true)
+}
+
+fn observe_source_while_with_hook(
+    source: &ImageSource,
+    path: &Path,
+    before_final_version_check: impl FnOnce(),
+    mut keep_going: impl FnMut() -> bool,
+) -> RatingObservation {
+    if !source.version_is_current_while(&mut keep_going) {
         return unsafe_rating_observation();
     }
     let mut reader = match source.clone_for_decode() {
@@ -256,8 +321,9 @@ fn observe_source_with_hook(
         Err(_) => return unsafe_rating_observation(),
     };
     let header = read_jpeg_header(&mut reader);
+    drop(reader);
     before_final_version_check();
-    if !source.version_is_current() {
+    if !source.version_is_current_while(&mut keep_going) {
         return unsafe_rating_observation();
     }
     let header = match header {
@@ -284,7 +350,7 @@ fn observe_source_with_hook(
     let state = rating_from_header(&header).unwrap_or(RatingState::Unsupported);
     let capability = if matches!(state, RatingState::Unsupported | RatingState::Unreadable) {
         RatingWriteCapability::UnsupportedMetadata
-    } else if source.matches_path(path) != ImageSourceMatch::Same {
+    } else if source.matches_path_while(path, &mut keep_going) != ImageSourceMatch::Same {
         RatingWriteCapability::UnsafeSource
     } else if cfg!(target_os = "windows") {
         RatingWriteCapability::WritableJpeg
@@ -301,34 +367,89 @@ const fn unsafe_rating_observation() -> RatingObservation {
     }
 }
 
-/// Read a folder entry without retaining it or creating any persistent index.
+/// Read only the bounded rating header for in-memory folder discovery.
+///
+/// This seam returns no write capability. Mutating paths must reopen a fully
+/// witnessed [`ImageSource`] and perform their independent guarded transaction.
 #[must_use]
-pub(crate) fn observe_path(path: &Path) -> RatingObservation {
-    match ImageSource::open(path) {
-        Ok(source) => observe_source(&source, path),
-        Err(_) => RatingObservation {
-            state: RatingState::Unreadable,
-            capability: RatingWriteCapability::UnsafeSource,
-        },
+pub(crate) fn scan_path_rating_while(
+    path: &Path,
+    provenance: Option<crate::fs::ScanProvenance>,
+    keep_going: impl FnMut() -> bool,
+) -> RatingState {
+    scan_path_rating_while_with_hook(path, provenance, keep_going, || {})
+}
+
+fn scan_path_rating_while_with_hook(
+    path: &Path,
+    provenance: Option<crate::fs::ScanProvenance>,
+    mut keep_going: impl FnMut() -> bool,
+    before_confirmation: impl FnOnce(),
+) -> RatingState {
+    let Ok(source) = RatingScanSource::open_while(path, provenance, &mut keep_going) else {
+        return RatingState::Unreadable;
+    };
+    if !source.native_version_is_current_while(&mut keep_going) {
+        return RatingState::Unreadable;
+    }
+    let header = read_rating_header_snapshot_while(&source, &mut keep_going);
+    before_confirmation();
+    if !source.native_version_is_current_while(&mut keep_going) {
+        return RatingState::Unreadable;
+    }
+    let confirmation = read_rating_header_snapshot_while(&source, &mut keep_going);
+    if !source.native_version_is_current_while(&mut keep_going) {
+        return RatingState::Unreadable;
+    }
+    rating_from_matching_header_snapshots(&header, &confirmation)
+}
+
+fn rating_from_matching_header_snapshots(
+    header: &RatingHeaderSnapshot,
+    confirmation: &RatingHeaderSnapshot,
+) -> RatingState {
+    if confirmation != header {
+        return RatingState::Unreadable;
+    }
+    match &header.parsed {
+        Ok(header) => rating_from_header(header).unwrap_or(RatingState::Unsupported),
+        Err(MetadataError::NotJpeg) => RatingState::Unrated,
+        Err(MetadataError::Unsupported) => RatingState::Unsupported,
+        Err(MetadataError::Unreadable) => RatingState::Unreadable,
     }
 }
 
-/// Read a scanned entry only when it remains the same regular filesystem object.
-#[must_use]
-pub(crate) fn observe_scanned_path(
-    path: &Path,
-    provenance: crate::fs::ScanProvenance,
-) -> RatingObservation {
-    match ImageSource::open_scanned(path, provenance) {
-        Ok(source) => observe_source(&source, path),
-        Err(_) => RatingObservation {
-            state: RatingState::Unreadable,
-            capability: RatingWriteCapability::UnsafeSource,
-        },
-    }
+fn read_rating_header_snapshot_while(
+    source: &RatingScanSource,
+    keep_going: &mut impl FnMut() -> bool,
+) -> RatingHeaderSnapshot {
+    let Ok(file) = source.clone_for_read() else {
+        return RatingHeaderSnapshot {
+            bytes: Vec::new(),
+            parsed: Err(MetadataError::Unreadable),
+        };
+    };
+    read_jpeg_header_snapshot_from_reader_while(file, keep_going)
+}
+
+fn read_jpeg_header_snapshot_from_reader_while(
+    reader: impl Read,
+    keep_going: &mut impl FnMut() -> bool,
+) -> RatingHeaderSnapshot {
+    let mut reader = SnapshotReader::new(reader);
+    let parsed = read_jpeg_header_while(&mut reader, keep_going);
+    reader.finish(parsed)
 }
 
 fn read_jpeg_header(reader: &mut impl Read) -> Result<JpegHeader, MetadataError> {
+    read_jpeg_header_while(reader, || true)
+}
+
+fn read_jpeg_header_while(
+    reader: &mut impl Read,
+    mut keep_going: impl FnMut() -> bool,
+) -> Result<JpegHeader, MetadataError> {
+    ensure_rating_work_current(&mut keep_going)?;
     let mut soi = [0_u8; 2];
     reader
         .read_exact(&mut soi)
@@ -340,6 +461,7 @@ fn read_jpeg_header(reader: &mut impl Read) -> Result<JpegHeader, MetadataError>
     let mut total = 2_usize;
     let mut segments = Vec::new();
     loop {
+        ensure_rating_work_current(&mut keep_going)?;
         if segments.len() >= MAX_HEADER_SEGMENTS {
             return Err(MetadataError::Unsupported);
         }
@@ -350,6 +472,7 @@ fn read_jpeg_header(reader: &mut impl Read) -> Result<JpegHeader, MetadataError>
         }
         raw.push(byte);
         loop {
+            ensure_rating_work_current(&mut keep_going)?;
             byte = read_byte(reader)?;
             raw.push(byte);
             if total
@@ -396,6 +519,7 @@ fn read_jpeg_header(reader: &mut impl Read) -> Result<JpegHeader, MetadataError>
         reader
             .read_exact(&mut raw[payload_offset..])
             .map_err(|_| MetadataError::Unreadable)?;
+        ensure_rating_work_current(&mut keep_going)?;
         total = next_total;
         segments.push(JpegSegment {
             marker,
@@ -412,6 +536,14 @@ fn read_jpeg_header(reader: &mut impl Read) -> Result<JpegHeader, MetadataError>
         #[cfg(any(target_os = "windows", test))]
         encoded_len: u64::try_from(total).map_err(|_| MetadataError::Unsupported)?,
     })
+}
+
+fn ensure_rating_work_current(keep_going: &mut impl FnMut() -> bool) -> Result<(), MetadataError> {
+    if keep_going() {
+        Ok(())
+    } else {
+        Err(MetadataError::Unreadable)
+    }
 }
 
 fn read_byte(reader: &mut impl Read) -> Result<u8, MetadataError> {
@@ -2223,6 +2355,121 @@ mod tests {
         assert_eq!(observation.state, RatingState::Unreadable);
         assert_eq!(observation.capability, RatingWriteCapability::UnsafeSource);
         assert!(!source.version_is_current());
+    }
+
+    #[test]
+    fn accepted_rating_stops_at_a_superseded_version_boundary() {
+        let workspace = TempWorkspace::new("rating_source_cancellation").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("2"))])).unwrap();
+        let source = ImageSource::open(&path).unwrap();
+        let checks = std::cell::Cell::new(0_u8);
+
+        let observation = observe_source_while(&source, &path, || {
+            let next = checks.get().saturating_add(1);
+            checks.set(next);
+            next < 3
+        });
+
+        assert_eq!(checks.get(), 3);
+        assert_eq!(observation.state, RatingState::Unreadable);
+        assert_eq!(observation.capability, RatingWriteCapability::UnsafeSource);
+    }
+
+    #[test]
+    fn folder_rating_scan_returns_the_bounded_state_for_the_scanned_object() {
+        let workspace = TempWorkspace::new("rating_folder_scan").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("4"))])).unwrap();
+        let (_, provenance) = crate::fs::scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .into_parts();
+
+        assert_eq!(
+            scan_path_rating_while(&path, Some(provenance), || true),
+            RatingState::Rated(Rating(4))
+        );
+    }
+
+    #[test]
+    fn folder_rating_scan_rejects_a_same_length_header_rewrite() {
+        let workspace = TempWorkspace::new("rating_folder_rewrite").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        let accepted = jpeg(&[segment(0xe1, &xmp_with_rating("2"))]);
+        let replacement = jpeg(&[segment(0xe1, &xmp_with_rating("5"))]);
+        assert_eq!(accepted.len(), replacement.len());
+        fs::write(&path, accepted).unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        let (_, provenance) = crate::fs::scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .into_parts();
+
+        let rating = scan_path_rating_while_with_hook(
+            &path,
+            Some(provenance),
+            || true,
+            || {
+                fs::write(&path, replacement).unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_times(std::fs::FileTimes::new().set_modified(modified))
+                    .unwrap();
+            },
+        );
+
+        assert_eq!(rating, RatingState::Unreadable);
+    }
+
+    #[test]
+    fn folder_rating_snapshots_compare_consumed_bytes_for_parse_failures() {
+        let mut current = || true;
+        let first =
+            read_jpeg_header_snapshot_from_reader_while(b"first non-JPEG".as_slice(), &mut current);
+        let mut current = || true;
+        let same =
+            read_jpeg_header_snapshot_from_reader_while(b"first non-JPEG".as_slice(), &mut current);
+        let mut current = || true;
+        let changed = read_jpeg_header_snapshot_from_reader_while(
+            b"second non-JPEG".as_slice(),
+            &mut current,
+        );
+
+        assert_eq!(
+            rating_from_matching_header_snapshots(&first, &changed),
+            RatingState::Unreadable
+        );
+        let mut current = || true;
+        let first =
+            read_jpeg_header_snapshot_from_reader_while(b"first non-JPEG".as_slice(), &mut current);
+        assert_eq!(
+            rating_from_matching_header_snapshots(&first, &same),
+            RatingState::Unrated
+        );
+    }
+
+    #[test]
+    fn folder_rating_header_stops_between_segments_when_cancelled() {
+        let encoded = jpeg(&[
+            segment(0xfe, &[0x41; 1024]),
+            segment(0xe1, &xmp_with_rating("3")),
+        ]);
+        let mut reader = encoded.as_slice();
+        let mut checks = 0_u8;
+
+        let result = read_jpeg_header_while(&mut reader, || {
+            checks = checks.saturating_add(1);
+            checks < 4
+        });
+
+        assert!(matches!(result, Err(MetadataError::Unreadable)));
+        assert_eq!(checks, 4);
+        assert!(!reader.is_empty());
     }
 
     #[test]

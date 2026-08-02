@@ -302,9 +302,9 @@ pub(crate) struct UiFrameOwned {
     pub preview_recovery_unsettled: bool,
     /// Retry for the current load would require the lost display-preview executor.
     pub preview_load_retry_blocked: bool,
-    /// Fixed, path-private description of active Trash restore work.
+    /// Fixed, path-private description of active Trash, delete, or restore work.
     pub curation_status: Option<String>,
-    /// Durable recovery guidance after an indeterminate restore worker loss.
+    /// Durable recovery guidance after an indeterminate curation worker loss.
     pub curation_recovery_status: Option<String>,
     /// A folder scan is still deciding the active playlist scope.
     pub folder_scan_busy: bool,

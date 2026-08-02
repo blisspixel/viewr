@@ -180,7 +180,7 @@ pub enum MetadataDisposition {
 
 enum DestinationState {
     Absent,
-    Present(crate::fs::ImageSource),
+    Present(crate::fs::PathIdentitySource),
 }
 
 /// Destination identity captured immediately after the native overwrite
@@ -208,7 +208,7 @@ impl SaveDestination {
         let parent = crate::fs::DirectorySource::open(&parent_path)
             .map_err(|_| Error::Encode("could not verify the Save As destination parent".into()))?;
         let path = parent_path.join(file_name);
-        let state = match parent.open_image(file_name) {
+        let state = match parent.open_image_identity(file_name) {
             Ok(source) if source.matches_path(&path) == crate::fs::ImageSourceMatch::Same => {
                 DestinationState::Present(source)
             }

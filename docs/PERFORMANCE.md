@@ -54,11 +54,12 @@ violate a gate. Normal viewer launches never emit it. The probe has a one-minute
 internal deadline, and the outer harness has a 90-second process timeout. A hang
 therefore fails with a bounded diagnostic instead of stalling CI.
 
-## Local Trash timing evidence
+## Local curation timing evidence
 
 Current-image Trash and Undo use native platform services and are not part of the
-GUI performance probe. Trash is a synchronous user-triggered call. Restore runs
-through a typed worker, allowing the event loop to repaint a fixed operation
+GUI performance probe. Trash, permanent delete after confirmation, and restore run
+through one typed worker. Strong accepted-source comparison and restored rating
+inspection remain off the event loop, allowing it to repaint a fixed operation
 status and non-mutating view controls while conflicting playlist, edit, and
 destructive actions wait.
 
@@ -132,16 +133,17 @@ measurement surface small and auditable.
 
 ## Current evidence
 
-On the Windows development host on 2026-07-29, the final three-run optimized
+On the Windows development host on 2026-08-01, the final three-run optimized
 rating-enabled probe met every startup, navigation, memory, folder-scaling, cache,
-and idle budget: 786.17 ms median first frame, 830.02 ms median first image,
-65.01 ms slowest sampled navigation, 246.88 MiB small-folder peak resident set,
-261.55 MiB large-folder peak resident set, four decoded cache entries at the exact
-256 MiB byte budget, and at most one delivered redraw in every measured idle
-window. All completed idle windows reported zero non-redraw events, zero
-event-driven repaint requests, and zero scheduled egui repaints. The synthetic
-50,000-image folder included the session rating scan and filtered-playlist state;
-those processes were unfocused with the pointer outside at measurement completion.
+and idle budget after full accepted-source comparisons were confined to background
+work: 866.91 ms median first frame, 918.70 ms median first image, 74.57 ms slowest
+sampled navigation, 253.76 MiB small-folder peak resident set, 277.88 MiB large-folder peak
+resident set, four decoded cache entries at the exact 256 MiB byte budget, and at
+most one delivered redraw in every measured idle window. All completed idle
+windows reported zero non-redraw events, zero event-driven repaint requests, and
+zero scheduled egui repaints. The synthetic 50,000-image folder included the
+session rating scan and filtered-playlist state; those processes were unfocused
+with the pointer outside at measurement completion.
 
 The probe now treats an outstanding egui repaint deadline as unsettled UI work. A
 500 ms idle observation starts or restarts only after delayed hover and activation

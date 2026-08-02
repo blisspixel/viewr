@@ -653,8 +653,9 @@ pub fn permanent_delete(path: &Path) -> Result<(), String> {
 /// Permanently delete the current entry only if it is still the accepted source.
 ///
 /// Callers must obtain explicit user confirmation first. A separate pre-confirmation
-/// call to [`verify_accepted_source`] avoids presenting a stale destructive prompt;
-/// this function repeats the check after confirmation immediately before deletion.
+/// call to [`verify_accepted_source_native`] avoids presenting a stale destructive
+/// prompt without reading the whole file on the event loop; this function performs
+/// the full content check after confirmation immediately before deletion.
 ///
 /// # Errors
 /// Returns a fixed source-rejection category or the path-private filesystem error.
@@ -673,7 +674,22 @@ pub(crate) fn verify_accepted_source(
     path: &Path,
     source: &crate::fs::ImageSource,
 ) -> Result<(), GuardedActionError> {
-    match source.matches_path(path) {
+    classify_source_match(source.matches_path(path))
+}
+
+/// Perform the bounded native-only check used before presenting a destructive
+/// confirmation. The post-confirmation worker repeats the full content check.
+pub(crate) fn verify_accepted_source_native(
+    path: &Path,
+    source: &crate::fs::ImageSource,
+) -> Result<(), GuardedActionError> {
+    classify_source_match(source.matches_path_native(path))
+}
+
+fn classify_source_match(
+    source_match: crate::fs::ImageSourceMatch,
+) -> Result<(), GuardedActionError> {
+    match source_match {
         crate::fs::ImageSourceMatch::Same => Ok(()),
         crate::fs::ImageSourceMatch::Changed => Err(GuardedActionError::Changed),
         crate::fs::ImageSourceMatch::Missing => Err(GuardedActionError::Missing),

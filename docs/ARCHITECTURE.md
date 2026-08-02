@@ -8,8 +8,9 @@ current implementation and names the seams that still need simplification.
 1. **Instant.** The first frame of an image must appear as fast as the disk and
    decoder allow, never blocked on anything else.
 2. **Never janky.** The UI thread never decodes or performs a bulk image read.
-   Heavy image work is off-thread; narrow native dialogs and Trash calls remain
-   synchronous user-triggered boundaries and are tracked explicitly below.
+   Heavy image work and destructive platform calls are off-thread; narrow native
+   dialogs and permanent-delete confirmation remain synchronous user-triggered
+   boundaries and are tracked explicitly below.
 3. **Safe with hostile input.** Untrusted bytes are decoded in isolation, away from
    the filesystem and network.
 4. **Auditable surface.** Clear ownership, bounded work, and no framework we
@@ -50,12 +51,13 @@ substituted link.
 Results wake the event loop through a typed `UserEvent`, request a redraw, and are
 applied only if they still match the current path or generation.
 The initial decode and folder scan start before renderer initialization, so GPU
-setup does not unnecessarily serialize first-pixel work. Native dialogs and Trash
-or permanent-delete calls for one current file remain synchronous,
-user-triggered platform calls. Trash restore uses one typed worker, a one-result
-channel, and `EventLoopProxy` wake; only the event thread reconciles receipts,
-playlist scope, and visible results. The general performance probe does not
-exercise native Trash operations, so their latency is not claimed by that gate.
+setup does not unnecessarily serialize first-pixel work. Native dialogs,
+including permanent-delete confirmation, remain synchronous and user-triggered.
+The Trash, permanent-delete, and restore platform calls use one typed curation worker,
+a one-result channel, and an `EventLoopProxy` wake; only the event thread
+reconciles receipts, playlist scope, and visible results. The general performance
+probe does not exercise native Trash operations, so their latency is not claimed
+by that gate.
 
 An explicit developer/CI probe uses the same application loop, records the first
 successfully presented window frame and image, samples bounded folder positions,
@@ -181,7 +183,20 @@ Shipped:
   it still resolves to the accepted identity and version. A successful decoder
   result is discarded if either the retained object changed or its pathname was
   replaced before publication, including an in-place rewrite of the same object
-  while decoding.
+  while decoding. Because Windows can cache or preserve every writable timestamp
+  across a same-length rewrite, each Windows source also retains an in-memory
+  SHA-256 content witness. It is checked through serialized handle reads and is
+  never persisted, exposed, or used as an identifier. Source acceptance enforces
+  the shared 512 MiB encoded-input ceiling before that streaming work. Decode
+  generation cancellation is checked between fixed 64 KiB chunks, including
+  later witness comparisons. The replace-latest animation, details, and rating
+  task propagates the same generation check through every comparison and exits
+  between stages, so obsolete inspection cannot monopolize its sole executor.
+  Folder-rating discovery cannot grant write capability: its separate read-only
+  source checks native scan identity and version around two reads of at most the
+  16 MiB JPEG header. The exact bytes
+  consumed by the parser and the parsed result must match, including parse-failure
+  paths, with cancellation between segments.
   Pure-Rust formats decode the duplicated handle on background threads via the
   `image` crate. For complex C-backed formats, the main process reads bounded
   encoded bytes from the same handle and delegates them to an
@@ -276,8 +291,11 @@ Shipped:
   Save As rejects a destination that aliases the open source before encoding and
   builds the complete output in a sibling temporary file before one atomic
   replacement attempt. The event loop retains the canonical destination parent
-  identity plus whether the destination was absent or the exact identity and
-  version present after the native dialog. Every captured existing file receives
+  identity plus whether the destination was absent or the exact native identity
+  and version present after the native dialog. The destination capability exposes
+  no reader, performs no full-file content witness on the event loop, and accepts
+  an existing destination independently of the encoded-source size ceiling. Every
+  captured existing file receives
   a second, app-owned overwrite prompt, and its identity and version are checked
   after that consent, during staging, and immediately before commit. The prompt
   exclusively owns UI and assistive-technology actions. Every source transition,
@@ -334,17 +352,20 @@ Shipped:
   never falls back to pathname matching. After success, the restored pathname is
   reopened without following its final component and must match the retained
   object identity. That fresh handle supplies rating observation and new
-  identity-plus-version playlist provenance.
+  identity-plus-version playlist provenance on the curation worker before the
+  event loop commits restored entries.
   External platform errors are mapped to fixed path-free user categories and
   retry dispositions before they leave this boundary. Identifiers are not logged
   or persisted.
 - **`macos`**: the narrow native bridge for Finder and Open With requests plus
   recoverable `NSFileManager` trash operations. It is absent from other builds.
 - **Windows Open With boundary**: the File and image context actions verify that
-  the current pathname still resolves to the retained accepted source, then call
-  `SHOpenWithDialog` with `OAIF_EXEC`, a parent HWND, and one NUL-terminated UTF-16
-  path. No shell command, editor preference, path log, or completion inference is
-  introduced. Successful delegation sets only a session-local, path-free `F5`
+  the current pathname still resolves to the retained accepted source on one
+  generation-cancellable background job, then call `SHOpenWithDialog` on the
+  event loop with `OAIF_EXEC`, a parent HWND, and one NUL-terminated UTF-16 path.
+  Navigation cancels and discards obsolete verification. No shell command, editor
+  preference, path log, or completion inference is introduced. Successful
+  delegation sets only a session-local, path-free `F5`
   reminder owned by the last-good frame. A failed reload or navigation retains
   both the pixels and reminder. Fresh accepted pixels or explicit invalidation of
   the displayed frame clears that ownership and the reminder together.
@@ -516,16 +537,22 @@ parsing, remain explicit v0.2 extraction debt. Meaningful decisions must keep
 moving behind narrow covered seams before later monitor, watcher, and page-state
 work expands them.
 
-Trash restore retains an explicit event-loop ownership boundary. The worker owns
-cloned exact receipts; the event loop owns captured playlist scope, indices, prior
-Undo state, and the only commit. Active or indeterminate restore ownership
+Source removal and Trash restore retain an explicit event-loop ownership boundary.
+The worker owns strong accepted-source validation, the Trash or permanent-delete
+platform call, cloned exact restore receipts, and restored rating/provenance
+inspection. The event loop owns captured playlist scope, indices, prior Undo
+state, and the only commit. Active or indeterminate curation ownership
 suppresses settled UI claims, so the interface cannot become a second recovery
 state owner. Conflicting mutations wait while zoom, pan, panels, and appearance
 remain responsive. Normal close defers through terminal reconciliation and join.
-The UI exposes an indeterminate worker-loss route instead of cancellation or
-fractional progress. An indeterminate restore retains its receipt and blocks the
-new Trash action that could replace it. `U` remains the typed reconciliation path;
-permanent delete does not create a second Undo owner.
+Failure or a partial restore cancels deferred close so visible recovery guidance
+is not lost. The UI exposes an indeterminate worker-loss route instead of
+cancellation or fractional progress. An indeterminate Trash or permanent-delete
+operation blocks another destructive action for the rest of the process and
+explicitly requires closing and reopening viewr after inspecting the filesystem.
+An indeterminate restore retains its receipt and blocks the new Trash action that
+could replace it. `U` remains the typed reconciliation path; permanent delete
+does not create a second Undo owner.
 
 The correction is not a framework rewrite. Extract pure state transitions with
 explicit inputs and outputs, keep `App` as the sole runtime owner, and make winit,
@@ -542,25 +569,28 @@ with behavior-preserving tests and no second source of truth.
   recovery to system Trash and preserves an older valid `U` action.
 - There is no bare-letter Trash shortcut and no mark, review, or batch mode. The
   destructive target is always the currently visible image. The accepted-source
-  handle supplies an identity proof immediately before the pathname Trash sink.
+  handle supplies a strong identity and content proof on the curation worker
+  immediately before the pathname Trash sink.
   Missing, replaced, linked, and identity-unavailable entries never reach that
   sink. The comparison narrows accidental replacement risk but remains a
   documented non-atomic boundary because desktop Trash integrations consume a
   pathname.
 - Each successful Trash action retains its exact in-memory playlist identity, so
   Undo after a folder change restores on disk without inserting a source-folder
-  path into the unrelated current view. Restore work runs on the typed worker. A
-  fixed top status names the operation; the event loop reconciles the result once
-  against the captured playlist scope. Normal close waits for reconciliation, and
-  worker loss preserves the receipt with durable polite recovery guidance.
+  path into the unrelated current view. Trash and restore work run on the typed
+  worker. A fixed top status names the operation; the event loop reconciles the
+  result once against the captured playlist scope. Normal close waits only for a
+  successful reconciliation. A failure stays visible, and worker loss preserves
+  durable polite recovery guidance.
 
 `Shift+Delete` is the only permanent delete, and it's the only action that shows a
 confirmation. The dialog names only a bounded, quote-safe filename and exposes
 Delete permanently and Cancel as its two actions. Single Trash and permanent
 delete reuse the retained source handle that supplied accepted pixels. Single
-Trash performs an immediate no-follow native-identity comparison. Permanent
-delete performs the comparison before opening confirmation and repeats it after
-confirmation immediately before `remove_file`. Entries detected as changed,
+Trash performs the full comparison on its worker. Permanent delete performs a
+bounded native-only comparison before opening confirmation, then its worker
+repeats the full identity and content comparison immediately before `remove_file`.
+Entries detected as changed,
 missing, linked, or identity-unavailable do not reach either sink. The final
 platform calls still consume a pathname, so the narrower post-comparison race
 remains explicit.

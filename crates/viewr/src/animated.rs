@@ -64,20 +64,18 @@ impl DecodedAnimation {
         generation: u64,
         before_final_version_check: impl FnOnce(),
     ) -> Result<Option<Self>, Error> {
-        if !source.version_is_current() {
+        let is_current = || current_generation.load(Ordering::Acquire) == generation;
+        if !source.version_is_current_while(is_current) {
             return Ok(None);
         }
         let file = source
             .clone_for_decode()
             .map_err(|error| Error::Decode(error.to_string()))?;
         let animation = crate::decode::with_background_decode_permit(|| {
-            Self::load_file_with_cancellation(path, file, &|| {
-                current_generation.load(Ordering::Acquire) == generation
-            })
+            Self::load_file_with_cancellation(path, file, &is_current)
         })?;
         before_final_version_check();
-        if current_generation.load(Ordering::Acquire) != generation || !source.version_is_current()
-        {
+        if !source.version_is_current_while(is_current) {
             return Ok(None);
         }
         Ok(animation)

@@ -192,6 +192,30 @@ users who explicitly want it.
   also denies its classic and io_uring networking syscalls. Filesystem narrowing
   comes from the enclosing package profile.
 
+## Decision 8: accepted-source integrity: retained handles plus native evidence
+
+**Chosen:** decode, inspection, export, rating, and destructive actions consume a
+retained file handle and validate native identity plus version evidence. Unix
+version evidence includes inode change time. Windows adds a streaming SHA-256
+content witness through the operating system CNG implementation because a
+same-length rewrite can preserve every writable timestamp and a retained handle
+can report cached metadata. The digest exists only inside the live source object,
+is never logged or persisted, and is not exposed as an image identifier.
+
+This uses the existing `windows-sys` boundary rather than adding a hashing crate.
+It uses fixed 64 KiB streaming reads without buffering the image, keeps the
+default dependency graph unchanged, and makes detected mutation fail closed. The
+shared 512 MiB encoded-input ceiling is enforced before hashing. Decode-generation
+cancellation is checked between chunks for both initial and comparison witnesses.
+Full comparison witnesses run only on owned background work. UI-only destination
+consent retains a capability that exposes native identity and version but no
+reader or digest. Folder-rating discovery uses another distinct read-only source
+instead of hashing full files: it verifies native identity/version around two
+bounded 16 MiB header reads, requires their exact consumed bytes and parsed results
+to match, polls cancellation between segments, and cannot authorize writes. The
+exact optimized Windows GUI remains subject to the
+startup, first-pixel, navigation, idle, cache, and large-folder performance gate.
+
 ## Supporting crates (shipped)
 
 | Need | Crate | Note |

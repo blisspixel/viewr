@@ -33,10 +33,23 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
+use crate::crop_state::{
+    CropRecoveryIdentity, crop_disconnect_message, crop_failure_message,
+    crop_preview_disconnect_message, crop_recovery_blocker, crop_recovery_matches,
+    crop_source_blocker, preview_retry_blocker,
+};
 use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
 use crate::curation_state::{
     CurationCloseDisposition, CurationKind, CurationRecovery, CurationTerminalState,
     curation_close_disposition, curation_recovery_message, curation_status, file_count,
+};
+use crate::current_work::{
+    CurrentWork, blocked_action_message, crop_work, curation_action_preflight, curation_work,
+    current_work_blocker, image_preparation_work,
+};
+use crate::keyboard_route::{
+    is_space_key, is_trash_shortcut_key, rating_assignment_for_key, route_consumed_keyboard_key,
+    single_key_shortcut_allowed, space_release_must_unwind,
 };
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::error::Error;
@@ -340,16 +353,6 @@ enum PreviewJobResult {
     Cancelled,
 }
 
-impl CurationKind {
-    const fn work(self) -> CurrentWork {
-        match self {
-            Self::Trash => CurrentWork::TrashMove,
-            Self::PermanentDelete => CurrentWork::PermanentDelete,
-            Self::Restore => CurrentWork::TrashRestore,
-        }
-    }
-}
-
 struct RemovalContext {
     path: PathBuf,
     playlist_index: usize,
@@ -582,21 +585,6 @@ enum HealStrokeUpdate {
     TooManyPoints,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CurrentWork {
-    TrashMove,
-    PermanentDelete,
-    TrashRestore,
-    #[cfg(target_os = "windows")]
-    SourceVerification,
-    FolderScan,
-    ImagePreparation,
-    Crop,
-    Save,
-    SpotHeal,
-    RatingWrite,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GuardedActionKind {
     Trash,
@@ -649,50 +637,6 @@ fn log_guarded_action_failure(action: GuardedActionKind, error: &GuardedActionEr
             "source-bound file action rejected: action={action}, category={}",
             error.category()
         );
-    }
-}
-
-fn image_preparation_work(foreground_load: bool, preview_preparation: bool) -> Option<CurrentWork> {
-    (foreground_load || preview_preparation).then_some(CurrentWork::ImagePreparation)
-}
-
-fn crop_work(selection_active: bool, worker_active: bool) -> Option<CurrentWork> {
-    (selection_active || worker_active).then_some(CurrentWork::Crop)
-}
-
-fn current_work_blocker<const N: usize>(work: [Option<CurrentWork>; N]) -> Option<CurrentWork> {
-    work.into_iter().flatten().next()
-}
-
-fn blocked_action_message(action: &str, blocker: CurrentWork) -> String {
-    let work = match blocker {
-        CurrentWork::TrashMove => "the move to Trash",
-        CurrentWork::PermanentDelete => "the permanent delete",
-        CurrentWork::TrashRestore => "the Trash restore",
-        #[cfg(target_os = "windows")]
-        CurrentWork::SourceVerification => "source verification",
-        CurrentWork::FolderScan => "the folder scan",
-        CurrentWork::ImagePreparation => "image preparation",
-        CurrentWork::Crop => "the crop",
-        CurrentWork::Save => "Save As",
-        CurrentWork::SpotHeal => "Spot Heal",
-        CurrentWork::RatingWrite => "the rating update",
-    };
-    format!("Wait for {work} to finish before {action}")
-}
-
-fn curation_action_preflight(
-    active: Option<CurationKind>,
-    has_work: bool,
-    action: &str,
-    empty_message: &str,
-) -> Option<String> {
-    if let Some(kind) = active {
-        Some(blocked_action_message(action, kind.work()))
-    } else if has_work {
-        None
-    } else {
-        Some(empty_message.to_owned())
     }
 }
 
@@ -1101,22 +1045,7 @@ fn primary_modifier_pressed(modifiers: ModifiersState) -> bool {
     }
 }
 
-fn single_key_shortcut_allowed(modifiers: ModifiersState) -> bool {
-    !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
-}
 
-fn rating_assignment_for_key(key: &str, repeat: bool) -> Option<RatingAssignment> {
-    if repeat {
-        return None;
-    }
-    match key {
-        "0" => Some(RatingAssignment::Clear),
-        "1" | "2" | "3" | "4" | "5" => {
-            crate::ratings::Rating::new(key.as_bytes()[0] - b'0').map(RatingAssignment::Set)
-        }
-        _ => None,
-    }
-}
 
 fn application_shortcuts_blocked<const N: usize>(owners: [bool; N]) -> bool {
     owners.into_iter().any(|owner| owner)
@@ -1129,21 +1058,6 @@ fn save_overwrite_dispatch_allows(
 ) -> bool {
     *owns_dispatch |= overwrite_pending;
     !*owns_dispatch || crate::ui::save_overwrite_action_allowed(action)
-}
-
-fn is_space_key(key: &winit::keyboard::Key) -> bool {
-    use winit::keyboard::{Key, NamedKey};
-
-    matches!(key, Key::Named(NamedKey::Space))
-        || matches!(key, Key::Character(character) if character.as_str() == " ")
-}
-
-fn space_release_must_unwind(
-    key: &winit::keyboard::Key,
-    state: winit::event::ElementState,
-    space_held: bool,
-) -> bool {
-    space_held && state == winit::event::ElementState::Released && is_space_key(key)
 }
 
 const fn filmstrip_is_available(projected_count: usize) -> bool {
@@ -1209,46 +1123,6 @@ fn rebase_preserved_trash_action(
     if same_playlist_scope(active, trashed) {
         crate::curate::rebase_trashed_file_indices_after_current_removals(records, removed_indices);
     }
-}
-
-fn route_consumed_keyboard_key(
-    key: &winit::keyboard::Key,
-    is_cropping: bool,
-    is_healing: bool,
-) -> bool {
-    use winit::keyboard::{Key, NamedKey};
-
-    match key {
-        Key::Character(character) => {
-            let character = character.as_str();
-            matches!(character, "+" | "=" | "-" | "_" | "/")
-                || [
-                    "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "f", "z", "y",
-                ]
-                .iter()
-                .any(|shortcut| character.eq_ignore_ascii_case(shortcut))
-                || (is_cropping && character.eq_ignore_ascii_case("x"))
-        }
-        Key::Named(
-            NamedKey::ArrowRight
-            | NamedKey::ArrowLeft
-            | NamedKey::Home
-            | NamedKey::End
-            | NamedKey::PageUp
-            | NamedKey::PageDown
-            | NamedKey::F5,
-        ) => true,
-        Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp) => is_cropping,
-        Key::Named(NamedKey::Escape) => is_cropping || is_healing,
-        _ => false,
-    }
-}
-
-fn is_trash_shortcut_key(key: &winit::keyboard::Key) -> bool {
-    use winit::keyboard::{Key, NamedKey};
-
-    matches!(key, Key::Named(NamedKey::Delete))
-        || (cfg!(target_os = "macos") && matches!(key, Key::Named(NamedKey::Backspace)))
 }
 
 fn image_is_fully_displayed(source: Option<(u32, u32)>, displayed: Option<(u32, u32)>) -> bool {
@@ -3130,7 +3004,7 @@ impl App {
         let blocker = current_work_blocker([
             self.curation_worker
                 .as_ref()
-                .map(|worker| worker.context.kind().work()),
+                .map(|worker| curation_work(worker.context.kind())),
             source_verification,
             self.folder_scan_job
                 .is_some()
@@ -3156,7 +3030,7 @@ impl App {
         let Some(worker) = self.curation_worker.as_ref() else {
             return false;
         };
-        let blocker = worker.context.kind().work();
+        let blocker = curation_work(worker.context.kind());
         self.show_toast(blocked_action_message(action, blocker));
         true
     }
@@ -3187,7 +3061,11 @@ impl App {
 
     fn crop_recovery_is_current(&self, recovery: &CropRecovery) -> bool {
         crop_recovery_matches(
-            recovery,
+            CropRecoveryIdentity {
+                path: recovery.source_path.as_path(),
+                generation: recovery.source_generation,
+                image: &recovery.source_image,
+            },
             self.session.generation.load(Ordering::Acquire),
             self.session.selected_path.as_deref(),
             self.session.presented_path.as_deref(),
@@ -6609,77 +6487,6 @@ fn record_idle_event_attribution(
     }
 }
 
-fn crop_recovery_matches(
-    recovery: &CropRecovery,
-    current_generation: u64,
-    selected_path: Option<&Path>,
-    presented_path: Option<&Path>,
-    current_image: Option<&Arc<DecodedImage>>,
-) -> bool {
-    recovery.source_generation == current_generation
-        && selected_path == Some(recovery.source_path.as_path())
-        && presented_path == Some(recovery.source_path.as_path())
-        && current_image.is_some_and(|image| Arc::ptr_eq(image, &recovery.source_image))
-}
-
-const fn crop_failure_message(selection_restored: bool) -> &'static str {
-    if selection_restored {
-        "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
-    } else {
-        "Crop was not applied because the image changed."
-    }
-}
-
-const fn crop_disconnect_message(selection_restored: bool) -> &'static str {
-    if selection_restored {
-        "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
-    } else {
-        "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
-    }
-}
-
-const fn crop_preview_disconnect_message(selection_restored: bool) -> &'static str {
-    if selection_restored {
-        "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
-    } else {
-        "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
-    }
-}
-
-const fn crop_recovery_blocker(
-    crop_recovery_unsettled: bool,
-    preview_recovery_unsettled: bool,
-) -> Option<&'static str> {
-    if crop_recovery_unsettled {
-        Some(crate::ui::CROP_RECOVERY_STATUS)
-    } else if preview_recovery_unsettled {
-        Some(crate::ui::PREVIEW_RECOVERY_STATUS)
-    } else {
-        None
-    }
-}
-
-const fn preview_retry_blocker(preview_load_retry_blocked: bool) -> Option<&'static str> {
-    if preview_load_retry_blocked {
-        Some(crate::ui::PREVIEW_RECOVERY_STATUS)
-    } else {
-        None
-    }
-}
-
-const fn crop_source_blocker(
-    image_open_in_progress: bool,
-    image_open_failed: bool,
-) -> Option<&'static str> {
-    if image_open_in_progress {
-        Some("Wait for the image to finish opening before cropping")
-    } else if image_open_failed {
-        Some("Retry the failed image load before cropping")
-    } else {
-        None
-    }
-}
-
 fn present_image_patch(
     renderer: Option<&mut Renderer>,
     image: &DecodedImage,
@@ -6995,89 +6802,6 @@ mod test {
     }
 
     #[test]
-    fn busy_action_copy_is_specific_and_prioritized() {
-        assert_eq!(crop_work(true, false), Some(CurrentWork::Crop));
-        assert_eq!(crop_work(false, true), Some(CurrentWork::Crop));
-        assert_eq!(crop_work(false, false), None);
-        assert_eq!(
-            current_work_blocker([
-                None,
-                None,
-                image_preparation_work(true, false),
-                Some(CurrentWork::Crop),
-                Some(CurrentWork::Save),
-                Some(CurrentWork::SpotHeal),
-            ]),
-            Some(CurrentWork::ImagePreparation)
-        );
-        assert_eq!(
-            current_work_blocker([
-                None,
-                None,
-                image_preparation_work(false, true),
-                Some(CurrentWork::Crop),
-                Some(CurrentWork::Save),
-                Some(CurrentWork::SpotHeal),
-            ]),
-            Some(CurrentWork::ImagePreparation)
-        );
-        assert_eq!(
-            current_work_blocker([
-                None,
-                None,
-                None,
-                Some(CurrentWork::Crop),
-                Some(CurrentWork::Save),
-                Some(CurrentWork::SpotHeal),
-            ]),
-            Some(CurrentWork::Crop)
-        );
-        assert_eq!(
-            current_work_blocker([
-                None,
-                None,
-                None,
-                None,
-                Some(CurrentWork::Save),
-                Some(CurrentWork::SpotHeal),
-            ]),
-            Some(CurrentWork::Save)
-        );
-        assert_eq!(
-            current_work_blocker([None, None, None, None, None, Some(CurrentWork::SpotHeal)]),
-            Some(CurrentWork::SpotHeal)
-        );
-        assert_eq!(
-            current_work_blocker([
-                Some(CurrentWork::TrashRestore),
-                Some(CurrentWork::FolderScan),
-                None,
-                None,
-                None,
-                None,
-            ]),
-            Some(CurrentWork::TrashRestore)
-        );
-        assert_eq!(
-            current_work_blocker([None, Some(CurrentWork::FolderScan), None, None, None, None,]),
-            Some(CurrentWork::FolderScan)
-        );
-        assert_eq!(
-            current_work_blocker([None, None, None, None, None, None]),
-            None
-        );
-        assert_eq!(
-            blocked_action_message("moving this file to Trash", CurrentWork::SpotHeal),
-            "Wait for Spot Heal to finish before moving this file to Trash"
-        );
-        #[cfg(target_os = "windows")]
-        assert_eq!(
-            blocked_action_message("saving a copy", CurrentWork::SourceVerification),
-            "Wait for source verification to finish before saving a copy"
-        );
-    }
-
-    #[test]
     fn curation_worker_dispatches_without_waiting_and_wakes_once() {
         let (started_sender, started_receiver) = mpsc::sync_channel(1);
         let (release_sender, release_receiver) = mpsc::sync_channel(1);
@@ -7133,30 +6857,6 @@ mod test {
             wake_receiver.try_recv(),
             Err(mpsc::TryRecvError::Disconnected)
         ));
-    }
-
-    #[test]
-    fn curation_preflight_follows_app_ownership() {
-        assert_eq!(
-            curation_action_preflight(
-                Some(CurationKind::Restore),
-                false,
-                "restoring files from Trash",
-                "Nothing to restore from Trash",
-            ),
-            Some(
-                "Wait for the Trash restore to finish before restoring files from Trash".to_owned()
-            )
-        );
-        assert_eq!(
-            curation_action_preflight(
-                None,
-                false,
-                "restoring files from Trash",
-                "Nothing to restore from Trash",
-            ),
-            Some("Nothing to restore from Trash".to_owned())
-        );
     }
 
     #[test]
@@ -7546,74 +7246,6 @@ mod test {
     }
 
     #[test]
-    fn crop_recovery_requires_generation_path_and_exact_source_allocation() {
-        let path = PathBuf::from("album").join("source.png");
-        let source_image = Arc::new(DecodedImage {
-            rgba: vec![10, 20, 30, 255],
-            width: 1,
-            height: 1,
-            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
-            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
-        });
-        let same_pixels_different_allocation = Arc::new(DecodedImage {
-            rgba: source_image.rgba.clone(),
-            width: source_image.width,
-            height: source_image.height,
-            color_profile: source_image.color_profile,
-            working_color: source_image.working_color,
-        });
-        let transform = Transform {
-            zoom: 2.5,
-            offset_x: 0.2,
-            offset_y: -0.1,
-            rotation_steps: 1,
-            flip_h: true,
-            is_cropping: true,
-            crop_rect: Some([0.2, 0.3, 0.8, 0.9]),
-            ..Transform::default()
-        };
-        let recovery = CropRecovery {
-            source_path: path.clone(),
-            source_generation: 42,
-            source_image: Arc::clone(&source_image),
-            transform,
-            animation: None,
-            auxiliary_job: None,
-        };
-
-        assert!(crop_recovery_matches(
-            &recovery,
-            42,
-            Some(&path),
-            Some(&path),
-            Some(&source_image),
-        ));
-        assert!(!crop_recovery_matches(
-            &recovery,
-            43,
-            Some(&path),
-            Some(&path),
-            Some(&source_image),
-        ));
-        assert!(!crop_recovery_matches(
-            &recovery,
-            42,
-            Some(Path::new("album/other.png")),
-            Some(&path),
-            Some(&source_image),
-        ));
-        assert!(!crop_recovery_matches(
-            &recovery,
-            42,
-            Some(&path),
-            Some(&path),
-            Some(&same_pixels_different_allocation),
-        ));
-        assert_eq!(recovery.transform.crop_rect, Some([0.2, 0.3, 0.8, 0.9]));
-        assert_eq!(recovery.transform.rotation_steps, 1);
-    }
-
-    #[test]
     fn crop_recovery_preserves_every_auxiliary_job_terminal_state() {
         let path = PathBuf::from("source.png");
         let source_image = Arc::new(DecodedImage {
@@ -7690,73 +7322,6 @@ mod test {
     }
 
     #[test]
-    fn crop_failure_copy_states_safe_state_and_direct_retry() {
-        assert_eq!(
-            crop_failure_message(true),
-            "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
-        );
-        assert_eq!(
-            crop_failure_message(false),
-            "Crop was not applied because the image changed."
-        );
-    }
-
-    #[test]
-    fn crop_disconnect_copy_requires_restart_without_promising_retry() {
-        assert_eq!(
-            crop_disconnect_message(true),
-            "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
-        );
-        assert_eq!(
-            crop_disconnect_message(false),
-            "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
-        );
-    }
-
-    #[test]
-    fn crop_preview_disconnect_copy_and_recovery_priority_are_truthful() {
-        assert_eq!(
-            crop_preview_disconnect_message(true),
-            "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
-        );
-        assert_eq!(
-            crop_preview_disconnect_message(false),
-            "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
-        );
-        assert_eq!(
-            crop_recovery_blocker(true, true),
-            Some(crate::ui::CROP_RECOVERY_STATUS)
-        );
-        assert_eq!(
-            crop_recovery_blocker(false, true),
-            Some(crate::ui::PREVIEW_RECOVERY_STATUS)
-        );
-        assert_eq!(crop_recovery_blocker(false, false), None);
-        assert_eq!(
-            preview_retry_blocker(true),
-            Some(crate::ui::PREVIEW_RECOVERY_STATUS)
-        );
-        assert_eq!(preview_retry_blocker(false), None);
-    }
-
-    #[test]
-    fn crop_source_requires_a_settled_successful_image_load() {
-        assert_eq!(
-            crop_source_blocker(true, false),
-            Some("Wait for the image to finish opening before cropping")
-        );
-        assert_eq!(
-            crop_source_blocker(false, true),
-            Some("Retry the failed image load before cropping")
-        );
-        assert_eq!(
-            crop_source_blocker(true, true),
-            Some("Wait for the image to finish opening before cropping")
-        );
-        assert_eq!(crop_source_blocker(false, false), None);
-    }
-
-    #[test]
     fn canceling_a_heal_retains_and_invalidates_the_single_worker() {
         let (_sender, result_rx) = mpsc::channel::<HealWorkerOutput>();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -7780,101 +7345,6 @@ mod test {
     #[test]
     fn test_load_icon() {
         assert!(load_icon().is_some(), "load_icon returned None!");
-    }
-
-    #[test]
-    fn consumed_keyboard_routing_preserves_shortcuts_without_hijacking_controls() {
-        use winit::keyboard::{Key, NamedKey};
-
-        assert!(route_consumed_keyboard_key(
-            &Key::Character("t".into()),
-            false,
-            false,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Character("+".into()),
-            false,
-            false,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Character("j".into()),
-            false,
-            false,
-        ));
-        for key in ["b", "B", "m", "M", "x", "X"] {
-            assert!(
-                !route_consumed_keyboard_key(&Key::Character(key.into()), false, false),
-                "unused culling key {key} must not be intercepted"
-            );
-        }
-        assert!(route_consumed_keyboard_key(
-            &Key::Character("x".into()),
-            true,
-            false,
-        ));
-        assert!(is_trash_shortcut_key(&Key::Named(NamedKey::Delete)));
-        assert_eq!(
-            is_trash_shortcut_key(&Key::Named(NamedKey::Backspace)),
-            cfg!(target_os = "macos")
-        );
-        assert!(route_consumed_keyboard_key(
-            &Key::Character("z".into()),
-            false,
-            false,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Named(NamedKey::ArrowRight),
-            true,
-            false,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Named(NamedKey::Escape),
-            true,
-            false,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Named(NamedKey::Escape),
-            false,
-            true,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Named(NamedKey::ArrowRight),
-            false,
-            false,
-        ));
-        assert!(route_consumed_keyboard_key(
-            &Key::Named(NamedKey::F5),
-            false,
-            false,
-        ));
-        for key in [
-            NamedKey::Home,
-            NamedKey::End,
-            NamedKey::PageUp,
-            NamedKey::PageDown,
-        ] {
-            assert!(route_consumed_keyboard_key(&Key::Named(key), false, false,));
-        }
-        assert!(!route_consumed_keyboard_key(
-            &Key::Named(NamedKey::ArrowDown),
-            false,
-            true,
-        ));
-        assert!(!route_consumed_keyboard_key(
-            &Key::Named(NamedKey::Enter),
-            true,
-            false,
-        ));
-        assert!(!route_consumed_keyboard_key(
-            &Key::Named(NamedKey::Space),
-            false,
-            false,
-        ));
-        assert!(single_key_shortcut_allowed(ModifiersState::default()));
-        assert!(single_key_shortcut_allowed(ModifiersState::SHIFT));
-        assert!(!single_key_shortcut_allowed(ModifiersState::CONTROL));
-        assert!(!single_key_shortcut_allowed(ModifiersState::ALT));
-        assert!(!single_key_shortcut_allowed(ModifiersState::SUPER));
     }
 
     #[test]

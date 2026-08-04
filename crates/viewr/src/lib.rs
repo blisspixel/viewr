@@ -13,6 +13,8 @@ pub mod cli;
 pub mod color;
 pub mod crop;
 pub mod curate;
+mod crop_state;
+mod current_work;
 mod curation_state;
 pub mod decode;
 pub mod edit;
@@ -25,6 +27,7 @@ mod gpu_policy;
 pub mod heal;
 pub mod image_info;
 pub(crate) mod job;
+mod keyboard_route;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod performance;

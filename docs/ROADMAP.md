@@ -94,11 +94,12 @@ v1.0.0  Broadly recommended release
 ### Immediate focus
 
 **Immediate focus: v0.2 reliability architecture, followed by v0.3 display
-correctness and v0.4 file coherence.** Finish pure, covered ownership for remaining
-concentrated `app.rs` transitions (crop recovery, current-work preflight, keyboard
-routing, and entry surfaces) while preserving bounded job, thumbnail, prefetch,
-chrome, presentation, curation, rating, save, and GPU contracts. Do not start v0.3
-monitor/profile work that deepens unowned event-loop races.
+correctness and v0.4 file coherence.** Crop recovery, current-work preflight, and
+keyboard routing pure seams are in place beside presentation, curation, rating,
+and save. Finish remaining concentrated `app.rs` transitions (entry surfaces and
+any leftover recovery coordination) while preserving bounded job, thumbnail,
+prefetch, chrome, and GPU contracts. Do not start v0.3 monitor/profile work that
+deepens unowned event-loop races.
 
 Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
 minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,

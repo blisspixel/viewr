@@ -30,6 +30,11 @@ and organized by user-visible concern.
 
 ### Changed
 
+- Reliability architecture continues for v0.2: concurrent work preflight, crop
+  recovery identity and start blockers, and keyboard shortcut routing now live in
+  100 percent line-covered pure seams (`current_work`, `crop_state`,
+  `keyboard_route`). The application remains the sole worker, transform, focus,
+  and UI-dispatch owner. User-visible behavior is unchanged.
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)
   instead of HTML. CI still regenerates it offline from the locked release graph
   and compares the inventory by meaning. No application runtime change.

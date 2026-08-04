@@ -61,7 +61,10 @@ GUI performance probe. Trash, permanent delete after confirmation, and restore r
 through one typed worker. Strong accepted-source comparison and restored rating
 inspection remain off the event loop, allowing it to repaint a fixed operation
 status and non-mutating view controls while conflicting playlist, edit, and
-destructive actions wait.
+destructive actions wait. Trash receipt capture lists system Trash once after the
+move and binds by original path plus retained object identity, rather than listing
+before and after. After a successful removal, surviving neighbor prefetches stay
+in memory so advancing to the next image does not cold-decode by default.
 
 When a developer explicitly enables `RUST_LOG=viewr=info` or
 `VIEWR_LOG=info`, Undo reports submitted, restored, failed, and total native

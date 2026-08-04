@@ -11,6 +11,14 @@ and organized by user-visible concern.
   texture names now use the same privacy-safe filename helper. Full directory
   paths no longer enter display chrome or in-process texture debug names.
 
+### Performance
+
+- Delete feels closer to ordinary navigation: Trash no longer lists the whole
+  system Trash before the move just to prepare Undo, and after a successful move
+  the next image reuses any already-prefetched decode instead of clearing the
+  entire neighbor cache first. Exact Undo still binds a receipt after the move
+  when the platform can prove it.
+
 ### Changed
 
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)

@@ -4329,7 +4329,13 @@ impl App {
     }
 
     fn after_paths_removed(&mut self, removed: &[PathBuf], old_index: usize) {
-        self.reset_prefetch_for_playlist_change();
+        // Keep neighbor prefetch for surviving images. Full cache reset made Delete
+        // feel like a cold navigation even when the next image was already decoded.
+        for path in removed {
+            self.remove_prefetched_image(path);
+            self.thumb_textures.remove(path);
+            self.prefetch_schedule.allow(path);
+        }
         if let Some(playlist) = &mut self.playlist {
             playlist.remove_paths(removed, old_index);
             if playlist.files.is_empty() {
@@ -4347,6 +4353,7 @@ impl App {
                 self.session.selected_path = Some(next_path.clone());
                 self.transform = Transform::default();
                 self.spawn_image_load(next_path);
+                self.kick_prefetch();
             }
         } else {
             self.cancel_pending_image_load();

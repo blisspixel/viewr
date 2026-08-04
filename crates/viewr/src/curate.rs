@@ -156,6 +156,9 @@ impl TrashReceipt {
 )]
 pub(crate) enum TrashReceiptCaptureStatus {
     Bound,
+    /// Historical category for a pre-move listing failure. Capture no longer
+    /// pre-lists Trash, but restore and diagnostic code still understand it.
+    #[allow(dead_code)] // retained so older capture evidence categories stay complete
     PreListFailed,
     PostListFailed,
     NoCandidate,
@@ -422,9 +425,9 @@ pub fn move_to_trash(path: &Path) -> Result<TrashReceipt, String> {
         path,
         &source,
         TrashReceiptCapture::new,
-        |path, source, receipt_capture| {
+        |path, source, _receipt_capture| {
             let mut receipt = move_to_trash_unbound(path, source)?;
-            receipt_capture.bind_receipts(std::iter::once(&mut receipt));
+            TrashReceiptCapture::bind_receipts(std::iter::once(&mut receipt));
             Ok(receipt)
         },
     )
@@ -481,55 +484,19 @@ fn move_to_trash_unbound(
     })
 }
 
-struct TrashReceiptCapture {
-    #[cfg(any(
-        target_os = "windows",
-        all(
-            unix,
-            not(target_os = "macos"),
-            not(target_os = "ios"),
-            not(target_os = "android")
-        )
-    ))]
-    known_ids: Option<HashSet<OsString>>,
-}
+/// Captures exact Trash receipts after a move without a pre-move full listing.
+///
+/// Listing the whole Recycle Bin or free-desktop trash twice made every Delete
+/// pay shell enumeration cost proportional to trash size. Capture now does one
+/// post-move list and binds by original path plus retained object identity.
+struct TrashReceiptCapture;
 
 impl TrashReceiptCapture {
-    fn new() -> Self {
-        #[cfg(any(
-            target_os = "windows",
-            all(
-                unix,
-                not(target_os = "macos"),
-                not(target_os = "ios"),
-                not(target_os = "android")
-            )
-        ))]
-        {
-            let known_ids = trash::os_limited::list().ok().map(|items| {
-                items
-                    .into_iter()
-                    .map(|item| item.id)
-                    .collect::<HashSet<_>>()
-            });
-            Self { known_ids }
-        }
-
-        #[cfg(not(any(
-            target_os = "windows",
-            all(
-                unix,
-                not(target_os = "macos"),
-                not(target_os = "ios"),
-                not(target_os = "android")
-            )
-        )))]
-        {
-            Self {}
-        }
+    const fn new() -> Self {
+        Self
     }
 
-    fn bind_receipts<'a>(&self, receipts: impl IntoIterator<Item = &'a mut TrashReceipt>) {
+    fn bind_receipts<'a>(receipts: impl IntoIterator<Item = &'a mut TrashReceipt>) {
         #[cfg(any(
             target_os = "windows",
             all(
@@ -540,7 +507,7 @@ impl TrashReceiptCapture {
             )
         ))]
         {
-            self.bind_receipts_with(receipts, trash::os_limited::list);
+            Self::bind_receipts_with(receipts, trash::os_limited::list);
         }
 
         #[cfg(not(any(
@@ -553,7 +520,6 @@ impl TrashReceiptCapture {
             )
         )))]
         {
-            let _ = self;
             for _ in receipts {}
         }
     }
@@ -568,7 +534,6 @@ impl TrashReceiptCapture {
         )
     ))]
     fn bind_receipts_with<'a, E>(
-        &self,
         receipts: impl IntoIterator<Item = &'a mut TrashReceipt>,
         list: impl FnOnce() -> Result<Vec<trash::TrashItem>, E>,
     ) {
@@ -576,14 +541,6 @@ impl TrashReceiptCapture {
         if receipts.peek().is_none() {
             return;
         }
-
-        let Some(known_ids) = self.known_ids.as_ref() else {
-            for receipt in receipts {
-                receipt.platform_id = None;
-                receipt.capture_status = TrashReceiptCaptureStatus::PreListFailed;
-            }
-            return;
-        };
 
         let items = list();
         let Ok(items) = items else {
@@ -595,7 +552,7 @@ impl TrashReceiptCapture {
         };
 
         for receipt in receipts {
-            match exact_new_trash_item_id(&items, known_ids, receipt) {
+            match exact_trash_item_id_for_receipt(&items, receipt) {
                 Ok(platform_id) => {
                     receipt.platform_id = Some(platform_id);
                     receipt.capture_status = TrashReceiptCaptureStatus::Bound;
@@ -632,9 +589,9 @@ pub(crate) fn move_source_to_trash(
         path,
         source,
         TrashReceiptCapture::new,
-        |path, source, receipt_capture| {
+        |path, source, _receipt_capture| {
             let mut receipt = move_to_trash_unbound(path, source)?;
-            receipt_capture.bind_receipts(std::iter::once(&mut receipt));
+            TrashReceiptCapture::bind_receipts(std::iter::once(&mut receipt));
             Ok(receipt)
         },
     )
@@ -1043,16 +1000,15 @@ fn same_trash_origin(receipt_path: &Path, listed_path: &Path) -> bool {
         not(target_os = "android")
     )
 ))]
-fn exact_new_trash_item_id(
+fn exact_trash_item_id_for_receipt(
     items: &[trash::TrashItem],
-    known_ids: &HashSet<OsString>,
     receipt: &TrashReceipt,
 ) -> Result<OsString, TrashReceiptCaptureStatus> {
     let restore_source = receipt
         .restore_source
         .as_deref()
         .ok_or(TrashReceiptCaptureStatus::IdentityMismatch)?;
-    classify_new_trash_item_id(items, known_ids, &receipt.original_path, |item| {
+    classify_trash_item_id(items, &receipt.original_path, |item| {
         trash_item_matches_source(item, restore_source)
     })
 }
@@ -1066,17 +1022,15 @@ fn exact_new_trash_item_id(
         not(target_os = "android")
     )
 ))]
-fn classify_new_trash_item_id(
+fn classify_trash_item_id(
     items: &[trash::TrashItem],
-    known_ids: &HashSet<OsString>,
     original_path: &Path,
     mut matches_source: impl FnMut(&trash::TrashItem) -> bool,
 ) -> Result<OsString, TrashReceiptCaptureStatus> {
     let mut saw_same_origin = false;
     let mut captured = None;
     for item in items {
-        if known_ids.contains(&item.id) || !same_trash_origin(original_path, &item.original_path())
-        {
+        if !same_trash_origin(original_path, &item.original_path()) {
             continue;
         }
         saw_same_origin = true;
@@ -1723,47 +1677,52 @@ mod tests {
         )
     ))]
     #[test]
-    fn receipt_capture_distinguishes_pre_and_post_listing_failures() {
+    fn receipt_capture_uses_one_post_move_listing_and_fails_closed() {
         use std::cell::Cell;
 
-        let mut pre_list_receipt = TrashReceipt::without_restore_for_test("pre.jpg".into());
-        let pre_list = super::TrashReceiptCapture { known_ids: None };
+        let mut post_list_receipt = TrashReceipt::without_restore_for_test("post.jpg".into());
         let post_list_calls = Cell::new(0);
-        pre_list.bind_receipts_with(
-            std::iter::once(&mut pre_list_receipt),
+        super::TrashReceiptCapture::bind_receipts_with(
+            std::iter::once(&mut post_list_receipt),
             || -> Result<Vec<trash::TrashItem>, ()> {
                 post_list_calls.set(post_list_calls.get() + 1);
-                Ok(Vec::new())
+                Err(())
             },
-        );
-        assert_eq!(
-            pre_list_receipt.capture_status(),
-            TrashReceiptCaptureStatus::PreListFailed
-        );
-        assert_eq!(post_list_calls.get(), 0);
-
-        let mut post_list_receipt = TrashReceipt::without_restore_for_test("post.jpg".into());
-        let post_list = super::TrashReceiptCapture {
-            known_ids: Some(std::collections::HashSet::new()),
-        };
-        post_list.bind_receipts_with(
-            std::iter::once(&mut post_list_receipt),
-            || -> Result<Vec<trash::TrashItem>, ()> { Err(()) },
         );
         assert_eq!(
             post_list_receipt.capture_status(),
             TrashReceiptCaptureStatus::PostListFailed
         );
+        assert_eq!(post_list_calls.get(), 1);
 
-        let empty_post_list_calls = Cell::new(0);
-        post_list.bind_receipts_with(
+        let empty_list_calls = Cell::new(0);
+        super::TrashReceiptCapture::bind_receipts_with(
             std::iter::empty(),
             || -> Result<Vec<trash::TrashItem>, ()> {
-                empty_post_list_calls.set(empty_post_list_calls.get() + 1);
+                empty_list_calls.set(empty_list_calls.get() + 1);
                 Ok(Vec::new())
             },
         );
-        assert_eq!(empty_post_list_calls.get(), 0);
+        assert_eq!(empty_list_calls.get(), 0);
+
+        let workspace = TempWorkspace::new("receipt_capture_no_candidate").unwrap();
+        let path = workspace.path().join("missing.jpg");
+        std::fs::write(&path, b"accepted object").unwrap();
+        let mut no_candidate = TrashReceipt {
+            original_path: path.clone(),
+            trashed_path: None,
+            platform_id: None,
+            restore_source: Some(Arc::new(crate::fs::ImageSource::open(&path).unwrap())),
+            capture_status: TrashReceiptCaptureStatus::NotAttempted,
+        };
+        super::TrashReceiptCapture::bind_receipts_with(
+            std::iter::once(&mut no_candidate),
+            || -> Result<Vec<trash::TrashItem>, ()> { Ok(Vec::new()) },
+        );
+        assert_eq!(
+            no_candidate.capture_status(),
+            TrashReceiptCaptureStatus::NoCandidate
+        );
     }
 
     #[cfg(any(
@@ -1788,31 +1747,29 @@ mod tests {
         };
         let first = item("first");
         let second = item("second");
-        let known = item("known");
-        let known_ids = std::collections::HashSet::from([known.id.clone()]);
+        let unrelated = trash::TrashItem {
+            id: "other".into(),
+            name: "other.jpg".into(),
+            original_parent: parent.join("elsewhere"),
+            time_deleted: 0,
+        };
 
         assert_eq!(
-            super::classify_new_trash_item_id(&[], &known_ids, &original, |_| true),
+            super::classify_trash_item_id(&[], &original, |_| true),
             Err(TrashReceiptCaptureStatus::NoCandidate)
         );
         assert_eq!(
-            super::classify_new_trash_item_id(&[known], &known_ids, &original, |_| true),
+            super::classify_trash_item_id(&[unrelated], &original, |_| true),
             Err(TrashReceiptCaptureStatus::NoCandidate),
-            "a pre-existing Trash item is not a new receipt"
+            "unrelated Trash items cannot satisfy the receipt"
         );
         assert_eq!(
-            super::classify_new_trash_item_id(
-                std::slice::from_ref(&first),
-                &known_ids,
-                &original,
-                |_| false,
-            ),
+            super::classify_trash_item_id(std::slice::from_ref(&first), &original, |_| false,),
             Err(TrashReceiptCaptureStatus::IdentityMismatch)
         );
         assert_eq!(
-            super::classify_new_trash_item_id(
+            super::classify_trash_item_id(
                 &[first.clone(), second.clone()],
-                &known_ids,
                 &original,
                 |candidate| candidate.id == first.id,
             ),
@@ -1820,7 +1777,7 @@ mod tests {
             "one identity-bound candidate remains exact among same-origin items"
         );
         assert_eq!(
-            super::classify_new_trash_item_id(&[first, second], &known_ids, &original, |_| true),
+            super::classify_trash_item_id(&[first, second], &original, |_| true),
             Err(TrashReceiptCaptureStatus::AmbiguousCandidate)
         );
     }
@@ -1881,9 +1838,8 @@ mod tests {
             restore_source: Some(source),
             capture_status: TrashReceiptCaptureStatus::NotAttempted,
         };
-        let known_ids = std::collections::HashSet::new();
         assert_eq!(
-            super::exact_new_trash_item_id(std::slice::from_ref(&item), &known_ids, &receipt,),
+            super::exact_trash_item_id_for_receipt(std::slice::from_ref(&item), &receipt,),
             Ok(platform_id)
         );
 
@@ -1891,9 +1847,9 @@ mod tests {
         std::fs::rename(&data_path, retained).unwrap();
         std::fs::write(&data_path, b"same-path substitute").unwrap();
         assert_eq!(
-            super::exact_new_trash_item_id(&[item], &known_ids, &receipt),
+            super::exact_trash_item_id_for_receipt(&[item], &receipt),
             Err(TrashReceiptCaptureStatus::IdentityMismatch),
-            "a sole new same-origin item is not enough without source identity"
+            "a sole same-origin item is not enough without source identity"
         );
     }
 

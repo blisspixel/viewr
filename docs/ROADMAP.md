@@ -94,12 +94,11 @@ v1.0.0  Broadly recommended release
 ### Immediate focus
 
 **Immediate focus: v0.2 reliability architecture, followed by v0.3 display
-correctness and v0.4 file coherence.** Concentrated pure-policy seams for
-entry/folder-scan, work currency, recovery copy, prefetch destination, filter
-source-change, crop, current-work, keyboard, presentation, curation, rating, and
-save are in place. Close the remaining coverage-exclusion checklist item with a
-measured floor, then tag v0.2 only after that evidence holds. Preserve bounded
-job, thumbnail, prefetch, chrome, and GPU contracts. Do not start v0.3
+correctness and v0.4 file coherence.** Pure-policy seams and the owned-logic
+coverage floor are evidenced (90.18 percent lines under the CI llvm-cov
+contract). Before tagging v0.2.0, complete residual thin-native-glue judgment
+for the remaining whole-file exclusions and the full VERIFY.md gate. Preserve
+bounded job, thumbnail, prefetch, chrome, and GPU contracts. Do not start v0.3
 monitor/profile work that deepens unowned event-loop races.
 
 Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
@@ -127,7 +126,7 @@ but completed history does not override an open gate here.
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
-| Reliability architecture | Open for v0.2 | Pure seams extracted; measure coverage floor before tagging v0.2. |
+| Reliability architecture | Open for v0.2 | Pure seams and 90.18 percent owned-logic coverage measured; finish residual thin-native glue judgment and full VERIFY before tagging v0.2.0. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
@@ -279,7 +278,7 @@ state before job ownership and test seams are explicit.
   accessibility copy from a single raw frame snapshot. Covered blocker matrices
   include recovery ownership, concurrent work, unavailable Spot Heal, and the
   requirement that an active tool always remains closable.
-- [ ] Narrow the coverage exclusion as each seam becomes pure. The first
+- [x] Narrow the coverage exclusion as each seam becomes pure. The first
   enforcement step now includes the egui/AccessKit `ui.rs` adapter after chrome
   policy moved to its pure projection, while the measured floor remains above 85
   percent. The exclusion is exact-path scoped so it cannot hide similarly named
@@ -313,12 +312,15 @@ state before job ownership and test seams are explicit.
   (`rating_state`), prefetch destination routing (`prefetch`), and filter
   source-change gates (`playlist`) behind pure unit-tested seams. `App` remains
   the only event-loop, worker, dialog, playlist-mutation, toast, and
-  UI-dispatch owner. Workspace `cargo fmt --check`, Clippy `-D warnings`, and
-  `cargo test --workspace --all-targets --locked` are green on this step.
-  Close this checklist item only after a measured owned-logic coverage floor
-  reconfirms the 85 percent bar. Preserve the bounded job, thumbnail, prefetch,
-  chrome, preview, presentation, curation, rating, save, and GPU upload
-  contracts while doing so.
+  UI-dispatch owner. Owned-logic line coverage remeasured with the CI
+  `cargo-llvm-cov` contract (workspace, locked, exact-path exclusions for
+  `app`/`gpu`/`sandbox`/`worker_limit`/`error`/`main`, jxl vendor packages
+  outside the owned-logic denominator, `--fail-under-lines 85`) at **90.18
+  percent** lines (summary report), above the 85 percent floor. Workspace
+  `cargo fmt --check`, Clippy `-D warnings`, and
+  `cargo test --workspace --all-targets --locked` remain green. Preserve the
+  bounded job, thumbnail, prefetch, chrome, preview, presentation, curation,
+  rating, save, and GPU upload contracts.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

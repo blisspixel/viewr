@@ -116,8 +116,14 @@ presented-rating, recovery, discovery, terminal-write, and deferred-close policy
 while the application remains the only capability-bearing and mutable rating
 owner. The private `save_state` seam owns Save As start blockers, terminal close
 disposition, and app close wait coordination without owning destinations, workers,
-or dialogs. Coverage is a floor and a signal, not the goal. The real goal is that
-the tests would catch a regression, which is why we also run mutation testing.
+or dialogs. Additional pure seams for concurrent-work preflight (`current_work`),
+crop recovery identity (`crop_state`), keyboard routing (`keyboard_route`),
+folder-scan dispositions (`entry_state`), generation-path currency
+(`work_currency`), and edit presentation failure copy (`edit_state`) are also in
+the coverage floor, with expanded curation and rating recovery copy covered in
+their existing state modules. Coverage is a floor and a signal, not the goal. The
+real goal is that the tests would catch a regression, which is why we also run
+mutation testing.
 
 - `cargo test --workspace --all-targets --locked` is the canonical unit,
   integration, binary, example, and benchmark-target runner. CI separately runs

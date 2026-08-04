@@ -30,6 +30,10 @@ and organized by user-visible concern.
 
 ### Changed
 
+- Owned-logic line coverage remeasured under the CI `cargo-llvm-cov` contract at
+  90.18 percent (above the 85 percent floor) after the eighth pure-seam step.
+  Whole-file exclusions for event-loop, GPU, sandbox, and entry surfaces remain
+  explicit debt rather than silent gaps.
 - Reliability architecture continues for v0.2: generation-tagged work currency,
   folder-scan entry dispositions, edit and curation recovery copy, permanent-
   delete confirmation policy, prefetch destination routing, filter source-

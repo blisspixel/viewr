@@ -30,12 +30,12 @@ and organized by user-visible concern.
 
 ### Changed
 
-- Reliability architecture continues for v0.2: folder-scan entry dispositions,
-  concurrent work preflight, crop recovery identity and start blockers, and
-  keyboard shortcut routing now live in pure seams (`entry_state`,
-  `current_work`, `crop_state`, `keyboard_route`). Selected-file currency,
-  basename match, success and failure outcomes, and path-free user messages are
-  exhaustive pure policy. The application remains the sole worker, playlist,
+- Reliability architecture continues for v0.2: generation-tagged work currency,
+  folder-scan entry dispositions, concurrent work preflight, crop recovery
+  identity and start blockers, and keyboard shortcut routing now live in pure
+  seams (`work_currency`, `entry_state`, `current_work`, `crop_state`,
+  `keyboard_route`). Selected, presented, and loaded path gates share one pure
+  generation contract. The application remains the sole worker, playlist,
   toast, prefetch, and UI-dispatch owner. User-visible behavior is unchanged.
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)
   instead of HTML. CI still regenerates it offline from the locked release graph

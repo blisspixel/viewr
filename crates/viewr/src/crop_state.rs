@@ -26,10 +26,13 @@ pub(crate) fn crop_recovery_matches(
     presented_path: Option<&Path>,
     current_image: Option<&Arc<DecodedImage>>,
 ) -> bool {
-    recovery.generation == current_generation
-        && selected_path == Some(recovery.path)
-        && presented_path == Some(recovery.path)
-        && current_image.is_some_and(|image| Arc::ptr_eq(image, recovery.image))
+    crate::work_currency::presented_work_is_current(
+        recovery.generation,
+        recovery.path,
+        current_generation,
+        selected_path,
+        presented_path,
+    ) && current_image.is_some_and(|image| Arc::ptr_eq(image, recovery.image))
 }
 
 #[must_use]

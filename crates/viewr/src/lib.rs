@@ -49,6 +49,7 @@ pub mod thumbs;
 /// The main user interface module built with egui.
 pub mod ui;
 pub mod view;
+mod work_currency;
 pub(crate) mod worker_limit;
 
 pub use app::{run, run_with_image};

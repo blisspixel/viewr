@@ -91,7 +91,12 @@ pub(super) fn preview_job_matches(
     current_generation: u64,
     selected_path: Option<&Path>,
 ) -> bool {
-    job_generation == current_generation && selected_path == Some(job_path)
+    crate::work_currency::selected_work_is_current(
+        job_generation,
+        job_path,
+        current_generation,
+        selected_path,
+    )
 }
 
 #[cfg(test)]

@@ -79,6 +79,7 @@ use crate::save_state::{
 use crate::theme::{Preference, PreferenceRecovery};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
+use crate::work_currency::{loaded_work_is_current, presented_work_is_current};
 
 /// Start viewr: create the event loop and run the application to completion.
 ///
@@ -1890,8 +1891,9 @@ impl App {
             .take()
             .expect("auxiliary job exists after polling it")
             .into_context();
-        if !auxiliary_job_is_current(
-            &context,
+        if !presented_work_is_current(
+            context.generation,
+            &context.path,
             self.session.generation.load(Ordering::Acquire),
             self.session.selected_path.as_deref(),
             self.session.presented_path.as_deref(),
@@ -2488,9 +2490,12 @@ impl App {
             .take()
             .expect("Open With job exists after terminal poll")
             .into_context();
-        if self.session.generation.load(Ordering::Acquire) != context.generation
-            || self.current_loaded_path() != Some(context.path.as_path())
-        {
+        if !loaded_work_is_current(
+            context.generation,
+            &context.path,
+            self.session.generation.load(Ordering::Acquire),
+            self.current_loaded_path(),
+        ) {
             return;
         }
         let source_match = match polled {
@@ -6410,17 +6415,6 @@ fn bind_playlist_source_provenance(
     playlist.set_scan_provenance(path, Some(provenance))
 }
 
-fn auxiliary_job_is_current(
-    context: &AuxiliaryLoadContext,
-    generation: u64,
-    selected: Option<&Path>,
-    presented: Option<&Path>,
-) -> bool {
-    context.generation == generation
-        && selected == Some(context.path.as_path())
-        && presented == Some(context.path.as_path())
-}
-
 const fn auxiliary_disconnect_message() -> &'static str {
     "Image details, animation, and rating reading stopped unexpectedly. Close and reopen viewr before continuing."
 }
@@ -6727,41 +6721,6 @@ mod test {
             &space,
             ElementState::Pressed,
             true
-        ));
-    }
-
-    #[test]
-    fn auxiliary_result_requires_exact_generation_and_both_image_owners() {
-        let path = PathBuf::from("current.jpg");
-        let other = Path::new("other.jpg");
-        let context = AuxiliaryLoadContext {
-            path: path.clone(),
-            generation: 8,
-        };
-
-        assert!(auxiliary_job_is_current(
-            &context,
-            8,
-            Some(&path),
-            Some(&path)
-        ));
-        assert!(!auxiliary_job_is_current(
-            &context,
-            7,
-            Some(&path),
-            Some(&path)
-        ));
-        assert!(!auxiliary_job_is_current(
-            &context,
-            8,
-            Some(other),
-            Some(&path)
-        ));
-        assert!(!auxiliary_job_is_current(
-            &context,
-            8,
-            Some(&path),
-            Some(other)
         ));
     }
 

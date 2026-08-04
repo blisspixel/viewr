@@ -33,20 +33,12 @@ pub(crate) fn is_space_key(key: &Key) -> bool {
 }
 
 #[must_use]
-pub(crate) fn space_release_must_unwind(
-    key: &Key,
-    state: ElementState,
-    space_held: bool,
-) -> bool {
+pub(crate) fn space_release_must_unwind(key: &Key, state: ElementState, space_held: bool) -> bool {
     space_held && state == ElementState::Released && is_space_key(key)
 }
 
 #[must_use]
-pub(crate) fn route_consumed_keyboard_key(
-    key: &Key,
-    is_cropping: bool,
-    is_healing: bool,
-) -> bool {
+pub(crate) fn route_consumed_keyboard_key(key: &Key, is_cropping: bool, is_healing: bool) -> bool {
     match key {
         Key::Character(character) => {
             let character = character.as_str();

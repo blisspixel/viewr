@@ -47,14 +47,14 @@ use crate::current_work::{
     CurrentWork, blocked_action_message, crop_work, curation_action_preflight, curation_work,
     current_work_blocker, image_preparation_work,
 };
-use crate::keyboard_route::{
-    is_space_key, is_trash_shortcut_key, rating_assignment_for_key, route_consumed_keyboard_key,
-    single_key_shortcut_allowed, space_release_must_unwind,
-};
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
+use crate::keyboard_route::{
+    is_space_key, is_trash_shortcut_key, rating_assignment_for_key, route_consumed_keyboard_key,
+    single_key_shortcut_allowed, space_release_must_unwind,
+};
 use crate::prefetch::{self, PrefetchCache};
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
@@ -1044,8 +1044,6 @@ fn primary_modifier_pressed(modifiers: ModifiersState) -> bool {
         modifiers.control_key()
     }
 }
-
-
 
 fn application_shortcuts_blocked<const N: usize>(owners: [bool; N]) -> bool {
     owners.into_iter().any(|owner| owner)

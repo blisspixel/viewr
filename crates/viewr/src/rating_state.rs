@@ -5,7 +5,9 @@
 //! and terminal dispositions derived from immutable facts.
 
 use crate::chrome::RATING_RECOVERY_STATUS;
-use crate::ratings::{RatingFilter, RatingState, RatingWriteError};
+use crate::ratings::{
+    RatingFilter, RatingObservation, RatingState, RatingWriteCapability, RatingWriteError,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PresentedRatingTransition {
@@ -130,6 +132,52 @@ pub(crate) const fn rating_close_disposition(
     }
 }
 
+/// Path-free guidance after the auxiliary details worker endpoint is lost.
+#[must_use]
+pub(crate) const fn auxiliary_disconnect_message() -> &'static str {
+    "Image details, animation, and rating reading stopped unexpectedly. Close and reopen viewr before continuing."
+}
+
+/// Rating observation forced after auxiliary endpoint loss.
+#[must_use]
+pub(crate) const fn rating_after_auxiliary_disconnect() -> RatingObservation {
+    RatingObservation {
+        state: RatingState::Unreadable,
+        capability: RatingWriteCapability::ObservationFailed,
+    }
+}
+
+/// Path-free user message for a terminal rating write failure.
+#[must_use]
+pub(crate) const fn rating_write_failure_message(error: RatingWriteError) -> &'static str {
+    match error {
+        RatingWriteError::ReadOnlyFormat => {
+            "This image's rating is read-only in viewr. The file was not changed."
+        }
+        RatingWriteError::UnsupportedMetadata => {
+            "This image has unsupported rating metadata. The file was not changed."
+        }
+        RatingWriteError::UnreadableMetadata => {
+            "viewr could not read this image's rating safely. The file was not changed."
+        }
+        RatingWriteError::SourceChanged => {
+            "The image changed on disk before the rating could be saved. Press F5 to reload, then try again."
+        }
+        RatingWriteError::PermissionDenied => {
+            "Could not save the rating because the image or its folder is read-only. The previous rating is unchanged."
+        }
+        RatingWriteError::WriteFailed => {
+            "Could not save the rating safely. The previous rating is unchanged."
+        }
+        RatingWriteError::VerificationRestored => {
+            "The rating update could not be verified. The original image was restored."
+        }
+        RatingWriteError::RecoveryFailed => {
+            "The rating update could not be verified or restored. Stop editing this image and restore it from a trusted backup."
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +255,36 @@ mod tests {
         assert_eq!(
             RATING_RECOVERY_STATUS,
             "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload."
+        );
+    }
+
+    #[test]
+    fn auxiliary_disconnect_copy_requires_a_restart_without_promising_success() {
+        let message = auxiliary_disconnect_message();
+        assert!(message.contains("Close and reopen viewr"));
+        assert!(message.contains("rating"));
+        assert!(!message.contains("recover"));
+        assert_eq!(
+            rating_after_auxiliary_disconnect(),
+            RatingObservation {
+                state: RatingState::Unreadable,
+                capability: RatingWriteCapability::ObservationFailed,
+            }
+        );
+    }
+
+    #[test]
+    fn rating_write_failure_copy_is_exhaustive_and_path_free() {
+        for error in WRITE_ERRORS {
+            let message = rating_write_failure_message(error);
+            assert!(!message.is_empty());
+            assert!(!message.contains('\\'));
+            assert!(!message.contains('/'));
+            assert!(!message.contains('\n'));
+        }
+        assert_eq!(
+            rating_write_failure_message(RatingWriteError::WriteFailed),
+            "Could not save the rating safely. The previous rating is unchanged."
         );
     }
 

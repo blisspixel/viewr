@@ -18,6 +18,7 @@ mod curation_state;
 mod current_work;
 pub mod decode;
 pub mod edit;
+mod edit_state;
 mod entry_state;
 pub mod ephemeral;
 pub mod error;

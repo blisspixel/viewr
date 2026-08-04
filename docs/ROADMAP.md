@@ -127,7 +127,7 @@ but completed history does not override an open gate here.
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
-| Reliability architecture | Open for v0.2 | Finish remaining pure seams and keep stale-worker contracts green. |
+| Reliability architecture | Open for v0.2 | Pure seams extracted; measure coverage floor before tagging v0.2. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
@@ -304,13 +304,21 @@ state before job ownership and test seams are explicit.
   Save As start blockers, folder-scan save gates, terminal close disposition,
   and app close wait coordination into the 100 percent covered private
   `save_state` seam. `App` remains the only destination, worker, image, dialog,
-  and close-application owner. `gpu.rs` retains native resource and frame
-  lifecycle work, while concentrated `app.rs` shortcut, event, remaining crop
-  recovery, rating and curation integration transitions and entry surfaces
-  still mix platform integration with pure unit-tested helpers. Move those
-  helpers behind covered seams before closing this item. Preserve the bounded
-  job, thumbnail, prefetch, chrome, preview, presentation, curation, rating,
-  save, and GPU upload contracts while doing so.
+  and close-application owner. The eighth step moves concurrent-work preflight
+  (`current_work`), crop recovery identity (`crop_state`), keyboard routing
+  (`keyboard_route`), folder-scan dispositions (`entry_state`), generation-path
+  currency (`work_currency`), edit presentation failure copy (`edit_state`),
+  expanded curation outcome and permanent-delete confirmation copy
+  (`curation_state`), rating write and auxiliary disconnect guidance
+  (`rating_state`), prefetch destination routing (`prefetch`), and filter
+  source-change gates (`playlist`) behind pure unit-tested seams. `App` remains
+  the only event-loop, worker, dialog, playlist-mutation, toast, and
+  UI-dispatch owner. Workspace `cargo fmt --check`, Clippy `-D warnings`, and
+  `cargo test --workspace --all-targets --locked` are green on this step.
+  Close this checklist item only after a measured owned-logic coverage floor
+  reconfirms the 85 percent bar. Preserve the bounded job, thumbnail, prefetch,
+  chrome, preview, presentation, curation, rating, save, and GPU upload
+  contracts while doing so.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

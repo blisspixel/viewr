@@ -36,3 +36,6 @@ Desktop.ini
 
 # Agent working files (prewarm, codegraph, scratch)
 .agent/
+
+# Local logs
+logs/

@@ -48,6 +48,10 @@ use crate::current_work::{
     current_work_blocker, image_preparation_work,
 };
 use crate::decode::{DecodedImage, LoadedImage};
+use crate::entry_state::{
+    FolderScanDisposition, FolderScanSuccess, folder_scan_disposition, folder_scan_failure_class,
+    folder_scan_user_message, selected_file_index_by, selected_scan_is_current,
+};
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
@@ -1352,69 +1356,90 @@ impl App {
         purpose: ScanPurpose,
         files: Result<Vec<crate::fs::ScannedImage>, crate::fs::ScanImagesError>,
     ) -> bool {
-        if let ScanPurpose::SelectedFile(selected) = &purpose
-            && !selected_scan_is_current(self.session.selected_path.as_deref(), selected)
-        {
+        let open_folder = matches!(purpose, ScanPurpose::OpenFolder);
+        let selected_is_current = match &purpose {
+            ScanPurpose::SelectedFile(selected) => {
+                selected_scan_is_current(self.session.selected_path.as_deref(), selected)
+            }
+            ScanPurpose::OpenFolder => true,
+        };
+        let success = files.as_ref().map(|entries| match &purpose {
+            ScanPurpose::SelectedFile(selected) => FolderScanSuccess::Selected {
+                matched_index: selected_file_index_by(
+                    entries,
+                    selected,
+                    crate::fs::ScannedImage::path,
+                ),
+            },
+            ScanPurpose::OpenFolder => FolderScanSuccess::OpenFolder {
+                count: entries.len(),
+            },
+        });
+        let result = match success {
+            Ok(facts) => Ok(facts),
+            Err(error) => Err(folder_scan_failure_class(
+                matches!(error, crate::fs::ScanImagesError::Cancelled),
+                matches!(
+                    error,
+                    crate::fs::ScanImagesError::LimitExceeded
+                        | crate::fs::ScanImagesError::PathBudgetExceeded
+                ),
+            )),
+        };
+        let disposition = folder_scan_disposition(open_folder, selected_is_current, result);
+        if matches!(disposition, FolderScanDisposition::Discard) {
             return false;
         }
-        match (purpose, files) {
-            (ScanPurpose::SelectedFile(selected), Ok(files)) => {
-                if let Some(index) =
-                    selected_file_index_by(&files, &selected, crate::fs::ScannedImage::path)
-                {
-                    self.replace_playlist_from_scan(files, index);
-                } else {
-                    self.replace_playlist(vec![selected.clone()], 0);
-                }
+        if let Some(message) = folder_scan_user_message(disposition) {
+            if matches!(
+                disposition,
+                FolderScanDisposition::InstallSelectedOnlyScanFailed
+                    | FolderScanDisposition::OpenFolderFailed
+            ) && let Err(error) = &files
+            {
+                log::warn!("folder scan unavailable: {error}");
+            }
+            self.show_toast(message);
+        }
+        match (disposition, purpose, files) {
+            (
+                FolderScanDisposition::InstallScanAt(index),
+                ScanPurpose::SelectedFile(selected),
+                Ok(entries),
+            ) => {
+                self.replace_playlist_from_scan(entries, index);
                 self.preserve_presented_source_provenance(&selected);
                 self.kick_prefetch();
             }
             (
+                FolderScanDisposition::InstallSelectedOnly
+                | FolderScanDisposition::InstallSelectedOnlyLimitExceeded
+                | FolderScanDisposition::InstallSelectedOnlyScanFailed,
                 ScanPurpose::SelectedFile(selected),
-                Err(
-                    crate::fs::ScanImagesError::LimitExceeded
-                    | crate::fs::ScanImagesError::PathBudgetExceeded,
-                ),
+                _,
             ) => {
                 self.replace_playlist(vec![selected.clone()], 0);
                 self.preserve_presented_source_provenance(&selected);
-                self.show_toast(
-                    "Folder is too large for safe automatic browsing. Opened only the selected image",
-                );
+                if matches!(disposition, FolderScanDisposition::InstallSelectedOnly) {
+                    self.kick_prefetch();
+                }
             }
-            (
-                ScanPurpose::SelectedFile(_) | ScanPurpose::OpenFolder,
-                Err(crate::fs::ScanImagesError::Cancelled),
-            ) => {
-                return false;
-            }
-            (ScanPurpose::SelectedFile(selected), Err(error)) => {
-                log::warn!("folder scan unavailable: {error}");
-                self.replace_playlist(vec![selected.clone()], 0);
-                self.preserve_presented_source_provenance(&selected);
-                self.show_toast("Folder browsing is unavailable. Opened only the selected image");
-            }
-            (ScanPurpose::OpenFolder, Ok(files)) if files.is_empty() => {
-                self.show_toast("The selected folder contains no supported images");
-            }
-            (ScanPurpose::OpenFolder, Ok(files)) => {
-                let first = files[0].path().to_owned();
-                self.replace_playlist_from_scan(files, 0);
+            (FolderScanDisposition::OpenFolderFirst, ScanPurpose::OpenFolder, Ok(entries)) => {
+                let first = entries[0].path().to_owned();
+                self.replace_playlist_from_scan(entries, 0);
                 self.begin_image_load(first);
                 self.kick_prefetch();
             }
             (
-                ScanPurpose::OpenFolder,
-                Err(
-                    crate::fs::ScanImagesError::LimitExceeded
-                    | crate::fs::ScanImagesError::PathBudgetExceeded,
-                ),
-            ) => {
-                self.show_toast("The selected folder exceeds safe browsing limits");
-            }
-            (ScanPurpose::OpenFolder, Err(error)) => {
-                log::warn!("selected folder scan failed: {error}");
-                self.show_toast("Could not read the selected folder");
+                FolderScanDisposition::OpenFolderEmpty
+                | FolderScanDisposition::OpenFolderLimitExceeded
+                | FolderScanDisposition::OpenFolderFailed,
+                _,
+                _,
+            ) => {}
+            (FolderScanDisposition::Discard, _, _) => unreachable!("discard returned early"),
+            _ => {
+                log::error!("folder scan disposition mismatched purpose or payload");
             }
         }
         true
@@ -6370,22 +6395,6 @@ fn prefetch_destination(
     }
 }
 
-fn selected_file_index_by<T>(
-    files: &[T],
-    selected: &Path,
-    path: impl Fn(&T) -> &Path + Copy,
-) -> Option<usize> {
-    files
-        .iter()
-        .position(|entry| path(entry) == selected)
-        .or_else(|| {
-            let selected_name = selected.file_name()?;
-            files
-                .iter()
-                .position(|entry| path(entry).file_name() == Some(selected_name))
-        })
-}
-
 fn bind_playlist_source_provenance(
     playlist: &mut Playlist,
     path: &Path,
@@ -6399,10 +6408,6 @@ fn bind_playlist_source_provenance(
         return false;
     };
     playlist.set_scan_provenance(path, Some(provenance))
-}
-
-fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
-    current == Some(selected)
 }
 
 fn auxiliary_job_is_current(
@@ -7455,30 +7460,6 @@ mod test {
             repaint_deadline(now, Duration::from_millis(500)),
             now.checked_add(Duration::from_millis(500))
         );
-    }
-
-    #[test]
-    fn selected_file_matches_relative_scan_results_by_name() {
-        let files = vec![PathBuf::from("./img1.png"), PathBuf::from("./img2.png")];
-        assert_eq!(
-            selected_file_index_by(&files, Path::new("img2.png"), PathBuf::as_path),
-            Some(1)
-        );
-        assert_eq!(
-            selected_file_index_by(&files, Path::new("missing.png"), PathBuf::as_path),
-            None
-        );
-    }
-
-    #[test]
-    fn stale_selected_file_scan_is_discarded() {
-        let selected = Path::new("selected.png");
-        assert!(selected_scan_is_current(Some(selected), selected));
-        assert!(!selected_scan_is_current(None, selected));
-        assert!(!selected_scan_is_current(
-            Some(Path::new("replacement.png")),
-            selected
-        ));
     }
 
     #[test]

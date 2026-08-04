@@ -163,6 +163,12 @@ impl PreferenceSaveError {
     }
 }
 
+/// Path-free toast when appearance was applied for the session but not remembered.
+#[must_use]
+pub(crate) const fn appearance_save_failure_message() -> &'static str {
+    "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
+}
+
 impl Preference {
     /// Every supported appearance choice, in menu order.
     pub const ALL: [Self; 4] = [Self::System, Self::Light, Self::Dark, Self::Console];
@@ -457,8 +463,8 @@ fn preference_path() -> Option<PathBuf> {
 mod tests {
     use super::{
         Mode, Preference, PreferenceLoad, PreferenceRecovery, PreferenceSaveError,
-        chrome_palette_for, load_preference_from, load_preference_from_path, palette_for,
-        save_preference_to,
+        appearance_save_failure_message, chrome_palette_for, load_preference_from,
+        load_preference_from_path, palette_for, save_preference_to,
     };
 
     #[test]
@@ -665,6 +671,18 @@ mod tests {
                     .chars()
                     .any(|character| matches!(character, '/' | '\\' | '\n' | '\r'))
             );
+        }
+    }
+
+    #[test]
+    fn appearance_save_failure_copy_is_fixed_and_path_private() {
+        let message = appearance_save_failure_message();
+        assert_eq!(
+            message,
+            "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
+        );
+        for private_fragment in ["C:\\Users\\private", "/home/private", "access denied"] {
+            assert!(!message.contains(private_fragment));
         }
     }
 }

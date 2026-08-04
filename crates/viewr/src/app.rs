@@ -63,7 +63,9 @@ use crate::keyboard_route::{
     single_key_shortcut_allowed, space_release_must_unwind,
 };
 use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
-use crate::prefetch::{self, PrefetchCache, PrefetchDestination, prefetch_destination};
+use crate::prefetch::{
+    self, PrefetchCache, PrefetchDestination, path_free_texture_id, prefetch_destination,
+};
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
     durable_presentation_error, external_edit_pending_after_frame_transition,
@@ -81,7 +83,7 @@ use crate::save_state::{
     folder_scan_blocks_save, save_close_disposition, save_start_blocker,
     save_start_blocker_message,
 };
-use crate::theme::{Preference, PreferenceRecovery};
+use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
 use crate::work_currency::{loaded_work_is_current, presented_work_is_current};
@@ -244,10 +246,6 @@ fn run_internal(
         .unwrap_or_else(|| Err("performance probe exited before completion".into()))
         .map(Some)
         .map_err(Error::Platform)
-}
-
-fn appearance_save_failure_message() -> &'static str {
-    "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
 }
 
 /// Application-level events delivered from native platform integrations.
@@ -6275,18 +6273,6 @@ fn complete_patch_presentation<E>(
     }
 }
 
-/// Stable path-free texture name for in-process GPU/UI caches.
-///
-/// Hashes the retained path bytes so two same-named files from different folders
-/// stay distinct without embedding directory components in debug-facing names.
-fn path_free_texture_id(prefix: &str, path: &Path) -> String {
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    format!("{prefix}:{:016x}", hasher.finish())
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -6552,38 +6538,6 @@ mod test {
             wake_receiver.try_recv(),
             Err(mpsc::TryRecvError::Disconnected)
         ));
-    }
-
-    #[test]
-    fn texture_ids_are_stable_and_path_free() {
-        let left = PathBuf::from("private").join("album").join("one.png");
-        let right = PathBuf::from("other").join("folder").join("one.png");
-        let same_left = PathBuf::from("private").join("album").join("one.png");
-
-        let left_id = path_free_texture_id("thumb", &left);
-        let right_id = path_free_texture_id("thumb", &right);
-        let same_id = path_free_texture_id("thumb", &same_left);
-
-        assert_eq!(left_id, same_id);
-        assert_ne!(left_id, right_id);
-        assert!(left_id.starts_with("thumb:"));
-        assert!(!left_id.contains("private"));
-        assert!(!left_id.contains("album"));
-        assert!(!left_id.contains("one.png"));
-        assert!(!right_id.contains("other"));
-        assert!(!right_id.contains("folder"));
-    }
-
-    #[test]
-    fn appearance_save_failure_copy_is_fixed_and_path_private() {
-        let message = appearance_save_failure_message();
-        assert_eq!(
-            message,
-            "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again."
-        );
-        for private_fragment in ["C:\\Users\\private", "/home/private", "access denied"] {
-            assert!(!message.contains(private_fragment));
-        }
     }
 
     #[test]

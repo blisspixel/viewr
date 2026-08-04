@@ -289,6 +289,19 @@ pub(crate) fn prefetch_destination(
     }
 }
 
+/// Stable path-free texture name for in-process GPU/UI caches.
+///
+/// Hashes the retained path bytes so two same-named files from different folders
+/// stay distinct without embedding directory components in debug-facing names.
+#[must_use]
+pub(crate) fn path_free_texture_id(prefix: &str, path: &Path) -> String {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    format!("{prefix}:{:016x}", hasher.finish())
+}
+
 /// Privacy-safe filename for UI status and opt-in diagnostics.
 ///
 /// Directories are removed, control characters are replaced, and output is
@@ -466,7 +479,7 @@ pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize>
 mod tests {
     use super::{
         MAX_ACTIVE_JOBS, PrefetchCache, PrefetchDestination, PrefetchFailure, PrefetchSchedule,
-        neighbor_indices, prefetch_destination, privacy_safe_file_name,
+        neighbor_indices, path_free_texture_id, prefetch_destination, privacy_safe_file_name,
     };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
@@ -493,6 +506,26 @@ mod tests {
             prefetch_destination(Some(selected), true, false, Path::new("stale.png")),
             PrefetchDestination::Ignore
         );
+    }
+
+    #[test]
+    fn texture_ids_are_stable_and_path_free() {
+        let left = PathBuf::from("private").join("album").join("one.png");
+        let right = PathBuf::from("other").join("folder").join("one.png");
+        let same_left = PathBuf::from("private").join("album").join("one.png");
+
+        let left_id = path_free_texture_id("thumb", &left);
+        let right_id = path_free_texture_id("thumb", &right);
+        let same_id = path_free_texture_id("thumb", &same_left);
+
+        assert_eq!(left_id, same_id);
+        assert_ne!(left_id, right_id);
+        assert!(left_id.starts_with("thumb:"));
+        assert!(!left_id.contains("private"));
+        assert!(!left_id.contains("album"));
+        assert!(!left_id.contains("one.png"));
+        assert!(!right_id.contains("other"));
+        assert!(!right_id.contains("folder"));
     }
 
     fn tiny(id: u8) -> DecodedImage {

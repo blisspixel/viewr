@@ -34,6 +34,8 @@ and organized by user-visible concern.
   90.18 percent (above the 85 percent floor) after the eighth pure-seam step.
   Whole-file exclusions for event-loop, GPU, sandbox, and entry surfaces remain
   explicit debt rather than silent gaps.
+- Appearance save failure copy and path-free texture cache ids moved into the
+  covered `theme` and `prefetch` modules. User-visible behavior is unchanged.
 - Reliability architecture continues for v0.2: generation-tagged work currency,
   folder-scan entry dispositions, edit and curation recovery copy, permanent-
   delete confirmation policy, prefetch destination routing, filter source-

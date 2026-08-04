@@ -23,6 +23,18 @@ pub(crate) enum FilterSelection {
     Empty,
 }
 
+/// True when applying the filter selection must clear or replace the current image.
+#[must_use]
+pub(crate) const fn filter_selection_changes_source(
+    selection: FilterSelection,
+    has_current_image: bool,
+) -> bool {
+    match selection {
+        FilterSelection::Stay => !has_current_image,
+        FilterSelection::Select(_) | FilterSelection::Empty => true,
+    }
+}
+
 impl Playlist {
     pub(crate) fn new(files: Vec<PathBuf>, index: usize) -> Self {
         let provenance = vec![None; files.len()];

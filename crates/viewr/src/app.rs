@@ -21,7 +21,6 @@ use crate::performance::{
     PERFORMANCE_IDLE_OBSERVATION, PERFORMANCE_PROBE_TIMEOUT, PerformanceProbe,
     schedule_performance_wake,
 };
-use crate::playlist::{FilterSelection, Playlist, ScanPurpose};
 use crate::ratings::{
     RatingAssignment, RatingFilter, RatingObservation, RatingState, RatingWriteCapability,
     RatingWriteError,
@@ -41,8 +40,9 @@ use crate::crop_state::{
 use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
 use crate::curation_state::{
     CurationCloseDisposition, CurationKind, CurationRecovery, CurationTerminalState,
-    GuardedSourceAction, curation_close_disposition, curation_recovery_message, curation_status,
-    guarded_source_action_failure_message, permanent_delete_success_message,
+    GuardedSourceAction, PERMANENT_DELETE_ACTION, curation_close_disposition,
+    curation_recovery_message, curation_status, guarded_source_action_failure_message,
+    permanent_delete_confirmed, permanent_delete_description, permanent_delete_success_message,
     restore_result_message, single_trash_result_message,
 };
 use crate::current_work::{
@@ -62,7 +62,8 @@ use crate::keyboard_route::{
     is_space_key, is_trash_shortcut_key, rating_assignment_for_key, route_consumed_keyboard_key,
     single_key_shortcut_allowed, space_release_must_unwind,
 };
-use crate::prefetch::{self, PrefetchCache};
+use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
+use crate::prefetch::{self, PrefetchCache, PrefetchDestination, prefetch_destination};
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
     durable_presentation_error, external_edit_pending_after_frame_transition,
@@ -432,16 +433,6 @@ fn cancel_pending_save_for_source_change(pending_save: &mut Option<PendingSave>)
     pending_save.take().is_some()
 }
 
-const fn filter_selection_changes_source(
-    selection: FilterSelection,
-    has_current_image: bool,
-) -> bool {
-    match selection {
-        FilterSelection::Stay => !has_current_image,
-        FilterSelection::Select(_) | FilterSelection::Empty => true,
-    }
-}
-
 struct CropRecovery {
     source_path: PathBuf,
     source_generation: u64,
@@ -526,7 +517,6 @@ impl Default for Transform {
 
 const EDIT_HISTORY_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_HEAL_BRUSH_RADIUS: u32 = 18;
-const PERMANENT_DELETE_ACTION: &str = "Delete permanently";
 
 struct HealTool {
     active: bool,
@@ -2698,10 +2688,14 @@ impl App {
             let selected_with_foreground = self.session.selected_path.as_deref()
                 == Some(path.as_path())
                 && self.session.is_loading();
+            let path_in_playlist = self
+                .playlist
+                .as_ref()
+                .is_some_and(|playlist| playlist.files.iter().any(|item| item == &path));
             let destination = prefetch_destination(
                 self.session.selected_path.as_deref(),
                 self.session.is_loading() || self.session.load_error.is_some(),
-                self.playlist.as_ref(),
+                path_in_playlist,
                 &path,
             );
             let mut diagnostic = None;
@@ -3917,16 +3911,21 @@ impl App {
             ));
             return;
         }
+        let safe_name = prefetch::privacy_safe_file_name(&path).replace('"', "?");
         let confirmed = rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Warning)
             .set_title("Permanently delete?")
-            .set_description(permanent_delete_description(&path))
+            .set_description(permanent_delete_description(&safe_name))
             .set_buttons(rfd::MessageButtons::OkCancelCustom(
                 PERMANENT_DELETE_ACTION.to_owned(),
                 "Cancel".to_owned(),
             ))
             .show();
-        if !permanent_delete_confirmed(&confirmed) {
+        let confirmed_label = match &confirmed {
+            rfd::MessageDialogResult::Custom(label) => Some(label.as_str()),
+            _ => None,
+        };
+        if !permanent_delete_confirmed(confirmed_label) {
             return;
         }
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
@@ -6177,32 +6176,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PrefetchDestination {
-    PresentSelected,
-    CacheNeighbor,
-    Ignore,
-}
-
-fn prefetch_destination(
-    selected: Option<&Path>,
-    selected_is_pending_or_failed: bool,
-    playlist: Option<&Playlist>,
-    path: &Path,
-) -> PrefetchDestination {
-    if selected == Some(path) {
-        if selected_is_pending_or_failed {
-            PrefetchDestination::PresentSelected
-        } else {
-            PrefetchDestination::Ignore
-        }
-    } else if playlist.is_some_and(|playlist| playlist.files.iter().any(|item| item == path)) {
-        PrefetchDestination::CacheNeighbor
-    } else {
-        PrefetchDestination::Ignore
-    }
-}
-
 fn bind_playlist_source_provenance(
     playlist: &mut Playlist,
     path: &Path,
@@ -6302,13 +6275,6 @@ fn complete_patch_presentation<E>(
     }
 }
 
-fn permanent_delete_description(path: &Path) -> String {
-    let name = prefetch::privacy_safe_file_name(path).replace('"', "?");
-    format!(
-        "Delete \"{name}\" forever?\n\nThis skips the system Trash and cannot be undone from viewr."
-    )
-}
-
 /// Stable path-free texture name for in-process GPU/UI caches.
 ///
 /// Hashes the retained path bytes so two same-named files from different folders
@@ -6319,13 +6285,6 @@ fn path_free_texture_id(prefix: &str, path: &Path) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
     format!("{prefix}:{:016x}", hasher.finish())
-}
-
-fn permanent_delete_confirmed(result: &rfd::MessageDialogResult) -> bool {
-    matches!(
-        result,
-        rfd::MessageDialogResult::Custom(label) if label == PERMANENT_DELETE_ACTION
-    )
 }
 
 #[cfg(test)]
@@ -6613,40 +6572,6 @@ mod test {
         assert!(!left_id.contains("one.png"));
         assert!(!right_id.contains("other"));
         assert!(!right_id.contains("folder"));
-    }
-
-    #[test]
-    fn permanent_delete_confirmation_is_bounded_path_free_and_control_safe() {
-        let path = PathBuf::from("private")
-            .join("album")
-            .join("bad\n\u{202e}\"gpj");
-        let description = permanent_delete_description(&path);
-        assert!(description.starts_with("Delete \"bad???gpj\" forever?"));
-        assert!(!description.contains("private"));
-        assert!(!description.contains("album"));
-        assert!(!description.contains('\u{202e}'));
-        assert_eq!(description.matches('\n').count(), 2);
-        assert!(description.contains("system Trash"));
-
-        let long_name = format!("{}.png", "a".repeat(140));
-        let description = permanent_delete_description(Path::new(&long_name));
-        let quoted = description
-            .strip_prefix("Delete \"")
-            .and_then(|value| value.split_once("\" forever?"))
-            .map(|(name, _)| name)
-            .expect("fixed confirmation structure");
-        assert_eq!(quoted.chars().count(), 96);
-    }
-
-    #[test]
-    fn permanent_delete_requires_the_explicit_destructive_action() {
-        assert!(permanent_delete_confirmed(
-            &rfd::MessageDialogResult::Custom(PERMANENT_DELETE_ACTION.to_owned())
-        ));
-        assert!(!permanent_delete_confirmed(&rfd::MessageDialogResult::Ok));
-        assert!(!permanent_delete_confirmed(
-            &rfd::MessageDialogResult::Custom("Cancel".to_owned())
-        ));
     }
 
     #[test]
@@ -7008,42 +6933,6 @@ mod test {
         assert_eq!(
             repaint_deadline(now, Duration::from_millis(500)),
             now.checked_add(Duration::from_millis(500))
-        );
-    }
-
-    #[test]
-    fn selected_prefetch_result_presents_only_while_pending_or_failed() {
-        let selected = Path::new("selected.png");
-        let playlist = Playlist::new(vec![selected.to_owned(), PathBuf::from("neighbor.png")], 0);
-
-        assert_eq!(
-            prefetch_destination(Some(selected), true, Some(&playlist), selected),
-            PrefetchDestination::PresentSelected
-        );
-        assert_eq!(
-            prefetch_destination(Some(selected), false, Some(&playlist), selected),
-            PrefetchDestination::Ignore
-        );
-    }
-
-    #[test]
-    fn prefetch_result_caches_only_current_playlist_neighbors() {
-        let selected = Path::new("selected.png");
-        let neighbor = Path::new("neighbor.png");
-        let playlist = Playlist::new(vec![selected.to_owned(), neighbor.to_owned()], 0);
-
-        assert_eq!(
-            prefetch_destination(Some(selected), false, Some(&playlist), neighbor),
-            PrefetchDestination::CacheNeighbor
-        );
-        assert_eq!(
-            prefetch_destination(
-                Some(selected),
-                true,
-                Some(&playlist),
-                Path::new("stale.png")
-            ),
-            PrefetchDestination::Ignore
         );
     }
 }

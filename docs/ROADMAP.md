@@ -94,13 +94,13 @@ v1.0.0  Broadly recommended release
 ### Immediate focus
 
 **Immediate focus: v0.2 reliability architecture, followed by v0.3 display
-correctness and v0.4 file coherence.** Generation-stale work currency,
-entry/folder-scan disposition, edit and curation recovery copy, crop recovery,
-current-work preflight, and keyboard routing pure seams are in place beside
-presentation, rating, and save. Confirm coverage floor and residual pure-policy
-helpers in `app.rs`, then close the v0.2 pure-seam checklist item with evidence
-while preserving bounded job, thumbnail, prefetch, chrome, and GPU contracts.
-Do not start v0.3 monitor/profile work that deepens unowned event-loop races.
+correctness and v0.4 file coherence.** Concentrated pure-policy seams for
+entry/folder-scan, work currency, recovery copy, prefetch destination, filter
+source-change, crop, current-work, keyboard, presentation, curation, rating, and
+save are in place. Close the remaining coverage-exclusion checklist item with a
+measured floor, then tag v0.2 only after that evidence holds. Preserve bounded
+job, thumbnail, prefetch, chrome, and GPU contracts. Do not start v0.3
+monitor/profile work that deepens unowned event-loop races.
 
 Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
 minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,

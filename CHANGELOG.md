@@ -31,12 +31,13 @@ and organized by user-visible concern.
 ### Changed
 
 - Reliability architecture continues for v0.2: generation-tagged work currency,
-  folder-scan entry dispositions, edit and curation recovery copy, rating write
-  and auxiliary disconnect guidance, concurrent work preflight, crop recovery
-  identity and start blockers, and keyboard shortcut routing now live in pure
-  seams (`work_currency`, `entry_state`, `edit_state`, `curation_state`,
-  `rating_state`, `current_work`, `crop_state`, `keyboard_route`). The
-  application remains the sole worker, playlist, toast, prefetch, and
+  folder-scan entry dispositions, edit and curation recovery copy, permanent-
+  delete confirmation policy, prefetch destination routing, filter source-
+  change gates, rating write and auxiliary disconnect guidance, concurrent work
+  preflight, crop recovery, and keyboard routing now live in pure seams
+  (`work_currency`, `entry_state`, `edit_state`, `curation_state`, `prefetch`,
+  `playlist`, `rating_state`, `current_work`, `crop_state`, `keyboard_route`).
+  The application remains the sole worker, playlist, toast, dialog, and
   UI-dispatch owner. User-visible behavior is unchanged.
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)
   instead of HTML. CI still regenerates it offline from the locked release graph

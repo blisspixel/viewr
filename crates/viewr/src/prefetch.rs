@@ -260,6 +260,35 @@ impl PrefetchSchedule {
     }
 }
 
+/// Where a completed speculative decode may apply.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrefetchDestination {
+    PresentSelected,
+    CacheNeighbor,
+    Ignore,
+}
+
+/// Pure destination policy for a finished prefetch job.
+#[must_use]
+pub(crate) fn prefetch_destination(
+    selected: Option<&Path>,
+    selected_is_pending_or_failed: bool,
+    path_in_playlist: bool,
+    path: &Path,
+) -> PrefetchDestination {
+    if selected == Some(path) {
+        if selected_is_pending_or_failed {
+            PrefetchDestination::PresentSelected
+        } else {
+            PrefetchDestination::Ignore
+        }
+    } else if path_in_playlist {
+        PrefetchDestination::CacheNeighbor
+    } else {
+        PrefetchDestination::Ignore
+    }
+}
+
 /// Privacy-safe filename for UI status and opt-in diagnostics.
 ///
 /// Directories are removed, control characters are replaced, and output is
@@ -436,14 +465,35 @@ pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize>
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ACTIVE_JOBS, PrefetchCache, PrefetchFailure, PrefetchSchedule, neighbor_indices,
-        privacy_safe_file_name,
+        MAX_ACTIVE_JOBS, PrefetchCache, PrefetchDestination, PrefetchFailure, PrefetchSchedule,
+        neighbor_indices, prefetch_destination, privacy_safe_file_name,
     };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn prefetch_destination_presents_selected_only_while_pending_or_failed() {
+        let selected = Path::new("selected.png");
+        assert_eq!(
+            prefetch_destination(Some(selected), true, true, selected),
+            PrefetchDestination::PresentSelected
+        );
+        assert_eq!(
+            prefetch_destination(Some(selected), false, true, selected),
+            PrefetchDestination::Ignore
+        );
+        assert_eq!(
+            prefetch_destination(Some(selected), false, true, Path::new("neighbor.png")),
+            PrefetchDestination::CacheNeighbor
+        );
+        assert_eq!(
+            prefetch_destination(Some(selected), true, false, Path::new("stale.png")),
+            PrefetchDestination::Ignore
+        );
+    }
 
     fn tiny(id: u8) -> DecodedImage {
         DecodedImage {

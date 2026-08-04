@@ -200,6 +200,24 @@ pub(crate) const fn single_trash_result_message(
     }
 }
 
+/// Exact confirmation button label for permanent delete dialogs.
+pub(crate) const PERMANENT_DELETE_ACTION: &str = "Delete permanently";
+
+/// Path-free permanent-delete confirmation body. `safe_name` must already be
+/// privacy-safe and quote-sanitized by the caller.
+#[must_use]
+pub(crate) fn permanent_delete_description(safe_name: &str) -> String {
+    format!(
+        "Delete \"{safe_name}\" forever?\n\nThis skips the system Trash and cannot be undone from viewr."
+    )
+}
+
+/// True only when the user chose the explicit permanent-delete action label.
+#[must_use]
+pub(crate) fn permanent_delete_confirmed(custom_label: Option<&str>) -> bool {
+    matches!(custom_label, Some(label) if label == PERMANENT_DELETE_ACTION)
+}
+
 /// Path-free success copy after permanent delete. `safe_name` must already be
 /// privacy-safe and quote-sanitized by the caller.
 #[must_use]
@@ -601,6 +619,21 @@ mod tests {
             permanent_delete_success_message("bad???gpj", false),
             "Permanently deleted \"bad???gpj\". This cannot be undone."
         );
+    }
+
+    #[test]
+    fn permanent_delete_confirmation_is_bounded_and_label_exact() {
+        let description = permanent_delete_description("bad???gpj");
+        assert!(description.starts_with("Delete \"bad???gpj\" forever?"));
+        assert_eq!(description.matches('\n').count(), 2);
+        assert!(description.contains("system Trash"));
+        assert!(!description.contains('\\'));
+        assert!(!description.contains('/'));
+
+        assert!(permanent_delete_confirmed(Some(PERMANENT_DELETE_ACTION)));
+        assert!(!permanent_delete_confirmed(Some("Cancel")));
+        assert!(!permanent_delete_confirmed(None));
+        assert!(!permanent_delete_confirmed(Some("Ok")));
     }
 
     #[test]

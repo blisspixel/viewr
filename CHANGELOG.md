@@ -33,10 +33,11 @@ and organized by user-visible concern.
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)
   instead of HTML. CI still regenerates it offline from the locked release graph
   and compares the inventory by meaning. No application runtime change.
-- Windows accessibility smoke expands nested View submenus more reliably: it opens
-  View only when closed (so a second Invoke cannot toggle it shut), expands nested
-  rows with ExpandCollapse, a pointer click on the row, Invoke, and focused Right
-  Arrow, and double-Escapes before the File-menu reset between attempts.
+- Windows accessibility smoke expands nested View and Edit submenus more
+  reliably: it opens the parent menu only when closed (so a second Invoke cannot
+  toggle it shut), expands nested rows with ExpandCollapse, a pointer click on
+  the row, Invoke, and focused Right Arrow, and double-Escapes before the
+  File-menu reset between attempts.
 - Save As lifecycle policy now lives in a 100 percent line-covered private seam.
   Start blockers, folder-scan save gates, terminal close disposition, and app
   close wait coordination are exhaustive pure transitions. The application

@@ -778,20 +778,135 @@ function Open-ViewSubmenu {
     )
 }
 
+function Test-EditMenuOpen {
+    # Crop is a stable top-level Edit action published only while Edit is open.
+    $null -ne (Get-Element -Name "Crop" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ))
+}
+
+function Open-EditMenuIfNeeded {
+    if (Test-EditMenuOpen) {
+        return
+    }
+    $edit = Get-Element -Name "Edit" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    if ($null -eq $edit) {
+        $edit = Wait-ForElement -Name "Edit" -ControlType (
+            [System.Windows.Automation.ControlType]::Button
+        )
+    }
+    Activate-Element -Element $edit
+    Wait-ForResult -Description "the open Edit menu" -Probe {
+        if (Test-EditMenuOpen) {
+            return [IntPtr]1
+        }
+        return $null
+    } | Out-Null
+}
+
 function Open-EditSubmenu {
     param(
         [Parameter(Mandatory)]
-        [string]$Name
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$ExpectedChildName,
+        [System.Windows.Automation.ControlType]$ExpectedChildControlType = (
+            [System.Windows.Automation.ControlType]::RadioButton
+        ),
+        [switch]$ExpectedChildPrefix
     )
 
-    $edit = Wait-ForElement -Name "Edit" -ControlType (
-        [System.Windows.Automation.ControlType]::Button
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $child = Get-Element `
+            -Name $ExpectedChildName `
+            -Prefix:$ExpectedChildPrefix `
+            -ControlType $ExpectedChildControlType
+        if ($null -ne $child) {
+            return
+        }
+
+        Open-EditMenuIfNeeded
+        $submenu = Get-Element -Name $Name -Prefix -ControlType (
+            [System.Windows.Automation.ControlType]::Button
+        )
+        if ($null -eq $submenu) {
+            Open-EditMenuIfNeeded
+            $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
+                [System.Windows.Automation.ControlType]::Button
+            )
+        }
+        Expand-NestedMenuItem -Element $submenu
+
+        $publishDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        $nextExpandAt = [DateTime]::UtcNow.AddMilliseconds(400)
+        $expandFallbackCount = 1
+        while ([DateTime]::UtcNow -lt $publishDeadline) {
+            if ($script:Process.HasExited) {
+                throw "viewr exited while opening the Edit '$Name' submenu"
+            }
+            try {
+                $child = Get-Element `
+                    -Name $ExpectedChildName `
+                    -Prefix:$ExpectedChildPrefix `
+                    -ControlType $ExpectedChildControlType
+                if ($null -ne $child) {
+                    return
+                }
+
+                if (
+                    $expandFallbackCount -lt 5 -and
+                    [DateTime]::UtcNow -ge $nextExpandAt
+                ) {
+                    if (-not (Test-EditMenuOpen)) {
+                        Open-EditMenuIfNeeded
+                    }
+                    $preferredFocusElement = Get-Element -Name $Name -Prefix -ControlType (
+                        [System.Windows.Automation.ControlType]::Button
+                    )
+                    if ($null -ne $preferredFocusElement) {
+                        Expand-NestedMenuItem -Element $preferredFocusElement
+                    }
+                    else {
+                        Send-ApplicationKey -VirtualKey 0x27
+                    }
+                    $expandFallbackCount += 1
+                    $nextExpandAt = [DateTime]::UtcNow.AddMilliseconds(500)
+                }
+            }
+            catch [System.Windows.Automation.ElementNotAvailableException] {
+                # Retry from the current tree after an accessibility refresh.
+            }
+            Start-Sleep -Milliseconds 80
+        }
+
+        if ($attempt -lt 5) {
+            Send-ApplicationKey -VirtualKey 0x1B
+            Start-Sleep -Milliseconds 120
+            Send-ApplicationKey -VirtualKey 0x1B
+            Start-Sleep -Milliseconds 100
+            Wait-ForResult -Description "the File menu action before retrying Edit '$Name'" -Probe {
+                $file = Get-Element -Name "File" -ControlType (
+                    [System.Windows.Automation.ControlType]::Button
+                )
+                if ($null -eq $file) {
+                    return $null
+                }
+                Activate-Element -Element $file
+                return [IntPtr]1
+            } | Out-Null
+            Wait-ForElementAbsent -Name $Name -Prefix -ControlType (
+                [System.Windows.Automation.ControlType]::Button
+            ) | Out-Null
+        }
+    }
+
+    $treeSummary = Get-TreeSummary
+    throw (
+        "Edit submenu '$Name' did not expose '$ExpectedChildName' after five attempts; " +
+        "accessible tree: $treeSummary"
     )
-    Activate-Element -Element $edit
-    $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
-        [System.Windows.Automation.ControlType]::Button
-    )
-    Activate-Element -Element $submenu
 }
 
 function Set-ApplicationFocusHint {
@@ -1320,7 +1435,10 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
-    Open-EditSubmenu -Name "Rating: Unrated"
+    Open-EditSubmenu `
+        -Name "Rating: Unrated" `
+        -ExpectedChildName "Rating 4 of 5, shortcut 4" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
     $ratingFour = Wait-ForSelectionState `
         -Name "Rating 4 of 5, shortcut 4" `
         -Selected $false

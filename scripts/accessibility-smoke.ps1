@@ -115,6 +115,9 @@ public static class ViewrAccessibilityNativeMethods {
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
     private static bool FocusWindowForInput(IntPtr hwnd) {
         if (GetForegroundWindow() == hwnd) return true;
 
@@ -201,6 +204,28 @@ public static class ViewrAccessibilityNativeMethods {
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
         if (sent == (uint)inputs.Length) return true;
         return sent == 0 && PostKeyPress(hwnd, virtualKey);
+    }
+
+    public static bool ClickScreenPoint(IntPtr hwnd, int screenX, int screenY) {
+        if (!FocusWindowForInput(hwnd)) return false;
+        if (!SetCursorPos(screenX, screenY)) return false;
+        Thread.Sleep(20);
+        var inputs = new[] {
+            new Input {
+                Type = 0,
+                Value = new InputValue {
+                    Mouse = new MouseInput { Flags = 0x0002 }
+                }
+            },
+            new Input {
+                Type = 0,
+                Value = new InputValue {
+                    Mouse = new MouseInput { Flags = 0x0004 }
+                }
+            }
+        };
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) ==
+            (uint)inputs.Length;
     }
 
     private static bool PostKeyPress(IntPtr hwnd, ushort virtualKey) {
@@ -463,6 +488,94 @@ function Try-ExpandSubmenuElement {
     return $true
 }
 
+function Test-ViewMenuOpen {
+    $null -ne (Get-Element -Name "Fit Image to View" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ))
+}
+
+function Open-ViewMenuIfNeeded {
+    if (Test-ViewMenuOpen) {
+        return
+    }
+    $view = Get-Element -Name "View" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    if ($null -eq $view) {
+        $view = Wait-ForElement -Name "View" -ControlType (
+            [System.Windows.Automation.ControlType]::Button
+        )
+    }
+    Activate-Element -Element $view
+    Wait-ForResult -Description "the open View menu" -Probe {
+        if (Test-ViewMenuOpen) {
+            return [IntPtr]1
+        }
+        return $null
+    } | Out-Null
+}
+
+function Invoke-ElementClick {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Element
+    )
+
+    try {
+        $bounds = $Element.Current.BoundingRectangle
+        if ($bounds.Width -le 0 -or $bounds.Height -le 0) {
+            return $false
+        }
+        $x = [int][Math]::Floor($bounds.Left + ($bounds.Width / 2.0))
+        $y = [int][Math]::Floor($bounds.Top + ($bounds.Height / 2.0))
+        return [ViewrAccessibilityNativeMethods]::ClickScreenPoint(
+            $script:Window,
+            $x,
+            $y
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
+function Expand-NestedMenuItem {
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement]$Element
+    )
+
+    # Nested AccessKit menu rows often stay collapsed after Invoke alone.
+    # Prefer ExpandCollapse, then a real pointer click on the row, then Invoke,
+    # then focused Right Arrow (the conventional keyboard expansion path).
+    [void](Try-ExpandSubmenuElement -Element $Element)
+    if (-not (Invoke-ElementClick -Element $Element)) {
+        try {
+            Activate-Element -Element $Element
+        }
+        catch {
+            # Fall through to keyboard expansion below.
+        }
+    }
+    $fresh = $Element
+    try {
+        $name = [string]$Element.Current.Name
+        if (-not [string]::IsNullOrWhiteSpace($name)) {
+            $resolved = Get-Element -Name $name -ControlType (
+                [System.Windows.Automation.ControlType]::Button
+            )
+            if ($null -ne $resolved) {
+                $fresh = $resolved
+                [void](Try-ExpandSubmenuElement -Element $fresh)
+            }
+        }
+    }
+    catch [System.Windows.Automation.ElementNotAvailableException] {
+        # Tree refreshed; keyboard path still has a chance.
+    }
+    Send-ApplicationKey -VirtualKey 0x27 -PreferredFocusElement $fresh
+}
+
 function Get-ToggleState {
     param(
         [Parameter(Mandatory)]
@@ -569,7 +682,7 @@ function Open-ViewSubmenu {
         [switch]$ExpectedChildPrefix
     )
 
-    for ($attempt = 1; $attempt -le 4; $attempt++) {
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
         $child = Get-Element `
             -Name $ExpectedChildName `
             -Prefix:$ExpectedChildPrefix `
@@ -578,38 +691,23 @@ function Open-ViewSubmenu {
             return
         }
 
-        $view = Get-Element -Name "View" -ControlType (
+        # Do not toggle View when it is already open. A second Invoke closes it
+        # and races the nested row publication on CI runners.
+        Open-ViewMenuIfNeeded
+        $submenu = Get-Element -Name $Name -Prefix -ControlType (
             [System.Windows.Automation.ControlType]::Button
         )
-        if ($null -eq $view) {
-            $view = Wait-ForElement -Name "View" -ControlType (
+        if ($null -eq $submenu) {
+            Open-ViewMenuIfNeeded
+            $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
                 [System.Windows.Automation.ControlType]::Button
             )
         }
-        # Always (re)open View so the nested row is published before we expand it.
-        Activate-Element -Element $view
-        $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
-            [System.Windows.Automation.ControlType]::Button
-        )
+        Expand-NestedMenuItem -Element $submenu
 
-        # Nested AccessKit menus expand more reliably with focus + Right Arrow than
-        # with Invoke alone. Invoke first, then expand patterns and arrows.
-        Activate-Element -Element $submenu
-        $freshSubmenu = Get-Element -Name $Name -Prefix -ControlType (
-            [System.Windows.Automation.ControlType]::Button
-        )
-        if ($null -ne $freshSubmenu) {
-            [void](Try-ExpandSubmenuElement -Element $freshSubmenu)
-            Send-ApplicationKey `
-                -VirtualKey 0x27 `
-                -PreferredFocusElement $freshSubmenu
-        } else {
-            Send-ApplicationKey -VirtualKey 0x27
-        }
-
-        $publishDeadline = [DateTime]::UtcNow.AddSeconds(4)
-        $nextKeyAt = [DateTime]::UtcNow.AddMilliseconds(350)
-        $keyboardFallbackCount = 1
+        $publishDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        $nextExpandAt = [DateTime]::UtcNow.AddMilliseconds(400)
+        $expandFallbackCount = 1
         while ([DateTime]::UtcNow -lt $publishDeadline) {
             if ($script:Process.HasExited) {
                 throw "viewr exited while opening the '$Name' submenu"
@@ -624,21 +722,24 @@ function Open-ViewSubmenu {
                 }
 
                 if (
-                    $keyboardFallbackCount -lt 4 -and
-                    [DateTime]::UtcNow -ge $nextKeyAt
+                    $expandFallbackCount -lt 5 -and
+                    [DateTime]::UtcNow -ge $nextExpandAt
                 ) {
+                    if (-not (Test-ViewMenuOpen)) {
+                        Open-ViewMenuIfNeeded
+                    }
                     $preferredFocusElement = Get-Element -Name $Name -Prefix -ControlType (
                         [System.Windows.Automation.ControlType]::Button
                     )
                     if ($null -ne $preferredFocusElement) {
-                        [void](Try-ExpandSubmenuElement -Element $preferredFocusElement)
+                        Expand-NestedMenuItem -Element $preferredFocusElement
                     }
-                    # Right Arrow expands nested menu rows under AccessKit.
-                    Send-ApplicationKey `
-                        -VirtualKey 0x27 `
-                        -PreferredFocusElement $preferredFocusElement
-                    $keyboardFallbackCount += 1
-                    $nextKeyAt = [DateTime]::UtcNow.AddMilliseconds(450)
+                    else {
+                        # Right Arrow expands the focused nested row under AccessKit.
+                        Send-ApplicationKey -VirtualKey 0x27
+                    }
+                    $expandFallbackCount += 1
+                    $nextExpandAt = [DateTime]::UtcNow.AddMilliseconds(500)
                 }
             }
             catch [System.Windows.Automation.ElementNotAvailableException] {
@@ -647,11 +748,11 @@ function Open-ViewSubmenu {
             Start-Sleep -Milliseconds 80
         }
 
-        if ($attempt -lt 4) {
+        if ($attempt -lt 5) {
             # Escape dismisses open menus. Switching through File resets View so
             # the next attempt starts from a known closed nested-menu state.
             Send-ApplicationKey -VirtualKey 0x1B
-            Start-Sleep -Milliseconds 150
+            Start-Sleep -Milliseconds 120
             Send-ApplicationKey -VirtualKey 0x1B
             Start-Sleep -Milliseconds 100
             Wait-ForResult -Description "the File menu action before retrying '$Name'" -Probe {
@@ -672,7 +773,7 @@ function Open-ViewSubmenu {
 
     $treeSummary = Get-TreeSummary
     throw (
-        "submenu '$Name' did not expose '$ExpectedChildName' after four attempts; " +
+        "submenu '$Name' did not expose '$ExpectedChildName' after five attempts; " +
         "accessible tree: $treeSummary"
     )
 }

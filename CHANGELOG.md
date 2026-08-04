@@ -34,9 +34,9 @@ and organized by user-visible concern.
   instead of HTML. CI still regenerates it offline from the locked release graph
   and compares the inventory by meaning. No application runtime change.
 - Windows accessibility smoke expands nested View submenus more reliably: after
-  Invoke it prefers ExpandCollapse when available, retries conventional Right
-  Arrow expansion even without a focused submenu node, and uses Escape before the
-  existing File-menu reset between attempts.
+  reopening View it Invokes the nested row, tries ExpandCollapse when available,
+  sends Right Arrow immediately and on a short retry schedule, and double-Escapes
+  before the File-menu reset between attempts.
 - Save As lifecycle policy now lives in a 100 percent line-covered private seam.
   Start blockers, folder-scan save gates, terminal close disposition, and app
   close wait coordination are exhaustive pure transitions. The application

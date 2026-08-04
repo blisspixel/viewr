@@ -569,7 +569,7 @@ function Open-ViewSubmenu {
         [switch]$ExpectedChildPrefix
     )
 
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
         $child = Get-Element `
             -Name $ExpectedChildName `
             -Prefix:$ExpectedChildPrefix `
@@ -578,30 +578,38 @@ function Open-ViewSubmenu {
             return
         }
 
-        $submenu = Get-Element -Name $Name -Prefix -ControlType (
+        $view = Get-Element -Name "View" -ControlType (
             [System.Windows.Automation.ControlType]::Button
         )
-        if ($null -eq $submenu) {
+        if ($null -eq $view) {
             $view = Wait-ForElement -Name "View" -ControlType (
                 [System.Windows.Automation.ControlType]::Button
             )
-            Activate-Element -Element $view
-            $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
-                [System.Windows.Automation.ControlType]::Button
-            )
         }
+        # Always (re)open View so the nested row is published before we expand it.
+        Activate-Element -Element $view
+        $submenu = Wait-ForElement -Name $Name -Prefix -ControlType (
+            [System.Windows.Automation.ControlType]::Button
+        )
+
+        # Nested AccessKit menus expand more reliably with focus + Right Arrow than
+        # with Invoke alone. Invoke first, then expand patterns and arrows.
         Activate-Element -Element $submenu
-        # Nested AccessKit menus sometimes stay collapsed after Invoke. Prefer the
-        # expand pattern when present, then fall back to conventional Right Arrow.
         $freshSubmenu = Get-Element -Name $Name -Prefix -ControlType (
             [System.Windows.Automation.ControlType]::Button
         )
         if ($null -ne $freshSubmenu) {
             [void](Try-ExpandSubmenuElement -Element $freshSubmenu)
+            Send-ApplicationKey `
+                -VirtualKey 0x27 `
+                -PreferredFocusElement $freshSubmenu
+        } else {
+            Send-ApplicationKey -VirtualKey 0x27
         }
 
-        $publishDeadline = [DateTime]::UtcNow.AddSeconds(3)
-        $keyboardFallbackCount = 0
+        $publishDeadline = [DateTime]::UtcNow.AddSeconds(4)
+        $nextKeyAt = [DateTime]::UtcNow.AddMilliseconds(350)
+        $keyboardFallbackCount = 1
         while ([DateTime]::UtcNow -lt $publishDeadline) {
             if ($script:Process.HasExited) {
                 throw "viewr exited while opening the '$Name' submenu"
@@ -616,32 +624,34 @@ function Open-ViewSubmenu {
                 }
 
                 if (
-                    $keyboardFallbackCount -lt 2 -and
-                    [DateTime]::UtcNow -ge $publishDeadline.AddSeconds(-2.2 + $keyboardFallbackCount)
+                    $keyboardFallbackCount -lt 4 -and
+                    [DateTime]::UtcNow -ge $nextKeyAt
                 ) {
                     $preferredFocusElement = Get-Element -Name $Name -Prefix -ControlType (
                         [System.Windows.Automation.ControlType]::Button
                     )
-                    # Prefer the submenu item when available; otherwise still send
-                    # Right Arrow so a focused View menu can expand the current row.
+                    if ($null -ne $preferredFocusElement) {
+                        [void](Try-ExpandSubmenuElement -Element $preferredFocusElement)
+                    }
+                    # Right Arrow expands nested menu rows under AccessKit.
                     Send-ApplicationKey `
                         -VirtualKey 0x27 `
                         -PreferredFocusElement $preferredFocusElement
                     $keyboardFallbackCount += 1
-                    $publishDeadline = [DateTime]::UtcNow.AddSeconds(2)
+                    $nextKeyAt = [DateTime]::UtcNow.AddMilliseconds(450)
                 }
             }
             catch [System.Windows.Automation.ElementNotAvailableException] {
                 # Retry from the current tree after an accessibility refresh.
             }
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds 80
         }
 
-        if ($attempt -lt 3) {
-            # A failed nested-menu invocation can leave View open while AccessKit
-            # publishes no child nodes. Escape dismisses open menus, then File can
-            # only move away from View. Wait-ForResult also replaces a UIA element
-            # if the tree refreshes before the invocation reaches it.
+        if ($attempt -lt 4) {
+            # Escape dismisses open menus. Switching through File resets View so
+            # the next attempt starts from a known closed nested-menu state.
+            Send-ApplicationKey -VirtualKey 0x1B
+            Start-Sleep -Milliseconds 150
             Send-ApplicationKey -VirtualKey 0x1B
             Start-Sleep -Milliseconds 100
             Wait-ForResult -Description "the File menu action before retrying '$Name'" -Probe {
@@ -662,7 +672,7 @@ function Open-ViewSubmenu {
 
     $treeSummary = Get-TreeSummary
     throw (
-        "submenu '$Name' did not expose '$ExpectedChildName' after three attempts; " +
+        "submenu '$Name' did not expose '$ExpectedChildName' after four attempts; " +
         "accessible tree: $treeSummary"
     )
 }

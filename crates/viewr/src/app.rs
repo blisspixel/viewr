@@ -3078,7 +3078,10 @@ impl App {
             playlist_index,
             scope: self.playlist_scope.clone(),
         });
-        let started = self.start_curation_worker(
+        // Persistent top-bar status owns the in-progress state. Outcome toasts
+        // fire only when the worker finishes, so Delete does not flash a second
+        // busy message on top of the spinner status.
+        let _started = self.start_curation_worker(
             "viewr-trash-move",
             context,
             move || CurationCompletion::Trash {
@@ -3086,9 +3089,6 @@ impl App {
             },
             "Could not start the move to Trash. Nothing was moved.",
         );
-        if started {
-            self.show_toast("Moving file to Trash in the background");
-        }
     }
 
     fn start_curation_worker(
@@ -4336,30 +4336,56 @@ impl App {
             self.thumb_textures.remove(path);
             self.prefetch_schedule.allow(path);
         }
-        if let Some(playlist) = &mut self.playlist {
-            playlist.remove_paths(removed, old_index);
-            if playlist.files.is_empty() {
-                self.cancel_pending_image_load();
-                self.session.selected_path = None;
-                self.invalidate_displayed_image();
-            } else {
-                if playlist.visible_len() == 0 {
-                    self.cancel_pending_image_load();
-                    self.session.selected_path = None;
-                    self.invalidate_displayed_image();
-                    return;
-                }
-                let next_path = playlist.files[playlist.index].clone();
-                self.session.selected_path = Some(next_path.clone());
-                self.transform = Transform::default();
-                self.spawn_image_load(next_path);
-                self.kick_prefetch();
-            }
-        } else {
+        let Some(playlist) = self.playlist.as_mut() else {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
+            return;
+        };
+
+        // Prefer the image the user is already looking at. Trash may finish after
+        // they navigated away; never yank them back to the deleted item's slot.
+        let selected_before = self
+            .session
+            .selected_path
+            .clone()
+            .or_else(|| self.session.presented_path.clone());
+        let selected_was_removed = selected_before
+            .as_ref()
+            .is_some_and(|path| removed.iter().any(|removed_path| removed_path == path));
+
+        playlist.remove_paths(removed, old_index);
+        if playlist.files.is_empty() {
+            self.cancel_pending_image_load();
+            self.session.selected_path = None;
+            self.invalidate_displayed_image();
+            return;
         }
+        if playlist.visible_len() == 0 {
+            self.cancel_pending_image_load();
+            self.session.selected_path = None;
+            self.invalidate_displayed_image();
+            return;
+        }
+
+        if !selected_was_removed
+            && let Some(path) = selected_before
+            && let Some(index) = playlist.files.iter().position(|entry| entry == &path)
+            && playlist.select(index)
+        {
+            // Keep the image the user already moved to; only refresh playlist
+            // bookkeeping and neighbor work.
+            self.session.selected_path = Some(path);
+            self.kick_prefetch();
+            self.request_redraw();
+            return;
+        }
+
+        let next_path = playlist.files[playlist.index].clone();
+        self.session.selected_path = Some(next_path.clone());
+        self.transform = Transform::default();
+        self.spawn_image_load(next_path);
+        self.kick_prefetch();
     }
 
     fn undo_trash(&mut self) {

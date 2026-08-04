@@ -19,6 +19,15 @@ and organized by user-visible concern.
   entire neighbor cache first. Exact Undo still binds a receipt after the move
   when the platform can prove it.
 
+### Fixed
+
+- Finishing Trash no longer forces navigation when the user already moved to
+  another surviving image while the move ran. The playlist still drops the
+  deleted path, but the current selection is preserved when it was not removed.
+- Delete no longer flashes a second busy toast on top of the top-bar spinner
+  status. In-progress Trash uses the persistent operation status; outcome toasts
+  still report success or failure.
+
 ### Changed
 
 - The third-party license inventory is plain text (`THIRD_PARTY_LICENSES.txt`)

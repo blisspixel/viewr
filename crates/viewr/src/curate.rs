@@ -383,15 +383,18 @@ impl GuardedActionError {
 /// Prefers the slot that previously held `old_index` (the image that "took the
 /// place" of a deleted one). Clamps when the list shrinks past the end.
 #[must_use]
+/// Choose the catalog index to present after `removed` paths leave the playlist.
+///
+/// `old_index` is the pre-removal catalog index of the deleted selection. Callers
+/// that already moved selection elsewhere should not use this helper to force
+/// navigation; they should keep the surviving selection path instead.
 pub fn index_after_removals(files: &[PathBuf], old_index: usize, removed: &[PathBuf]) -> usize {
     if files.is_empty() {
         return 0;
     }
-    let remove: HashSet<&Path> = removed.iter().map(PathBuf::as_path).collect();
-    // Count how many removed entries sat strictly before old_index in the
-    // pre-removal ordering is unknown here; callers pass the post-removal list.
-    // We only clamp the previous index into the new range.
-    let _ = remove;
+    // Post-removal list only: clamping lands on the image that filled the deleted
+    // slot, or the new last image when the deleted selection was the end.
+    let _ = removed;
     old_index.min(files.len().saturating_sub(1))
 }
 

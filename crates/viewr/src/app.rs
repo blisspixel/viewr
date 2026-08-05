@@ -86,7 +86,9 @@ use crate::save_state::{
 use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
-use crate::work_currency::{loaded_work_is_current, presented_work_is_current};
+#[cfg(target_os = "windows")]
+use crate::work_currency::loaded_work_is_current;
+use crate::work_currency::presented_work_is_current;
 
 /// Start viewr: create the event loop and run the application to completion.
 ///

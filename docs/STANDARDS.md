@@ -92,18 +92,20 @@ of as dependency-only packages. The remaining exclusions are exact source paths,
 not basename patterns, so similarly named integration tests cannot be removed by
 this filename filter:
 
-- `app.rs`: windowing and event-loop integration mixed with pure helpers that
-  still need extraction under the v0.2 roadmap
+- `app.rs`: windowing, event-loop orchestration, worker ownership, and dialogs.
+  Pure policy for work currency, entry scan, recovery copy, concurrent work,
+  crop recovery, keyboard routing, presentation, curation, rating, and save lives
+  in covered private modules. Remaining free helpers in `app` are thin adapters
+  over platform APIs rather than unowned domain matrices.
 - `gpu.rs`: device, surface, texture, pipeline, and frame-lifecycle integration;
   standalone image and descriptor decisions live in covered private modules
 - `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
 - `worker_limit.rs`: OS Job Object / process-group glue
-- `error.rs` and both workspace `main.rs` files: entry/error surfaces, including a
-  small amount of pure parsing still tracked for extraction
+- `error.rs` and both workspace `main.rs` files: entry and process surfaces
 
-The whole-file exclusions are acknowledged debt, not a claim that every excluded
-line is untestable. Their pure helpers retain direct unit tests, but those lines do
-not count toward the percentage until they move behind covered seams. Everything
+The whole-file exclusions are intentional native and orchestration shells, not
+silent gaps. Their pure decisions retain direct unit tests in covered modules.
+Excluded line count does not dilute the owned-logic floor. Everything
 else is in the coverage floor. This includes the `ui.rs` egui/AccessKit adapter,
 the pure `chrome` projection, and the CPU-only `gpu_image` sizing, mip, preview,
 and upload-selection policy. It also includes `gpu_policy` surface selection,

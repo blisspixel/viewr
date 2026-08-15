@@ -136,7 +136,7 @@ fn run_internal(
     // A desktop viewer that cannot reach a window says so before starting the
     // event loop, instead of aborting inside the dynamic loader.
     crate::startup::preflight().map_err(Error::Launch)?;
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+    let event_loop = build_event_loop()?;
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
     let event_proxy = event_loop.create_proxy();
@@ -255,6 +255,36 @@ fn run_internal(
         .unwrap_or_else(|| Err("performance probe exited before completion".into()))
         .map(Some)
         .map_err(Error::Platform)
+}
+
+/// Create the event loop, pinned to the backend viewr resolved for this host.
+///
+/// Pinning matters when `WAYLAND_DISPLAY` survives from an earlier session:
+/// winit would bind Wayland and fail, while the X server named by `DISPLAY` is
+/// running. A failure is reported as one packaged sentence with no path from
+/// the machine that built viewr.
+fn build_event_loop() -> Result<EventLoop<UserEvent>, Error> {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::wayland::EventLoopBuilderExtWayland as _;
+        use winit::platform::x11::EventLoopBuilderExtX11 as _;
+
+        match crate::startup::preferred_backend() {
+            Some(crate::startup::DisplaySession::X11) => {
+                builder.with_x11();
+            }
+            Some(crate::startup::DisplaySession::Wayland) => {
+                builder.with_wayland();
+            }
+            _ => {}
+        }
+    }
+    builder.build().map_err(|error| {
+        Error::Launch(crate::startup::host_event_loop_failure_message(
+            &error.to_string(),
+        ))
+    })
 }
 
 /// Application-level events delivered from native platform integrations.
@@ -5056,10 +5086,9 @@ impl ApplicationHandler<UserEvent> for App {
             }
             Err(e) => {
                 log::error!("failed to initialize gpu: {e}");
-                self.startup_failure = Some(Error::Launch(crate::startup::gpu_failure_message(
-                    &e.to_string(),
-                    cfg!(target_os = "linux"),
-                )));
+                self.startup_failure = Some(Error::Launch(
+                    crate::startup::host_gpu_failure_message(&e.to_string()),
+                ));
                 event_loop.exit();
             }
         }

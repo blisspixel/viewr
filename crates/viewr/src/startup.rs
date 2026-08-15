@@ -2,14 +2,16 @@
 //!
 //! A desktop viewer that cannot open a window must say so on stderr with a
 //! non-zero exit rather than aborting inside a dynamic loader or exiting
-//! quietly. Session detection, the required-library table, and every message
-//! are pure so they can be tested without a display. Only the dynamic-library
-//! probe touches the platform.
+//! quietly. Session detection, the required-library tables, backend selection,
+//! and every message are pure so they can be tested without a display. Only the
+//! dynamic-library probe and the environment reads touch the platform.
 
 #[cfg(target_os = "linux")]
 pub(crate) use unix_desktop::{
-    DisplaySession, RequiredLibrary, detect_session, fallback_session, headless_message,
-    missing_library_message, required_libraries, window_readiness_report,
+    DisplaySession, RequiredLibrary, WindowSupport, compositor_missing_message, detect_session,
+    event_loop_failure_message, fallback_session, gpu_advice, gpu_runtime_libraries,
+    headless_message, missing_library_message, required_libraries, wayland_socket_path,
+    window_readiness_report,
 };
 
 /// Result of the doctor window-presentation section.
@@ -25,23 +27,14 @@ pub(crate) struct WindowReadiness {
 const SURFACE_NOTE: &str =
     "[note] a GPU surface is proven only when viewr opens a window, not by doctor";
 
+/// Advice for a failed surface on a platform whose graphics stack is linked.
+#[cfg(any(not(target_os = "linux"), test))]
+const NATIVE_GPU_ADVICE: &str =
+    "Update the graphics driver for this display and run viewr again.\n";
+
 /// Launch-time message when the window exists but no GPU surface could be made.
-pub(crate) fn gpu_failure_message(detail: &str, linux: bool) -> String {
-    let mut message = format!(
-        "cannot present images on this display: {detail}\n\
-This usually means the session has no working GPU driver or software renderer.\n"
-    );
-    if linux {
-        message.push_str(
-            "Install working GPU drivers, or the Mesa software renderer:\n  \
-Debian or Ubuntu: sudo apt install libgl1-mesa-dri\n  \
-Fedora or RHEL: sudo dnf install mesa-dri-drivers\n  \
-Arch: sudo pacman -S mesa\n",
-        );
-    } else {
-        message.push_str("Update the graphics driver for this display and run viewr again.\n");
-    }
-    message
+pub(crate) fn gpu_failure_message(detail: &str, advice: &str) -> String {
+    format!("cannot present images on this display: {detail}\n{advice}")
 }
 
 /// Doctor window-presentation section for platforms with a linked window system.
@@ -58,39 +51,62 @@ pub(crate) fn native_window_readiness(platform: &str) -> WindowReadiness {
 
 /// Session variables that decide which windowing backend the process uses.
 #[cfg(target_os = "linux")]
-fn session_environment() -> (Option<String>, Option<String>, Option<String>) {
+fn session_environment() -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     (
         std::env::var("WINIT_UNIX_BACKEND").ok(),
         std::env::var("WAYLAND_DISPLAY").ok(),
         std::env::var("DISPLAY").ok(),
+        std::env::var("XDG_RUNTIME_DIR").ok(),
     )
 }
 
-/// Current session as seen through the process environment.
+/// Whether `WAYLAND_DISPLAY` names a compositor socket that exists.
 #[cfg(target_os = "linux")]
-pub(crate) fn current_session() -> DisplaySession {
-    let (backend, wayland, x11) = session_environment();
-    detect_session(backend.as_deref(), wayland.as_deref(), x11.as_deref())
+fn wayland_compositor_reachable(wayland_display: Option<&str>, runtime_dir: Option<&str>) -> bool {
+    wayland_socket_path(wayland_display, runtime_dir)
+        .is_some_and(|socket| std::path::Path::new(&socket).exists())
 }
 
-/// The session viewr will actually present through, and the first library it
-/// cannot load.
+/// The backend viewr will present through, and what that backend is missing.
 ///
-/// When the preferred backend is incomplete but the other one is fully
-/// installed, winit starts on that one, so the report follows it rather than
-/// blocking a launch that works.
+/// A Wayland variable whose compositor is not running resolves to X11 when an X
+/// server is available, and a backend whose libraries are incomplete falls back
+/// to the other one when that is complete. Launch and doctor share this result
+/// so they never disagree about which backend runs.
 #[cfg(target_os = "linux")]
-pub(crate) fn resolve_window_support() -> (DisplaySession, Option<&'static RequiredLibrary>) {
-    let session = current_session();
-    let missing = first_missing_library(session);
-    if missing.is_some() {
-        let (backend, wayland, x11) = session_environment();
+pub(crate) fn resolve_window_support() -> WindowSupport {
+    let (backend, wayland, x11, runtime_dir) = session_environment();
+    let reachable = wayland_compositor_reachable(wayland.as_deref(), runtime_dir.as_deref());
+    let compositor_unreachable =
+        wayland.as_deref().is_some_and(|value| !value.is_empty()) && !reachable;
+    let session = detect_session(
+        backend.as_deref(),
+        wayland.as_deref(),
+        x11.as_deref(),
+        reachable,
+    );
+    let mut missing_library = first_missing_library(session);
+    let mut session = session;
+    if missing_library.is_some() {
         let fallback = fallback_session(backend.as_deref(), wayland.as_deref(), x11.as_deref());
         if fallback != DisplaySession::None && first_missing_library(fallback).is_none() {
-            return (fallback, None);
+            session = fallback;
+            missing_library = None;
         }
     }
-    (session, missing)
+    let (egl, vulkan) = gpu_runtime_present();
+    WindowSupport {
+        session,
+        missing_library,
+        compositor_unreachable,
+        egl,
+        vulkan,
+    }
 }
 
 /// First required library the dynamic loader cannot resolve for this session.
@@ -101,8 +117,16 @@ pub(crate) fn first_missing_library(session: DisplaySession) -> Option<&'static 
         .find(|library| !library.sonames.iter().copied().any(library_loads))
 }
 
+/// Whether the EGL and Vulkan runtimes wgpu can use are installed.
+#[cfg(target_os = "linux")]
+pub(crate) fn gpu_runtime_present() -> (bool, bool) {
+    let loadable = |library: &RequiredLibrary| library.sonames.iter().copied().any(library_loads);
+    let runtimes = gpu_runtime_libraries();
+    (loadable(&runtimes[0]), loadable(&runtimes[1]))
+}
+
 /// Ask the dynamic loader whether a soname resolves, using the same search the
-/// windowing stack performs later.
+/// windowing and graphics stacks perform later.
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)] // dlopen/dlclose is the only way to answer the loader question
 fn library_loads(soname: &str) -> bool {
@@ -121,11 +145,70 @@ fn library_loads(soname: &str) -> bool {
     true
 }
 
+/// The backend the event loop should be pinned to, when viewr chose one.
+///
+/// `None` leaves winit's own selection alone, which is correct when the user
+/// set `WINIT_UNIX_BACKEND` or when no session is reachable.
+#[cfg(target_os = "linux")]
+pub(crate) fn preferred_backend() -> Option<DisplaySession> {
+    let (backend, ..) = session_environment();
+    if backend.is_some_and(|value| matches!(value.trim(), "x11" | "wayland")) {
+        return None;
+    }
+    match resolve_window_support().session {
+        DisplaySession::None => None,
+        session => Some(session),
+    }
+}
+
+/// Complete stderr message for a GPU surface failure on this host.
+pub(crate) fn host_gpu_failure_message(detail: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let (egl, vulkan) = gpu_runtime_present();
+        gpu_failure_message(detail, &gpu_advice(egl, vulkan))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        gpu_failure_message(detail, NATIVE_GPU_ADVICE)
+    }
+}
+
+/// Complete stderr message for an event loop that could not start.
+pub(crate) fn host_event_loop_failure_message(detail: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        event_loop_failure_message(detail, resolve_window_support().compositor_unreachable)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        format!("cannot open a window: {detail}")
+    }
+}
+
+/// Window-presentation readiness for the current platform.
+pub(crate) fn host_window_readiness() -> WindowReadiness {
+    #[cfg(target_os = "linux")]
+    {
+        let support = resolve_window_support();
+        window_readiness_report(&support)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        native_window_readiness(match std::env::consts::OS {
+            "windows" => "Windows",
+            "macos" => "macOS",
+            other => other,
+        })
+    }
+}
+
 /// Check that this process can reach a window before starting the event loop.
 ///
 /// # Errors
-/// Returns a complete, actionable message when no desktop session is reachable
-/// or a windowing library the backend loads dynamically is not installed.
+/// Returns a complete, actionable message when no desktop session is reachable,
+/// a windowing library the backend loads dynamically is not installed, or no
+/// graphics runtime exists for wgpu to create a surface with.
 #[allow(
     clippy::unnecessary_wraps,
     reason = "platforms without a dynamic windowing preflight share one signature"
@@ -133,11 +216,15 @@ fn library_loads(soname: &str) -> bool {
 pub(crate) fn preflight() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let (session, missing) = resolve_window_support();
-        if session == DisplaySession::None {
-            return Err(headless_message());
+        let support = resolve_window_support();
+        if support.session == DisplaySession::None {
+            return Err(if support.compositor_unreachable {
+                compositor_missing_message()
+            } else {
+                headless_message()
+            });
         }
-        if let Some(library) = missing {
+        if let Some(library) = support.missing_library {
             return Err(missing_library_message(library));
         }
     }
@@ -154,10 +241,25 @@ mod unix_desktop {
 
     use super::{SURFACE_NOTE, WindowReadiness};
 
+    /// Everything the launch and doctor paths need to agree on for this host.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct WindowSupport {
+        /// The backend viewr will actually use.
+        pub(crate) session: DisplaySession,
+        /// First windowing library the loader cannot resolve for that backend.
+        pub(crate) missing_library: Option<&'static RequiredLibrary>,
+        /// `WAYLAND_DISPLAY` names a compositor socket that does not exist.
+        pub(crate) compositor_unreachable: bool,
+        /// `libEGL` is installed, so wgpu's GL backend can initialize.
+        pub(crate) egl: bool,
+        /// `libvulkan` is installed, so wgpu's Vulkan backend can initialize.
+        pub(crate) vulkan: bool,
+    }
+
     /// Which windowing backend the process will use on a Unix desktop.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) enum DisplaySession {
-        /// `WAYLAND_DISPLAY` names a compositor.
+        /// `WAYLAND_DISPLAY` names a compositor that is running.
         Wayland,
         /// `DISPLAY` names an X server.
         X11,
@@ -176,8 +278,9 @@ mod unix_desktop {
         }
     }
 
-    /// A shared library the windowing stack loads at runtime rather than at link
-    /// time, so a missing package is invisible to `ldd` until a window is created.
+    /// A shared library the windowing or graphics stack loads at runtime rather
+    /// than at link time, so a missing package is invisible to `ldd` until a
+    /// window or a GPU surface is created.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct RequiredLibrary {
         /// What the library is used for, in user words.
@@ -224,16 +327,66 @@ mod unix_desktop {
         arch: "wayland",
     };
 
+    /// wgpu's GL backend loads EGL at run time; without it that backend cannot
+    /// initialize, even when Mesa's DRI drivers are installed.
+    const EGL: RequiredLibrary = RequiredLibrary {
+        purpose: "the OpenGL backend, including Mesa software rendering",
+        sonames: &["libEGL.so.1", "libEGL.so"],
+        debian: "libegl1 libegl-mesa0",
+        fedora: "mesa-libEGL",
+        arch: "mesa",
+    };
+
+    /// wgpu's Vulkan backend loads the loader at run time and still needs an
+    /// installed driver behind it.
+    const VULKAN: RequiredLibrary = RequiredLibrary {
+        purpose: "the Vulkan backend",
+        sonames: &["libvulkan.so.1", "libvulkan.so"],
+        debian: "mesa-vulkan-drivers",
+        fedora: "mesa-vulkan-drivers",
+        arch: "vulkan-swrast",
+    };
+
     const X11_LIBRARIES: &[RequiredLibrary] = &[XKBCOMMON, XKBCOMMON_X11, XLIB];
     const WAYLAND_LIBRARIES: &[RequiredLibrary] = &[XKBCOMMON, WAYLAND_CLIENT];
+    const GPU_RUNTIME_LIBRARIES: &[RequiredLibrary] = &[EGL, VULKAN];
+
+    /// The graphics runtimes wgpu can initialize on this platform.
+    pub(crate) const fn gpu_runtime_libraries() -> &'static [RequiredLibrary] {
+        GPU_RUNTIME_LIBRARIES
+    }
+
+    /// Resolve the socket `WAYLAND_DISPLAY` names, per the Wayland protocol.
+    ///
+    /// An absolute value is the socket itself. A bare name is relative to
+    /// `XDG_RUNTIME_DIR`, and without that directory there is nothing to reach.
+    pub(crate) fn wayland_socket_path(
+        wayland_display: Option<&str>,
+        runtime_dir: Option<&str>,
+    ) -> Option<String> {
+        let display = wayland_display
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        if display.starts_with('/') {
+            return Some(display.to_owned());
+        }
+        let directory = runtime_dir
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?
+            .trim_end_matches('/');
+        Some(format!("{directory}/{display}"))
+    }
 
     /// Resolve the session the windowing stack will use.
     ///
-    /// `WINIT_UNIX_BACKEND` overrides automatic selection, matching winit.
+    /// `WINIT_UNIX_BACKEND` overrides automatic selection, matching winit. A
+    /// Wayland variable whose compositor is not running is not a session, so an
+    /// available X server wins instead of failing the launch.
     pub(crate) fn detect_session(
         backend_override: Option<&str>,
         wayland_display: Option<&str>,
         x11_display: Option<&str>,
+        wayland_reachable: bool,
     ) -> DisplaySession {
         let wayland = wayland_display.is_some_and(|value| !value.is_empty());
         let x11 = x11_display.is_some_and(|value| !value.is_empty());
@@ -241,7 +394,7 @@ mod unix_desktop {
             Some("x11") if x11 => DisplaySession::X11,
             Some("wayland") if wayland => DisplaySession::Wayland,
             Some("x11" | "wayland") => DisplaySession::None,
-            _ if wayland => DisplaySession::Wayland,
+            _ if wayland && wayland_reachable => DisplaySession::Wayland,
             _ if x11 => DisplaySession::X11,
             _ => DisplaySession::None,
         }
@@ -259,8 +412,8 @@ mod unix_desktop {
         if backend_override.is_some_and(|value| matches!(value.trim(), "x11" | "wayland")) {
             return DisplaySession::None;
         }
-        match detect_session(None, wayland_display, x11_display) {
-            DisplaySession::Wayland => detect_session(Some("x11"), None, x11_display),
+        match detect_session(None, wayland_display, x11_display, true) {
+            DisplaySession::Wayland => detect_session(Some("x11"), None, x11_display, false),
             DisplaySession::X11 | DisplaySession::None => DisplaySession::None,
         }
     }
@@ -276,7 +429,7 @@ mod unix_desktop {
         }
     }
 
-    /// Package-manager guidance for one missing library, indented for a report.
+    /// Package-manager guidance for one library, indented for a report.
     fn install_hint(library: &RequiredLibrary, indent: &str) -> String {
         let mut hint = String::new();
         for (distribution, command, package) in [
@@ -308,23 +461,105 @@ unset).\nviewr is a desktop viewer and needs a running desktop session. `viewr d
             .to_owned()
     }
 
+    /// Launch-time message when `WAYLAND_DISPLAY` points at nothing.
+    pub(crate) fn compositor_missing_message() -> String {
+        "cannot open a window: WAYLAND_DISPLAY names a compositor socket that does not exist, and \
+DISPLAY is unset.\nStart a desktop session, or unset WAYLAND_DISPLAY when the session is X11. \
+`viewr doctor`, `viewr benchmark`, and `viewr version` still work from a terminal."
+            .to_owned()
+    }
+
+    /// Keep a platform error's sentence and drop build-machine paths from it.
+    ///
+    /// Dependency errors embed the source file they were raised in, which is a
+    /// path from the machine that built viewr. It means nothing to the reader.
+    fn sanitize_platform_detail(detail: &str) -> String {
+        let sentence = detail
+            .rsplit(": ")
+            .find(|segment| {
+                !segment.is_empty() && !segment.contains('/') && !segment.contains('\\')
+            })
+            .unwrap_or("the platform reported no reason");
+        sentence.trim().chars().take(200).collect()
+    }
+
+    /// Launch-time message for an event loop that refused to start.
+    pub(crate) fn event_loop_failure_message(detail: &str, compositor_unreachable: bool) -> String {
+        let reason = sanitize_platform_detail(detail);
+        if compositor_unreachable {
+            return format!(
+                "cannot open a window: WAYLAND_DISPLAY names a compositor socket that does not \
+exist ({reason}).\nUnset WAYLAND_DISPLAY to use the X11 session named by DISPLAY, or start a \
+desktop session.\n"
+            );
+        }
+        format!(
+            "cannot open a window: the desktop session refused to start an event loop \
+({reason}).\nCheck that this session is a running desktop, then run viewr again.\n"
+        )
+    }
+
+    /// What to do about a GPU surface that could not be created.
+    ///
+    /// Naming a package that is already installed wastes the reader's time, so
+    /// an installed runtime moves the advice to the session itself.
+    pub(crate) fn gpu_advice(egl: bool, vulkan: bool) -> String {
+        if egl || vulkan {
+            let present = match (egl, vulkan) {
+                (true, true) => "EGL and Vulkan are",
+                (true, false) => "EGL is",
+                _ => "Vulkan is",
+            };
+            return format!(
+                "{present} installed, so the graphics runtime is present and this display cannot \
+present through it.\nA forwarded, nested, or virtual X session often cannot: try a local desktop \
+session, or check that the display exposes EGL or a Vulkan driver.\n"
+            );
+        }
+        let mut advice = String::from(
+            "viewr renders through Vulkan or OpenGL, and neither runtime is installed here.\n\
+Install one of them, then run viewr again:\n",
+        );
+        for library in GPU_RUNTIME_LIBRARIES {
+            let _ = writeln!(advice, "  {}:", library.purpose);
+            advice.push_str(&install_hint(library, "    "));
+        }
+        advice
+    }
+
     /// Build the doctor window-presentation section for a Unix desktop.
-    pub(crate) fn window_readiness_report(
-        session: DisplaySession,
-        missing: Option<&RequiredLibrary>,
-    ) -> WindowReadiness {
+    pub(crate) fn window_readiness_report(support: &WindowSupport) -> WindowReadiness {
         let mut lines = Vec::new();
         let mut critical_ok = true;
-        match session {
+        match support.session {
             DisplaySession::None => {
-                lines.push(format!("[WARN] display session: {}", session.summary()));
+                if support.compositor_unreachable {
+                    lines.push(
+                        "[WARN] display session: WAYLAND_DISPLAY names a compositor that is not running"
+                            .to_owned(),
+                    );
+                } else {
+                    lines.push(format!(
+                        "[WARN] display session: {}",
+                        support.session.summary()
+                    ));
+                }
                 lines.push(
                     "       viewr cannot open a window here; CLI subcommands still work".to_owned(),
                 );
             }
             DisplaySession::Wayland | DisplaySession::X11 => {
-                lines.push(format!("[ok]   display session: {}", session.summary()));
-                if let Some(library) = missing {
+                lines.push(format!(
+                    "[ok]   display session: {}",
+                    support.session.summary()
+                ));
+                if support.compositor_unreachable {
+                    lines.push(
+                        "[note] WAYLAND_DISPLAY names a compositor that is not running; using X11"
+                            .to_owned(),
+                    );
+                }
+                if let Some(library) = support.missing_library {
                     critical_ok = false;
                     lines.push(format!(
                         "[FAIL] windowing library: {} is missing ({})",
@@ -332,7 +567,7 @@ unset).\nviewr is a desktop viewer and needs a running desktop session. `viewr d
                     ));
                     lines.extend(install_hint(library, "       ").lines().map(str::to_owned));
                 } else {
-                    let present: Vec<&str> = required_libraries(session)
+                    let present: Vec<&str> = required_libraries(support.session)
                         .iter()
                         .map(|library| library.sonames[0])
                         .collect();
@@ -341,48 +576,134 @@ unset).\nviewr is a desktop viewer and needs a running desktop session. `viewr d
                         present.join(", ")
                     ));
                 }
+                lines.extend(gpu_runtime_lines(
+                    support.egl,
+                    support.vulkan,
+                    &mut critical_ok,
+                ));
             }
         }
         lines.push(SURFACE_NOTE.to_owned());
         WindowReadiness { lines, critical_ok }
     }
 
+    /// Report the graphics runtimes, failing when neither backend can exist.
+    fn gpu_runtime_lines(egl: bool, vulkan: bool, critical_ok: &mut bool) -> Vec<String> {
+        if !egl && !vulkan {
+            *critical_ok = false;
+            let mut lines = vec![
+                "[FAIL] gpu runtime: no Vulkan or OpenGL runtime found, so no GPU surface can be created"
+                    .to_owned(),
+            ];
+            for library in GPU_RUNTIME_LIBRARIES {
+                lines.push(format!("       {}:", library.purpose));
+                lines.extend(
+                    install_hint(library, "         ")
+                        .lines()
+                        .map(str::to_owned),
+                );
+            }
+            return lines;
+        }
+        let state = match (egl, vulkan) {
+            (true, true) => "EGL and Vulkan present",
+            (true, false) => "EGL present, Vulkan absent",
+            _ => "Vulkan present, EGL absent",
+        };
+        vec![format!("[ok]   gpu runtime: {state}")]
+    }
+
     #[cfg(test)]
     mod tests {
         use super::{
-            DisplaySession, WAYLAND_CLIENT, XKBCOMMON_X11, detect_session, fallback_session,
-            headless_message, install_hint, missing_library_message, required_libraries,
-            window_readiness_report,
+            DisplaySession, EGL, RequiredLibrary, VULKAN, WAYLAND_CLIENT, WindowSupport,
+            XKBCOMMON_X11, compositor_missing_message, detect_session, event_loop_failure_message,
+            fallback_session, gpu_advice, gpu_runtime_libraries, headless_message, install_hint,
+            missing_library_message, required_libraries, sanitize_platform_detail,
+            wayland_socket_path, window_readiness_report,
         };
 
+        fn support(
+            session: DisplaySession,
+            missing_library: Option<&'static RequiredLibrary>,
+            compositor_unreachable: bool,
+            egl: bool,
+            vulkan: bool,
+        ) -> WindowSupport {
+            WindowSupport {
+                session,
+                missing_library,
+                compositor_unreachable,
+                egl,
+                vulkan,
+            }
+        }
+
         #[test]
-        fn session_detection_prefers_wayland_and_honors_the_backend_override() {
+        fn session_detection_prefers_a_reachable_compositor_and_honors_the_override() {
             assert_eq!(
-                detect_session(None, Some("wayland-0"), Some(":0")),
+                detect_session(None, Some("wayland-0"), Some(":0"), true),
                 DisplaySession::Wayland
             );
-            assert_eq!(detect_session(None, None, Some(":6")), DisplaySession::X11);
+            // A Wayland variable with no compositor behind it is not a session,
+            // so an available X server runs instead of failing the launch.
             assert_eq!(
-                detect_session(None, Some(""), Some("")),
-                DisplaySession::None
-            );
-            assert_eq!(detect_session(None, None, None), DisplaySession::None);
-            assert_eq!(
-                detect_session(Some("x11"), Some("wayland-0"), Some(":0")),
+                detect_session(None, Some("wayland-0"), Some(":0"), false),
                 DisplaySession::X11
             );
             assert_eq!(
-                detect_session(Some("wayland"), None, Some(":0")),
+                detect_session(None, Some("wayland-0"), None, false),
                 DisplaySession::None
             );
             assert_eq!(
-                detect_session(Some("x11"), Some("wayland-0"), None),
-                DisplaySession::None
-            );
-            assert_eq!(
-                detect_session(Some("other"), None, Some(":0")),
+                detect_session(None, None, Some(":6"), false),
                 DisplaySession::X11
             );
+            assert_eq!(
+                detect_session(None, Some(""), Some(""), false),
+                DisplaySession::None
+            );
+            assert_eq!(
+                detect_session(None, None, None, false),
+                DisplaySession::None
+            );
+            // An explicit backend is respected even when it cannot work, so the
+            // failure names the choice the user made.
+            assert_eq!(
+                detect_session(Some("wayland"), Some("wayland-0"), Some(":0"), false),
+                DisplaySession::Wayland
+            );
+            assert_eq!(
+                detect_session(Some("x11"), Some("wayland-0"), Some(":0"), true),
+                DisplaySession::X11
+            );
+            assert_eq!(
+                detect_session(Some("wayland"), None, Some(":0"), false),
+                DisplaySession::None
+            );
+            assert_eq!(
+                detect_session(Some("other"), None, Some(":0"), false),
+                DisplaySession::X11
+            );
+        }
+
+        #[test]
+        fn the_wayland_socket_follows_the_protocol_rules() {
+            assert_eq!(
+                wayland_socket_path(Some("wayland-0"), Some("/run/user/1000")),
+                Some("/run/user/1000/wayland-0".to_owned())
+            );
+            assert_eq!(
+                wayland_socket_path(Some("wayland-0"), Some("/run/user/1000/")),
+                Some("/run/user/1000/wayland-0".to_owned())
+            );
+            assert_eq!(
+                wayland_socket_path(Some("/tmp/custom.sock"), None),
+                Some("/tmp/custom.sock".to_owned())
+            );
+            assert_eq!(wayland_socket_path(Some("wayland-0"), None), None);
+            assert_eq!(wayland_socket_path(Some(""), Some("/run/user/1000")), None);
+            assert_eq!(wayland_socket_path(None, Some("/run/user/1000")), None);
         }
 
         #[test]
@@ -391,7 +712,6 @@ unset).\nviewr is a desktop viewer and needs a running desktop session. `viewr d
                 fallback_session(None, Some("wayland-0"), Some(":0")),
                 DisplaySession::X11
             );
-            // Nothing to fall back to.
             assert_eq!(
                 fallback_session(None, Some("wayland-0"), None),
                 DisplaySession::None
@@ -401,7 +721,6 @@ unset).\nviewr is a desktop viewer and needs a running desktop session. `viewr d
                 DisplaySession::None
             );
             assert_eq!(fallback_session(None, None, None), DisplaySession::None);
-            // An explicit backend choice is not second-guessed.
             assert_eq!(
                 fallback_session(Some("wayland"), Some("wayland-0"), Some(":0")),
                 DisplaySession::None
@@ -429,6 +748,12 @@ unset).\nviewr is a desktop viewer and needs a running desktop session. `viewr d
                 ["libxkbcommon.so.0", "libwayland-client.so.0"]
             );
             assert!(required_libraries(DisplaySession::None).is_empty());
+
+            let runtimes: Vec<&str> = gpu_runtime_libraries()
+                .iter()
+                .map(|library| library.sonames[0])
+                .collect();
+            assert_eq!(runtimes, ["libEGL.so.1", "libvulkan.so.1"]);
         }
 
         #[test]
@@ -448,21 +773,77 @@ needs it for X11 keyboard layout handling."
         }
 
         #[test]
-        fn a_headless_host_is_told_what_still_works() {
-            let message = headless_message();
-            assert!(message.contains("no graphical session was found"));
-            assert!(message.contains("viewr doctor"));
+        fn a_host_without_a_session_is_told_what_still_works() {
+            for message in [headless_message(), compositor_missing_message()] {
+                assert!(message.starts_with("cannot open a window: "));
+                assert!(message.contains("viewr doctor"));
+            }
+            assert!(compositor_missing_message().contains("unset WAYLAND_DISPLAY"));
+            assert!(headless_message().contains("no graphical session was found"));
         }
 
         #[test]
-        fn doctor_window_section_fails_only_when_a_session_cannot_load_its_libraries() {
-            let ready = window_readiness_report(DisplaySession::X11, None);
+        fn platform_errors_keep_their_sentence_and_lose_the_build_machine_path() {
+            let winit = "os error at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:89: Could not find wayland compositor";
+            assert_eq!(
+                sanitize_platform_detail(winit),
+                "Could not find wayland compositor"
+            );
+            assert_eq!(sanitize_platform_detail("plain failure"), "plain failure");
+            assert_eq!(
+                sanitize_platform_detail("/only/a/path"),
+                "the platform reported no reason"
+            );
+            assert!(sanitize_platform_detail(&"x".repeat(500)).len() <= 200);
+
+            let wayland = event_loop_failure_message(winit, true);
+            assert!(!wayland.contains("/home/runner"));
+            assert!(!wayland.contains(".cargo"));
+            assert!(wayland.contains("Could not find wayland compositor"));
+            assert!(wayland.contains("Unset WAYLAND_DISPLAY"));
+
+            let other = event_loop_failure_message(winit, false);
+            assert!(!other.contains("/home/runner"));
+            assert!(other.contains("refused to start an event loop"));
+        }
+
+        #[test]
+        fn gpu_advice_stops_recommending_a_runtime_that_is_already_installed() {
+            let missing = gpu_advice(false, false);
+            assert!(missing.contains("neither runtime is installed here"));
+            assert!(missing.contains("sudo apt install libegl1 libegl-mesa0"));
+            assert!(missing.contains("sudo apt install mesa-vulkan-drivers"));
+            assert!(missing.contains("sudo dnf install mesa-libEGL"));
+            assert!(missing.contains("sudo pacman -S vulkan-swrast"));
+
+            for (egl, vulkan, expected) in [
+                (true, true, "EGL and Vulkan are installed"),
+                (true, false, "EGL is installed"),
+                (false, true, "Vulkan is installed"),
+            ] {
+                let advice = gpu_advice(egl, vulkan);
+                assert!(advice.contains(expected), "{egl} {vulkan}");
+                assert!(advice.contains("forwarded, nested, or virtual X session"));
+                assert!(!advice.contains("sudo apt install"));
+            }
+        }
+
+        #[test]
+        fn doctor_window_section_fails_when_this_host_cannot_present() {
+            let ready =
+                window_readiness_report(&support(DisplaySession::X11, None, false, true, true));
             assert!(ready.critical_ok);
             assert!(ready.lines[0].contains("display session: X11"));
             assert!(ready.lines[1].starts_with("[ok]   windowing libraries"));
-            assert!(ready.lines[1].contains("libxkbcommon-x11.so.0"));
+            assert!(ready.lines[2] == "[ok]   gpu runtime: EGL and Vulkan present");
 
-            let broken = window_readiness_report(DisplaySession::X11, Some(&XKBCOMMON_X11));
+            let broken = window_readiness_report(&support(
+                DisplaySession::X11,
+                Some(&XKBCOMMON_X11),
+                false,
+                true,
+                false,
+            ));
             assert!(!broken.critical_ok);
             assert!(
                 broken
@@ -476,15 +857,56 @@ needs it for X11 keyboard layout handling."
                     .iter()
                     .any(|line| line.contains("sudo apt install libxkbcommon-x11-0"))
             );
+            assert!(
+                broken
+                    .lines
+                    .iter()
+                    .any(|line| line == "[ok]   gpu runtime: EGL present, Vulkan absent")
+            );
 
-            let headless = window_readiness_report(DisplaySession::None, None);
+            // A session with no graphics runtime cannot present, and doctor
+            // stops calling that a healthy install.
+            let no_runtime =
+                window_readiness_report(&support(DisplaySession::X11, None, false, false, false));
+            assert!(!no_runtime.critical_ok);
+            assert!(
+                no_runtime
+                    .lines
+                    .iter()
+                    .any(|line| line.starts_with("[FAIL] gpu runtime: no Vulkan or OpenGL runtime"))
+            );
+            assert!(
+                no_runtime
+                    .lines
+                    .iter()
+                    .any(|line| line.contains("sudo apt install libegl1 libegl-mesa0"))
+            );
+
+            // A stale Wayland variable explains itself instead of contradicting
+            // the launch path.
+            let stale =
+                window_readiness_report(&support(DisplaySession::X11, None, true, true, false));
+            assert!(stale.critical_ok);
+            assert!(
+                stale
+                    .lines
+                    .iter()
+                    .any(|line| line.starts_with("[note] WAYLAND_DISPLAY names a compositor"))
+            );
+
+            let headless =
+                window_readiness_report(&support(DisplaySession::None, None, false, false, false));
             assert!(headless.critical_ok);
             assert!(headless.lines[0].starts_with("[WARN] display session: none"));
-            assert!(headless.lines[1].contains("CLI subcommands still work"));
+
+            let stale_headless =
+                window_readiness_report(&support(DisplaySession::None, None, true, true, true));
+            assert!(stale_headless.critical_ok);
+            assert!(stale_headless.lines[0].contains("compositor that is not running"));
 
             for report in [
-                window_readiness_report(DisplaySession::Wayland, None),
-                window_readiness_report(DisplaySession::None, None),
+                window_readiness_report(&support(DisplaySession::Wayland, None, false, true, true)),
+                window_readiness_report(&support(DisplaySession::None, None, false, true, true)),
             ] {
                 assert!(
                     report
@@ -493,48 +915,55 @@ needs it for X11 keyboard layout handling."
                         .is_some_and(|line| line.contains("proven only when viewr opens a window"))
                 );
             }
+
+            assert_eq!(EGL.sonames[0], "libEGL.so.1");
+            assert_eq!(VULKAN.sonames[0], "libvulkan.so.1");
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{gpu_failure_message, native_window_readiness};
-
-    #[test]
-    fn a_failed_surface_reports_itself_without_developer_logging() {
-        let linux = gpu_failure_message("create_surface: no enabled backend", true);
-        assert!(linux.starts_with("cannot present images on this display: create_surface:"));
-        assert!(linux.contains("no working GPU driver or software renderer"));
-        assert!(linux.contains("sudo apt install libgl1-mesa-dri"));
-
-        let other = gpu_failure_message("device request failed", false);
-        assert!(other.contains("device request failed"));
-        assert!(other.contains("Update the graphics driver"));
-        assert!(!other.contains("apt"));
-    }
+    use super::{NATIVE_GPU_ADVICE, gpu_failure_message, native_window_readiness};
 
     /// The loader probe and the launch decision, exercised on the real host.
     #[cfg(target_os = "linux")]
     #[test]
     fn the_launch_check_asks_the_loader_and_agrees_with_its_own_report() {
         use super::{
-            DisplaySession, current_session, library_loads, preflight, resolve_window_support,
+            DisplaySession, first_missing_library, gpu_runtime_present, library_loads,
+            preferred_backend, preflight, resolve_window_support,
         };
 
         assert!(library_loads("libc.so.6"));
         assert!(!library_loads("libviewr-does-not-exist.so.0"));
         assert!(!library_loads("interior\0nul.so"));
 
-        let (resolved, missing) = resolve_window_support();
-        // A fallback is reported only when it resolves every library it needs.
-        if missing.is_some() {
-            assert_eq!(resolved, current_session());
-        }
+        let support = resolve_window_support();
+        // A fallback is reported only when it resolves every library it needs,
+        // so a reported gap always belongs to the reported backend.
+        assert_eq!(
+            support.missing_library.is_some(),
+            first_missing_library(support.session).is_some()
+        );
         assert_eq!(
             preflight().is_ok(),
-            resolved != DisplaySession::None && missing.is_none()
+            support.session != DisplaySession::None && support.missing_library.is_none()
         );
+        assert_eq!(gpu_runtime_present(), (support.egl, support.vulkan));
+        assert_eq!(
+            preferred_backend().is_some(),
+            support.session != DisplaySession::None
+                && !std::env::var("WINIT_UNIX_BACKEND")
+                    .is_ok_and(|value| matches!(value.trim(), "x11" | "wayland"))
+        );
+    }
+
+    #[test]
+    fn a_failed_surface_reports_the_reason_and_its_advice() {
+        let message = gpu_failure_message("create_surface: no enabled backend", NATIVE_GPU_ADVICE);
+        assert!(message.starts_with("cannot present images on this display: create_surface:"));
+        assert!(message.contains("Update the graphics driver"));
     }
 
     #[test]

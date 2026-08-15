@@ -174,13 +174,26 @@ session needs:
 | X11 | `libxkbcommon.so.0`, `libxkbcommon-x11.so.0`, `libX11.so.6` | `libxkbcommon0 libxkbcommon-x11-0 libx11-6` | `libxkbcommon libxkbcommon-x11 libX11` | `libxkbcommon libxkbcommon-x11 libx11` |
 | Wayland | `libxkbcommon.so.0`, `libwayland-client.so.0` | `libxkbcommon0 libwayland-client0` | `libxkbcommon libwayland-client` | `libxkbcommon wayland` |
 
-Presenting images also needs a working GPU driver or the Mesa software renderer
-(`libgl1-mesa-dri` on Debian and Ubuntu, `mesa-dri-drivers` on Fedora and RHEL,
-`mesa` on Arch). Most desktop installations already have all of this.
+Presenting images needs one of the two graphics runtimes viewr renders through,
+also loaded at run time. Mesa's DRI drivers alone are not enough, because the
+OpenGL backend reaches them through EGL:
 
-`viewr doctor` checks the libraries for the current session and names the
-package to install when one is missing. Launching without them prints the same
-guidance and exits non-zero rather than aborting inside the dynamic loader.
+| Runtime | Library | Debian or Ubuntu | Fedora or RHEL | Arch |
+| --- | --- | --- | --- | --- |
+| OpenGL, including Mesa software rendering | `libEGL.so.1` | `libegl1 libegl-mesa0` | `mesa-libEGL` | `mesa` |
+| Vulkan | `libvulkan.so.1` plus an installed driver | `mesa-vulkan-drivers` | `mesa-vulkan-drivers` | `vulkan-swrast` |
+
+Most desktop installations already have all of this. Minimal containers, remote
+X hosts, and virtual machines often do not.
+
+`viewr doctor` checks the windowing libraries for the current session and both
+graphics runtimes, and names the package to install when one is missing.
+Launching without them prints the same guidance and exits non-zero rather than
+aborting inside the dynamic loader or failing without a reason.
+
+`WAYLAND_DISPLAY` left over from an earlier session names a compositor that is
+not running. viewr uses the X server named by `DISPLAY` in that case rather than
+failing, and says so in the doctor report.
 
 The installer registers `com.github.blisspixel.viewr.desktop` as an available image
 viewer. It never changes a default. To opt in for JPEG explicitly:
@@ -242,8 +255,8 @@ prints the reason on stderr and exits non-zero; developer logging is not
 required to see it.
 
 `bin/viewr-decode` is the isolated decode worker. viewr starts it and speaks a
-binary protocol over its standard input and output. Running it by hand prints
-one explanatory line and exits.
+binary protocol over its standard input and output. Running it by hand prints a
+short explanation and exits.
 
 Developers and maintainers should use the complete matrix in [VERIFY.md](VERIFY.md).
 Release publication is documented separately in [PUBLISHING.md](PUBLISHING.md).

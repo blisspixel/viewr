@@ -29,10 +29,13 @@ Status last verified on 2026-08-02:
   every asset.
 - [x] Publish and verify annotated tag `v0.1.1`, the patch release that makes a
   failed launch observable, under the same immutable 12-asset contract.
+- [x] Publish and verify annotated tag `v0.1.2`, the patch release that resolves
+  the windowing backend and reports the graphics runtime, under that same
+  contract.
 
 ## Pre-1.0 release procedure
 
-This is the procedure used for `v0.1.0` and repeated for the `v0.1.1` patch. An
+This is the procedure used for `v0.1.0` and repeated for each patch. An
 unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
@@ -46,8 +49,8 @@ production environment.
 5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 
    ```text
-   git tag -a v0.1.1 -m "viewr 0.1.1"
-   git push origin v0.1.1
+   git tag -a v0.1.2 -m "viewr 0.1.2"
+   git push origin v0.1.2
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -65,9 +68,9 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.1.1 --repo blisspixel/viewr
-gh release verify v0.1.1 --repo blisspixel/viewr
-gh attestation verify viewr-0.1.1-x86_64-pc-windows-msvc.zip \
+gh release view v0.1.2 --repo blisspixel/viewr
+gh release verify v0.1.2 --repo blisspixel/viewr
+gh attestation verify viewr-0.1.2-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
@@ -130,9 +133,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.1.1 is public, immutable, checksummed, and attested, and v0.1.0 remains
-  published with a known-issues note. Their executable archives are not
-  Authenticode-signed or Apple-notarized, so each release remains an
+- v0.1.2 is public, immutable, checksummed, and attested, and v0.1.1 and v0.1.0
+  remain published, the first with a known-issues note. Their executable archives
+  are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.
 - The foreground installer tools contact only the official GitHub repository after
   the user runs them. They do not create an updater service or add network access

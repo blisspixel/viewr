@@ -233,7 +233,7 @@ class DocumentationTests(unittest.TestCase):
         )
         sonames = re.findall(r'sonames: &\["([^"]+)"', startup)
         debian_packages = re.findall(r'debian: "([^"]+)"', startup)
-        self.assertEqual(len(sonames), 4)
+        self.assertEqual(len(sonames), 6)
         self.assertEqual(len(debian_packages), len(sonames))
 
         install = (REPOSITORY_ROOT / "docs/INSTALL.md").read_text(encoding="utf-8")
@@ -243,7 +243,7 @@ class DocumentationTests(unittest.TestCase):
         for package in debian_packages:
             with self.subTest(package=package):
                 self.assertIn(package, install)
-        self.assertIn("`viewr doctor` checks the libraries", install)
+        self.assertIn("`viewr doctor` checks the windowing libraries", install)
 
     def test_pre_one_version_path_builds_product_before_distribution(self) -> None:
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")

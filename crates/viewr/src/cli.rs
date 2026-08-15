@@ -459,23 +459,11 @@ pub fn doctor() -> bool {
 
 /// Window-presentation readiness for the current platform.
 ///
-/// Linux asks the dynamic loader the same question the windowing backend will
-/// ask later. Windows and macOS link their window systems, so doctor reports
-/// what it can and does not claim a window was created.
+/// Linux asks the dynamic loader the same questions the windowing and graphics
+/// stacks will ask later. Windows and macOS link their window systems, so
+/// doctor reports what it can and does not claim a window was created.
 fn window_readiness() -> crate::startup::WindowReadiness {
-    #[cfg(target_os = "linux")]
-    {
-        let (session, missing) = crate::startup::resolve_window_support();
-        crate::startup::window_readiness_report(session, missing)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        crate::startup::native_window_readiness(match std::env::consts::OS {
-            "windows" => "Windows",
-            "macos" => "macOS",
-            other => other,
-        })
-    }
+    crate::startup::host_window_readiness()
 }
 
 /// Report where the executable and its decode worker live.
@@ -596,12 +584,17 @@ fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Re
     writeln!(stdout, "{}", "-".repeat(48))?;
     if ok {
         writeln!(stdout, "doctor: critical checks passed")?;
+        // The last line a stranger reads must not imply more than was proven.
+        writeln!(
+            stdout,
+            "doctor: no window was opened here; run `viewr <path>` to see the picture or the exact failure"
+        )?;
     } else {
         writeln!(stdout, "doctor: one or more critical checks failed")?;
         if !readiness.critical_ok {
             writeln!(
                 stdout,
-                "doctor: this desktop session cannot open a viewr window until the library above is installed"
+                "doctor: this host cannot open a viewr window until the item above is installed"
             )?;
         }
     }

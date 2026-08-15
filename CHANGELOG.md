@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Fixed
+
+- A stale `WAYLAND_DISPLAY` no longer blocks a working X11 session. viewr now
+  resolves the backend itself: a Wayland variable whose compositor socket does
+  not exist is not a session, so the X server named by `DISPLAY` runs instead of
+  winit binding Wayland and failing. The event loop is pinned to the resolved
+  backend, and `doctor` reports the same resolution the launch uses.
+- A platform error that refuses the event loop is reported as one packaged
+  sentence. Dependency errors embed the source path of the machine that built
+  viewr, which meant nothing to the reader and looked like an unfinished build.
+  The sentence is kept and the path is dropped.
+- GPU failure advice no longer recommends packages that are already installed.
+  viewr renders through Vulkan or OpenGL, and its OpenGL backend reaches Mesa
+  through EGL, so `libgl1-mesa-dri` alone never fixed the failure. The message
+  now distinguishes a host with no graphics runtime, which names `libEGL` and
+  Vulkan packages per distribution, from a host that has one and still cannot
+  present, which points at the session instead.
+- `viewr doctor` reports both graphics runtimes and fails when a desktop session
+  has neither, because no GPU surface can be created there. Headless hosts stay
+  green so installers and CI keep working.
+- The last line of a passing `doctor` no longer reads as proof that viewer works.
+  It states that no window was opened and names the command that proves it.
+
+### Documentation
+
+- The installation guide lists the graphics runtimes viewr renders through, with
+  the package per distribution, and corrects the earlier claim that Mesa's DRI
+  drivers alone are enough. It also documents the stale-`WAYLAND_DISPLAY` rule.
+- The decode worker is described as printing a short explanation rather than one
+  line, matching what it prints.
+
 ## 0.1.1 - 2026-08-15
 
 ### Security
@@ -51,7 +84,7 @@ and organized by user-visible concern.
   and `viewr benchmark --fast` no longer run as if the argument were absent.
 - Running `viewr-decode` by hand no longer hangs waiting for a protocol frame
   that will never arrive. `--help`, `--version`, any argument, or an interactive
-  terminal prints one line explaining that viewr starts this worker, then exits.
+  terminal prints a short explanation that viewr starts this worker, then exits.
 - The Unix installer prints the `viewr doctor` report when the staged binaries
   fail it, so the missing desktop library is visible rather than swallowed.
 - Help examples use the path separator of the platform reading them.

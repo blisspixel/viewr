@@ -95,11 +95,13 @@ v1.0.0  Broadly recommended release
 
 **Immediate focus: v0.2 reliability architecture, followed by v0.3 display
 correctness and v0.4 file coherence.** Pure-policy seams and the owned-logic
-coverage floor are evidenced (90.18 percent lines under the CI llvm-cov
-contract). Before tagging v0.2.0, complete residual thin-native-glue judgment
-for the remaining whole-file exclusions and the full VERIFY.md gate. Preserve
-bounded job, thumbnail, prefetch, chrome, and GPU contracts. Do not start v0.3
-monitor/profile work that deepens unowned event-loop races.
+coverage floor are evidenced (90.11 percent lines under the CI llvm-cov
+contract, with the launch-prerequisite `startup` seam at 98.56 percent). Before
+tagging v0.2.0, complete residual thin-native-glue judgment for the remaining
+whole-file exclusions and the full VERIFY.md gate. Preserve bounded job,
+thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
+observable. Do not start v0.3 monitor/profile work that deepens unowned
+event-loop races.
 
 Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
 minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,

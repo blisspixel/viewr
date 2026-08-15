@@ -109,6 +109,15 @@ published Linux archive was then re-verified from the release page: matching
 SHA-256 sidecar, 30-file internal manifest, and one attestation binding it to
 `release.yml@refs/tags/v0.1.1` at that commit.
 
+For v0.1.2, [main CI run 31902602684](https://github.com/blisspixel/viewr/actions/runs/31902602684)
+passed all seven jobs and [fuzz run 31902602696](https://github.com/blisspixel/viewr/actions/runs/31902602696)
+passed both targets on commit `0b44b14544ea97a2fb1acae00b597372f1213757`.
+[Release run 31903069276](https://github.com/blisspixel/viewr/actions/runs/31903069276)
+repeated the complete gates and published the immutable
+[v0.1.2 release](https://github.com/blisspixel/viewr/releases/tag/v0.1.2), whose
+Linux archive re-verifies from the release page with a matching sidecar and one
+attestation bound to `release.yml@refs/tags/v0.1.2` at that commit.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#version-path-to-an-exceptional-10)

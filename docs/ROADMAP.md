@@ -18,9 +18,9 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) |
+| Published install target | Immutable [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1), a patch over [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) |
 | Active development line | `main`, working toward **v0.2.0** |
-| Next tag allowed | **v0.2.0** only after its exit criteria below are true |
+| Next tag allowed | **v0.2.0** only after its exit criteria below are true. Further v0.1.x patches remain allowed for shipped defects |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -28,7 +28,7 @@ Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding, an
 honest capability reporting, but camera RAW and multi-page viewing remain open.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the signed-attested but
-publisher-unsigned v0.1.0 archives. Human assistive-technology evidence, platform
+publisher-unsigned v0.1.x archives. Human assistive-technology evidence, platform
 signing and notarization, representative-hardware acceptance, and display
 fidelity remain open.
 
@@ -47,6 +47,7 @@ security issues without pulling later milestone scope forward.
 
 ```text
 v0.1.0  Public foundation          [released]
+v0.1.1  Observable launch patch    [released]
    |
    v
 v0.2.0  Reliability architecture   [next]
@@ -103,8 +104,8 @@ thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
 observable. Do not start v0.3 monitor/profile work that deepens unowned
 event-loop races.
 
-Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
-minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,
+Current position: v0.1.1 is released and verified, and v0.1.0 remains published
+with its known issues recorded. v0.2.0 is the next planned minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,
 then v0.5 formats, then v0.6 product quality, then v0.7 through v0.9 evidence and
 trust.
 
@@ -127,6 +128,7 @@ but completed history does not override an open gate here.
 | Public repository and hosted quality | Complete | `main` is public. [CI run 30642307317](https://github.com/blisspixel/viewr/actions/runs/30642307317) passed all seven jobs and [fuzz run 30642307463](https://github.com/blisspixel/viewr/actions/runs/30642307463) passed both targets on release commit `86d3eef920ec5e523fbc6dbc286c4dcbd68e7f1b`. |
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
+| First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
 | Reliability architecture | Open for v0.2 | Pure seams, 90.11 percent owned-logic coverage, observable launch failure, residual exclusion judgment, and VERIFY subset green; CI tip green on `47234b1`. Tag v0.2.0 only with release notes under `docs/releases/` and an immutable tag. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |

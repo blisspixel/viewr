@@ -67,14 +67,14 @@ class DocumentationTests(unittest.TestCase):
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
             "README.md": (
-                "v0.1.0 is the first public preview",
+                "v0.1.1 is the current public preview",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.1.0 is the first public GitHub Release",
+                "v0.1.1 is the current public GitHub Release",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -82,14 +82,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Current position: v0.1.0 is released and verified",
+                "Current position: v0.1.1 is released and verified",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.1.0 is public, immutable, checksummed, and attested",
+                "v0.1.1 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (
@@ -97,8 +97,16 @@ class DocumentationTests(unittest.TestCase):
                 "GitHub build-provenance attestation",
                 "not Authenticode-signed",
                 "notarized",
+                "Known issues in this release",
+            ),
+            "docs/releases/v0.1.1.md": (
+                "A patch release over the first public preview",
+                "GitHub build-provenance attestation",
+                "not Authenticode-signed",
+                "notarized",
             ),
             "CHANGELOG.md": (
+                "## 0.1.1 - 2026-08-15",
                 "## 0.1.0 - 2026-07-31",
                 "first unsigned pre-1.0 release",
             ),

@@ -18,9 +18,9 @@ pub(crate) const OFFICIAL_RELEASES_URL: &str = "https://github.com/blisspixel/vi
 pub(crate) const OFFICIAL_LATEST_RELEASE_URL: &str =
     "https://github.com/blisspixel/viewr/releases/latest";
 pub(crate) const WINDOWS_INSTALL_COMMAND: &str =
-    "irm https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.ps1 | iex";
+    "irm https://github.com/blisspixel/viewr/releases/download/v0.1.1/install.ps1 | iex";
 pub(crate) const UNIX_INSTALL_COMMAND: &str =
-    "curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.sh | sh";
+    "curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.1/install.sh | sh";
 
 /// Which help screen the user asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1011,8 +1011,8 @@ mod tests {
         assert!(OFFICIAL_LATEST_RELEASE_URL.starts_with(OFFICIAL_RELEASES_URL));
         assert!(update.contains(WINDOWS_INSTALL_COMMAND));
         assert!(update.contains(UNIX_INSTALL_COMMAND));
-        assert!(WINDOWS_INSTALL_COMMAND.contains("/releases/download/v0.1.0/"));
-        assert!(UNIX_INSTALL_COMMAND.contains("/releases/download/v0.1.0/"));
+        assert!(WINDOWS_INSTALL_COMMAND.contains("/releases/download/v0.1.1/"));
+        assert!(UNIX_INSTALL_COMMAND.contains("/releases/download/v0.1.1/"));
         assert!(!WINDOWS_INSTALL_COMMAND.contains("/main/"));
         assert!(!UNIX_INSTALL_COMMAND.contains("/main/"));
         assert!(update.contains("verifies the release checksum and manifest"));

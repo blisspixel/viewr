@@ -27,10 +27,13 @@ Status last verified on 2026-08-02:
 - [x] Publish and verify annotated tag `v0.1.0`. The release is immutable, contains
   the exact 12 expected assets, and has one GitHub release attestation covering
   every asset.
+- [x] Publish and verify annotated tag `v0.1.1`, the patch release that makes a
+  failed launch observable, under the same immutable 12-asset contract.
 
-## First public pre-1.0 release
+## Pre-1.0 release procedure
 
-An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
+This is the procedure used for `v0.1.0` and repeated for the `v0.1.1` patch. An
+unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
@@ -43,8 +46,8 @@ production environment.
 5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 
    ```text
-   git tag -a v0.1.0 -m "viewr 0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.1.1 -m "viewr 0.1.1"
+   git push origin v0.1.1
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -62,11 +65,15 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.1.0 --repo blisspixel/viewr
-gh release verify v0.1.0 --repo blisspixel/viewr
-gh attestation verify viewr-0.1.0-x86_64-pc-windows-msvc.zip \
+gh release view v0.1.1 --repo blisspixel/viewr
+gh release verify v0.1.1 --repo blisspixel/viewr
+gh attestation verify viewr-0.1.1-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
+
+`gh release verify` and `gh attestation` need GitHub CLI 2.49 or newer. Older
+builds have neither subcommand, and the sidecar plus the archive's internal
+per-file manifest remain the available integrity evidence.
 
 Download at least one archive and its sidecar, then run:
 
@@ -112,8 +119,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.1.0 is public, immutable, checksummed, and attested. Its executable archives
-  are not Authenticode-signed or Apple-notarized, so the release remains an
+- v0.1.1 is public, immutable, checksummed, and attested, and v0.1.0 remains
+  published with a known-issues note. Their executable archives are not
+  Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.
 - The foreground installer tools contact only the official GitHub repository after
   the user runs them. They do not create an updater service or add network access

@@ -6,7 +6,7 @@ LICENSE.
 
 ## License summary
 
-- Apache-2.0 (Apache License 2.0): 282 packages
+- Apache-2.0 (Apache License 2.0): 281 packages
 - MIT (MIT License): 87 packages
 - Unicode-3.0 (Unicode License v3): 19 packages
 - BSD-3-Clause (BSD 3-Clause "New" or "Revised" License): 9 packages
@@ -4085,7 +4085,6 @@ used_by:
   cfg-if 1.0.4
   concurrent-queue 2.5.0
   core-foundation-sys 0.8.7
-  core-foundation 0.10.1
   core-foundation 0.9.4
   core-graphics-types 0.1.3
   core-graphics 0.23.2
@@ -4577,7 +4576,7 @@ limitations under the License.
 ### Apache-2.0
 name: Apache License 2.0
 used_by:
-  webbrowser 1.2.1
+  webbrowser 1.2.2
 text:
 <<<
                               Apache License

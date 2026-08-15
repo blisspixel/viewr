@@ -7,6 +7,13 @@ and organized by user-visible concern.
 
 ### Security
 
+- Updated the transitive `webbrowser` dependency to 1.2.2, which fixes
+  `RUSTSEC-2026-0257`: earlier versions substituted a URL into the `BROWSER`
+  template before tokenizing it, so a URL containing spaces could add browser
+  arguments. viewr has no HTTP or TLS client and this dependency arrives through
+  the egui hyperlink path, but the advisory floor is enforced rather than
+  waived. Removing it also converged the macOS `core-foundation` line, so its
+  duplicate-version baseline entry is gone rather than left stale.
 - Filmstrip labels, status filenames, Image Information basenames, and thumbnail
   texture names now use the same privacy-safe filename helper. Full directory
   paths no longer enter display chrome or in-process texture debug names.

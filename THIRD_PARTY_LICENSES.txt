@@ -6492,9 +6492,9 @@ used_by:
   syn 2.0.119
   syn 3.0.3
   thiserror-impl 1.0.69
-  thiserror-impl 2.0.19
+  thiserror-impl 2.0.20
   thiserror 1.0.69
-  thiserror 2.0.19
+  thiserror 2.0.20
   type-map 0.5.1
   unicode-ident 1.0.24
   usvg 0.47.0

@@ -218,6 +218,25 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn('multiple-versions = "deny"', deny_policy)
         self.assertNotIn('multiple-versions = "warn"', deny_policy)
 
+    def test_linux_runtime_libraries_match_the_launch_check(self) -> None:
+        """Every library the launch check probes is named in the install guide."""
+        startup = (REPOSITORY_ROOT / "crates/viewr/src/startup.rs").read_text(
+            encoding="utf-8"
+        )
+        sonames = re.findall(r'sonames: &\["([^"]+)"', startup)
+        debian_packages = re.findall(r'debian: "([^"]+)"', startup)
+        self.assertEqual(len(sonames), 4)
+        self.assertEqual(len(debian_packages), len(sonames))
+
+        install = (REPOSITORY_ROOT / "docs/INSTALL.md").read_text(encoding="utf-8")
+        for soname in sonames:
+            with self.subTest(soname=soname):
+                self.assertIn(soname, install)
+        for package in debian_packages:
+            with self.subTest(package=package):
+                self.assertIn(package, install)
+        self.assertIn("`viewr doctor` checks the libraries", install)
+
     def test_pre_one_version_path_builds_product_before_distribution(self) -> None:
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         standards = (REPOSITORY_ROOT / "docs/STANDARDS.md").read_text(encoding="utf-8")

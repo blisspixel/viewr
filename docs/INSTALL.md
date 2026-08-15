@@ -102,8 +102,10 @@ names are:
 - `viewr-<version>-x86_64-apple-darwin.zip`
 - `viewr-<version>-aarch64-apple-darwin.zip`
 
-Verify the sidecar before extraction. If GitHub CLI is installed, also verify build
-provenance:
+Verify the sidecar before extraction. If GitHub CLI 2.49 or newer is installed,
+also verify build provenance. Older `gh` builds do not have the `attestation`
+command, in which case the sidecar and the internal per-file manifest remain the
+available integrity evidence:
 
 ```text
 gh attestation verify <archive> --repo blisspixel/viewr
@@ -161,6 +163,24 @@ cargo build --workspace --locked
 
 ### Linux
 
+Portable Linux archives link the C runtime only. The windowing stack loads its
+keyboard and display libraries at run time, so `ldd bin/viewr` does not list
+them and a missing package appears only when a window is opened. A desktop
+session needs:
+
+| Session | Libraries | Debian or Ubuntu | Fedora or RHEL | Arch |
+| --- | --- | --- | --- | --- |
+| X11 | `libxkbcommon.so.0`, `libxkbcommon-x11.so.0`, `libX11.so.6` | `libxkbcommon0 libxkbcommon-x11-0 libx11-6` | `libxkbcommon libxkbcommon-x11 libX11` | `libxkbcommon libxkbcommon-x11 libx11` |
+| Wayland | `libxkbcommon.so.0`, `libwayland-client.so.0` | `libxkbcommon0 libwayland-client0` | `libxkbcommon libwayland-client` | `libxkbcommon wayland` |
+
+Presenting images also needs a working GPU driver or the Mesa software renderer
+(`libgl1-mesa-dri` on Debian and Ubuntu, `mesa-dri-drivers` on Fedora and RHEL,
+`mesa` on Arch). Most desktop installations already have all of this.
+
+`viewr doctor` checks the libraries for the current session and names the
+package to install when one is missing. Launching without them prints the same
+guidance and exits non-zero rather than aborting inside the dynamic loader.
+
 The installer registers `com.github.blisspixel.viewr.desktop` as an available image
 viewer. It never changes a default. To opt in for JPEG explicitly:
 
@@ -210,9 +230,19 @@ viewr --version
 viewr doctor
 ```
 
-`doctor` verifies binary placement, the worker protocol, platform expectations,
-privacy boundaries, and an in-memory decode self-test. It performs no network
-request and creates no diagnostic log.
+`doctor` verifies binary placement, the worker protocol, platform identity,
+privacy boundaries, an in-memory decode self-test, and the windowing
+prerequisites of the current desktop session. It performs no network request and
+creates no diagnostic log.
+
+What `doctor` cannot prove is a working GPU surface, because it never opens a
+window. It says so in its report. If viewr then fails to present, the launch
+prints the reason on stderr and exits non-zero; developer logging is not
+required to see it.
+
+`bin/viewr-decode` is the isolated decode worker. viewr starts it and speaks a
+binary protocol over its standard input and output. Running it by hand prints
+one explanatory line and exits.
 
 Developers and maintainers should use the complete matrix in [VERIFY.md](VERIFY.md).
 Release publication is documented separately in [PUBLISHING.md](PUBLISHING.md).

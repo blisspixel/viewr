@@ -131,6 +131,11 @@ Menus expose the same actions and shortcuts. There is no flag, review queue,
 batch-trash mode, or bare-letter delete shortcut. Detailed interaction behavior is
 in [Design](docs/DESIGN.md) and [Accessibility](docs/ACCESSIBILITY.md).
 
+Rating **writes** are currently limited to ordinary supported JPEG files on
+Windows. macOS and Linux builds read embedded ratings and filter a folder by
+them, but do not write a rating back to a file yet. The exact scope, states, and
+safety contract are in [Ratings](docs/RATINGS.md).
+
 ## Appearance
 
 - **System** follows the operating system's light or dark setting.

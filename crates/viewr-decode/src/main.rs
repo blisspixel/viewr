@@ -11,8 +11,33 @@
 
 #![allow(missing_docs)] // binary entry; module docs live above
 
-use std::io::{BufReader, Write};
+use std::io::{BufReader, IsTerminal, Write};
 use viewr_protocol::{WorkerColorProfile, WorkerResponse};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// One-line explanation for a person who ran this binary by hand.
+fn hand_run_notice() -> String {
+    format!(
+        "viewr-decode {VERSION} is viewr's isolated decode worker, not a command you run.\n\
+viewr starts it and speaks a binary protocol over stdin and stdout. It takes no\n\
+options and no file path. Use `viewr doctor` to check that the pair is installed\n\
+side by side, and see docs/FORMATS.md for the formats it decodes.\n"
+    )
+}
+
+/// Decide how an invocation should end before the protocol loop starts.
+///
+/// A worker that waits forever on a terminal looks like a hang, so an explicit
+/// argument or an interactive stdin gets one line of explanation instead.
+fn hand_run_exit(arguments: &[String], stdin_is_terminal: bool) -> Option<i32> {
+    match arguments.first().map(String::as_str) {
+        Some("--help" | "-h" | "help" | "--version" | "-V" | "version") => Some(0),
+        Some(_) => Some(2),
+        None if stdin_is_terminal => Some(0),
+        None => None,
+    }
+}
 
 #[cfg(feature = "avif")]
 mod avif;
@@ -27,6 +52,16 @@ struct DecodedOutput {
 }
 
 fn main() {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = hand_run_exit(&arguments, std::io::stdin().is_terminal()) {
+        if code == 0 {
+            print!("{}", hand_run_notice());
+        } else {
+            eprint!("{}", hand_run_notice());
+        }
+        std::process::exit(code);
+    }
+
     #[cfg(target_os = "linux")]
     {
         if let Err(error) = harden_worker_process() {
@@ -242,7 +277,10 @@ fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DecodedOutput, copy_strided_rgba, validate_decoded, worker_error};
+    use super::{
+        DecodedOutput, copy_strided_rgba, hand_run_exit, hand_run_notice, validate_decoded,
+        worker_error,
+    };
     use viewr_protocol::{MAX_DECODE_DIMENSION, MAX_DECODE_PIXELS};
     use viewr_protocol::{WorkerColorProfile, WorkerResponse};
 
@@ -274,6 +312,28 @@ mod tests {
         );
         assert!(copy_strided_rgba(&data, 2, 2, 7).is_err());
         assert!(copy_strided_rgba(&data[..15], 2, 2, 8).is_err());
+    }
+
+    #[test]
+    fn running_the_worker_by_hand_explains_itself_instead_of_waiting() {
+        let argument = |value: &str| vec![value.to_owned()];
+        for value in ["--help", "-h", "help", "--version", "-V", "version"] {
+            assert_eq!(hand_run_exit(&argument(value), false), Some(0), "{value}");
+            assert_eq!(hand_run_exit(&argument(value), true), Some(0), "{value}");
+        }
+        assert_eq!(hand_run_exit(&argument("photo.heic"), false), Some(2));
+        assert_eq!(hand_run_exit(&argument("--decode"), false), Some(2));
+
+        // An interactive terminal cannot speak the protocol, so do not block on it.
+        assert_eq!(hand_run_exit(&[], true), Some(0));
+        // A pipe from viewr is the only supported invocation.
+        assert_eq!(hand_run_exit(&[], false), None);
+
+        let notice = hand_run_notice();
+        assert!(notice.starts_with(&format!("viewr-decode {}", super::VERSION)));
+        assert!(notice.contains("not a command you run"));
+        assert!(notice.contains("viewr doctor"));
+        assert!(notice.ends_with('\n'));
     }
 
     #[test]

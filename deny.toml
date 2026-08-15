@@ -81,7 +81,6 @@ skip = [
     { crate = "block2@0.5.1", reason = "winit and AccessKit macOS adapters require block2 0.5" },
     { crate = "calloop@0.13.0", reason = "winit 0.30 requires the smithay-client-toolkit 0.19 event loop" },
     { crate = "calloop-wayland-source@0.3.0", reason = "smithay-client-toolkit 0.19 requires this source adapter" },
-    { crate = "core-foundation@0.9.4", reason = "winit 0.30 and core-graphics 0.23 require this macOS line" },
     { crate = "foldhash@0.1.5", reason = "gpu-descriptor's hashbrown 0.15 requires this hash implementation" },
     { crate = "getrandom@0.3.4", reason = "the locked ahash line requires getrandom 0.3" },
     { crate = "hashbrown@0.15.5", reason = "gpu-descriptor 0.3 requires hashbrown 0.15" },

@@ -147,6 +147,10 @@ Listed in folder navigation so users can step onto them. Decode requires the
 `viewr-decode` binary co-located with `viewr` (same directory after
 `cargo build --workspace`).
 
+`viewr` starts that worker and sends it encoded bytes over a private pipe. It is
+not a command-line tool: run by hand, it prints one line explaining what it is
+and exits, because there is no protocol frame on a terminal to answer.
+
 | Format | Extensions | Default worker build | Full decode |
 |--------|------------|----------------------|-------------|
 | AVIF | `.avif` | Error explaining missing feature | `--features avif` (+ system libavif) |

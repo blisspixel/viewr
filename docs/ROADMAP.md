@@ -95,11 +95,13 @@ v1.0.0  Broadly recommended release
 
 **Immediate focus: v0.2 reliability architecture, followed by v0.3 display
 correctness and v0.4 file coherence.** Pure-policy seams and the owned-logic
-coverage floor are evidenced (90.18 percent lines under the CI llvm-cov
-contract). Before tagging v0.2.0, complete residual thin-native-glue judgment
-for the remaining whole-file exclusions and the full VERIFY.md gate. Preserve
-bounded job, thumbnail, prefetch, chrome, and GPU contracts. Do not start v0.3
-monitor/profile work that deepens unowned event-loop races.
+coverage floor are evidenced (90.11 percent lines under the CI llvm-cov
+contract, with the launch-prerequisite `startup` seam at 98.56 percent). Before
+tagging v0.2.0, complete residual thin-native-glue judgment for the remaining
+whole-file exclusions and the full VERIFY.md gate. Preserve bounded job,
+thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
+observable. Do not start v0.3 monitor/profile work that deepens unowned
+event-loop races.
 
 Current position: v0.1.0 is released and verified. v0.2.0 is the next planned
 minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,
@@ -272,6 +274,18 @@ state before job ownership and test seams are explicit.
   generation cancellation through every full witness comparison; Save As
   destination consent retains only native identity and version. Failed or partial
   curation cancels deferred close so recovery remains visible.
+- [x] Make first-run launch failure observable and recoverable. The GUI entry
+  point checks the windowing libraries its Linux session loads dynamically and
+  reports a missing one with its package name; a failed window or GPU surface
+  now returns a complete stderr message and a non-zero exit instead of a
+  developer-only log line and exit 0. `doctor` reports window presentation as
+  its own section, fails when the session cannot load those libraries, and
+  states that a GPU surface is proven only when a window opens. The CLI reserves
+  `--help` on every subcommand, rejects arguments a subcommand does not accept,
+  refuses to open the GUI on a mistyped command, and the decode worker explains
+  itself instead of hanging when a person runs it by hand. Session detection,
+  the required-library table, and every message live in the covered `startup`
+  seam; only the dynamic-library probe touches the platform.
 - [x] Move dock/menu view models out of paint code so enablement and accessibility
   state can be exhaustively tested without a window. One immutable projection now
   derives dock layout, control readiness, selected state, labels, shortcuts, and

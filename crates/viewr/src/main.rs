@@ -27,7 +27,6 @@ fn main() -> ExitCode {
         Err(msg) => {
             cli::ensure_console();
             eprintln!("viewr: {msg}");
-            eprintln!("Try `viewr help`.");
             return ExitCode::from(2);
         }
     };

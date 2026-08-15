@@ -11,6 +11,11 @@ pub enum Error {
     #[error("gpu initialization failed: {0}")]
     Gpu(String),
 
+    /// The graphical session cannot present a window. The message is already a
+    /// complete, actionable report, so it is printed without a prefix.
+    #[error("{0}")]
+    Launch(String),
+
     /// Native operating-system integration could not be initialized.
     #[error("platform integration failed: {0}")]
     Platform(String),

@@ -112,8 +112,10 @@ bit-identical executables.
 ## 5. Verify a published release
 
 Obtain the archive and checksum only from the canonical GitHub release page. Verify
-the sidecar before extraction, then verify GitHub provenance when GitHub CLI is
-available:
+the sidecar before extraction, then verify GitHub provenance when GitHub CLI 2.49
+or newer is available. Older `gh` builds have neither `release verify` nor
+`attestation`; on those hosts the sidecar and the archive's internal per-file
+manifest are the integrity evidence:
 
 ```text
 gh release verify <tag> --repo blisspixel/viewr

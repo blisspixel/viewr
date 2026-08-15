@@ -7,6 +7,13 @@ and organized by user-visible concern.
 
 ### Security
 
+- Updated the transitive `webbrowser` dependency to 1.2.2, which fixes
+  `RUSTSEC-2026-0257`: earlier versions substituted a URL into the `BROWSER`
+  template before tokenizing it, so a URL containing spaces could add browser
+  arguments. viewr has no HTTP or TLS client and this dependency arrives through
+  the egui hyperlink path, but the advisory floor is enforced rather than
+  waived. Removing it also converged the macOS `core-foundation` line, so its
+  duplicate-version baseline entry is gone rather than left stale.
 - Filmstrip labels, status filenames, Image Information basenames, and thumbnail
   texture names now use the same privacy-safe filename helper. Full directory
   paths no longer enter display chrome or in-process texture debug names.
@@ -21,6 +28,33 @@ and organized by user-visible concern.
 
 ### Fixed
 
+- A launch that never produces a window now reports why and exits non-zero. A
+  failed GPU surface or window creation prints one actionable message on
+  standard error instead of logging only under `RUST_LOG` and exiting 0.
+- Linux launches check the keyboard and display libraries the windowing backend
+  loads at run time. A missing library prints its soname and the package name
+  for Debian, Ubuntu, Fedora, RHEL, and Arch, then exits non-zero, instead of
+  aborting inside the dynamic loader. A launch with no desktop session says so.
+- `viewr doctor` reports window presentation as its own section: the detected
+  session, the libraries it needs, and an explicit note that a GPU surface is
+  proven only when viewr opens a window. A session that cannot load its
+  windowing libraries is now a critical failure rather than a green report.
+- `--help` and `-h` are reserved on every subcommand. `viewr doctor --help`,
+  `viewr benchmark --help`, `viewr open --help`, `viewr update --help`, and
+  `viewr performance-probe --help` print help for that command instead of
+  running it, failing on a directory, or opening the GUI on the literal flag.
+  `viewr help <command>` prints the same screens.
+- An unknown first word that is not an existing path, and does not look like
+  one, reports `'word' is not a viewr command` and exits 2 instead of starting
+  the GUI on a typo. Files, folders, and Open With handoffs are unchanged.
+- Subcommands reject arguments they do not accept, so `viewr doctor --verbose`
+  and `viewr benchmark --fast` no longer run as if the argument were absent.
+- Running `viewr-decode` by hand no longer hangs waiting for a protocol frame
+  that will never arrive. `--help`, `--version`, any argument, or an interactive
+  terminal prints one line explaining that viewr starts this worker, then exits.
+- The Unix installer prints the `viewr doctor` report when the staged binaries
+  fail it, so the missing desktop library is visible rather than swallowed.
+- Help examples use the path separator of the platform reading them.
 - Finishing Trash no longer forces navigation when the user already moved to
   another surviving image while the move ran. The playlist still drops the
   deleted path, but the current selection is preserved when it was not removed.
@@ -253,6 +287,16 @@ and organized by user-visible concern.
 
 ### Documentation
 
+- The installation guide lists the Linux runtime libraries each desktop session
+  loads dynamically, with the package name per distribution, and states what
+  `viewr doctor` does and does not prove about opening a window. It also
+  identifies `bin/viewr-decode` as a worker rather than a command to run.
+- The README states the current rating write scope beside the controls table:
+  Windows writes ratings to supported JPEG files, while macOS and Linux read and
+  filter only.
+- The installation and verification guides note that `gh attestation` and
+  `gh release verify` need GitHub CLI 2.49 or newer, and name the sidecar and
+  internal manifest as the evidence available without them.
 - Clarified the README's "No tracking" promise as a literal product boundary:
   viewr rejects spyware and bloatware patterns, has no collection or upload
   machinery, initializes no logger during normal runs, and writes no log file.

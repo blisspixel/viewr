@@ -52,6 +52,9 @@ machinery exists in the first place.
 ## Logging is opt-in (stderr only, never a log file)
 
 By default the process is silent: no `log` output, **no log files on disk**.
+Silence covers diagnostics, not failure. A launch that cannot open a window or
+create a GPU surface prints one actionable message on stderr and exits non-zero
+without any logging variable set.
 
 If you want diagnostics while developing, set an environment variable yourself.
 Output goes to **stderr only**; viewr never opens a `.log` file:

@@ -22,6 +22,38 @@ pub(crate) const WINDOWS_INSTALL_COMMAND: &str =
 pub(crate) const UNIX_INSTALL_COMMAND: &str =
     "curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.0/install.sh | sh";
 
+/// Which help screen the user asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTopic {
+    /// The command list and privacy summary.
+    Overview,
+    /// `viewr open`.
+    Open,
+    /// `viewr doctor`.
+    Doctor,
+    /// `viewr benchmark`.
+    Benchmark,
+    /// `viewr update`.
+    Update,
+    /// `viewr performance-probe`.
+    PerformanceProbe,
+}
+
+impl HelpTopic {
+    /// Resolve a `viewr help <topic>` argument.
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "help" => Some(Self::Overview),
+            "open" => Some(Self::Open),
+            "doctor" => Some(Self::Doctor),
+            "benchmark" | "bench" => Some(Self::Benchmark),
+            "update" => Some(Self::Update),
+            "performance-probe" => Some(Self::PerformanceProbe),
+            _ => None,
+        }
+    }
+}
+
 /// Parsed invocation: either a GUI launch or a CLI subcommand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
@@ -30,8 +62,8 @@ pub enum Invocation {
         /// Image path from the command line, if any.
         image: Option<PathBuf>,
     },
-    /// Print help to stdout.
-    Help,
+    /// Print help for one command or the overview to stdout.
+    Help(HelpTopic),
     /// Print version to stdout.
     Version,
     /// Run local environment diagnostics.
@@ -59,6 +91,45 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
+    parse_args_with(args, &|path| path.exists())
+}
+
+/// `--help` and `-h` are reserved on every command, so a stranger who adds them
+/// to any subcommand reads help instead of running the command.
+fn is_help_flag(argument: &str) -> bool {
+    matches!(argument, "--help" | "-h" | "/?" | "help")
+}
+
+/// Decide whether an unrecognized first token was meant as a file or folder.
+///
+/// A token that exists, carries a separator, an extension, or an explicit
+/// relative or absolute prefix is a path. Anything else is a mistyped command,
+/// and opening a GUI on it would hide the mistake.
+fn looks_like_path(path: &Path, exists: &dyn Fn(&Path) -> bool) -> bool {
+    if exists(path) || path.is_absolute() || path.extension().is_some() {
+        return true;
+    }
+    let text = path.to_string_lossy();
+    text.starts_with('.')
+        || text.starts_with('~')
+        || text.contains('/')
+        || text.contains('\\')
+        || text.contains(':')
+}
+
+fn unexpected_argument(argument: &str, command: &str) -> String {
+    if argument.starts_with('-') {
+        format!("unknown option '{argument}' for `{command}`. Try `{command} --help`.")
+    } else {
+        format!("`{command}` takes no argument '{argument}'. Try `{command} --help`.")
+    }
+}
+
+fn parse_args_with<I, S>(args: I, exists: &dyn Fn(&Path) -> bool) -> Result<Invocation, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let mut args: Vec<PathBuf> = args
         .into_iter()
         .map(|s| PathBuf::from(s.as_ref()))
@@ -72,40 +143,94 @@ where
         return Ok(Invocation::Gui { image: None });
     }
 
-    let first = args[0].to_string_lossy();
-    match first.as_ref() {
-        "help" | "--help" | "-h" | "/?" => Ok(Invocation::Help),
+    let first = args[0].to_string_lossy().into_owned();
+    let rest: Vec<String> = args[1..]
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    let asked_for_help = rest.first().is_some_and(|argument| is_help_flag(argument));
+
+    match first.as_str() {
+        "help" | "--help" | "-h" | "/?" => match rest.first() {
+            None => Ok(Invocation::Help(HelpTopic::Overview)),
+            Some(topic) => HelpTopic::from_name(topic).map(Invocation::Help).ok_or_else(|| {
+                format!("`viewr help` has no topic '{topic}'. Try `viewr help` for the command list.")
+            }),
+        },
         "version" | "--version" | "-V" => Ok(Invocation::Version),
-        "doctor" => Ok(Invocation::Doctor),
-        "update" => Ok(Invocation::Update),
+        "doctor" | "update" => {
+            if asked_for_help {
+                let topic = if first == "doctor" {
+                    HelpTopic::Doctor
+                } else {
+                    HelpTopic::Update
+                };
+                return Ok(Invocation::Help(topic));
+            }
+            if let Some(extra) = rest.first() {
+                return Err(unexpected_argument(extra, &format!("viewr {first}")));
+            }
+            if first == "doctor" {
+                Ok(Invocation::Doctor)
+            } else {
+                Ok(Invocation::Update)
+            }
+        }
         "benchmark" | "bench" => {
-            let dir = args.get(1).cloned();
-            Ok(Invocation::Benchmark { dir })
+            if asked_for_help {
+                return Ok(Invocation::Help(HelpTopic::Benchmark));
+            }
+            if let Some(flag) = rest.first().filter(|argument| argument.starts_with('-')) {
+                return Err(unexpected_argument(flag, "viewr benchmark"));
+            }
+            if rest.len() > 1 {
+                return Err("usage: viewr benchmark [dir]. Try `viewr benchmark --help`.".into());
+            }
+            Ok(Invocation::Benchmark {
+                dir: args.get(1).cloned(),
+            })
         }
         "performance-probe" => {
-            let Some(image) = args.get(1).cloned() else {
-                return Err("usage: viewr performance-probe <path>".into());
-            };
-            if args.len() != 2 {
-                return Err("usage: viewr performance-probe <path>".into());
+            if asked_for_help {
+                return Ok(Invocation::Help(HelpTopic::PerformanceProbe));
             }
-            Ok(Invocation::PerformanceProbe { image })
+            if args.len() != 2 {
+                return Err(
+                    "usage: viewr performance-probe <path>. Try `viewr performance-probe --help`."
+                        .into(),
+                );
+            }
+            Ok(Invocation::PerformanceProbe {
+                image: args[1].clone(),
+            })
         }
         "open" => {
-            let image = args.get(1).cloned();
-            if image.is_none() {
-                return Err("usage: viewr open <path>".into());
+            if asked_for_help {
+                return Ok(Invocation::Help(HelpTopic::Open));
             }
-            Ok(Invocation::Gui { image })
+            if let Some(flag) = rest.first().filter(|argument| argument.starts_with('-')) {
+                return Err(unexpected_argument(flag, "viewr open"));
+            }
+            if rest.len() > 1 {
+                return Err("usage: viewr open <path>. Try `viewr open --help`.".into());
+            }
+            let Some(image) = args.get(1).cloned() else {
+                return Err("usage: viewr open <path>. Try `viewr open --help`.".into());
+            };
+            Ok(Invocation::Gui { image: Some(image) })
         }
         // Flags that are not paths.
-        s if s.starts_with('-') => {
-            Err(format!("unknown option '{s}'. Try `viewr help` for usage."))
-        }
-        // Treat anything else as an image path (Open With / drag to shortcut).
-        _ => Ok(Invocation::Gui {
+        flag if flag.starts_with('-') => Err(format!(
+            "unknown option '{flag}'. Try `viewr help` for usage."
+        )),
+        // Open With, drag-to-shortcut, and ordinary paths still open the GUI.
+        _ if looks_like_path(&args[0], exists) => Ok(Invocation::Gui {
             image: Some(args[0].clone()),
         }),
+        word => Err(format!(
+            "'{word}' is not a viewr command, and no such file or folder exists. \
+Try `viewr help` for usage, or `viewr open <path>` for a path."
+        )),
     }
 }
 
@@ -132,8 +257,8 @@ fn run_with_io(
 ) -> io::Result<ExitCode> {
     match inv {
         Invocation::Gui { .. } => Ok(ExitCode::FAILURE), // caller should launch GUI
-        Invocation::Help => {
-            print_help(stdout)?;
+        Invocation::Help(topic) => {
+            write!(stdout, "{}", help_text(topic, example_image_path()))?;
             Ok(ExitCode::SUCCESS)
         }
         Invocation::Version => {
@@ -168,20 +293,32 @@ fn run_with_io(
     }
 }
 
-fn print_help(stdout: &mut impl Write) -> io::Result<()> {
-    writeln!(
-        stdout,
-        "\
+/// The example path in help uses the separator of the running platform.
+fn example_image_path() -> &'static str {
+    if cfg!(windows) {
+        r"photos\IMG_001.jpg"
+    } else {
+        "photos/IMG_001.jpg"
+    }
+}
+
+/// Complete text of one help screen, ending with a newline.
+fn help_text(topic: HelpTopic, example_image: &str) -> String {
+    match topic {
+        HelpTopic::Overview => format!(
+            "\
 viewr {VERSION} - a photo viewer that just shows your photos.
 
 Usage:
-  viewr [path]                 Open the GUI (optional image path)
-  viewr open <path>            Open the GUI on a path
+  viewr [file or folder]       Open the GUI (optional image file or folder)
+  viewr open <file or folder>  Open the GUI on a file or folder
   viewr doctor                 Local diagnostics (no network)
   viewr benchmark [dir]        Time decode on images in dir (or a tiny temp set)
   viewr update                 Manual update guidance (no network request)
-  viewr help                   Show this help
+  viewr help [command]         Show this help, or help for one command
   viewr version                Show version
+
+Add --help to any command, for example `viewr doctor --help`.
 
 Privacy:
   No network client, no telemetry, no activity log, no log files.
@@ -189,11 +326,83 @@ Privacy:
   `update` only prints official manual install and build instructions (never downloads).
 
 Examples:
-  viewr photos\\IMG_001.jpg
+  viewr {example_image}
   viewr doctor
   viewr benchmark corpus
 "
-    )
+        ),
+        HelpTopic::Open => format!(
+            "\
+viewr open - open the GUI on a file or folder
+
+Usage:
+  viewr open <file or folder>
+
+Identical to `viewr <file or folder>`, and the way to open a path that could be
+read as a command name. A folder opens its first naturally sorted image.
+
+Examples:
+  viewr open {example_image}
+  viewr open photos
+"
+        ),
+        HelpTopic::Doctor => "\
+viewr doctor - local diagnostics
+
+Usage:
+  viewr doctor
+
+Reports binary placement, the decode worker and its in-memory IPC probe,
+platform identity, privacy boundaries, an in-memory PNG decode self-test, and
+the windowing prerequisites of the current desktop session.
+
+Everything runs in memory: no network request, no temp file, no log file.
+Exit status is 1 when a critical check fails, including a desktop session that
+is missing a library viewr needs to open a window. Creating a GPU surface is
+proven when viewr opens a window, not by doctor.
+"
+        .to_owned(),
+        HelpTopic::Benchmark => "\
+viewr benchmark - time local decoding
+
+Usage:
+  viewr benchmark              Time a small in-memory corpus (no temp files)
+  viewr benchmark <dir>        Time supported images in <dir>, read-only
+
+Prints file, pixel count, median milliseconds over five decodes, and megapixels
+per second. Files in <dir> are only read. Nothing is written, cached on disk, or
+sent anywhere.
+
+Exit status is 1 when <dir> is not a directory or contains no supported image.
+"
+        .to_owned(),
+        HelpTopic::Update => "\
+viewr update - manual update guidance
+
+Usage:
+  viewr update
+
+Prints the official release page and the installer command for this platform,
+plus the source rebuild. viewr never checks for, downloads, or installs an
+update by itself, and there is no `viewr update --download`.
+"
+        .to_owned(),
+        HelpTopic::PerformanceProbe => format!(
+            "\
+viewr performance-probe - explicit local startup and navigation measurement
+
+Usage:
+  viewr performance-probe <path>
+
+Opens the GUI, samples startup, navigation, and memory across the folder that
+contains <path>, prints one JSON report, and exits. Maintainers and CI budgets
+use this command; ordinary launches measure nothing and keep no report.
+
+Example:
+  viewr performance-probe {example_image}
+"
+        ),
+    }
 }
 
 fn print_update(stdout: &mut impl Write) -> io::Result<()> {
@@ -248,56 +457,87 @@ pub fn doctor() -> bool {
     doctor_to(&mut stdout.lock(), explicit_worker.as_deref()).unwrap_or(false)
 }
 
+/// Window-presentation readiness for the current platform.
+///
+/// Linux asks the dynamic loader the same question the windowing backend will
+/// ask later. Windows and macOS link their window systems, so doctor reports
+/// what it can and does not claim a window was created.
+fn window_readiness() -> crate::startup::WindowReadiness {
+    #[cfg(target_os = "linux")]
+    {
+        let (session, missing) = crate::startup::resolve_window_support();
+        crate::startup::window_readiness_report(session, missing)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        crate::startup::native_window_readiness(match std::env::consts::OS {
+            "windows" => "Windows",
+            "macos" => "macOS",
+            other => other,
+        })
+    }
+}
+
+/// Report where the executable and its decode worker live.
+///
+/// Returns whether every critical layout check passed and whether a worker is
+/// available for the IPC probe.
+fn report_binary_layout(
+    stdout: &mut impl Write,
+    explicit_worker: Option<&OsStr>,
+) -> io::Result<(bool, bool)> {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            writeln!(stdout, "[FAIL] cannot resolve current_exe: {e}")?;
+            return Ok((false, false));
+        }
+    };
+    writeln!(stdout, "[ok]   executable: {}", exe.display())?;
+
+    let mut worker = exe;
+    worker.set_file_name(if cfg!(windows) {
+        "viewr-decode.exe"
+    } else {
+        "viewr-decode"
+    });
+    if worker.is_file() {
+        writeln!(stdout, "[ok]   worker beside exe: {}", worker.display())?;
+        return Ok((true, true));
+    }
+    if let Some(explicit) = explicit_worker {
+        let explicit = Path::new(explicit);
+        if explicit.is_file() {
+            writeln!(
+                stdout,
+                "[ok]   worker via VIEWR_DECODE_BIN: {}",
+                explicit.display()
+            )?;
+            return Ok((true, true));
+        }
+        writeln!(
+            stdout,
+            "[WARN] VIEWR_DECODE_BIN set but missing: {}",
+            explicit.display()
+        )?;
+        return Ok((false, false));
+    }
+    // Not a hard failure: core pure-Rust formats still work.
+    writeln!(
+        stdout,
+        "[WARN] viewr-decode not found beside exe
+       Release archives ship bin/viewr and bin/viewr-decode together; keep the pair.
+       Core formats still open. Optional AVIF and HEIC files report an error."
+    )?;
+    Ok((true, false))
+}
+
 fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Result<bool> {
     writeln!(stdout, "viewr doctor {VERSION}")?;
     writeln!(stdout, "{}", "-".repeat(48))?;
-    let mut ok = true;
-    let mut worker_available = false;
+    writeln!(stdout, "Binaries, decode, and privacy")?;
 
-    // --- binary layout ---
-    match std::env::current_exe() {
-        Ok(exe) => {
-            writeln!(stdout, "[ok]   executable: {}", exe.display())?;
-            let mut worker = exe.clone();
-            worker.set_file_name(if cfg!(windows) {
-                "viewr-decode.exe"
-            } else {
-                "viewr-decode"
-            });
-            if worker.is_file() {
-                writeln!(stdout, "[ok]   worker beside exe: {}", worker.display())?;
-                worker_available = true;
-            } else if let Some(explicit) = explicit_worker {
-                let explicit = Path::new(explicit);
-                if explicit.is_file() {
-                    writeln!(
-                        stdout,
-                        "[ok]   worker via VIEWR_DECODE_BIN: {}",
-                        explicit.display()
-                    )?;
-                    worker_available = true;
-                } else {
-                    writeln!(
-                        stdout,
-                        "[WARN] VIEWR_DECODE_BIN set but missing: {}",
-                        explicit.display()
-                    )?;
-                    ok = false;
-                }
-            } else {
-                writeln!(
-                    stdout,
-                    "[WARN] viewr-decode not found beside exe
-       (AVIF/HEIC need: cargo build -p viewr-decode)"
-                )?;
-                // Not a hard failure: core pure-Rust formats still work.
-            }
-        }
-        Err(e) => {
-            writeln!(stdout, "[FAIL] cannot resolve current_exe: {e}")?;
-            ok = false;
-        }
-    }
+    let (mut ok, worker_available) = report_binary_layout(stdout, explicit_worker)?;
 
     if worker_available {
         match crate::sandbox::probe_worker() {
@@ -342,11 +582,28 @@ fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Re
         writeln!(stdout, "[ok]   source tree: docs/PRIVACY.md present")?;
     }
 
+    // --- window presentation ---
+    let readiness = window_readiness();
+    writeln!(stdout)?;
+    writeln!(stdout, "Window presentation")?;
+    for line in &readiness.lines {
+        writeln!(stdout, "{line}")?;
+    }
+    if !readiness.critical_ok {
+        ok = false;
+    }
+
     writeln!(stdout, "{}", "-".repeat(48))?;
     if ok {
         writeln!(stdout, "doctor: critical checks passed")?;
     } else {
         writeln!(stdout, "doctor: one or more critical checks failed")?;
+        if !readiness.critical_ok {
+            writeln!(
+                stdout,
+                "doctor: this desktop session cannot open a viewr window until the library above is installed"
+            )?;
+        }
     }
     Ok(ok)
 }
@@ -528,8 +785,9 @@ pub fn ensure_console() {
 #[cfg(test)]
 mod tests {
     use super::{
-        Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL, UNIX_INSTALL_COMMAND,
-        WINDOWS_INSTALL_COMMAND, benchmark_to, decode_self_test, median, parse_args, run_with_io,
+        HelpTopic, Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL,
+        UNIX_INSTALL_COMMAND, WINDOWS_INSTALL_COMMAND, benchmark_to, decode_self_test, help_text,
+        median, parse_args, parse_args_with, run_with_io, window_readiness,
     };
     use crate::ephemeral::TempWorkspace;
     use std::fs;
@@ -557,13 +815,86 @@ mod tests {
 
     #[test]
     fn parse_help_and_doctor() {
-        assert_eq!(parse_args(["viewr", "help"]).unwrap(), Invocation::Help);
-        assert_eq!(parse_args(["viewr", "--help"]).unwrap(), Invocation::Help);
+        assert_eq!(
+            parse_args(["viewr", "help"]).unwrap(),
+            Invocation::Help(HelpTopic::Overview)
+        );
+        assert_eq!(
+            parse_args(["viewr", "--help"]).unwrap(),
+            Invocation::Help(HelpTopic::Overview)
+        );
         assert_eq!(parse_args(["viewr", "doctor"]).unwrap(), Invocation::Doctor);
         assert_eq!(parse_args(["viewr", "update"]).unwrap(), Invocation::Update);
         assert_eq!(
             parse_args(["viewr", "version"]).unwrap(),
             Invocation::Version
+        );
+    }
+
+    #[test]
+    fn every_command_reserves_its_own_help() {
+        for (arguments, topic) in [
+            (["viewr", "doctor", "--help"], HelpTopic::Doctor),
+            (["viewr", "doctor", "-h"], HelpTopic::Doctor),
+            (["viewr", "benchmark", "--help"], HelpTopic::Benchmark),
+            (["viewr", "bench", "--help"], HelpTopic::Benchmark),
+            (["viewr", "update", "--help"], HelpTopic::Update),
+            (["viewr", "open", "--help"], HelpTopic::Open),
+            (
+                ["viewr", "performance-probe", "--help"],
+                HelpTopic::PerformanceProbe,
+            ),
+            (["viewr", "help", "doctor"], HelpTopic::Doctor),
+            (["viewr", "help", "open"], HelpTopic::Open),
+        ] {
+            assert_eq!(
+                parse_args(arguments).unwrap(),
+                Invocation::Help(topic),
+                "{arguments:?}"
+            );
+        }
+
+        let unknown_topic = parse_args(["viewr", "help", "frobnicate"]).unwrap_err();
+        assert!(unknown_topic.contains("has no topic 'frobnicate'"));
+    }
+
+    #[test]
+    fn commands_reject_arguments_they_do_not_accept() {
+        for (arguments, expected) in [
+            (
+                ["viewr", "doctor", "--verbose"],
+                "unknown option '--verbose' for `viewr doctor`",
+            ),
+            (
+                ["viewr", "update", "--download"],
+                "unknown option '--download' for `viewr update`",
+            ),
+            (
+                ["viewr", "doctor", "corpus"],
+                "`viewr doctor` takes no argument 'corpus'",
+            ),
+            (
+                ["viewr", "benchmark", "--fast"],
+                "unknown option '--fast' for `viewr benchmark`",
+            ),
+            (
+                ["viewr", "open", "--force"],
+                "unknown option '--force' for `viewr open`",
+            ),
+        ] {
+            let error = parse_args(arguments).unwrap_err();
+            assert!(error.contains(expected), "{arguments:?} produced {error}");
+        }
+
+        assert!(
+            parse_args(["viewr", "benchmark", "corpus", "extra"])
+                .unwrap_err()
+                .contains("usage: viewr benchmark [dir]")
+        );
+        assert!(
+            parse_args(["viewr", "open", "a.png", "b.png"])
+                .unwrap_err()
+                .contains("usage: viewr open <path>")
         );
     }
 
@@ -604,6 +935,44 @@ mod tests {
     }
 
     #[test]
+    fn a_mistyped_command_reports_itself_instead_of_opening_the_gui() {
+        let missing = |_: &Path| false;
+        for word in ["nosuch", "docter", "xyzzy"] {
+            let error = parse_args_with(["viewr", word], &missing).unwrap_err();
+            assert!(error.contains(&format!("'{word}' is not a viewr command")));
+            assert!(error.contains("no such file or folder exists"));
+        }
+
+        // Paths still open the viewer, including files that vanished before the
+        // handler ran, so Open With and drag-to-shortcut keep working.
+        for path in [
+            "photo.jpg",
+            "./photos",
+            "photos/holiday",
+            r"photos\holiday",
+            "~/photos",
+        ] {
+            assert_eq!(
+                parse_args_with(["viewr", path], &missing).unwrap(),
+                Invocation::Gui {
+                    image: Some(PathBuf::from(path))
+                },
+                "{path}"
+            );
+        }
+
+        // An extension-free name that exists on disk is a folder, not a typo.
+        let existing = |path: &Path| path == Path::new("photos");
+        assert_eq!(
+            parse_args_with(["viewr", "photos"], &existing).unwrap(),
+            Invocation::Gui {
+                image: Some(PathBuf::from("photos"))
+            }
+        );
+        assert!(parse_args_with(["viewr", "photoss"], &existing).is_err());
+    }
+
+    #[test]
     fn parse_open_requires_path() {
         assert!(parse_args(["viewr", "open"]).is_err());
         assert_eq!(
@@ -622,11 +991,12 @@ mod tests {
 
     #[test]
     fn static_commands_report_their_contract() {
-        let (code, help, error) = invoke(Invocation::Help);
+        let (code, help, error) = invoke(Invocation::Help(HelpTopic::Overview));
         assert_eq!(code, ExitCode::SUCCESS);
         assert!(error.is_empty());
         assert!(help.contains("Usage:"));
         assert!(help.contains("No network client"));
+        assert!(help.contains("Add --help to any command"));
 
         let (code, version, error) = invoke(Invocation::Version);
         assert_eq!(code, ExitCode::SUCCESS);
@@ -663,11 +1033,58 @@ mod tests {
         assert_eq!((width, height), (64, 48));
         assert!(elapsed_ms >= 0.0);
 
+        let readiness = window_readiness();
         let (code, output, error) = invoke(Invocation::Doctor);
-        assert_eq!(code, ExitCode::SUCCESS);
         assert!(error.is_empty());
+        assert!(output.contains("Binaries, decode, and privacy"));
         assert!(output.contains("decode self-test: 64x48 PNG"));
-        assert!(output.contains("doctor: critical checks passed"));
+        assert!(output.contains("Window presentation"));
+        for line in &readiness.lines {
+            assert!(output.contains(line), "missing doctor line: {line}");
+        }
+        // Doctor is honest about what it did not prove.
+        assert!(output.contains("proven only when viewr opens a window"));
+        if readiness.critical_ok {
+            assert_eq!(code, ExitCode::SUCCESS);
+            assert!(output.contains("doctor: critical checks passed"));
+        } else {
+            assert_eq!(code, ExitCode::from(1));
+            assert!(output.contains("doctor: one or more critical checks failed"));
+            assert!(output.contains("cannot open a viewr window"));
+        }
+    }
+
+    #[test]
+    fn every_help_screen_documents_its_command_on_this_platform() {
+        for (topic, expected) in [
+            (HelpTopic::Overview, "viewr [file or folder]"),
+            (HelpTopic::Open, "viewr open <file or folder>"),
+            (HelpTopic::Doctor, "viewr doctor - local diagnostics"),
+            (HelpTopic::Benchmark, "viewr benchmark <dir>"),
+            (HelpTopic::Update, "there is no `viewr update --download`"),
+            (
+                HelpTopic::PerformanceProbe,
+                "viewr performance-probe <path>",
+            ),
+        ] {
+            for example in ["photos/IMG_001.jpg", r"photos\IMG_001.jpg"] {
+                let text = help_text(topic, example);
+                assert!(text.contains(expected), "{topic:?} missing {expected}");
+                assert!(text.ends_with('\n'));
+            }
+        }
+
+        // The example path uses the separator of the platform reading it.
+        let unix = help_text(HelpTopic::Overview, "photos/IMG_001.jpg");
+        assert!(unix.contains("viewr photos/IMG_001.jpg"));
+        assert!(!unix.contains(r"photos\IMG_001.jpg"));
+        let windows = help_text(HelpTopic::Overview, r"photos\IMG_001.jpg");
+        assert!(windows.contains(r"viewr photos\IMG_001.jpg"));
+
+        // Doctor help states the boundary the report itself keeps.
+        let doctor = help_text(HelpTopic::Doctor, "photos/IMG_001.jpg");
+        assert!(doctor.contains("missing a library viewr needs to open a window"));
+        assert!(doctor.contains("no network request, no temp file, no log file"));
     }
 
     #[test]

@@ -95,6 +95,17 @@ then repeated the complete gates, built all four archives, verified checksums an
 manifests, attested all 12 assets, and published the immutable
 [v0.1.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.1.0).
 
+For v0.1.1, [main CI run 31896435500](https://github.com/blisspixel/viewr/actions/runs/31896435500)
+passed all seven jobs and [fuzz run 31896435451](https://github.com/blisspixel/viewr/actions/runs/31896435451)
+passed both targets on commit `cca11a28d101cb1bc28a903530189adde307d1cb`.
+[Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683)
+repeated the complete gates, built all four archives, verified checksums and
+manifests, attested all 12 assets, and published the immutable
+[v0.1.1 release](https://github.com/blisspixel/viewr/releases/tag/v0.1.1). The
+published Linux archive was then re-verified from the release page: matching
+SHA-256 sidecar, 30-file internal manifest, and one attestation binding it to
+`release.yml@refs/tags/v0.1.1` at that commit.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#version-path-to-an-exceptional-10)

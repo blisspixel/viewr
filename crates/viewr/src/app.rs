@@ -133,6 +133,9 @@ fn run_internal(
     image_path: Option<PathBuf>,
     performance_probe: Option<PerformanceProbe>,
 ) -> Result<Option<crate::performance::PerformanceReport>, Error> {
+    // A desktop viewer that cannot reach a window says so before starting the
+    // event loop, instead of aborting inside the dynamic loader.
+    crate::startup::preflight().map_err(Error::Launch)?;
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     // A viewer is idle most of the time; wait for events rather than spin.
     event_loop.set_control_flow(ControlFlow::Wait);
@@ -235,11 +238,15 @@ fn run_internal(
         prefetch_schedule: prefetch::PrefetchSchedule::default(),
         event_proxy,
         performance_probe,
+        startup_failure: None,
     };
     if let Some(path) = app.session.selected_path.clone() {
         app.load_and_scan(path);
     }
     event_loop.run_app(&mut app)?;
+    if let Some(failure) = app.startup_failure.take() {
+        return Err(failure);
+    }
     let Some(probe) = app.performance_probe else {
         return Ok(None);
     };
@@ -829,6 +836,9 @@ struct App {
     event_proxy: EventLoopProxy<UserEvent>,
     /// Explicit developer/CI performance probe; absent from normal launches.
     performance_probe: Option<PerformanceProbe>,
+    /// Why the window or its GPU surface never appeared. Reported on exit so a
+    /// failed launch is never a silent success.
+    startup_failure: Option<Error>,
 }
 
 fn primary_modifier_pressed(modifiers: ModifiersState) -> bool {
@@ -4998,6 +5008,9 @@ impl ApplicationHandler<UserEvent> for App {
             Ok(w) => Arc::new(w),
             Err(e) => {
                 log::error!("failed to create window: {e}");
+                self.startup_failure = Some(Error::Launch(format!(
+                    "cannot open a window on this display: {e}"
+                )));
                 event_loop.exit();
                 return;
             }
@@ -5043,6 +5056,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             Err(e) => {
                 log::error!("failed to initialize gpu: {e}");
+                self.startup_failure = Some(Error::Launch(crate::startup::gpu_failure_message(
+                    &e.to_string(),
+                    cfg!(target_os = "linux"),
+                )));
                 event_loop.exit();
             }
         }

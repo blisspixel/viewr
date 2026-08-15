@@ -45,6 +45,7 @@ pub(crate) mod sandbox;
 mod save_state;
 /// State for the selected, loading, and presented image.
 pub mod session;
+mod startup;
 pub mod theme;
 pub mod thumbs;
 /// The main user interface module built with egui.

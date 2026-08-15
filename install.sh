@@ -316,8 +316,12 @@ staged_version=$("$stage_dir/viewr" --version) ||
     fail "staged binary did not report its version"
 [ "$staged_version" = "viewr $version" ] ||
     fail "staged binary version does not match the selected release"
-"$stage_dir/viewr" doctor >/dev/null ||
+# Keep the report: doctor names the missing desktop library when a session
+# cannot open a window, and a hidden reason leaves the user guessing.
+doctor_report=$("$stage_dir/viewr" doctor 2>&1) || {
+    printf '%s\n' "$doctor_report" >&2
     fail "staged binaries did not pass viewr doctor"
+}
 
 command_link="$BIN_DIR/viewr"
 if [ -e "$command_link" ] || [ -L "$command_link" ]; then

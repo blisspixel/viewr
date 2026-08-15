@@ -128,7 +128,7 @@ but completed history does not override an open gate here.
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
-| Reliability architecture | Open for v0.2 | Pure seams, 90.18 percent owned-logic coverage, residual exclusion judgment, and VERIFY subset green; CI tip green on `33ce34b`. Tag v0.2.0 only with release notes under `docs/releases/` and an immutable tag. |
+| Reliability architecture | Open for v0.2 | Pure seams, 90.11 percent owned-logic coverage, observable launch failure, residual exclusion judgment, and VERIFY subset green; CI tip green on `47234b1`. Tag v0.2.0 only with release notes under `docs/releases/` and an immutable tag. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |

@@ -183,6 +183,10 @@ OpenGL backend reaches them through EGL:
 | OpenGL, including Mesa software rendering | `libEGL.so.1` | `libegl1 libegl-mesa0` | `mesa-libEGL` | `mesa` |
 | Vulkan | `libvulkan.so.1` plus an installed driver | `mesa-vulkan-drivers` | `mesa-vulkan-drivers` | `vulkan-swrast` |
 
+The Vulkan loader is packaged separately from every driver, so a host can have
+`libvulkan.so.1` and still enumerate nothing. `viewr doctor` reports that state
+as a loader without a driver rather than as a working runtime.
+
 Most desktop installations already have all of this. Minimal containers, remote
 X hosts, and virtual machines often do not.
 

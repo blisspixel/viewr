@@ -89,7 +89,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           coverage run \
-            --source=scripts.release_artifact,scripts.performance_gate \
+            --source=scripts.release_artifact,scripts.performance_gate,scripts.software_gl_probe \
             -m unittest discover -s scripts/tests
           coverage report --precision=2 --show-missing --fail-under=85
 
@@ -184,6 +184,17 @@ jobs:
 
       - name: Enforce startup, first-pixel, navigation, idle, and memory budgets
         run: python -B scripts/performance_gate.py --binary target/release/viewr
+
+      # A host with no Vulkan driver must still present through OpenGL. wgpu
+      # reaches Mesa's GL through EGL, and it can only do so when the display
+      # connection reaches the instance, so this proves that wiring end to end.
+      - name: Present through the OpenGL backend on a software X session
+        env:
+          WGPU_BACKEND: gl
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get install -y --no-install-recommends libegl1 libegl-mesa0
+          python -B scripts/software_gl_probe.py --binary target/release/viewr
 
   c-decoder-policy:
     if: github.event_name != 'schedule'

@@ -194,7 +194,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           sudo apt-get install -y --no-install-recommends libegl1 libegl-mesa0
-          python -B scripts/software_gl_probe.py --binary target/release/viewr
+          python -B -m scripts.software_gl_probe --binary target/release/viewr
 
   c-decoder-policy:
     if: github.event_name != 'schedule'

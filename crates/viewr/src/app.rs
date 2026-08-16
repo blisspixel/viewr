@@ -5052,7 +5052,12 @@ impl ApplicationHandler<UserEvent> for App {
         } else {
             crate::gpu::MAX_GPU_BASE_PIXELS
         };
-        match pollster::block_on(Renderer::new(window, mode, max_base_pixels)) {
+        match pollster::block_on(Renderer::new(
+            window,
+            event_loop.owned_display_handle(),
+            mode,
+            max_base_pixels,
+        )) {
             Ok(renderer) => {
                 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 let mut renderer = renderer;

@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Fixed
+
+- viewr can present through OpenGL again on hosts with no Vulkan driver. The
+  display connection is now handed to the wgpu instance, which the GL backend
+  requires: without it that backend selects a surfaceless platform and then
+  reports every window surface as incompatible, so a session whose only working
+  renderer is software Mesa could never open a window. CI proves the OpenGL path
+  end to end by presenting a frame on a virtual X session with `WGPU_BACKEND=gl`.
+- A Vulkan loader with no driver behind it no longer counts as a graphics
+  runtime. `doctor` reports it as a loader without a driver, and a host in that
+  state now fails with the packages that actually move the failure instead of
+  being told its display is at fault one package too early.
+
+### Documentation
+
+- The installation guide states that the Vulkan loader is packaged separately
+  from every driver, and how `viewr doctor` reports that state.
+
 ## 0.1.2 - 2026-08-15
 
 ### Fixed

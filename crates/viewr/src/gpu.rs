@@ -86,13 +86,20 @@ impl Renderer {
     /// Returns an error if the GPU adapter, device, or surface cannot be created.
     pub async fn new(
         window: Arc<winit::window::Window>,
+        display: winit::event_loop::OwnedDisplayHandle,
         mode: Mode,
         max_base_pixels: u64,
     ) -> Result<Self, Error> {
         let size = window.inner_size();
 
-        // Honors WGPU_BACKEND and related env vars, else picks sensible defaults.
-        let instance = wgpu::Instance::default();
+        // The display connection must reach the instance. Without it the GL
+        // backend selects a surfaceless platform, then reports every window
+        // surface as incompatible, so a session whose only working renderer is
+        // software Mesa can never present. Honors WGPU_BACKEND and related env
+        // vars, else picks sensible defaults.
+        let instance = wgpu::Instance::new(
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
+        );
 
         let surface = instance
             .create_surface(Arc::clone(&window))

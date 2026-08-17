@@ -67,6 +67,34 @@ fn successful_fuzz_seeds_reach_every_distinct_core_decoder() {
 }
 
 #[test]
+fn empty_jxl_blend_region_regression_decodes_without_panicking() {
+    let bytes = std::fs::read(decoder_seed_directory().join("regression-jxl-empty-blend-region"))
+        .expect("read JXL regression seed");
+    let (&selector, payload) = bytes.split_first().expect("seed has selector");
+    let extension = CORE_EXTENSIONS[usize::from(selector) % CORE_EXTENSIONS.len()];
+    assert_eq!(extension, "jxl");
+
+    // This stream clips one channel's frame region to zero area during frame
+    // composition. Upstream borrowed a subgrid of the zero-width source grid
+    // and panicked, which the release profile turns into an aborted process.
+    // Whatever this decodes to, it must not panic and must keep the shape
+    // contract every accepted decode carries.
+    for image in [
+        DecodedImage::load_from_memory_with_extension(payload, extension),
+        DecodedImage::load_from_memory(payload),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert_eq!(
+            image.rgba.len(),
+            image.width as usize * image.height as usize * 4,
+            "accepted decode broke the shared shape policy"
+        );
+    }
+}
+
+#[test]
 fn unused_jxl_lf_level_regression_is_rejected_without_panicking() {
     let bytes = std::fs::read(decoder_seed_directory().join("regression-jxl-unused-lf-level"))
         .expect("read JXL regression seed");

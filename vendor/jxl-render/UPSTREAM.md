@@ -20,10 +20,17 @@ The local deviations are deliberately narrow:
   one `RenderState` boundary, with an executable regression test proving that an
   error wakes a blocked caller. The crate manifest delegates workspace resolver
   selection to viewr's root manifest.
+- `src/blend.rs` skips compositing a channel whose clipped frame region has zero
+  area, while still appending the channel so the output keeps its shape. A
+  malformed stream can clip a channel to nothing, and upstream 0.12.4 then
+  borrowed a subgrid of the zero-width source grid, which asserts inside
+  `jxl-grid`. Because the release profile aborts on panic, that turned one
+  hostile JPEG XL file into a terminated viewer.
 
-The hosted fuzz input that exposed the issue is retained as
-`fuzz/corpus/decode_memory/regression-jxl-unused-lf-level` and replayed by a
-normal integration test as well as future fuzz runs.
+The hosted fuzz inputs that exposed these issues are retained as
+`fuzz/corpus/decode_memory/regression-jxl-unused-lf-level` and
+`fuzz/corpus/decode_memory/regression-jxl-empty-blend-region`, and both are
+replayed by normal integration tests as well as future fuzz runs.
 
 When updating `jxl-oxide`, replace this directory from the matching published
 `jxl-render` crate, determine whether upstream now checks the reference flag

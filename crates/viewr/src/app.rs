@@ -5037,13 +5037,13 @@ fn monitor_logical_size(monitor: &winit::monitor::MonitorHandle) -> Option<(f64,
 /// A cascaded origin plus a tall window puts the lower edge behind a dock or
 /// taskbar even after the size is bounded. Wayland ignores client positioning,
 /// which is why the size bound rather than this placement is the contract.
-fn centered_window_attributes(
+fn placed_window_attributes(
     attributes: WindowAttributes,
     monitor: &winit::monitor::MonitorHandle,
     monitor_size: (f64, f64),
     window_size: (f64, f64),
 ) -> WindowAttributes {
-    let (left, top) = crate::startup::centered_window_position(monitor_size, window_size);
+    let (left, top) = crate::startup::window_position(monitor_size, window_size);
     let scale = monitor.scale_factor();
     let origin = monitor.position();
     attributes.with_position(PhysicalPosition::new(
@@ -5082,7 +5082,7 @@ impl ApplicationHandler<UserEvent> for App {
             .with_visible(false);
 
         if let (Some(monitor), Some(monitor_size)) = (monitor.as_ref(), monitor_size) {
-            attrs = centered_window_attributes(attrs, monitor, monitor_size, window_size);
+            attrs = placed_window_attributes(attrs, monitor, monitor_size, window_size);
         }
 
         if let Some(icon) = load_icon() {

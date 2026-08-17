@@ -33,7 +33,16 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   FUZZ_TOOLCHAIN: nightly-2026-07-20
-  FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '600' || '60' }}
+  # Pull requests stay fast. The weekly sweep runs longest, and the runs whose
+  # result is allowed to reach a user get more than a pull request: a tag,
+  # which is the release rerun, and a push to `main`. A reusable workflow keeps
+  # the caller's `event_name`, so the release rerun is identified by its tag
+  # ref rather than by `workflow_call`, which never appears here.
+  FUZZ_SECONDS: >-
+    ${{ github.event_name == 'schedule' && '600'
+    || github.ref_type == 'tag' && '300'
+    || github.event_name == 'push' && '180'
+    || '60' }}
 
 jobs:
   fuzz:
@@ -76,8 +85,37 @@ jobs:
       - name: Lint fuzz workspace
         run: cargo +$FUZZ_TOOLCHAIN clippy --manifest-path fuzz/Cargo.toml --bins -- -D warnings
 
+      # libFuzzer writes every newly interesting input into the corpus
+      # directory, and without this that coverage is discarded when the job
+      # ends: each run restarts from the committed seeds alone. Carrying the
+      # corpus forward lets exploration compound across runs instead of
+      # re-deriving the same reachable states every time. The key rotates per
+      # run so each run publishes what it learned, and the prefix restores the
+      # most recent corpus for this target. Restored entries carry libFuzzer's
+      # content-hash names, so they never collide with the committed seeds and
+      # both sets are present for the run.
+      - name: Restore accumulated corpus
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
       - name: Build fuzz target
         run: cargo +$FUZZ_TOOLCHAIN fuzz build "${{ matrix.target }}"
+
+      # A corpus that only grows would eventually spend the run's budget
+      # loading inputs instead of exploring. The weekly sweep reduces it in
+      # place to the smallest set reaching the same coverage, and that
+      # minimized corpus is what later runs restore. Committed seeds removed as
+      # redundant here return with the next checkout.
+      - name: Minimize accumulated corpus
+        if: github.event_name == 'schedule'
+        run: >
+          cargo +$FUZZ_TOOLCHAIN fuzz cmin "${{ matrix.target }}"
+          "fuzz/corpus/${{ matrix.target }}"
+          -- -max_len=${{ matrix.max_len }}
 
       - name: Fuzz
         run: >

@@ -158,9 +158,14 @@ higher standard than the rest of the app.
   decoder, seeded with malformed and adversarial samples. A crash found by the
   fuzzer is a release blocker.
 - The operational pure-Rust decoder and worker-protocol targets live in `fuzz/`.
-  They compile with a pinned nightly and cargo-fuzz release, run briefly on
-  relevant changes, and run for at least 600 seconds per target on the weekly
-  schedule. `fuzz/README.md` is the executable local contract.
+  They compile with a pinned nightly and cargo-fuzz release. Time per target
+  scales with how far a result can travel: 60 seconds on a pull request, 180 on
+  a push to `main`, 300 on the tag rerun that gates a release, and at least 600
+  on the weekly schedule. `fuzz/README.md` is the executable local contract.
+- The corpus accumulates across runs instead of restarting from the committed
+  seeds every time, so coverage compounds rather than being re-derived, and the
+  weekly sweep minimizes it in place so the budget is spent exploring rather
+  than loading. Committed seeds return with every checkout.
 - A regression corpus: every file that ever caused a crash or hang becomes a
   permanent test case.
 - Optional C-backed decode runs in the restricted worker described in

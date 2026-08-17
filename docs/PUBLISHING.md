@@ -131,6 +131,16 @@ repeated the complete gates and published the immutable
 Linux archive re-verifies from the release page with a matching sidecar and one
 attestation bound to `release.yml@refs/tags/v0.1.3` at that commit.
 
+For v0.1.4, [main CI run 32049375756](https://github.com/blisspixel/viewr/actions/runs/32049375756)
+passed all seven jobs and [fuzz run 32049375806](https://github.com/blisspixel/viewr/actions/runs/32049375806)
+passed both targets on commit `414651b76c7d40f931842cada05faa281bdcb6f8`.
+[Release run 32050640235](https://github.com/blisspixel/viewr/actions/runs/32050640235)
+repeated the complete gates and published the immutable
+[v0.1.4 release](https://github.com/blisspixel/viewr/releases/tag/v0.1.4), whose
+Linux archive re-verifies from the release page with a matching sidecar, a
+32-file internal manifest, and one attestation bound to
+`release.yml@refs/tags/v0.1.4` at that commit.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#version-path-to-an-exceptional-10)

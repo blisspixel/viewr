@@ -397,6 +397,15 @@ pub(crate) fn blend<S: Sample>(
         blend_params.width = clipped_original_frame_region.width as usize;
         blend_params.height = clipped_original_frame_region.height as usize;
 
+        // A malformed stream can clip this channel's frame region to zero area.
+        // There is nothing to composite, and borrowing a subgrid of the
+        // zero-width source grid asserts inside `jxl-grid`, so keep the channel
+        // and skip only the blend.
+        if clipped_original_frame_region.is_empty() {
+            output_grid.append_channel(target_grid, target_region);
+            continue;
+        }
+
         let new_grid = new_grid.buffer()[idx].as_float().unwrap();
         blend_single(target_subgrid, new_grid.as_subgrid(), &blend_params);
         output_grid.append_channel(target_grid, target_region);

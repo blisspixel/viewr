@@ -34,6 +34,8 @@ Status last verified on 2026-08-02:
   contract.
 - [x] Publish and verify annotated tag `v0.1.3`, the patch release that restores
   OpenGL presentation, under that same contract.
+- [x] Publish and verify annotated tag `v0.1.4`, the patch release that fits the
+  first window to the monitor it opens on, under that same contract.
 
 ## Pre-1.0 release procedure
 
@@ -51,8 +53,8 @@ production environment.
 5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 
    ```text
-   git tag -a v0.1.3 -m "viewr 0.1.3"
-   git push origin v0.1.3
+   git tag -a v0.1.4 -m "viewr 0.1.4"
+   git push origin v0.1.4
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -70,9 +72,9 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.1.3 --repo blisspixel/viewr
-gh release verify v0.1.3 --repo blisspixel/viewr
-gh attestation verify viewr-0.1.3-x86_64-pc-windows-msvc.zip \
+gh release view v0.1.4 --repo blisspixel/viewr
+gh release verify v0.1.4 --repo blisspixel/viewr
+gh attestation verify viewr-0.1.4-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
@@ -153,8 +155,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.1.3 is public, immutable, checksummed, and attested, and v0.1.2, v0.1.1, and
-  v0.1.0 remain published, the first preview with a known-issues note. Their executable archives
+- v0.1.4 is public, immutable, checksummed, and attested, and v0.1.3, v0.1.2,
+  v0.1.1, and v0.1.0 remain published, the first preview with a known-issues
+  note. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.
 - The foreground installer tools contact only the official GitHub repository after

@@ -39,7 +39,7 @@ content.
 
 ## Install
 
-v0.1.3 is the current public preview. Its portable archives are checksummed and
+v0.1.4 is the current public preview. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch.
@@ -47,7 +47,7 @@ security controls to force a launch.
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.1.3/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.1.4/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -57,13 +57,13 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.3/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.4/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-Both commands execute an installer fixed to the immutable v0.1.3 release. The
+Both commands execute an installer fixed to the immutable v0.1.4 release. The
 installer resolves the latest stable archive, verifies its SHA-256 sidecar and
 internal manifest, and installs it without giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
@@ -148,13 +148,13 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 
 ## Project status
 
-v0.1.3 is the current public foundation preview, not a percentage-complete score
-or a claim that the product is finished. It is the third patch over the first
+v0.1.4 is the current public foundation preview, not a percentage-complete score
+or a claim that the product is finished. It is the fourth patch over the first
 public preview, v0.1.0, and that immutable release is the public install target.
 `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.2.0** reliability,
 then v0.3 display correctness through v0.9 publisher authentication, then v1.0.
-The [release notes](docs/releases/v0.1.3.md) state the exact preview limits.
+The [release notes](docs/releases/v0.1.4.md) state the exact preview limits.
 
 ## Development
 

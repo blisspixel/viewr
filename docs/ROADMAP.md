@@ -18,7 +18,7 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3), the third patch over [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) |
+| Published install target | Immutable [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4), the fourth patch over [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) |
 | Active development line | `main`, working toward **v0.2.0** |
 | Next tag allowed | **v0.2.0** only after its exit criteria below are true. Further v0.1.x patches remain allowed for shipped defects |
 | Later tags | Blocked until every earlier minor gate is closed |
@@ -50,6 +50,7 @@ v0.1.0  Public foundation          [released]
 v0.1.1  Observable launch patch    [released]
 v0.1.2  Backend and runtime patch  [released]
 v0.1.3  OpenGL presentation patch  [released]
+v0.1.4  Window fit patch           [released]
    |
    v
 v0.2.0  Reliability architecture   [next]
@@ -109,7 +110,7 @@ thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
 observable. Do not start v0.3 monitor/profile work that deepens unowned
 event-loop races.
 
-Current position: v0.1.3 is released and verified, and the earlier patches remain
+Current position: v0.1.4 is released and verified, and the earlier patches remain
 published with the first preview's known issues recorded. v0.2.0 is the next planned minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,
 then v0.5 formats, then v0.6 product quality, then v0.7 through v0.9 evidence and
 trust.

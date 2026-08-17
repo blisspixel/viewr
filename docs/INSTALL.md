@@ -1,6 +1,6 @@
 # Installing viewr
 
-viewr is pre-1.0. v0.1.3 is the current public GitHub Release, a patch over the
+viewr is pre-1.0. v0.1.4 is the current public GitHub Release, a patch over the
 first public release v0.1.0. Its portable
 archives are checksummed, manifest-verified, and attested, but the Windows
 artifacts are not Authenticode-signed and the macOS artifacts are not Developer
@@ -12,7 +12,7 @@ Installation is per user and never requires elevation.
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.1.3/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.1.4/install.ps1 | iex
 ```
 
 The installer:
@@ -32,9 +32,9 @@ background.
 To install a specific version from a reviewed local copy of the script:
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.1.3/install.ps1 `
+irm https://github.com/blisspixel/viewr/releases/download/v0.1.4/install.ps1 `
   -OutFile $env:TEMP\viewr-install.ps1
-& $env:TEMP\viewr-install.ps1 -Version 0.1.3
+& $env:TEMP\viewr-install.ps1 -Version 0.1.4
 ```
 
 `-NoPath` skips the user PATH change, and `-NoShortcut` skips the Start menu
@@ -44,7 +44,7 @@ shortcut. `-InstallDir` is accepted only inside the current user's
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.3/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.1.4/install.sh | sh
 ```
 
 The shell installer:
@@ -63,7 +63,7 @@ glibc. Linux ARM64 and musl users must build from source for now.
 To pin a release or override the user-local locations:
 
 ```sh
-VIEWR_VERSION=0.1.3 \
+VIEWR_VERSION=0.1.4 \
 VIEWR_INSTALL_ROOT="$HOME/.local/share/viewr" \
 VIEWR_BIN_DIR="$HOME/.local/bin" \
 sh install.sh
@@ -75,11 +75,11 @@ configuration. The installer reports this without editing profile files.
 ## Review before running
 
 Pipe-to-shell commands are convenient but execute installer code. The commands
-above are fixed to the immutable `v0.1.3` release rather than a moving branch.
+above are fixed to the immutable `v0.1.4` release rather than a moving branch.
 To review it first:
 
 ```sh
-curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.1.3/install.sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.1.4/install.sh
 less install.sh
 sh install.sh
 ```
@@ -116,7 +116,7 @@ Extract the archive and keep `bin/viewr` and `bin/viewr-decode` side by side. Th
 archive also contains the project license, notice, third-party license inventory,
 security policy, canonical documentation, and a per-file release manifest.
 
-GitHub checksums and attestations improve integrity and provenance. The v0.1.3
+GitHub checksums and attestations improve integrity and provenance. The v0.1.4
 portable archives are not Authenticode-signed or Apple-notarized, so
 operating-system trust dialogs may still apply. Do not disable platform security
 controls to force a launch.

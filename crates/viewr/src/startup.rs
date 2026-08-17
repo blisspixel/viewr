@@ -291,8 +291,12 @@ const MAX_MONITOR_WIDTH_SHARE: f64 = 0.9;
 /// small display a window that claims the full preferred height is placed with
 /// its lower edge, including the folder-preview rail and the empty-state
 /// buttons, underneath that furniture, and no resize the user performs brings it
-/// back without moving the window first.
-const MAX_MONITOR_HEIGHT_SHARE: f64 = 0.75;
+/// back without moving the window first. Together with the top margin below,
+/// this leaves the bottom fifth of the monitor to the desktop.
+const MAX_MONITOR_HEIGHT_SHARE: f64 = 0.7;
+
+/// Share of a monitor's height left above the first window.
+const WINDOW_TOP_SHARE: f64 = 0.05;
 
 /// Logical size of the first window on a monitor of `monitor` logical size.
 ///
@@ -327,16 +331,20 @@ fn window_axis(preferred: f64, available: f64, minimum: f64) -> f64 {
 }
 
 /// Where the first window sits on its monitor, in logical pixels from the
-/// monitor origin.
+/// monitor origin: centered across, near the top.
 ///
-/// Bounding the size is not enough on its own: a platform that cascades new
-/// windows from a fixed offset can still push the lower edge of a bounded window
-/// behind a dock. Centering spends the margin the size policy reserved on both
-/// edges instead of all of it on one.
-pub(crate) fn centered_window_position(monitor: (f64, f64), window: (f64, f64)) -> (f64, f64) {
+/// Bounding the size is not enough on its own, because a platform that cascades
+/// new windows from a fixed offset can still push the lower edge of a bounded
+/// window behind a dock. Vertical centering would be the wrong correction:
+/// desktop furniture is not symmetric. A taskbar, dock, or panel almost always
+/// takes the bottom of the screen, and the window manager adds a title bar above
+/// the client area viewr asked for, so the reserved margin belongs below the
+/// window rather than split around it.
+pub(crate) fn window_position(monitor: (f64, f64), window: (f64, f64)) -> (f64, f64) {
+    let free_height = (monitor.1 - window.1).max(0.0);
     (
         ((monitor.0 - window.0) * 0.5).max(0.0),
-        ((monitor.1 - window.1) * 0.5).max(0.0),
+        (monitor.1 * WINDOW_TOP_SHARE).min(free_height),
     )
 }
 
@@ -1290,8 +1298,8 @@ needs it for X11 keyboard layout handling."
 #[cfg(test)]
 mod tests {
     use super::{
-        MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE, PREFERRED_WINDOW_SIZE, centered_window_position,
-        default_window_size, gpu_failure_message, native_window_readiness,
+        MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE, PREFERRED_WINDOW_SIZE, default_window_size,
+        gpu_failure_message, native_window_readiness, window_position,
     };
 
     /// The loader probe and the launch decision, exercised on the real host.
@@ -1341,10 +1349,10 @@ mod tests {
             default_window_size(Some((1920.0, 1080.0))),
             PREFERRED_WINDOW_SIZE
         );
-        // A 1280x800 session with a dock: the window must end above it.
-        assert_eq!(default_window_size(Some((1280.0, 800.0))), (1000.0, 600.0));
+        // A 1280x800 session with a 137px dock: the window must end above it.
+        assert_eq!(default_window_size(Some((1280.0, 800.0))), (1000.0, 560.0));
         // A narrow monitor bounds the width as well.
-        assert_eq!(default_window_size(Some((1024.0, 768.0))), (921.6, 576.0));
+        assert_eq!(default_window_size(Some((1024.0, 900.0))), (921.6, 630.0));
         // Neither axis drops below the size the window itself enforces.
         assert_eq!(
             default_window_size(Some((640.0, 480.0))),
@@ -1363,20 +1371,21 @@ mod tests {
     }
 
     #[test]
-    fn the_first_window_is_centered_inside_the_monitor_it_opens_on() {
-        // The 1280x800 session again: the reserved margin is spent on both
-        // edges, so the window ends 100 logical pixels above the screen bottom.
-        // 600 + 100 + 100 is the 800 the monitor has.
+    fn the_first_window_leaves_the_bottom_of_the_monitor_to_the_desktop() {
+        // The 1280x800 session with a 137px dock: 40 above the window plus 560
+        // of window leaves 200 below it, so a title bar of any ordinary height
+        // still ends above the dock.
         let monitor = (1280.0, 800.0);
         let window = default_window_size(Some(monitor));
         assert_eq!(
-            (window, centered_window_position(monitor, window)),
-            ((1000.0, 600.0), (140.0, 100.0))
+            (window, window_position(monitor, window)),
+            ((1000.0, 560.0), (140.0, 40.0))
         );
         // A window at least as large as its monitor starts at the origin
-        // instead of at a negative offset that would hide its title bar.
+        // instead of at an offset that would push its title bar off screen.
+        assert_eq!(window_position((640.0, 480.0), (1000.0, 720.0)), (0.0, 0.0));
         assert_eq!(
-            centered_window_position((640.0, 480.0), (1000.0, 720.0)),
+            window_position((640.0, 480.0), MINIMUM_WINDOW_SIZE),
             (0.0, 0.0)
         );
     }

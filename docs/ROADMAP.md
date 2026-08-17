@@ -353,11 +353,11 @@ state before job ownership and test seams are explicit.
 - [x] Bound the first window to the monitor it opens on. winit reports monitor
   extents but not the work area a taskbar, dock, or panel leaves behind, so the
   covered `startup` seam caps the requested logical size at 90 percent of the
-  monitor width and 75 percent of its height without going below the 640 by 480
-  minimum, and centers the window so a cascaded origin cannot spend that whole
-  reserved margin on one edge. `app` supplies only the monitor extent and scale.
-  A small display now opens a smaller, fully reachable window instead of one
-  whose lower edge sits behind a dock.
+  monitor width and 70 percent of its height without going below the 640 by 480
+  minimum, and places the window 5 percent below the top edge so the bottom fifth
+  of the monitor stays free for asymmetric furniture. `app` supplies only the
+  monitor extent, origin, and scale. A small display now opens a smaller, fully
+  reachable window instead of one whose lower edge sits behind a dock.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,

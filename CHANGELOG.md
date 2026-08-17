@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Fixed
+
+- The first window fits the monitor it opens on. viewr asked for a 1000 by 720
+  logical window on every display, so on a small screen with a taskbar, dock, or
+  panel the window was placed with its lower edge behind that furniture and the
+  bottom of the interface could not be read or clicked. The requested size is now
+  bounded by the monitor: at most 90 percent of its logical width and 75 percent
+  of its height, and never below the 640 by 480 minimum. Larger displays are
+  unaffected and no window changes size while an image loads.
+
+### Changed
+
+- The typed error set is inside the measured coverage floor rather than excluded
+  from it, and every launch category it reports has a direct test. The remaining
+  whole-file coverage exclusions are exactly the native integration surfaces:
+  the winit event loop, the wgpu device, the worker sandbox and its process
+  limits, and the two binary entry points.
+
 ## 0.1.3 - 2026-08-16
 
 ### Fixed

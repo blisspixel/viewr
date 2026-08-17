@@ -5007,6 +5007,26 @@ impl App {
     }
 }
 
+/// Logical size of the monitor the first window will most likely open on.
+///
+/// winit reports monitor extents but not the work area a taskbar, dock, or panel
+/// leaves behind, so the size policy in `startup` treats this as an upper bound
+/// rather than as space viewr may fill.
+fn primary_monitor_logical_size(event_loop: &ActiveEventLoop) -> Option<(f64, f64)> {
+    let monitor = event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next())?;
+    let scale = monitor.scale_factor();
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let size = monitor.size();
+    Some((
+        f64::from(size.width) / scale,
+        f64::from(size.height) / scale,
+    ))
+}
+
 fn load_icon() -> Option<winit::window::Icon> {
     let bytes = include_bytes!("../../../assets/icon.ico");
     if let Ok(image) = image::load_from_memory(bytes) {
@@ -5023,10 +5043,15 @@ impl ApplicationHandler<UserEvent> for App {
         if self.renderer.is_some() {
             return;
         }
+        let (window_width, window_height) =
+            crate::startup::default_window_size(primary_monitor_logical_size(event_loop));
         let mut attrs = Window::default_attributes()
             .with_title("viewr")
-            .with_inner_size(LogicalSize::new(1000.0, 720.0))
-            .with_min_inner_size(LogicalSize::new(640.0, 480.0))
+            .with_inner_size(LogicalSize::new(window_width, window_height))
+            .with_min_inner_size(LogicalSize::new(
+                crate::startup::MINIMUM_WINDOW_SIZE.0,
+                crate::startup::MINIMUM_WINDOW_SIZE.1,
+            ))
             .with_theme(self.theme_preference.window_theme())
             .with_visible(false);
 

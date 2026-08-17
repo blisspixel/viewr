@@ -101,13 +101,14 @@ this filename filter:
   standalone image and descriptor decisions live in covered private modules
 - `sandbox.rs`: `viewr-decode` process pool and bounded input/pixel-stream IPC
 - `worker_limit.rs`: OS Job Object / process-group glue
-- `error.rs` and both workspace `main.rs` files: entry and process surfaces
+- both workspace `main.rs` files: process entry surfaces
 
 The whole-file exclusions are intentional native and orchestration shells, not
 silent gaps. Their pure decisions retain direct unit tests in covered modules.
 Excluded line count does not dilute the owned-logic floor. Everything
 else is in the coverage floor. This includes the `ui.rs` egui/AccessKit adapter,
-the pure `chrome` projection, and the CPU-only `gpu_image` sizing, mip, preview,
+the pure `chrome` projection, the `error` categories every launch failure is
+reported through, and the CPU-only `gpu_image` sizing, mip, preview,
 and upload-selection policy. It also includes `gpu_policy` surface selection,
 patch geometry, placement packing, and clear-color mapping, plus `presentation`
 selected-versus-presented navigation, pristine reuse, opening, durable-error, and

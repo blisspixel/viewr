@@ -39,7 +39,10 @@ disappears. This spec is the converged result of two rounds of design critique
   from the window minus every visible docked panel. Opening, closing, or resizing
   chrome refits and recenters the photo inside the remaining viewport.
 - Top bar: a fixed 40px neutral surface with five conventional menus: File,
-  Edit, View, Tools, and Help. The right side shows a stable folder counter and, when space
+  Edit, View, Tools, and Help. Each menu title carries 8px of padding on each
+  side and no spacing between titles, so titles sit about 16px apart and
+  neighboring highlights meet instead of leaving a dead seam for a pointer
+  crossing an open menu bar. The right side shows a stable folder counter and, when space
   permits, the filename, dimensions, and physical zoom percentage, where 100
   percent means one source pixel per physical display pixel. Filename, dimensions,
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu

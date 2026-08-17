@@ -915,13 +915,19 @@ function Set-ApplicationFocusHint {
         [System.Windows.Automation.AutomationElement]$Element
     )
 
+    # Focus here is advisory, so a provider that refuses it is not a result.
+    # UIA focusability, element locality, and element availability can each
+    # change between discovery and SetFocus, and the refusals arrive as
+    # different exception types: catching one of them left the others fatal.
+    # The gate is native key delivery below plus the semantic effect every
+    # caller asserts, so a hint that does not apply cannot hide a defect: a key
+    # that fails to land still fails those checks. Report the refusal so a
+    # later failure carries its context, then continue.
     try {
         $Element.SetFocus()
     }
-    catch [System.InvalidOperationException] {
-        # UIA focusability can change between discovery and SetFocus. Native key
-        # delivery still has to succeed, and every caller verifies its semantic
-        # effect. A stale element or any unexpected failure remains fatal.
+    catch {
+        Write-Output "accessibility-smoke: focus hint not applied: $($_.Exception.Message)"
     }
 }
 

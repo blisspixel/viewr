@@ -26,11 +26,14 @@ disappears. This spec is the converged result of two rounds of design critique
 - Loading an image never changes the application-window dimensions. The initial
   1000px by 720px logical window, or the dimensions the user chooses by resizing,
   remains stable while image fit and zoom resolve inside its viewport.
-- The first window is bounded by the monitor it opens on. A desktop reserves
-  space no process can query here, so viewr asks for at most 90 percent of the
-  monitor's logical width and 75 percent of its height, and never less than the
-  640px by 480px minimum. A small display therefore opens a smaller window
-  instead of one whose lower edge sits behind a taskbar, dock, or panel.
+- The first window is bounded by the monitor it opens on and centered inside it.
+  A desktop reserves space no process can query here, so viewr asks for at most
+  90 percent of the monitor's logical width and 75 percent of its height, and
+  never less than the 640px by 480px minimum. Centering spends that reserved
+  margin on both edges rather than letting a cascaded origin push the lower edge
+  behind a taskbar, dock, or panel. A small display therefore opens a smaller
+  window that is fully reachable, and Wayland, which does not accept client
+  placement, still gets the bounded size.
 - Persistent chrome never overlaps the image. The image fit rectangle is computed
   from the window minus every visible docked panel. Opening, closing, or resizing
   chrome refits and recenters the photo inside the remaining viewport.

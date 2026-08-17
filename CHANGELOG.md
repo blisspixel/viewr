@@ -11,9 +11,12 @@ and organized by user-visible concern.
   logical window on every display, so on a small screen with a taskbar, dock, or
   panel the window was placed with its lower edge behind that furniture and the
   bottom of the interface could not be read or clicked. The requested size is now
-  bounded by the monitor: at most 90 percent of its logical width and 75 percent
-  of its height, and never below the 640 by 480 minimum. Larger displays are
-  unaffected and no window changes size while an image loads.
+  bounded by the monitor, at most 90 percent of its logical width and 75 percent
+  of its height and never below the 640 by 480 minimum, and the window is
+  centered on that monitor so a cascaded origin cannot spend the whole reserved
+  margin on one edge. Larger displays keep the same size, no window changes size
+  while an image loads, and Wayland, which does not accept client placement,
+  still gets the bounded size.
 
 ### Changed
 

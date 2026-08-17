@@ -326,6 +326,20 @@ fn window_axis(preferred: f64, available: f64, minimum: f64) -> f64 {
     preferred.min(available).max(minimum)
 }
 
+/// Where the first window sits on its monitor, in logical pixels from the
+/// monitor origin.
+///
+/// Bounding the size is not enough on its own: a platform that cascades new
+/// windows from a fixed offset can still push the lower edge of a bounded window
+/// behind a dock. Centering spends the margin the size policy reserved on both
+/// edges instead of all of it on one.
+pub(crate) fn centered_window_position(monitor: (f64, f64), window: (f64, f64)) -> (f64, f64) {
+    (
+        ((monitor.0 - window.0) * 0.5).max(0.0),
+        ((monitor.1 - window.1) * 0.5).max(0.0),
+    )
+}
+
 /// X11 and Wayland launch policy.
 ///
 /// Compiled for Linux, and for tests on every platform, so these pure decisions
@@ -1276,8 +1290,8 @@ needs it for X11 keyboard layout handling."
 #[cfg(test)]
 mod tests {
     use super::{
-        MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE, PREFERRED_WINDOW_SIZE, default_window_size,
-        gpu_failure_message, native_window_readiness,
+        MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE, PREFERRED_WINDOW_SIZE, centered_window_position,
+        default_window_size, gpu_failure_message, native_window_readiness,
     };
 
     /// The loader probe and the launch decision, exercised on the real host.
@@ -1346,6 +1360,25 @@ mod tests {
         ] {
             assert_eq!(default_window_size(monitor), PREFERRED_WINDOW_SIZE);
         }
+    }
+
+    #[test]
+    fn the_first_window_is_centered_inside_the_monitor_it_opens_on() {
+        // The 1280x800 session again: the reserved margin is spent on both
+        // edges, so the window ends 100 logical pixels above the screen bottom.
+        // 600 + 100 + 100 is the 800 the monitor has.
+        let monitor = (1280.0, 800.0);
+        let window = default_window_size(Some(monitor));
+        assert_eq!(
+            (window, centered_window_position(monitor, window)),
+            ((1000.0, 600.0), (140.0, 100.0))
+        );
+        // A window at least as large as its monitor starts at the origin
+        // instead of at a negative offset that would hide its title bar.
+        assert_eq!(
+            centered_window_position((640.0, 480.0), (1000.0, 720.0)),
+            (0.0, 0.0)
+        );
     }
 
     #[test]

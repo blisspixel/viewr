@@ -103,8 +103,10 @@ coverage floor are evidenced (90.60 percent lines under the CI llvm-cov
 contract, with the launch-prerequisite `startup` seam at 98.36 percent). The
 residual whole-file exclusions are now exactly five native integration surfaces,
 each named with the reason it cannot run honestly under coverage, and the typed
-error set moved into the measured floor. Before tagging v0.2.0, settle executor
-supervision for an in-process worker thread that dies, and run the full VERIFY.md
+error set moved into the measured floor. Executor supervision is settled: every
+replace-latest decode queue closes when its last worker stops, so a thread that
+dies produces a named scheduling error rather than an operation that stays busy
+forever. Before tagging v0.2.0, run the full VERIFY.md
 gate. Preserve bounded job,
 thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
 observable. Do not start v0.3 monitor/profile work that deepens unowned
@@ -136,7 +138,7 @@ but completed history does not override an open gate here.
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. That playtest also found the window opening under a 137px dock, which [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4) fixed by bounding and placing the first window inside its monitor. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
-| Reliability architecture | Open for v0.2 | Pure seams, 90.60 percent owned-logic coverage, observable launch failure, recorded residual exclusion judgment for the five native surfaces, and VERIFY subset green; CI tip green on `414651b`. Executor supervision for a worker thread that dies remains open. Tag v0.2.0 only with release notes under `docs/releases/` and an immutable tag. |
+| Reliability architecture | Open for v0.2 | Pure seams, 90.60 percent owned-logic coverage, observable launch failure, recorded residual exclusion judgment for the five native surfaces, and VERIFY subset green; CI tip green on `414651b`. Every replace-latest decode queue now closes when its last worker stops, so a worker thread that dies reports a named scheduling error instead of leaving the event loop waiting for a completion that cannot arrive. Remaining: run the full VERIFY.md gate, then tag v0.2.0 with release notes under `docs/releases/` and an immutable tag. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
@@ -255,8 +257,15 @@ state before job ownership and test seams are explicit.
   pixels are structurally validated and path-free, stale or off-window results
   cannot upload, executor saturation remains retryable without a wake loop, and a
   typed or disconnected failure is attempted once until the path leaves the
-  visible window or its generation resets. Executor supervision remains open;
-  release builds do not claim general recovery from an in-process thread panic.
+  visible window or its generation resets. Every replace-latest decode queue is
+  now supervised by a live-worker count: a worker that stops, including one that
+  unwinds, decrements it, and the last one out closes its queue. A queue with
+  workers left keeps serving, and a queue with none rejects further work so the
+  scheduling call reports a named error instead of accepting jobs no thread will
+  run and leaving the event loop waiting for a completion that cannot arrive.
+  Release builds still do not claim general recovery from an in-process thread
+  panic: the affected operation reports the loss and the interface asks for a
+  restart.
   The sixth slice replaces prefetch's shared unbounded completion channel with
   at most four event-loop-owned one-result jobs across current and cancelled
   generations. Owner context supplies the only publishable path and generation,

@@ -9,7 +9,7 @@
 use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::color::WorkingColorEncoding;
 use crate::error::Error;
@@ -201,17 +201,36 @@ impl LatestJobQueue {
     }
 }
 
-struct CloseLatestJobQueueOnDrop(std::sync::Arc<LatestJobQueue>);
+/// Closes a replace-latest queue once its last worker stops.
+///
+/// A worker that unwinds must not leave its queue accepting work: the queue
+/// would keep taking jobs no thread will ever run, the completion the event
+/// loop waits on would never be dropped, and the operation would stay busy
+/// forever with nothing to report. Closing makes the next submission fail with
+/// a named error instead. The count means a queue served by several workers
+/// survives losing one of them, and closes only when the last one is gone.
+struct CloseLatestJobQueueOnLastExit {
+    queue: std::sync::Arc<LatestJobQueue>,
+    live_workers: std::sync::Arc<AtomicUsize>,
+}
 
-impl Drop for CloseLatestJobQueueOnDrop {
+impl Drop for CloseLatestJobQueueOnLastExit {
     fn drop(&mut self) {
-        self.0.close();
+        if self.live_workers.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.queue.close();
+        }
     }
 }
 
-fn run_guarded_latest_queue(queue: std::sync::Arc<LatestJobQueue>) {
-    let close_on_exit = CloseLatestJobQueueOnDrop(queue);
-    while let Some(job) = close_on_exit.0.take() {
+fn run_guarded_latest_queue(
+    queue: std::sync::Arc<LatestJobQueue>,
+    live_workers: std::sync::Arc<AtomicUsize>,
+) {
+    let close_on_exit = CloseLatestJobQueueOnLastExit {
+        queue,
+        live_workers,
+    };
+    while let Some(job) = close_on_exit.queue.take() {
         job();
     }
 }
@@ -251,38 +270,34 @@ impl DecodeExecutor {
         }
 
         let foreground = std::sync::Arc::new(LatestJobQueue::default());
+        let foreground_workers = std::sync::Arc::new(AtomicUsize::new(MAX_CONCURRENT_FILE_DECODES));
         for index in 0..MAX_CONCURRENT_FILE_DECODES {
             let foreground_rx = std::sync::Arc::clone(&foreground);
+            let live_workers = std::sync::Arc::clone(&foreground_workers);
             let thread = std::thread::Builder::new()
                 .name(format!("viewr-decode-foreground-{index}"))
-                .spawn(move || {
-                    while let Some(job) = foreground_rx.take() {
-                        job();
-                    }
-                })
+                .spawn(move || run_guarded_latest_queue(foreground_rx, live_workers))
                 .map_err(|error| format!("failed to start foreground decoder: {error}"))?;
             threads.push(thread);
         }
 
         let auxiliary = std::sync::Arc::new(LatestJobQueue::default());
         let auxiliary_rx = std::sync::Arc::clone(&auxiliary);
+        let auxiliary_workers = std::sync::Arc::new(AtomicUsize::new(1));
         threads.push(
             std::thread::Builder::new()
                 .name("viewr-decode-current-details".into())
-                .spawn(move || {
-                    while let Some(job) = auxiliary_rx.take() {
-                        job();
-                    }
-                })
+                .spawn(move || run_guarded_latest_queue(auxiliary_rx, auxiliary_workers))
                 .map_err(|error| format!("failed to start current-image decoder: {error}"))?,
         );
 
         let presentation = std::sync::Arc::new(LatestJobQueue::default());
         let presentation_rx = std::sync::Arc::clone(&presentation);
+        let presentation_workers = std::sync::Arc::new(AtomicUsize::new(1));
         threads.push(
             std::thread::Builder::new()
                 .name("viewr-image-preview".into())
-                .spawn(move || run_guarded_latest_queue(presentation_rx))
+                .spawn(move || run_guarded_latest_queue(presentation_rx, presentation_workers))
                 .map_err(|error| format!("failed to start image preview worker: {error}"))?,
         );
 
@@ -1611,9 +1626,9 @@ pub(crate) fn positive_f32_to_px(v: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ColorNormalizer, ColorProfileStatus, DecodeGate, DecodeGateState, DecodeGeneration,
-        DecodePriority, DecodedImage, GenerationReader, LatestJobQueue,
-        MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES,
+        CloseLatestJobQueueOnLastExit, ColorNormalizer, ColorProfileStatus, DecodeGate,
+        DecodeGateState, DecodeGeneration, DecodePriority, DecodedImage, GenerationReader,
+        LatestJobQueue, MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES,
         MAX_SVG_ATTRIBUTE_BYTES, MAX_SVG_ATTRIBUTES, MAX_SVG_GEOMETRY_TOKENS, PNG_SIGNATURE,
         SourceImage, SourceOpen, acquire_decode_permit_from, positive_f32_to_px,
         run_guarded_latest_queue, svg_geometry_tokens, try_schedule_background,
@@ -2595,7 +2610,9 @@ mod tests {
         );
 
         let worker_queue = Arc::clone(&queue);
-        let worker = std::thread::spawn(move || run_guarded_latest_queue(worker_queue));
+        let worker = std::thread::spawn(move || {
+            run_guarded_latest_queue(worker_queue, Arc::new(AtomicUsize::new(1)));
+        });
         started_rx.recv().unwrap();
 
         let dropped = Arc::new(AtomicUsize::new(0));
@@ -2616,6 +2633,57 @@ mod tests {
         assert!(rejected.is_err());
         drop(rejected);
         assert_eq!(dropped.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn a_shared_queue_survives_one_lost_worker_and_closes_when_the_last_one_dies() {
+        let queue = Arc::new(LatestJobQueue::default());
+        let live_workers = Arc::new(AtomicUsize::new(2));
+        let first = CloseLatestJobQueueOnLastExit {
+            queue: Arc::clone(&queue),
+            live_workers: Arc::clone(&live_workers),
+        };
+        let second = CloseLatestJobQueueOnLastExit {
+            queue: Arc::clone(&queue),
+            live_workers: Arc::clone(&live_workers),
+        };
+
+        drop(first);
+        // One surviving worker still serves the queue, so work is still accepted.
+        assert!(queue.replace(Box::new(|| {})).is_ok());
+        assert_eq!(live_workers.load(Ordering::Acquire), 1);
+
+        drop(second);
+        // With no worker left, accepting work would strand the event loop.
+        assert!(queue.replace(Box::new(|| {})).is_err());
+        assert_eq!(live_workers.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn a_panicking_worker_closes_its_queue_so_the_next_submission_reports_the_loss() {
+        let queue = Arc::new(LatestJobQueue::default());
+        let (started_tx, started_rx) = mpsc::channel();
+        assert!(
+            queue
+                .replace(Box::new(move || {
+                    started_tx.send(()).unwrap();
+                    panic!("expected supervised worker failure");
+                }))
+                .is_ok()
+        );
+
+        let worker_queue = Arc::clone(&queue);
+        let live_workers = Arc::new(AtomicUsize::new(1));
+        let worker_live = Arc::clone(&live_workers);
+        let worker =
+            std::thread::spawn(move || run_guarded_latest_queue(worker_queue, worker_live));
+        started_rx.recv().unwrap();
+        assert!(worker.join().is_err());
+
+        assert_eq!(live_workers.load(Ordering::Acquire), 0);
+        // schedule_* turns this rejection into a message the viewer can show,
+        // instead of an operation that stays busy with no result to deliver.
+        assert!(queue.replace(Box::new(|| {})).is_err());
     }
 
     #[test]

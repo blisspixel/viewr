@@ -98,10 +98,13 @@ v1.0.0  Broadly recommended release
 
 **Immediate focus: v0.2 reliability architecture, followed by v0.3 display
 correctness and v0.4 file coherence.** Pure-policy seams and the owned-logic
-coverage floor are evidenced (90.11 percent lines under the CI llvm-cov
-contract, with the launch-prerequisite `startup` seam at 98.56 percent). Before
-tagging v0.2.0, complete residual thin-native-glue judgment for the remaining
-whole-file exclusions and the full VERIFY.md gate. Preserve bounded job,
+coverage floor are evidenced (90.60 percent lines under the CI llvm-cov
+contract, with the launch-prerequisite `startup` seam at 98.36 percent). The
+residual whole-file exclusions are now exactly five native integration surfaces,
+each named with the reason it cannot run honestly under coverage, and the typed
+error set moved into the measured floor. Before tagging v0.2.0, settle executor
+supervision for an in-process worker thread that dies, and run the full VERIFY.md
+gate. Preserve bounded job,
 thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
 observable. Do not start v0.3 monitor/profile work that deepens unowned
 event-loop races.
@@ -130,9 +133,9 @@ but completed history does not override an open gate here.
 | Public repository and hosted quality | Complete | `main` is public. [CI run 30642307317](https://github.com/blisspixel/viewr/actions/runs/30642307317) passed all seven jobs and [fuzz run 30642307463](https://github.com/blisspixel/viewr/actions/runs/30642307463) passed both targets on release commit `86d3eef920ec5e523fbc6dbc286c4dcbd68e7f1b`. |
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
-| First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. |
+| First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
-| Reliability architecture | Open for v0.2 | Pure seams, 90.11 percent owned-logic coverage, observable launch failure, residual exclusion judgment, and VERIFY subset green; CI tip green on `47234b1`. Tag v0.2.0 only with release notes under `docs/releases/` and an immutable tag. |
+| Reliability architecture | Open for v0.2 | Pure seams, 90.60 percent owned-logic coverage, observable launch failure, recorded residual exclusion judgment for the five native surfaces, and VERIFY subset green. Executor supervision for a worker thread that dies remains open. Tag v0.2.0 only with release notes under `docs/releases/` and an immutable tag. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
@@ -338,7 +341,23 @@ state before job ownership and test seams are explicit.
   `cargo fmt --check`, Clippy `-D warnings`, and
   `cargo test --workspace --all-targets --locked` remain green. Preserve the
   bounded job, thumbnail, prefetch, chrome, preview, presentation, curation,
-  rating, save, and GPU upload contracts.
+  rating, save, and GPU upload contracts. The ninth step closes the residual
+  judgment: the typed `error` set left the exclusion list for the measured floor
+  at 100 percent lines, with every launch category it reports directly tested.
+  The five remaining whole-file exclusions are exactly the native integration
+  surfaces named in `docs/STANDARDS.md`, the winit event loop (`app`), the wgpu
+  device and surface (`gpu`), the worker sandbox and its OS process limits
+  (`sandbox`, `worker_limit`), and the two binary entry points (`main`), and each
+  keeps its decisions in a covered seam beside it. The complete measured floor
+  was **90.60 percent** lines.
+- [x] Bound the first window to the monitor it opens on. winit reports monitor
+  extents but not the work area a taskbar, dock, or panel leaves behind, so the
+  covered `startup` seam caps the requested logical size at 90 percent of the
+  monitor width and 75 percent of its height without going below the 640 by 480
+  minimum, and centers the window so a cascaded origin cannot spend that whole
+  reserved margin on one edge. `app` supplies only the monitor extent and scale.
+  A small display now opens a smaller, fully reachable window instead of one
+  whose lower edge sits behind a dock.
 
 Definition of done: important state transitions have one owner and one pure test
 surface, native glue is thin, and a late worker result cannot mutate a newer image,
@@ -443,6 +462,13 @@ broad feature category. They prove and refine the accumulated viewer.
   visual-polish workflows on published Windows, macOS, and Linux artifacts.
 - [ ] Close evidence-backed layout, spacing, copy, loading, empty, error, recovery,
   and diagnostic issues without adding decorative controls or unrelated features.
+- [ ] Decide the resting zoom for a source smaller than the viewport. Fit
+  currently enlarges it to fill the window, so a 64 by 64 image opens at 1062
+  percent on the default window and a small icon is presented as a soft
+  interpolated wall. Established viewers treat "do not enlarge small images"
+  as the default or as a first-class option. Settle this on real fixtures and
+  keep one obvious meaning for `0` and `1` before changing what a first open
+  shows.
 - [ ] Repeat startup, animation, large-image, 50,000-file, mixed-DPI,
   multi-monitor, and profiled-display acceptance on representative hardware.
 - [ ] Prove clean install, same-version reinstall, update from each supported

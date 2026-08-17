@@ -414,6 +414,11 @@ Shipped:
   directory. The bounded read rejects oversized and unknown values.
 - **`performance`**: stable, path-free probe output and narrow platform peak-RSS
   readers used only by the explicit developer/CI performance command.
+- **`startup`**: launch prerequisites and first-window geometry. Session
+  detection, the dynamically loaded library tables, backend selection, graphics
+  runtime reporting, every launch message, and the monitor-bounded default window
+  size are pure. Only the loader probe and the environment reads touch the
+  platform, and `app` supplies the monitor extent winit reports.
 - **`error`**: the typed error set for the app.
 - **`chrome`**: the pure, immutable projection from one event-loop-owned frame
   snapshot to dock layout and control presentation. It derives applicability,

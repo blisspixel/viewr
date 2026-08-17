@@ -275,6 +275,71 @@ pub(crate) fn preflight() -> Result<(), String> {
     Ok(())
 }
 
+/// Logical size of the first window when the monitor imposes no limit.
+pub(crate) const PREFERRED_WINDOW_SIZE: (f64, f64) = (1000.0, 720.0);
+
+/// Smallest logical window viewr asks for. The first window is never smaller.
+pub(crate) const MINIMUM_WINDOW_SIZE: (f64, f64) = (640.0, 480.0);
+
+/// Share of a monitor's width the first window may claim.
+const MAX_MONITOR_WIDTH_SHARE: f64 = 0.9;
+
+/// Share of a monitor's height the first window may claim.
+///
+/// A desktop reserves space this process cannot query: a taskbar, dock, or
+/// panel, plus the title bar the window manager adds above the client area. On a
+/// small display a window that claims the full preferred height is placed with
+/// its lower edge, including the folder-preview rail and the empty-state
+/// buttons, underneath that furniture, and no resize the user performs brings it
+/// back without moving the window first.
+const MAX_MONITOR_HEIGHT_SHARE: f64 = 0.75;
+
+/// Logical size of the first window on a monitor of `monitor` logical size.
+///
+/// `None` keeps the preferred size, which is correct when no monitor can be
+/// resolved yet and the window manager places the window itself.
+pub(crate) fn default_window_size(monitor: Option<(f64, f64)>) -> (f64, f64) {
+    match monitor {
+        Some((width, height))
+            if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 =>
+        {
+            (
+                window_axis(
+                    PREFERRED_WINDOW_SIZE.0,
+                    width * MAX_MONITOR_WIDTH_SHARE,
+                    MINIMUM_WINDOW_SIZE.0,
+                ),
+                window_axis(
+                    PREFERRED_WINDOW_SIZE.1,
+                    height * MAX_MONITOR_HEIGHT_SHARE,
+                    MINIMUM_WINDOW_SIZE.1,
+                ),
+            )
+        }
+        _ => PREFERRED_WINDOW_SIZE,
+    }
+}
+
+/// One axis of the first window: the preferred size, bounded by the monitor
+/// share, but never below the minimum viewr accepts.
+fn window_axis(preferred: f64, available: f64, minimum: f64) -> f64 {
+    preferred.min(available).max(minimum)
+}
+
+/// Where the first window sits on its monitor, in logical pixels from the
+/// monitor origin.
+///
+/// Bounding the size is not enough on its own: a platform that cascades new
+/// windows from a fixed offset can still push the lower edge of a bounded window
+/// behind a dock. Centering spends the margin the size policy reserved on both
+/// edges instead of all of it on one.
+pub(crate) fn centered_window_position(monitor: (f64, f64), window: (f64, f64)) -> (f64, f64) {
+    (
+        ((monitor.0 - window.0) * 0.5).max(0.0),
+        ((monitor.1 - window.1) * 0.5).max(0.0),
+    )
+}
+
 /// X11 and Wayland launch policy.
 ///
 /// Compiled for Linux, and for tests on every platform, so these pure decisions
@@ -1224,7 +1289,10 @@ needs it for X11 keyboard layout handling."
 
 #[cfg(test)]
 mod tests {
-    use super::{NATIVE_GPU_ADVICE, gpu_failure_message, native_window_readiness};
+    use super::{
+        MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE, PREFERRED_WINDOW_SIZE, centered_window_position,
+        default_window_size, gpu_failure_message, native_window_readiness,
+    };
 
     /// The loader probe and the launch decision, exercised on the real host.
     #[cfg(target_os = "linux")]
@@ -1264,6 +1332,53 @@ mod tests {
         let message = gpu_failure_message("create_surface: no enabled backend", NATIVE_GPU_ADVICE);
         assert!(message.starts_with("cannot present images on this display: create_surface:"));
         assert!(message.contains("Update the graphics driver"));
+    }
+
+    #[test]
+    fn the_first_window_fits_the_monitor_it_opens_on() {
+        // A roomy desktop keeps the preferred size exactly.
+        assert_eq!(
+            default_window_size(Some((1920.0, 1080.0))),
+            PREFERRED_WINDOW_SIZE
+        );
+        // A 1280x800 session with a dock: the window must end above it.
+        assert_eq!(default_window_size(Some((1280.0, 800.0))), (1000.0, 600.0));
+        // A narrow monitor bounds the width as well.
+        assert_eq!(default_window_size(Some((1024.0, 768.0))), (921.6, 576.0));
+        // Neither axis drops below the size the window itself enforces.
+        assert_eq!(
+            default_window_size(Some((640.0, 480.0))),
+            MINIMUM_WINDOW_SIZE
+        );
+        // No monitor and unusable monitor geometry both keep the preferred size.
+        for monitor in [
+            None,
+            Some((0.0, 800.0)),
+            Some((1280.0, 0.0)),
+            Some((f64::NAN, 800.0)),
+            Some((1280.0, f64::INFINITY)),
+        ] {
+            assert_eq!(default_window_size(monitor), PREFERRED_WINDOW_SIZE);
+        }
+    }
+
+    #[test]
+    fn the_first_window_is_centered_inside_the_monitor_it_opens_on() {
+        // The 1280x800 session again: the reserved margin is spent on both
+        // edges, so the window ends 100 logical pixels above the screen bottom.
+        // 600 + 100 + 100 is the 800 the monitor has.
+        let monitor = (1280.0, 800.0);
+        let window = default_window_size(Some(monitor));
+        assert_eq!(
+            (window, centered_window_position(monitor, window)),
+            ((1000.0, 600.0), (140.0, 100.0))
+        );
+        // A window at least as large as its monitor starts at the origin
+        // instead of at a negative offset that would hide its title bar.
+        assert_eq!(
+            centered_window_position((640.0, 480.0), (1000.0, 720.0)),
+            (0.0, 0.0)
+        );
     }
 
     #[test]

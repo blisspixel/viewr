@@ -215,7 +215,6 @@ class DocumentationTests(unittest.TestCase):
             {
                 "crates/viewr-decode/src/main.rs",
                 "crates/viewr/src/app.rs",
-                "crates/viewr/src/error.rs",
                 "crates/viewr/src/gpu.rs",
                 "crates/viewr/src/main.rs",
                 "crates/viewr/src/sandbox.rs",

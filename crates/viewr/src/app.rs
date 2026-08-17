@@ -26,11 +26,11 @@ use crate::ratings::{
     RatingWriteError,
 };
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
-use winit::window::{Window, WindowId};
+use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::crop_state::{
     CropRecoveryIdentity, crop_disconnect_message, crop_failure_message,
@@ -5007,6 +5007,51 @@ impl App {
     }
 }
 
+/// The monitor the first window will most likely open on.
+fn first_monitor(event_loop: &ActiveEventLoop) -> Option<winit::monitor::MonitorHandle> {
+    event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next())
+}
+
+/// Logical size of `monitor`, or `None` when it reports unusable geometry.
+///
+/// winit reports monitor extents but not the work area a taskbar, dock, or panel
+/// leaves behind, so the size policy in `startup` treats this as an upper bound
+/// rather than as space viewr may fill.
+fn monitor_logical_size(monitor: &winit::monitor::MonitorHandle) -> Option<(f64, f64)> {
+    let scale = monitor.scale_factor();
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let size = monitor.size();
+    Some((
+        f64::from(size.width) / scale,
+        f64::from(size.height) / scale,
+    ))
+}
+
+/// Place the first window inside its monitor instead of where the platform
+/// would cascade it.
+///
+/// A cascaded origin plus a tall window puts the lower edge behind a dock or
+/// taskbar even after the size is bounded. Wayland ignores client positioning,
+/// which is why the size bound rather than this placement is the contract.
+fn centered_window_attributes(
+    attributes: WindowAttributes,
+    monitor: &winit::monitor::MonitorHandle,
+    monitor_size: (f64, f64),
+    window_size: (f64, f64),
+) -> WindowAttributes {
+    let (left, top) = crate::startup::centered_window_position(monitor_size, window_size);
+    let scale = monitor.scale_factor();
+    let origin = monitor.position();
+    attributes.with_position(PhysicalPosition::new(
+        origin.x + (left * scale) as i32,
+        origin.y + (top * scale) as i32,
+    ))
+}
+
 fn load_icon() -> Option<winit::window::Icon> {
     let bytes = include_bytes!("../../../assets/icon.ico");
     if let Ok(image) = image::load_from_memory(bytes) {
@@ -5023,12 +5068,22 @@ impl ApplicationHandler<UserEvent> for App {
         if self.renderer.is_some() {
             return;
         }
+        let monitor = first_monitor(event_loop);
+        let monitor_size = monitor.as_ref().and_then(monitor_logical_size);
+        let window_size = crate::startup::default_window_size(monitor_size);
         let mut attrs = Window::default_attributes()
             .with_title("viewr")
-            .with_inner_size(LogicalSize::new(1000.0, 720.0))
-            .with_min_inner_size(LogicalSize::new(640.0, 480.0))
+            .with_inner_size(LogicalSize::new(window_size.0, window_size.1))
+            .with_min_inner_size(LogicalSize::new(
+                crate::startup::MINIMUM_WINDOW_SIZE.0,
+                crate::startup::MINIMUM_WINDOW_SIZE.1,
+            ))
             .with_theme(self.theme_preference.window_theme())
             .with_visible(false);
+
+        if let (Some(monitor), Some(monitor_size)) = (monitor.as_ref(), monitor_size) {
+            attrs = centered_window_attributes(attrs, monitor, monitor_size, window_size);
+        }
 
         if let Some(icon) = load_icon() {
             attrs = attrs.with_window_icon(Some(icon));

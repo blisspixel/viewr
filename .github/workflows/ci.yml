@@ -260,18 +260,22 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # Coverage includes the egui/AccessKit UI adapter. Locally patched vendor
-      # crates run behavioral tests on every platform above but stay outside the
-      # owned-logic percentage, as they did before becoming workspace test members.
-      # The remaining exact-path exclusions contain native integration that cannot
-      # run honestly here, plus pure-helper debt tracked by the v0.2 roadmap.
+      # Coverage includes the egui/AccessKit UI adapter and the error types.
+      # Locally patched vendor crates run behavioral tests on every platform above
+      # but stay outside the owned-logic percentage, as they did before becoming
+      # workspace test members. Every remaining exact-path exclusion is native
+      # integration that cannot run honestly here: the winit event loop and its
+      # platform callbacks (`app`), the wgpu device and surface (`gpu`), the
+      # sandbox and worker process launchers (`sandbox`, `worker_limit`), and the
+      # two binary entry points (`main`). Their decisions live in the covered
+      # seams beside them.
       - name: Coverage
         run: >
           cargo llvm-cov --workspace
           --locked
           --exclude jxl-color
           --exclude jxl-render
-          --ignore-filename-regex '(^|[/\\])crates[/\\](viewr[/\\]src[/\\](app|gpu|sandbox|worker_limit|error|main)|viewr-decode[/\\]src[/\\]main)\.rs$'
+          --ignore-filename-regex '(^|[/\\])crates[/\\](viewr[/\\]src[/\\](app|gpu|sandbox|worker_limit|main)|viewr-decode[/\\]src[/\\]main)\.rs$'
           --fail-under-lines 85
           --lcov --output-path target/lcov.info
 

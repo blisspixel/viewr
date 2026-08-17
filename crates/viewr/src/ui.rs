@@ -70,6 +70,11 @@ const PRIMARY_MODIFIER: &str = "Ctrl";
 const TOP_STATUS_MAX_WIDTH: f32 = 220.0;
 const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
 const TOP_METADATA_GAP: f32 = 8.0;
+/// Extra separation egui adds between the top-bar reading items.
+///
+/// The reading strip sets this itself so its 8px gaps stay legible whatever
+/// spacing the menu titles beside it use.
+const TOP_METADATA_SPACING: f32 = 2.0;
 
 const OPEN_SCOPE_SUMMARY: &str = "Open a file to start. Its folder is browsed when access allows. Open Folder selects it explicitly for this session.";
 const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
@@ -745,8 +750,16 @@ fn docked_frame(colors: ChromeColors) -> Frame {
         .inner_margin(4.0)
 }
 
+/// Horizontal padding on each side of a top-bar menu title.
+///
+/// Desktop menu bars separate titles by roughly twice this value. macOS sets
+/// the gap with title padding alone and lets neighboring highlights meet, so
+/// the pointer crossing an open menu bar never falls through a dead seam. viewr
+/// follows that: 8 points a side, no extra spacing between titles.
+const MENU_TITLE_PADDING_X: f32 = 8.0;
+
 fn configure_top_menu_widgets(ui: &mut egui::Ui, colors: ChromeColors) {
-    ui.spacing_mut().button_padding = Vec2::new(10.0, 4.0);
+    ui.spacing_mut().button_padding = Vec2::new(MENU_TITLE_PADDING_X, 4.0);
     ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.hovered.bg_fill = colors.raised;
@@ -772,13 +785,16 @@ fn render_top_menu(
         .show(ui, |ui| {
             configure_top_menu_widgets(ui, colors);
             ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().item_spacing.x = 0.0;
                 file_menu(ui, actions, chrome);
                 edit_menu(ui, actions, frame, chrome);
                 view_menu(ui, actions, frame, chrome);
                 tools_menu(ui, actions, chrome);
                 help_menu(ui, actions);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // The reading strip owns its own separation instead of
+                    // inheriting whatever spacing the menu titles need.
+                    ui.spacing_mut().item_spacing.x = TOP_METADATA_SPACING;
                     render_top_operation_status(ui, actions, frame, chrome, colors);
                     render_top_rating_position(ui, frame, colors);
                     render_top_image_facts(ui, frame, chrome, colors);

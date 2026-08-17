@@ -67,14 +67,14 @@ class DocumentationTests(unittest.TestCase):
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
             "README.md": (
-                "v0.1.3 is the current public preview",
+                "v0.1.4 is the current public preview",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.1.3 is the current public GitHub Release",
+                "v0.1.4 is the current public GitHub Release",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -82,14 +82,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Current position: v0.1.3 is released and verified",
+                "Current position: v0.1.4 is released and verified",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.1.3 is public, immutable, checksummed, and attested",
+                "v0.1.4 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (
@@ -117,7 +117,14 @@ class DocumentationTests(unittest.TestCase):
                 "not Authenticode-signed",
                 "notarized",
             ),
+            "docs/releases/v0.1.4.md": (
+                "A patch release over [v0.1.3]",
+                "GitHub build-provenance attestation",
+                "not Authenticode-signed",
+                "notarized",
+            ),
             "CHANGELOG.md": (
+                "## 0.1.4 - 2026-08-17",
                 "## 0.1.3 - 2026-08-16",
                 "## 0.1.2 - 2026-08-15",
                 "## 0.1.1 - 2026-08-15",

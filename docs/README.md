@@ -29,8 +29,9 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, ordered quality tracks,
   implemented phases, and explicit non-goals.
-- [v0.1.3 release notes](releases/v0.1.3.md): the current preview, its OpenGL
-  presentation fix, and clearly stated platform limits.
+- [v0.1.4 release notes](releases/v0.1.4.md): the current preview, its
+  monitor-bounded first window, and clearly stated platform limits.
+- [v0.1.3 release notes](releases/v0.1.3.md): the OpenGL presentation fix.
 - [v0.1.2 release notes](releases/v0.1.2.md): backend resolution and
   graphics-runtime reporting.
 - [v0.1.1 release notes](releases/v0.1.1.md): the launch and command-line fixes

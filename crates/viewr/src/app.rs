@@ -52,8 +52,9 @@ use crate::current_work::{
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
 use crate::entry_state::{
-    FolderScanDisposition, FolderScanSuccess, folder_scan_disposition, folder_scan_failure_class,
-    folder_scan_user_message, selected_file_index_by, selected_scan_is_current,
+    FolderScanDisposition, FolderScanSuccess, PathEntry, folder_scan_disposition,
+    folder_scan_failure_class, folder_scan_user_message, path_entry, selected_file_index_by,
+    selected_scan_is_current,
 };
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -241,7 +242,7 @@ fn run_internal(
         startup_failure: None,
     };
     if let Some(path) = app.session.selected_path.clone() {
-        app.load_and_scan(path);
+        app.open_path_request(path);
     }
     event_loop.run_app(&mut app)?;
     if let Some(failure) = app.startup_failure.take() {
@@ -1034,8 +1035,18 @@ fn show_windows_open_with_dialog(
 }
 
 impl App {
-    fn open_file_request(&mut self, path: PathBuf) {
-        self.load_and_scan(path);
+    /// Open one path delivered by the command line, a drop, or the desktop.
+    fn open_path_request(&mut self, path: PathBuf) {
+        match path_entry(&path, Path::is_dir) {
+            PathEntry::Folder => {
+                if self.block_action_while_curating("opening another folder") {
+                    return;
+                }
+                let directory = crate::fs::canonical_file_path(&path).unwrap_or(path);
+                self.start_folder_scan(directory, ScanPurpose::OpenFolder);
+            }
+            PathEntry::Image => self.load_and_scan(path),
+        }
     }
 
     fn load_and_scan(&mut self, path: PathBuf) {
@@ -5294,7 +5305,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::DroppedFile(path) => {
-                self.open_file_request(path);
+                self.open_path_request(path);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let steps = match delta {
@@ -6159,7 +6170,7 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::OpenFile(path) => self.open_file_request(path),
+            UserEvent::OpenFile(path) => self.open_path_request(path),
             UserEvent::Wake => {}
             #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             UserEvent::AccessKit(event) => {

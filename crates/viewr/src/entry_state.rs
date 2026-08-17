@@ -46,6 +46,35 @@ pub(crate) enum FolderScanFailure {
     Other,
 }
 
+/// What one path handed to viewr from outside the window asks for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PathEntry {
+    /// Present this file and browse the folder that contains it.
+    Image,
+    /// Browse this folder and present its first naturally sorted image.
+    Folder,
+}
+
+/// Classify one path that arrived from outside the window.
+///
+/// The command line, a desktop Open With, a drop on the window, and the macOS
+/// open-file event all deliver a bare path, and `viewr help` documents that a
+/// folder opens its first naturally sorted image. A directory therefore starts
+/// the same browse the Open Folder button starts, rather than reaching a
+/// decoder that can only report that the source is not a regular file.
+///
+/// A path that does not exist stays an image request. The decode error then
+/// names the missing file, which is the honest report; treating it as a folder
+/// would replace that with a scan failure for a folder the user never named.
+#[must_use]
+pub(crate) fn path_entry(path: &Path, is_directory: impl Fn(&Path) -> bool) -> PathEntry {
+    if is_directory(path) {
+        PathEntry::Folder
+    } else {
+        PathEntry::Image
+    }
+}
+
 #[must_use]
 pub(crate) fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
     current == Some(selected)
@@ -142,6 +171,24 @@ pub(crate) const fn folder_scan_user_message(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn a_folder_from_outside_the_window_browses_and_everything_else_decodes() {
+        let folder = Path::new("album");
+        let is_folder = |candidate: &Path| candidate == folder;
+
+        assert_eq!(path_entry(folder, is_folder), PathEntry::Folder);
+        assert_eq!(
+            path_entry(Path::new("album/photo.png"), is_folder),
+            PathEntry::Image
+        );
+        // A missing path stays an image so the error names the file the user
+        // typed instead of reporting a folder they never asked for.
+        assert_eq!(
+            path_entry(Path::new("photo.jpg"), |_| false),
+            PathEntry::Image
+        );
+    }
 
     #[test]
     fn selected_scan_currency_is_exact_path_identity() {

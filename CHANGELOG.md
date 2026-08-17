@@ -3,6 +3,49 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## 0.1.5 - 2026-08-17
+
+### Fixed
+
+- A malformed JPEG XL file can no longer terminate the viewer. Frame
+  composition clips each channel's region against the output region, and a
+  hostile stream could clip a channel to zero area, after which the decoder
+  borrowed a zero-width buffer and panicked. Because release builds abort on
+  panic and JPEG XL decodes in process, opening one such file ended the process
+  instead of reporting a decode error. Compositing an empty region is now
+  skipped, which is what it already meant. viewr's own fuzzing gate found this
+  before release; it was not reported in the wild, and no other format is
+  affected.
+- A folder handed to viewr from outside the window opens that folder. `viewr
+  help` documents that a folder opens its first naturally sorted image, and the
+  empty-state card offers Open Folder, but a folder passed on the command line
+  reached the decoder instead of the folder scan and reported that the image
+  source must be a regular file. The path is now classified once, and a
+  directory starts the same browse the Open Folder button starts. The command
+  line, a drop on the window, a desktop Open With, and the macOS open-file event
+  all share that decision. A path that does not exist is still opened as a file,
+  so the error keeps naming the missing file.
+- The menu bar reads as one bar. The five menu titles sat 22 logical pixels
+  apart, which reads as five separate controls. Titles now carry 8 points of
+  padding on each side and nothing between them, so they sit about 16 pixels
+  apart and neighboring highlights meet rather than leaving a dead seam for a
+  pointer crossing an open menu bar. The reading strip on the right sets its own
+  separation and keeps its 8px gaps.
+
+### Changed
+
+- A decode worker that dies is reported instead of waited on. Each
+  replace-latest decode queue now closes when its last worker stops, including a
+  worker that unwinds. Previously only the image preview queue did, so a worker
+  lost on the foreground decode or current-image details queue left its queue
+  accepting work that no thread would ever run, and the operation stayed busy
+  with nothing to report. Scheduling now fails with a named message. A queue
+  served by several workers still survives losing one of them. Release builds
+  continue not to claim general recovery from an in-process thread panic.
+- The Windows accessibility smoke test treats its UI Automation focus call as
+  the advisory hint it was always documented to be. Native key delivery and each
+  caller's semantic assertion remain the gates.
+
 ## 0.1.4 - 2026-08-17
 
 ### Fixed

@@ -196,6 +196,14 @@ Shipped:
   later witness comparisons. The replace-latest animation, details, and rating
   task propagates the same generation check through every comparison and exits
   between stages, so obsolete inspection cannot monopolize its sole executor.
+  Each replace-latest queue is supervised: a worker that stops, including one
+  that unwinds, decrements a live-worker count, and the last one out closes the
+  queue. A queue served by several workers therefore survives losing one, and a
+  queue with none left rejects further work instead of accepting jobs no thread
+  will run, which would leave the event loop waiting for a completion that
+  cannot arrive. `schedule_foreground_decode`, `schedule_current_image_details`,
+  and `schedule_image_preview` turn that rejection into a named error the viewer
+  reports.
   Folder-rating discovery cannot grant write capability: its separate read-only
   source checks native scan identity and version around two reads of at most the
   16 MiB JPEG header. The exact bytes

@@ -473,13 +473,13 @@ broad feature category. They prove and refine the accumulated viewer.
   visual-polish workflows on published Windows, macOS, and Linux artifacts.
 - [ ] Close evidence-backed layout, spacing, copy, loading, empty, error, recovery,
   and diagnostic issues without adding decorative controls or unrelated features.
-- [ ] Decide the resting zoom for a source smaller than the viewport. Fit
-  currently enlarges it to fill the window, so a 64 by 64 image opens at 1062
-  percent on the default window and a small icon is presented as a soft
-  interpolated wall. Established viewers treat "do not enlarge small images"
-  as the default or as a first-class option. Settle this on real fixtures and
-  keep one obvious meaning for `0` and `1` before changing what a first open
-  shows.
+- [x] Decide the resting zoom for a source smaller than the viewport. Settled
+  against real fixtures and an independent playtest: fit no longer enlarges, so
+  a source smaller than the viewport rests at actual size and the readout shows
+  100 percent instead of 812. The playtest verdict on the previous behavior was
+  that it is "honest as arithmetic and dishonest as looking", and that a
+  thumbnail should not become a mural unless the player asks for zoom. Explicit
+  zoom is unchanged, and `0` and `1` keep their meanings.
 - [ ] Repeat startup, animation, large-image, 50,000-file, mixed-DPI,
   multi-monitor, and profiled-display acceptance on representative hardware.
 - [ ] Prove clean install, same-version reinstall, update from each supported

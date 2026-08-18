@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## 0.2.0 - 2026-08-18
+
+### Changed
+
+- A source smaller than the viewport rests at actual size. Fit scaled every
+  image to fill the window, so a 64 by 64 image opened at 812 percent and was
+  presented as a soft interpolated wall rather than a small image. Fit now stops
+  at one source pixel per physical display pixel, the same 100 percent the zoom
+  readout reports. A larger image still shrinks to fit, and enlarging a small one
+  is an explicit zoom.
+
+### Reliability
+
+- The v0.2.0 reliability architecture milestone is closed. Background details,
+  animation, crop, Save As, folder scans, thumbnails, and prefetch each have one
+  bounded event-loop-owned job; stale work cannot mutate a newer selection or
+  edit; failure paths are observable and recoverable, including a decode worker
+  that dies; native glue is limited to five named integration surfaces; race
+  contracts are tested; and owned-logic line coverage is 90.59 percent against
+  an 85 percent floor.
+
 ## 0.1.5 - 2026-08-17
 
 ### Fixed

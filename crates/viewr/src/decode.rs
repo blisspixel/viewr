@@ -2014,6 +2014,140 @@ mod tests {
     }
 
     #[test]
+    fn tagged_profiles_convert_to_published_srgb_reference_values() {
+        // Reference values are derived from the published matrices and transfer
+        // functions, not recorded from this library, so the test fails if the
+        // conversion silently changes. sRGB, Display P3, and Adobe RGB all use
+        // a D65 white point, so no chromatic adaptation is involved and a
+        // neutral input must stay neutral.
+        //
+        // Display P3 shares the sRGB transfer function and white point, so its
+        // neutral axis maps to itself exactly. Adobe RGB uses gamma 563/256, so
+        // its mid gray lands one code value higher. The saturated cases fall
+        // outside the sRGB gamut and clip, which is the documented behavior of
+        // the bounded sRGB working path.
+        struct Case {
+            profile: fn() -> moxcms::ColorProfile,
+            what: &'static str,
+            input: [u8; 4],
+            expected: [u8; 4],
+        }
+        // One code value of slack absorbs rounding in the library's fixed-point
+        // path without admitting a wrong matrix or transfer function: the
+        // saturated cases move by tens of code values.
+        const TOLERANCE: i32 = 1;
+        let cases = [
+            Case {
+                profile: moxcms::ColorProfile::new_display_p3,
+                what: "Display P3 black",
+                input: [0, 0, 0, 255],
+                expected: [0, 0, 0, 255],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_display_p3,
+                what: "Display P3 white",
+                input: [255, 255, 255, 255],
+                expected: [255, 255, 255, 255],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_display_p3,
+                what: "Display P3 mid gray",
+                input: [128, 128, 128, 200],
+                expected: [128, 128, 128, 200],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_display_p3,
+                what: "Display P3 saturated orange",
+                input: [210, 120, 35, 17],
+                expected: [224, 114, 0, 17],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_adobe_rgb,
+                what: "Adobe RGB black",
+                input: [0, 0, 0, 255],
+                expected: [0, 0, 0, 255],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_adobe_rgb,
+                what: "Adobe RGB white",
+                input: [255, 255, 255, 255],
+                expected: [255, 255, 255, 255],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_adobe_rgb,
+                what: "Adobe RGB mid gray",
+                input: [128, 128, 128, 255],
+                expected: [129, 129, 129, 255],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_adobe_rgb,
+                what: "Adobe RGB saturated orange",
+                input: [210, 120, 35, 255],
+                expected: [236, 121, 16, 255],
+            },
+            Case {
+                profile: moxcms::ColorProfile::new_srgb,
+                what: "sRGB is its own destination",
+                input: [210, 120, 35, 90],
+                expected: [210, 120, 35, 90],
+            },
+        ];
+
+        for case in cases {
+            let normalizer = ColorNormalizer::from_color_profile(&(case.profile)());
+            let image = normalizer
+                .normalize(SourceImage::new(case.input.to_vec(), 1, 1).unwrap())
+                .unwrap();
+            for (channel, (actual, expected)) in
+                image.rgba.iter().zip(case.expected.iter()).enumerate()
+            {
+                let drift = i32::from(*actual) - i32::from(*expected);
+                assert!(
+                    drift.abs() <= TOLERANCE,
+                    "{}: channel {channel} was {actual}, expected {expected}",
+                    case.what
+                );
+            }
+            assert_eq!(image.rgba[3], case.expected[3], "{}: alpha", case.what);
+            assert_eq!(image.working_color, WorkingColorEncoding::SRGB_RGBA8);
+        }
+    }
+
+    #[test]
+    fn a_cmyk_profile_falls_back_to_srgb_without_touching_pixels() {
+        // A CMYK source cannot be carried through the RGBA8 sRGB working path.
+        // The bounded fallback keeps the pixels exactly as decoded and says so,
+        // rather than reinterpreting four ink channels as RGB.
+        let mut cmyk = moxcms::ColorProfile::new_srgb();
+        cmyk.color_space = moxcms::DataColorSpace::Cmyk;
+
+        let normalizer = ColorNormalizer::from_color_profile(&cmyk);
+        let original = vec![10, 20, 30, 40, 200, 150, 100, 255];
+        let image = normalizer
+            .normalize(SourceImage::new(original.clone(), 1, 2).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            image.color_profile,
+            ColorProfileStatus::EmbeddedProfileFallback
+        );
+        assert_eq!(image.rgba, original);
+        assert_eq!(image.working_color, WorkingColorEncoding::SRGB_RGBA8);
+
+        // The same decision survives a round trip through encoded bytes, which
+        // is the form an embedded profile actually arrives in.
+        let encoded = cmyk.encode().expect("encode CMYK test profile");
+        let from_bytes = ColorNormalizer::from_icc_profile(&encoded)
+            .normalize(SourceImage::new(original.clone(), 1, 2).unwrap())
+            .unwrap();
+        assert_eq!(
+            from_bytes.color_profile,
+            ColorProfileStatus::EmbeddedProfileFallback
+        );
+        assert_eq!(from_bytes.rgba, original);
+    }
+
+    #[test]
     fn color_normalization_checks_cancellation_between_rows() {
         let normalizer =
             ColorNormalizer::from_color_profile(&moxcms::ColorProfile::new_display_p3());

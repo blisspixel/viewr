@@ -419,9 +419,15 @@ and [`Surface`](https://docs.rs/wgpu/latest/wgpu/struct.Surface.html) APIs.
   spike proves surface color-space and HDR behavior on all three backends.
 - [ ] Resolve and refresh the profile for the display that currently contains the
   window, including a move between differently profiled monitors.
-- [ ] Add CMYK/profile fallback fixtures plus sRGB, Display P3, and Adobe RGB
-  reference-vector tests. Keep a deterministic sRGB fallback when platform profile
-  information is unavailable.
+- [x] Add CMYK/profile fallback fixtures plus sRGB, Display P3, and Adobe RGB
+  reference-vector tests. Expected values are derived from the published
+  matrices and transfer functions rather than recorded from the library, so a
+  changed matrix, transfer function, or white point fails the gate; the
+  saturated cases move by tens of code values against a one-value tolerance. A
+  CMYK profile keeps its decoded pixels and reports the bounded sRGB fallback
+  instead of reinterpreting four ink channels as RGB, both as a parsed profile
+  and as the encoded bytes an embedded profile actually arrives in. Keep a
+  deterministic sRGB fallback when platform profile information is unavailable.
 - [ ] Enable wide-gamut and HDR presentation only after a higher-precision working
   path, tone mapping, capability checks, and real-display acceptance tests exist.
 

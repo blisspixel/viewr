@@ -18,9 +18,9 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.1.5](https://github.com/blisspixel/viewr/releases/tag/v0.1.5), the fifth patch over [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) |
-| Active development line | `main`, working toward **v0.2.0** |
-| Next tag allowed | **v0.2.0** only after its exit criteria below are true. Further v0.1.x patches remain allowed for shipped defects |
+| Published install target | Immutable [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0), the reliability architecture milestone |
+| Active development line | `main`, working toward **v0.3.0** |
+| Next tag allowed | **v0.3.0** only after its exit criteria below are true. Further v0.2.x patches remain allowed for shipped defects |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -54,10 +54,10 @@ v0.1.4  Window fit patch           [released]
 v0.1.5  Folder entry patch         [released]
    |
    v
-v0.2.0  Reliability architecture   [next]
+v0.2.0  Reliability architecture   [released]
    |
    v
-v0.3.0  Display-correct SDR preview
+v0.3.0  Display-correct SDR preview  [next]
    |
    v
 v0.4.0  File-coherence preview
@@ -98,8 +98,8 @@ v1.0.0  Broadly recommended release
 
 ### Immediate focus
 
-**Immediate focus: v0.2 reliability architecture, followed by v0.3 display
-correctness and v0.4 file coherence.** Pure-policy seams and the owned-logic
+**Immediate focus: v0.3 display correctness, followed by v0.4 file coherence.**
+The v0.2 reliability architecture milestone is released and closed. Pure-policy seams and the owned-logic
 coverage floor are evidenced (90.59 percent lines under the CI llvm-cov
 contract, with the launch-prerequisite `startup` seam at 98.40 percent). The
 residual whole-file exclusions are now exactly five native integration surfaces,
@@ -113,7 +113,7 @@ thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
 observable. Do not start v0.3 monitor/profile work that deepens unowned
 event-loop races.
 
-Current position: v0.1.5 is released and verified, and the earlier patches remain
+Current position: v0.2.0 is released and verified, and the earlier patches remain
 published with the first preview's known issues recorded. v0.2.0 is the next planned minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,
 then v0.5 formats, then v0.6 product quality, then v0.7 through v0.9 evidence and
 trust.
@@ -139,7 +139,7 @@ but completed history does not override an open gate here.
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. That playtest also found the window opening under a 137px dock, which [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4) fixed by bounding and placing the first window inside its monitor. An independent playtest of the published v0.1.4 Linux archive then measured that window at 1000 by 560 logical pixels at +140+40 on the same 1280 by 800 session, 29 physical pixels clear of the dock, matching the published bound and placement arithmetic. That round found the command line rejecting a folder while `viewr help` promised that a folder opens its first naturally sorted image, which [v0.1.5](https://github.com/blisspixel/viewr/releases/tag/v0.1.5) fixed by classifying every externally supplied path once. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
-| Reliability architecture | Open for v0.2 | Pure seams, 90.59 percent owned-logic coverage, observable launch failure, recorded residual exclusion judgment for the five native surfaces, and VERIFY subset green; CI tip green on `edc80fd`. Every replace-latest decode queue now closes when its last worker stops, so a worker thread that dies reports a named scheduling error instead of leaving the event loop waiting for a completion that cannot arrive. Every v0.2.0 exit criterion in the version table above is now evidenced. Remaining: run the full VERIFY.md gate on the candidate commit, then tag v0.2.0 with release notes under `docs/releases/` and an immutable tag. |
+| Reliability architecture | Complete | Released as [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0). Every background operation has one bounded event-loop-owned job, stale work cannot mutate a newer selection or edit, failure paths are observable including a decode worker that dies, native glue is limited to five named integration surfaces, race contracts are tested, and owned-logic line coverage is 90.59 percent against an 85 percent floor. |
 | Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |

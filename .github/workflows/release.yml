@@ -50,7 +50,7 @@ jobs:
         timeout-minutes: 10
         if: runner.os == 'Linux'
         run: |
-          scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+          bash scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
       - name: Set up pinned Rust target
         run: |
           rustup show

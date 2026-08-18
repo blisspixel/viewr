@@ -36,7 +36,7 @@ Status last verified on 2026-08-02:
   OpenGL presentation, under that same contract.
 - [x] Publish and verify annotated tag `v0.1.4`, the patch release that fits the
   first window to the monitor it opens on, under that same contract.
-- [ ] Publish and verify annotated tag `v0.1.5`, the patch release that stops a
+- [x] Publish and verify annotated tag `v0.1.5`, the patch release that stops a
   malformed JPEG XL file from terminating the viewer and opens a folder handed
   to viewr from outside the window, under that same contract.
 
@@ -143,6 +143,19 @@ repeated the complete gates and published the immutable
 Linux archive re-verifies from the release page with a matching sidecar, a
 33-file internal manifest, and one attestation bound to
 `release.yml@refs/tags/v0.1.4` at that commit.
+
+For v0.1.5, [main CI run 32077320223](https://github.com/blisspixel/viewr/actions/runs/32077320223)
+passed all seven jobs and [fuzz run 32077320239](https://github.com/blisspixel/viewr/actions/runs/32077320239)
+passed both targets on commit `edc80fd76f230baf7203a4c7002d4e917f7ccbf2`.
+[Release run 32077953927](https://github.com/blisspixel/viewr/actions/runs/32077953927)
+repeated the complete gates and published the immutable
+[v0.1.5 release](https://github.com/blisspixel/viewr/releases/tag/v0.1.5). Its
+Linux archive re-verifies from the release page with a matching SHA-256 sidecar,
+a 34-file internal manifest, and one attestation bound to
+`release.yml@refs/tags/v0.1.5` at that commit. The release rerun of the coverage
+job first stalled for one hour and fifty-one minutes inside `apt-get install`
+and was cancelled and rerun, completing in two minutes; every CI job now carries
+an explicit timeout so a stalled runner fails rather than holding a tag open.
 
 ## Required before a broadly recommended 1.0
 

@@ -63,11 +63,7 @@ jobs:
       - name: Install Linux GUI build dependencies
         timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwayland-dev libxkbcommon-dev libx11-dev \
-            libxrandr-dev libxi-dev libgl1-mesa-dev
-
+          scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
       - name: Install pinned fuzz toolchain
         run: |
           rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal --component rustfmt --component clippy

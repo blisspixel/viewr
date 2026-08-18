@@ -157,10 +157,22 @@ pub fn uv_transform(rotation_steps: i32, flip_h: bool, flip_v: bool) -> [f32; 4]
     matrix
 }
 
+/// The largest scale fit will apply, in physical display pixels per source pixel.
+///
+/// Fit shrinks a large image and leaves a small one alone. Enlarging a 64 by 64
+/// source to fill a 1000 pixel viewport is arithmetically honest and visually
+/// wrong: the result is a soft interpolated wall that no longer reads as a small
+/// image. Established viewers leave a small image at actual size and let the
+/// player enlarge it deliberately, so fit stops at one source pixel per physical
+/// display pixel, the same 100 percent the zoom readout reports. Explicit zoom
+/// is unaffected and still reaches its own limits.
+const MAX_FIT_SCALE: f32 = 1.0;
+
 /// Scale the image to fit entirely within the viewport, preserving aspect ratio
 /// and centering it. The longer-relative axis touches the edges; the other is
-/// letterboxed. A zero viewport or image dimension yields a hidden placement
-/// rather than a division by zero.
+/// letterboxed, and a source smaller than the viewport rests at actual size
+/// rather than being enlarged. A zero viewport or image dimension yields a
+/// hidden placement rather than a division by zero.
 #[must_use]
 pub fn fit_to_window(viewport: (u32, u32), image: (u32, u32), rotated90: bool) -> Placement {
     fit_to_viewport(viewport, image, rotated90, ViewportInsets::default())
@@ -206,7 +218,9 @@ pub fn fit_to_viewport(
             crop_rect: [0.0, 0.0, 0.0, 0.0],
         };
     }
-    let s = (available_width / iw).min(available_height / ih);
+    let s = (available_width / iw)
+        .min(available_height / ih)
+        .min(MAX_FIT_SCALE);
     let center_x = (left + right) * 0.5;
     let center_y = (top + bottom) * 0.5;
     Placement {
@@ -303,11 +317,13 @@ mod tests {
     }
 
     #[test]
-    fn small_image_scales_up_to_fit() {
-        // A 100x100 image in a 1000x1000 viewport fits exactly (fills).
+    fn a_small_image_is_not_enlarged_to_fill_the_window() {
+        // This asserted the opposite until fit stopped enlarging: a 100 by 100
+        // source in a 1000 by 1000 viewport filled it at 1000 percent. It now
+        // rests at actual size, occupying a tenth of each axis.
         let p = fit_to_window((1000, 1000), (100, 100), false);
-        assert!((p.scale[0] - 1.0).abs() < 1e-6);
-        assert!((p.scale[1] - 1.0).abs() < 1e-6);
+        assert!((p.scale[0] - 0.1).abs() < 1e-6);
+        assert!((p.scale[1] - 0.1).abs() < 1e-6);
     }
 
     #[test]
@@ -339,6 +355,58 @@ mod tests {
         assert!((p.scale[1] - 0.75).abs() < 1e-6);
         assert!((p.offset[0] + 0.1).abs() < 1e-6);
         assert!((p.offset[1] - 0.125).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_source_smaller_than_the_viewport_rests_at_actual_size() {
+        // A 64 by 64 fixture in a 1000 by 560 viewport would otherwise be
+        // enlarged to 812 percent and read as a soft wall rather than a small
+        // image. It now occupies exactly its own pixels, centered.
+        let small = fit_to_viewport((1000, 560), (64, 64), false, ViewportInsets::default());
+        assert!((small.scale[0] - 64.0 / 1000.0).abs() < 1e-6);
+        assert!((small.scale[1] - 64.0 / 560.0).abs() < 1e-6);
+        assert!(small.offset[0].abs() < 1e-6);
+        assert!(small.offset[1].abs() < 1e-6);
+        assert!(
+            (fit_pixel_scale((1000, 560), (64, 64), false, ViewportInsets::default()) - 1.0).abs()
+                < 1e-6
+        );
+
+        // An image that already exceeds one axis is still shrunk to fit.
+        assert!(
+            (fit_pixel_scale((1000, 560), (2000, 1000), false, ViewportInsets::default()) - 0.5)
+                .abs()
+                < 1e-6
+        );
+
+        // The cap is per fitted axis, not per source axis: a source narrower
+        // than the viewport but taller than it still shrinks.
+        assert!(
+            (fit_pixel_scale((1000, 560), (100, 1120), false, ViewportInsets::default()) - 0.5)
+                .abs()
+                < 1e-6
+        );
+
+        // Rotation swaps the source axes before the cap applies.
+        assert!(
+            (fit_pixel_scale((1000, 560), (64, 64), true, ViewportInsets::default()) - 1.0).abs()
+                < 1e-6
+        );
+
+        // Chrome reduces the space, but a small source still rests at actual
+        // size inside what remains.
+        let docked = fit_pixel_scale(
+            (1000, 560),
+            (64, 64),
+            false,
+            ViewportInsets {
+                left: 64.0,
+                right: 304.0,
+                top: 40.0,
+                bottom: 112.0,
+            },
+        );
+        assert!((docked - 1.0).abs() < 1e-6);
     }
 
     #[test]

@@ -22,7 +22,12 @@ disappears. This spec is the converged result of two rounds of design critique
 ## Layout
 
 - The image is scaled to fit the window (aspect preserved) and centered. The
-  letterbox area is the solid theme background, nothing else.
+  letterbox area is the solid theme background, nothing else. Fit shrinks a
+  large image and leaves a small one alone: it never enlarges past 100 percent,
+  because scaling a 64px by 64px source to fill the window is arithmetically
+  honest and visually wrong, and a soft interpolated wall no longer reads as a
+  small image. A source smaller than the viewport therefore rests at actual
+  size, and enlarging it is something the player asks for with zoom.
 - Loading an image never changes the application-window dimensions. The initial
   1000px by 720px logical window, or the dimensions the user chooses by resizing,
   remains stable while image fit and zoom resolve inside its viewport.

@@ -18,14 +18,18 @@ if [ "$#" -eq 0 ]; then
 fi
 
 attempts=3
-attempt_seconds=180
+attempt_seconds=240
 term_grace_seconds=20
 
 apt_get() {
-  sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+  sudo env DEBIAN_FRONTEND=noninteractive \
+    NEEDRESTART_SUSPEND=1 \
+    NEEDRESTART_MODE=l \
+    apt-get \
     -o Acquire::Retries=2 \
     -o Acquire::http::Timeout=30 \
     -o Acquire::https::Timeout=30 \
+    -o DPkg::Lock::Timeout=60 \
     "$@"
 }
 

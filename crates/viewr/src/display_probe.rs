@@ -10,18 +10,20 @@ use crate::display_state::{DisplayHints, MonitorIdentity};
 /// Refresh host color-management facts that can change when the window moves.
 #[must_use]
 pub(crate) fn refresh_display_hints(
-    mut hints: DisplayHints,
+    hints: DisplayHints,
     monitor: Option<&MonitorIdentity>,
 ) -> DisplayHints {
     #[cfg(windows)]
     {
+        let mut hints = hints;
         hints.advanced_color = windows_advanced_color(monitor.and_then(MonitorIdentity::name));
+        hints
     }
     #[cfg(not(windows))]
     {
         let _ = monitor;
+        hints
     }
-    hints
 }
 
 /// Fetch the display ICC associated with the monitor that owns the window.

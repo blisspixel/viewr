@@ -59,7 +59,9 @@ class CiInstallPackagesTests(unittest.TestCase):
         install_timeouts: list[int] = []
         timeout_line = re.compile(r"timeout-minutes:\s*(\d+)\s*$")
         for workflow in WORKFLOWS:
-            lines = workflow.read_text(encoding="utf-8").replace("\r\n", "\n").splitlines()
+            lines = (
+                workflow.read_text(encoding="utf-8").replace("\r\n", "\n").splitlines()
+            )
             self.assertTrue(
                 any("bash scripts/ci-install-packages.sh" in line for line in lines),
                 f"{workflow.name} does not call ci-install-packages.sh",

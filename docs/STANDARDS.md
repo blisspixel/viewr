@@ -122,8 +122,9 @@ disposition, and app close wait coordination without owning destinations, worker
 or dialogs. Additional pure seams for concurrent-work preflight (`current_work`),
 crop recovery identity (`crop_state`), keyboard routing (`keyboard_route`),
 folder-scan dispositions (`entry_state`), generation-path currency
-(`work_currency`), edit presentation failure copy (`edit_state`), and
-monitor-identity comparison (`display_state`) are also in
+(`work_currency`), edit presentation failure copy (`edit_state`),
+monitor-identity comparison (`display_state`), and session file-coherence
+policy (`file_coherence`) are also in
 the coverage floor, with expanded curation and rating recovery copy covered in
 their existing state modules. Coverage is a floor and a signal, not the goal. The
 real goal is that the tests would catch a regression, which is why we also run
@@ -200,7 +201,8 @@ higher standard than the rest of the app.
   and verified release archives include that inventory with LICENSE and NOTICE.
 - The privacy invariant is layered and deterministic. `cargo-deny` rejects HTTP,
   TLS, websocket, QUIC, and remote-service clients, and permits Linux's generic
-  D-Bus implementation only behind AccessKit/AT-SPI. Linux startup accepts only
+  D-Bus implementation only behind AccessKit/AT-SPI and the reviewed OpenURI
+  Open With chooser. Linux startup accepts only
   Unix D-Bus environment transports, installs `no_new_privs`, denies non-Unix
   socket creation and io_uring before application threads, covers x32 syscall
   aliases on x86-64, verifies `EPERM`, and fails closed. Package profiles add an

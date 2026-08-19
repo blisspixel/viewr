@@ -11,8 +11,8 @@ use objc2::ffi;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Imp, Sel};
 use objc2::sel;
-use objc2_app_kit::NSApplication;
-use objc2_foundation::{MainThreadMarker, NSArray, NSFileManager, NSURL};
+use objc2_app_kit::{NSApplication, NSModalResponseOK, NSOpenPanel, NSWorkspace};
+use objc2_foundation::{MainThreadMarker, NSArray, NSFileManager, NSString, NSURL};
 use winit::event_loop::EventLoopProxy;
 
 use crate::app::UserEvent;
@@ -129,6 +129,76 @@ pub(crate) fn restore_from_trash(
             .moveItemAtURL_toURL_error(&source, &destination)
             .map_err(|_| crate::curate::TrashRestoreError::OperationFailed)
     })
+}
+
+/// Ask the user which application should open `path`, then hand the original
+/// file to that application through `NSWorkspace`.
+///
+/// `allowedFileTypes` and `openFile:withApplication:` are the synchronous
+/// chooser APIs. The replacements require Uniform Type Identifiers or a
+/// completion handler that would return before the user-mediated launch
+/// finishes.
+#[allow(deprecated)]
+pub(crate) fn show_open_with_chooser(path: &Path) -> crate::open_with::OpenWithOutcome {
+    use crate::open_with::OpenWithOutcome;
+
+    let Ok(file) = file_url(path) else {
+        return OpenWithOutcome::InvalidPath;
+    };
+    objc2::rc::autoreleasepool(|_| {
+        #[allow(deprecated)]
+        {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return OpenWithOutcome::Failed;
+            };
+            let panel = NSOpenPanel::openPanel(mtm);
+            panel.setCanChooseFiles(true);
+            panel.setCanChooseDirectories(false);
+            panel.setAllowsMultipleSelection(false);
+            panel.setResolvesAliases(true);
+            let title = NSString::from_str("Open With");
+            panel.setTitle(Some(&title));
+            let message = NSString::from_str("Choose the application that should open this image.");
+            panel.setMessage(Some(&message));
+            let prompt = NSString::from_str("Open");
+            panel.setPrompt(Some(&prompt));
+            if let Ok(applications) = file_url(Path::new("/Applications")) {
+                panel.setDirectoryURL(Some(&applications));
+            }
+            panel.setAllowedFileTypes(Some(&NSArray::from_retained_slice(&[NSString::from_str(
+                "app",
+            )])));
+            if panel.runModal() != NSModalResponseOK {
+                return OpenWithOutcome::Cancelled;
+            }
+            let Some(application) = panel.URL() else {
+                return OpenWithOutcome::Cancelled;
+            };
+            let Some(file_path) = file_url_path(&file) else {
+                return OpenWithOutcome::InvalidPath;
+            };
+            let Some(application_path) = file_url_path(&application) else {
+                return OpenWithOutcome::Cancelled;
+            };
+            let Some(file_name) = path_as_nsstring(&file_path) else {
+                return OpenWithOutcome::InvalidPath;
+            };
+            let Some(application_name) = path_as_nsstring(&application_path) else {
+                return OpenWithOutcome::Cancelled;
+            };
+            if NSWorkspace::sharedWorkspace()
+                .openFile_withApplication(&file_name, Some(&application_name))
+            {
+                OpenWithOutcome::Launched
+            } else {
+                OpenWithOutcome::Failed
+            }
+        }
+    })
+}
+
+fn path_as_nsstring(path: &Path) -> Option<Retained<NSString>> {
+    Some(NSString::from_str(path.to_str()?))
 }
 
 fn file_url(path: &Path) -> Result<Retained<NSURL>, String> {

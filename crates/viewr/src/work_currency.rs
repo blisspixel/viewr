@@ -32,10 +32,6 @@ pub(crate) fn presented_work_is_current(
 }
 
 /// True when the job targets the currently loaded path at the current generation.
-///
-/// Production call sites are Windows Open With verification today; the pure
-/// contract stays available to unit tests on every platform.
-#[cfg(any(test, target_os = "windows"))]
 #[must_use]
 pub(crate) fn loaded_work_is_current(
     job_generation: u64,

@@ -167,14 +167,18 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 - File > Reload File (`F5`) bypasses the decoded-neighbor cache and reads the
   current path again. It resets in-memory view edits only when the action is safe,
   retains the last good frame during decode, and exposes Retry on failure.
-- On Windows, File and the image right-click surface expose Open With.... The
-  action uses the native single-file chooser for the exact accepted source and
-  never constructs a shell command or stores an editor preference. Compact help
-  explains that the original metadata is included, unsaved viewr edits are not,
-  and the chosen app can modify the source. A persistent path-free top status
-  requests `F5` after successful handoff because automatic external-change
-  watching is not implemented. Cancellation and launch failure are distinct;
-  macOS and Linux chooser parity remains roadmap work.
+- File and the image right-click surface expose Open With.... The action uses a
+  native user-mediated chooser for the exact accepted source and never
+  constructs a shell command or stores an editor preference: Windows
+  `SHOpenWithDialog`, macOS application picker plus NSWorkspace, and Linux
+  desktop-portal OpenURI with `ask`. Compact help explains that the original
+  metadata is included, unsaved viewr edits are not, and the chosen app can
+  modify the source. When that app changes the file, viewr reloads it if an
+  in-progress or applied crop, heal, rotate, and flip are idle; otherwise a
+  path-free status asks for `F5`. A missing path keeps that last good frame
+  with a durable status. A rename follows the same object in the folder list.
+  Cancellation and launch failure are distinct. A session watcher also observes
+  the current file and folder without writing history.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the

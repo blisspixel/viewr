@@ -73,10 +73,11 @@ The minimum contract is:
 - Animation exposes current frame, frame count, and pause/resume state.
 - Reload and Retry remain reachable and expose progress or failure as semantic
   text without clearing the last good image.
-- On Windows, Open With is reachable from both File and the image right-click
+- Open With is reachable from both File and the image right-click
   surface. Its help names the original source and external-app trust boundary.
-  Successful delegation produces one persistent polite `F5` reminder; cancellation
-  and failure do not claim that an edit occurred.
+  Successful delegation may reload a later external change when in-memory edits
+  are idle; otherwise one persistent polite `F5` reminder stays with the last
+  good frame. Cancellation and failure do not claim that an edit occurred.
 - Restore exposes one polite operation status while native work runs. Conflicting
   open, navigation, edit, Trash, and permanent-delete controls are disabled; zoom,
   pan, panels, and appearance remain usable. Closing changes the status to say the
@@ -174,7 +175,8 @@ Run the same workflow on every platform:
 | Position | Move Tools and Image Information left and right, including both on one side | Selected radio state is announced and controls remain reachable in a coherent order |
 | Navigation | Use Left, Right, Home, End, Page Up, Page Down, and a preview button | Immediate reuse remains quiet; a genuine miss names the selected target while the visible filename remains tied to presented pixels; stale decode completion never announces the wrong image |
 | Reload | Invoke File > Reload File and `F5` on a disposable file changed by another app | Reload is announced, the old frame remains until success, and a failed refresh exposes Retry without losing focus |
-| Open With | On Windows, inspect File > Open With and the image right-click action; choose and cancel a disposable editor handoff, then make one external change and press `F5` | Both entry points have one clear name and boundary explanation; cancellation is quiet and safe; success leaves a polite reload reminder without a path; the selected app receives the original rather than unsaved viewr edits; explicit reload presents the changed file |
+| Open With | Inspect File > Open With and the image right-click action; choose and cancel a disposable editor handoff, then make one external change | Both entry points have one clear name and boundary explanation; cancellation is quiet and safe; the selected app receives the original rather than unsaved viewr edits; a safe external change reloads without blanking; unsaved viewr edits keep the last good frame and ask for F5 |
+| File gone | Delete the presented file from outside viewr | The last good image stays visible and a polite status says the selected path no longer names that file |
 | View | Use Fit, Actual Size, Zoom In, Zoom Out, and Fullscreen | The action and resulting zoom are discoverable; fullscreen does not strand focus |
 | Editing | Rotate, flip, and start crop | Each tool has one descriptive name and the visible result matches the invoked action |
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |

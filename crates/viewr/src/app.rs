@@ -6,9 +6,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -87,9 +87,7 @@ use crate::save_state::{
 use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
-#[cfg(target_os = "windows")]
-use crate::work_currency::loaded_work_is_current;
-use crate::work_currency::presented_work_is_current;
+use crate::work_currency::{loaded_work_is_current, presented_work_is_current};
 
 /// Start viewr: create the event loop and run the application to completion.
 ///
@@ -192,8 +190,11 @@ fn run_internal(
         animation: None,
         image_details: None,
         auxiliary_job: None,
-        #[cfg(target_os = "windows")]
         open_with_job: None,
+        coherence_watch: None,
+        unsaved_crop: false,
+        pending_gone_notice: false,
+        last_coherence_action: None,
         pending_save: None,
         save_job: None,
         close_after_save: false,
@@ -221,6 +222,7 @@ fn run_internal(
         show_about: false,
         show_update: false,
         external_edit_pending: false,
+        source_gone: false,
         modifiers: ModifiersState::default(),
         toast: None,
         toast_until: None,
@@ -483,11 +485,15 @@ struct AuxiliaryLoadContext {
     generation: u64,
 }
 
-#[cfg(target_os = "windows")]
 struct OpenWithContext {
     path: PathBuf,
     generation: u64,
     cancel: Arc<AtomicBool>,
+}
+
+struct CoherenceWatch {
+    cancel: Arc<AtomicBool>,
+    latest: Arc<Mutex<Option<crate::file_coherence::CoherenceObservation>>>,
 }
 
 type AuxiliaryLoadResult = (
@@ -820,9 +826,14 @@ struct App {
     image_details: Option<crate::image_info::ImageDetails>,
     /// Replace-latest animation and metadata result for the current source.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
-    /// Generation-cancellable Windows source verification before native handoff.
-    #[cfg(target_os = "windows")]
+    /// Generation-cancellable source verification before the native Open With chooser.
     open_with_job: Option<OneShotJob<OpenWithContext, crate::fs::ImageSourceMatch>>,
+    coherence_watch: Option<CoherenceWatch>,
+    /// A crop has been applied to the presented pixels and is not on disk.
+    unsaved_crop: bool,
+    /// A gone source is waiting for the folder refresh before speaking.
+    pending_gone_notice: bool,
+    last_coherence_action: Option<crate::file_coherence::CoherenceAction>,
     /// Captured existing destination awaiting object-bound overwrite consent.
     pending_save: Option<PendingSave>,
     /// At most one explicit Save As encode with bounded completion ownership.
@@ -873,6 +884,8 @@ struct App {
     show_update: bool,
     /// Whether another app may have changed the source since the last accepted decode.
     external_edit_pending: bool,
+    /// Whether the selected path no longer names the presented file.
+    source_gone: bool,
     /// Latest keyboard modifiers (for Shift+Delete, etc.).
     modifiers: ModifiersState,
     /// Bottom toast message.
@@ -1035,47 +1048,66 @@ fn validate_performance_report(
     Ok(report)
 }
 
-#[cfg(target_os = "windows")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OpenWithOutcome {
-    Launched,
-    Cancelled,
-    InvalidPath,
-    Failed(u32),
-}
-
-#[cfg(target_os = "windows")]
-fn classify_open_with_hresult(result: i32) -> OpenWithOutcome {
-    const HRESULT_CANCELLED: u32 = 0x8007_04c7;
-    match result {
-        0 => OpenWithOutcome::Launched,
-        value if value.cast_unsigned() == HRESULT_CANCELLED => OpenWithOutcome::Cancelled,
-        value => OpenWithOutcome::Failed(value.cast_unsigned()),
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn show_windows_open_with_dialog(
-    path: &Path,
-    parent: windows_sys::Win32::Foundation::HWND,
-) -> OpenWithOutcome {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::UI::Shell::{OAIF_EXEC, OPENASINFO, SHOpenWithDialog};
-
-    let mut path_wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    if path_wide.contains(&0) {
-        return OpenWithOutcome::InvalidPath;
-    }
-    path_wide.push(0);
-    let request = OPENASINFO {
-        pcszFile: path_wide.as_ptr(),
-        pcszClass: std::ptr::null(),
-        oaifInFlags: OAIF_EXEC,
+#[allow(clippy::needless_pass_by_value)]
+fn run_coherence_watch(
+    path: PathBuf,
+    source: Arc<crate::fs::ImageSource>,
+    folder: Option<PathBuf>,
+    mut folder_stamp: Option<crate::fs::DirectoryStamp>,
+    cancel: Arc<AtomicBool>,
+    latest: Arc<Mutex<Option<crate::file_coherence::CoherenceObservation>>>,
+    event_proxy: EventLoopProxy<UserEvent>,
+) {
+    use crate::file_coherence::{
+        CoherenceObservation, FolderObservation, merge_observation, source_observation,
     };
-    // SAFETY: `path_wide` remains alive and NUL-terminated for the synchronous
-    // call, `request` contains valid pointers, and `parent` is either viewr's
-    // live HWND or null as explicitly accepted by the Windows API.
-    classify_open_with_hresult(unsafe { SHOpenWithDialog(parent, &raw const request) })
+    let mut last_sent = None;
+    while !cancel.load(Ordering::Acquire) {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        if cancel.load(Ordering::Acquire) {
+            return;
+        }
+        let source = source_observation(source.matches_path(&path));
+        let folder = match folder.as_deref() {
+            None => FolderObservation::Unchanged,
+            Some(folder) => match crate::fs::directory_stamp(folder) {
+                None => FolderObservation::Unavailable,
+                Some(stamp) => {
+                    let changed = folder_stamp.is_some_and(|previous| previous != stamp);
+                    folder_stamp = Some(stamp);
+                    if changed {
+                        FolderObservation::Changed
+                    } else {
+                        FolderObservation::Unchanged
+                    }
+                }
+            },
+        };
+        let observation = CoherenceObservation { source, folder };
+        if matches!(
+            (observation.source, observation.folder),
+            (
+                crate::file_coherence::SourceObservation::Unchanged,
+                crate::file_coherence::FolderObservation::Unchanged
+            )
+        ) {
+            last_sent = Some(observation);
+            continue;
+        }
+        if last_sent == Some(observation) {
+            continue;
+        }
+        last_sent = Some(observation);
+        if let Ok(mut pending) = latest.lock() {
+            *pending = Some(match pending.take() {
+                None => observation,
+                Some(previous) => merge_observation(previous, observation),
+            });
+        } else {
+            return;
+        }
+        let _ = event_proxy.send_event(UserEvent::Wake);
+    }
 }
 
 impl App {
@@ -1111,8 +1143,10 @@ impl App {
     }
 
     fn begin_image_load(&mut self, path: PathBuf) {
-        #[cfg(target_os = "windows")]
         self.cancel_open_with_check();
+        self.stop_coherence_watch();
+        self.pending_gone_notice = false;
+        self.source_gone = false;
         self.cancel_save_overwrite_for_source_change();
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
@@ -1239,6 +1273,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn finish_folder_scan(
         &mut self,
         purpose: ScanPurpose,
@@ -1257,7 +1292,13 @@ impl App {
                     entries,
                     selected,
                     crate::fs::ScannedImage::path,
-                ),
+                )
+                .or_else(|| {
+                    let current = self.current_source.as_ref()?.scan_provenance()?;
+                    entries
+                        .iter()
+                        .position(|entry| current.same_object(entry.provenance()))
+                }),
             },
             ScanPurpose::OpenFolder => FolderScanSuccess::OpenFolder {
                 count: entries.len(),
@@ -1296,7 +1337,29 @@ impl App {
                 Ok(entries),
             ) => {
                 self.replace_playlist_from_scan(entries, index);
-                self.preserve_presented_source_provenance(&selected);
+                let new_path = self
+                    .playlist
+                    .as_ref()
+                    .and_then(|playlist| playlist.files.get(index).cloned());
+                let followed_rename = new_path
+                    .as_deref()
+                    .is_some_and(|path| self.session.selected_path.as_deref() != Some(path));
+                if let Some(new_path) = new_path
+                    && followed_rename
+                {
+                    self.session.selected_path = Some(new_path.clone());
+                    if self.session.presented_path.is_some() {
+                        self.session.presented_path = Some(new_path);
+                    }
+                    self.start_coherence_watch();
+                }
+                self.settle_pending_gone_notice(!followed_rename, followed_rename);
+                let provenance_path = self
+                    .session
+                    .selected_path
+                    .clone()
+                    .unwrap_or_else(|| selected.clone());
+                self.preserve_presented_source_provenance(&provenance_path);
                 self.kick_prefetch();
             }
             (
@@ -1308,6 +1371,7 @@ impl App {
             ) => {
                 self.replace_playlist(vec![selected.clone()], 0);
                 self.preserve_presented_source_provenance(&selected);
+                self.settle_pending_gone_notice(false, false);
                 if matches!(disposition, FolderScanDisposition::InstallSelectedOnly) {
                     self.kick_prefetch();
                 }
@@ -1564,14 +1628,18 @@ impl App {
         );
         match kind {
             PresentationKind::Loaded => {
+                self.unsaved_crop = false;
+                self.source_gone = false;
                 self.prefetch_schedule.allow(path);
                 self.start_auxiliary_load(path);
             }
             PresentationKind::Cropped => {
+                self.unsaved_crop = true;
                 self.heal.reset_for_image();
                 self.show_toast("Crop applied");
             }
         }
+        self.start_coherence_watch();
         if !full_resolution {
             self.show_toast(
                 "Full image shown as a GPU-limited preview; export remains full resolution",
@@ -1663,6 +1731,11 @@ impl App {
         self.image_details = None;
         self.auxiliary_job = None;
         self.session.load_error = None;
+        self.stop_coherence_watch();
+        self.unsaved_crop = false;
+        self.pending_gone_notice = false;
+        self.source_gone = false;
+        self.last_coherence_action = None;
         self.current_image = None;
         self.current_preview = None;
         self.current_source = None;
@@ -2051,6 +2124,7 @@ impl App {
                     );
                     self.current_source = Some(Arc::new(verified.source));
                     self.current_rating_capability = RatingWriteCapability::WritableJpeg;
+                    self.start_coherence_watch();
                     self.start_auxiliary_load(&worker.path);
                 }
                 match worker.assignment {
@@ -2295,7 +2369,6 @@ impl App {
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        #[cfg(target_os = "windows")]
         self.cancel_open_with_check();
 
         // A reload is an explicit disk refresh. Drop any speculative copy,
@@ -2313,7 +2386,6 @@ impl App {
         self.request_redraw();
     }
 
-    #[cfg(target_os = "windows")]
     fn open_current_with(&mut self) {
         if self.block_action_while_busy("opening the source in another app", true) {
             return;
@@ -2359,14 +2431,12 @@ impl App {
         self.show_toast("Verifying source for Open With");
     }
 
-    #[cfg(target_os = "windows")]
     fn cancel_open_with_check(&mut self) {
         if let Some(job) = self.open_with_job.take() {
             job.context().cancel.store(true, Ordering::Release);
         }
     }
 
-    #[cfg(target_os = "windows")]
     fn finish_open_with_check(&mut self) {
         let Some(job) = self.open_with_job.as_ref() else {
             return;
@@ -2414,44 +2484,222 @@ impl App {
         self.show_open_with_dialog(&context.path);
     }
 
-    #[cfg(target_os = "windows")]
     fn show_open_with_dialog(&mut self, path: &Path) {
-        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-        let parent = self
-            .renderer
-            .as_ref()
-            .and_then(|renderer| renderer.window().window_handle().ok())
-            .and_then(|handle| match handle.as_raw() {
-                RawWindowHandle::Win32(handle) => {
-                    Some(handle.hwnd.get() as windows_sys::Win32::Foundation::HWND)
-                }
-                _ => None,
-            })
-            .unwrap_or(std::ptr::null_mut());
         self.context_menu_pos = None;
-        match show_windows_open_with_dialog(path, parent) {
-            OpenWithOutcome::Launched => {
+        let outcome = {
+            #[cfg(target_os = "windows")]
+            {
+                use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                let parent = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|renderer| renderer.window().window_handle().ok())
+                    .and_then(|handle| match handle.as_raw() {
+                        RawWindowHandle::Win32(handle) => {
+                            Some(handle.hwnd.get() as windows_sys::Win32::Foundation::HWND)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(std::ptr::null_mut());
+                crate::open_with::show_open_with_dialog(path, parent)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                crate::open_with::show_open_with_dialog(path)
+            }
+        };
+        match outcome {
+            crate::open_with::OpenWithOutcome::Launched => {
                 self.external_edit_pending = true;
-                self.show_toast(
-                    "Source opened in another app. Press F5 to reload possible changes",
-                );
+                self.show_toast("Source opened in another app. Changes reload when that is safe");
             }
-            OpenWithOutcome::Cancelled => self.show_toast("Open With canceled"),
-            OpenWithOutcome::InvalidPath => {
-                log::error!("Windows Open With rejected an invalid path");
-                self.show_toast("Could not open the Windows app chooser");
+            crate::open_with::OpenWithOutcome::Cancelled => self.show_toast("Open With canceled"),
+            crate::open_with::OpenWithOutcome::InvalidPath => {
+                log::error!("Open With rejected an invalid path");
+                self.show_toast("Could not open the app chooser");
             }
-            OpenWithOutcome::Failed(code) => {
-                log::error!("Windows Open With failed with HRESULT {code:#010x}");
-                self.show_toast("Could not open the Windows app chooser");
+            crate::open_with::OpenWithOutcome::Failed => {
+                log::error!("Open With chooser failed");
+                self.show_toast("Could not open the app chooser");
             }
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    fn open_current_with(&mut self) {
-        self.show_toast("Open With is currently available on Windows");
+    fn start_coherence_watch(&mut self) {
+        self.stop_coherence_watch();
+        self.last_coherence_action = None;
+        if !crate::file_coherence::watch_can_start(
+            self.current_image.is_some(),
+            self.current_source.is_some(),
+            self.session.presented_path.as_deref() == self.session.selected_path.as_deref()
+                && self.session.selected_path.is_some(),
+        ) {
+            return;
+        }
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+            return;
+        };
+        let Some(source) = self.current_source.clone() else {
+            return;
+        };
+        let folder = path.parent().map(Path::to_owned);
+        let folder_stamp = folder.as_deref().and_then(crate::fs::directory_stamp);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let latest = Arc::new(Mutex::new(None));
+        let worker_latest = Arc::clone(&latest);
+        let event_proxy = self.event_proxy.clone();
+        let spawn = std::thread::Builder::new()
+            .name("viewr-file-coherence".into())
+            .spawn(move || {
+                run_coherence_watch(
+                    path,
+                    source,
+                    folder,
+                    folder_stamp,
+                    worker_cancel,
+                    worker_latest,
+                    event_proxy,
+                );
+            });
+        if spawn.is_ok() {
+            self.coherence_watch = Some(CoherenceWatch { cancel, latest });
+        }
+    }
+
+    fn stop_coherence_watch(&mut self) {
+        if let Some(watch) = self.coherence_watch.take() {
+            watch.cancel.store(true, Ordering::Release);
+        }
+    }
+
+    fn poll_coherence_watch(&mut self) {
+        let Some(watch) = self.coherence_watch.as_ref() else {
+            return;
+        };
+        let observation = watch
+            .latest
+            .lock()
+            .ok()
+            .and_then(|mut latest| latest.take());
+        let Some(observation) = observation else {
+            return;
+        };
+        let facts = crate::file_coherence::CoherenceFacts::from_observation(
+            observation,
+            crate::file_coherence::UnsavedEdits {
+                cropping: self.transform.is_cropping || self.crop_job.is_some(),
+                applied_crop: self.unsaved_crop,
+                heal_pending: self.heal.active
+                    || self.heal.is_busy()
+                    || self.heal.painting
+                    || self.heal.history.can_undo(),
+                rotated_or_flipped: self.transform.rotation_steps != 0
+                    || self.transform.flip_h
+                    || self.transform.flip_v,
+            },
+            crate::file_coherence::SessionBusy {
+                loading: self.session.is_loading() || self.preview_job.is_some(),
+                saving: self.save_transaction_active(),
+                healing: self.heal.is_busy() || self.heal.painting,
+                cropping: self.crop_job.is_some(),
+                curating: self.curation_worker.is_some(),
+                rating: self.rating_write_worker.is_some(),
+            },
+        );
+        self.apply_coherence_action(crate::file_coherence::coalesce(
+            crate::file_coherence::CoherenceAction::Ignore,
+            crate::file_coherence::decide(facts),
+        ));
+    }
+
+    fn apply_coherence_action(&mut self, action: crate::file_coherence::CoherenceAction) {
+        use crate::file_coherence::CoherenceAction;
+        let announce = crate::file_coherence::should_announce(self.last_coherence_action, action);
+        if !matches!(action, CoherenceAction::Ignore) {
+            self.last_coherence_action = Some(action);
+        }
+        match action {
+            CoherenceAction::Ignore => {}
+            CoherenceAction::RemindReload => {
+                self.external_edit_pending = true;
+                if announce {
+                    self.show_toast(crate::file_coherence::reload_reminder_copy());
+                }
+            }
+            CoherenceAction::ReloadCurrent => self.reload_current_from_disk_quietly(),
+            CoherenceAction::ReloadAndRescan => {
+                self.reload_current_from_disk_quietly();
+                self.refresh_folder_membership();
+            }
+            CoherenceAction::CurrentGone => {
+                self.external_edit_pending = false;
+                self.source_gone = true;
+                if announce {
+                    self.show_toast(crate::file_coherence::current_gone_copy());
+                }
+            }
+            CoherenceAction::RescanFolder => self.refresh_folder_membership(),
+            CoherenceAction::RemindAndRescan => {
+                self.external_edit_pending = true;
+                if announce {
+                    self.show_toast(crate::file_coherence::reload_reminder_copy());
+                }
+                self.refresh_folder_membership();
+            }
+            CoherenceAction::GoneAndRescan => {
+                self.external_edit_pending = false;
+                self.pending_gone_notice = true;
+                self.refresh_folder_membership();
+            }
+        }
+    }
+
+    fn reload_current_from_disk_quietly(&mut self) {
+        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+            return;
+        };
+        self.remove_prefetched_image(&path);
+        self.prefetch_schedule.reset();
+        self.thumb_textures.remove(&path);
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
+        self.spawn_refreshed_image_load(path);
+    }
+
+    fn settle_pending_gone_notice(&mut self, found_same_path: bool, found_rename: bool) {
+        if !self.pending_gone_notice {
+            return;
+        }
+        self.pending_gone_notice = false;
+        match crate::file_coherence::gone_rescan_result(found_same_path, found_rename) {
+            crate::file_coherence::GoneRescanResult::Reappeared => {
+                self.source_gone = false;
+                if !self.session.is_loading() && self.preview_job.is_none() {
+                    self.reload_current_from_disk_quietly();
+                }
+            }
+            crate::file_coherence::GoneRescanResult::Renamed => {
+                self.source_gone = false;
+                self.show_toast(crate::file_coherence::renamed_copy());
+            }
+            crate::file_coherence::GoneRescanResult::Missing => {
+                self.source_gone = true;
+                self.show_toast(crate::file_coherence::current_gone_copy());
+            }
+        }
+    }
+
+    fn refresh_folder_membership(&mut self) {
+        if self.folder_scan_job.is_some() {
+            return;
+        }
+        let Some(path) = self.session.selected_path.clone() else {
+            return;
+        };
+        let Some(directory) = path.parent().map(Path::to_owned) else {
+            return;
+        };
+        self.start_folder_scan(directory, ScanPurpose::SelectedFile(path));
     }
 
     fn current_loaded_path(&self) -> Option<&Path> {
@@ -4681,6 +4929,9 @@ impl App {
             }
             JobPoll::Pending => unreachable!("pending save result returned early"),
         };
+        if matches!(terminal, SaveTerminalState::Succeeded) {
+            self.refresh_folder_membership();
+        }
         match save_close_disposition(close_requested, terminal, self.curation_worker.is_some()) {
             SaveCloseDisposition::StayOpen => {}
             SaveCloseDisposition::Exit => event_loop.exit(),
@@ -5871,6 +6122,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let show_about = self.show_about;
                 let show_update = self.show_update;
                 let external_edit_pending = self.external_edit_pending;
+                let source_gone = self.source_gone;
                 let source_image_size = self
                     .current_image
                     .as_ref()
@@ -5989,6 +6241,7 @@ impl ApplicationHandler<UserEvent> for App {
                     show_update,
                     rating,
                     external_edit_pending,
+                    source_gone,
                     file_path: path_str,
                     selected_file_name,
                     img_size,
@@ -6333,8 +6586,8 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        #[cfg(target_os = "windows")]
         self.finish_open_with_check();
+        self.poll_coherence_watch();
         self.poll_rating_write(event_loop);
         self.poll_rating_discovery();
         self.poll_curation_result(event_loop);
@@ -6718,20 +6971,6 @@ mod test {
         assert!(!filmstrip_is_available(0));
         assert!(!filmstrip_is_available(1));
         assert!(filmstrip_is_available(2));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_open_with_hresult_is_classified_without_path_details() {
-        assert_eq!(classify_open_with_hresult(0), OpenWithOutcome::Launched);
-        assert_eq!(
-            classify_open_with_hresult(0x8007_04c7_u32.cast_signed()),
-            OpenWithOutcome::Cancelled
-        );
-        assert_eq!(
-            classify_open_with_hresult(0x8000_4005_u32.cast_signed()),
-            OpenWithOutcome::Failed(0x8000_4005)
-        );
     }
 
     #[test]

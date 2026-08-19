@@ -1288,9 +1288,25 @@ try {
     $collapseTools = Wait-ForElement -Name "Collapse tools panel" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
-    Wait-ForElement -Name "Rotate clockwise (R)" -ControlType (
+    $rotateClockwise = Wait-ForElement -Name "Rotate clockwise (R)" -ControlType (
         [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $rotateClockwise
+    $replacedPng = [Convert]::FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    [IO.File]::WriteAllBytes($firstImage, $replacedPng)
+    Wait-ForElement -Name "Source may have changed. Press F5" -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
+    Wait-ForElement -Name "first.png" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x74
+    Wait-ForElementAbsent `
+        -Name "Source may have changed. Press F5" `
+        -Prefix `
+        -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Wait-ForElementAbsent `
         -Name "Mark for batch trash" `
         -Prefix `
@@ -1569,6 +1585,13 @@ try {
     Wait-ForElement -Name "Rating: 4 of 5" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
+    [IO.File]::Delete($ratedImage)
+    Wait-ForElement -Name "This file is no longer at its selected path." -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Wait-ForElement -Name "rated.jpg" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
 
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
@@ -1577,6 +1600,7 @@ try {
         "Spot Heal, source privacy, native Open With discovery, panel shortcuts, dock positions, " +
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
+        "external file replacement with unsaved edits, last-good-frame after delete, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }

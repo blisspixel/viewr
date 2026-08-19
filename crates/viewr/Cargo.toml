@@ -99,6 +99,9 @@ accesskit_winit = { version = "0.32", default-features = false, features = [
     "rwh_06",
 ] }
 viewr-seccomp = { path = "../viewr-seccomp" }
+# Session-bus OpenURI chooser. cargo-deny confines zbus to AccessKit plus this
+# reviewed Open With path; startup still allows only unix: D-Bus transports.
+zbus = { version = "5.18.0", default-features = false, features = ["blocking-api"] }
 
 # Launch Services delivers Finder/Open With requests through the application
 # delegate rather than argv. Keep this glue macOS-only and use the same objc2
@@ -106,12 +109,21 @@ viewr-seccomp = { path = "../viewr-seccomp" }
 [target.'cfg(target_os = "macos")'.dependencies]
 accesskit_winit = { version = "0.32", default-features = false, features = ["rwh_06"] }
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSApplication",
+    "NSOpenPanel",
+    "NSPanel",
+    "NSResponder",
+    "NSSavePanel",
+    "NSWindow",
+    "NSWorkspace",
+] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSArray",
     "NSError",
     "NSFileManager",
     "NSObject",
+    "NSString",
     "NSURL",
 ] }
 

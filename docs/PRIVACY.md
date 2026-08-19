@@ -24,7 +24,7 @@ code, and where possible it's enforced in CI so it can't quietly regress.
 - **Native dialog and external-app boundary.** Open, Open Folder, Save As path
   choice, and permanent-delete confirmation use native operating-system dialogs.
   When a captured Save As destination already exists, viewr adds an app-owned,
-  identity-bound overwrite confirmation. Windows Open With also delegates the
+  identity-bound overwrite confirmation. Open With also delegates the
   exact current source to an application the user
   explicitly selects. That application receives the original file, path, and
   embedded metadata and may read, transmit, modify, or replace it under its own
@@ -96,7 +96,8 @@ A promise you can verify beats a promise you have to trust.
    client appears. Windows and macOS use AccessKit's platform adapters with default
    features disabled. Linux's upstream AccessKit/AT-SPI adapter needs a generic
    D-Bus implementation; cargo-deny permits that implementation and its process
-   helper only behind the reviewed AccessKit dependency path. Before logging,
+   helper only behind the reviewed AccessKit dependency path and viewr's
+   OpenURI Open With chooser. Before logging,
    workers, GUI initialization, or application threads, Linux rejects configured
    D-Bus addresses that are not `unix:` transports, installs `no_new_privs`, denies
    non-Unix socket families and io_uring with seccomp, mirrors those denials onto
@@ -353,17 +354,17 @@ pixel-strip locators, so large ordinary TIFF pixel data does not need to enter t
 metadata parser. Retention is content-driven and writes only JPEG, PNG, or WebP
 destinations supported by the transactional export path.
 
-On Windows, Open With first verifies the unmodified original source on a
-generation-cancellable background job, then passes that exact path to the native
-chooser. Navigation cancels obsolete verification. It does not pass viewr's
+Open With first verifies the unmodified original source on a
+generation-cancellable background job, then passes that exact path to a native
+chooser: Windows `SHOpenWithDialog`, macOS application picker plus
+`NSWorkspace`, or the Linux desktop-portal `OpenURI` method with `ask`.
+Navigation cancels obsolete verification. It does not pass viewr's
 unsaved crop, rotation, flip, or Spot Heal state and does not sanitize metadata
-first. After a successful handoff, a path-private status
-remains owned by the last-good frame. An explicit `F5` refresh or another image
-load clears it only after fresh accepted pixels are presented. A failed reload or
-navigation retains the status with the last-good frame; clearing or removing that
-frame clears the reminder as well. The status says only that the external app may
-have changed the source. viewr does not infer edit completion from another
-process lifetime and does not reload automatically.
+first. After a successful handoff, a session watcher reloads the source when
+those edits are idle. If a silent reload would destroy unsaved work, a
+path-private `F5` reminder stays owned by the last-good frame. viewr does not
+infer edit completion from another process lifetime, write handoff history, or
+launch a default application without the chooser.
 
 ## Updates
 

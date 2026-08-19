@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### File coherence
+
+- A session watcher observes the current file and its folder without writing
+  history. External replacement reloads when crop, heal, rotate, and flip are
+  idle, and asks for F5 when a silent reload would destroy those edits. A
+  missing path keeps the last good frame with a durable status. A rename
+  follows the same object in the folder list. Noisy events collapse to one
+  visible change. The F5 reminder no longer claims an external app opened the
+  file when the change came from disk.
+- Open With uses a native user-mediated chooser on Windows, macOS, and Linux.
+  It still verifies the accepted source first, never builds a shell command,
+  and never launches a default application silently.
+
 ## 0.3.0 - 2026-08-19
 
 ### Fixed

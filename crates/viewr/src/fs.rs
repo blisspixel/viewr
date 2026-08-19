@@ -72,10 +72,53 @@ struct FileIdentity {
 }
 
 /// Opaque identity evidence captured while a regular folder entry is scanned.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ScanProvenance {
     identity: FileIdentity,
     version: FileVersion,
+}
+
+impl ScanProvenance {
+    /// Whether two scan records name the same filesystem object.
+    ///
+    /// Rename updates version evidence while preserving object identity, so a
+    /// folder refresh can follow the object to its new pathname.
+    #[must_use]
+    pub(crate) fn same_object(self, other: Self) -> bool {
+        self.identity == other.identity
+    }
+}
+
+/// Identity plus version for the folder currently being browsed.
+///
+/// Adding, renaming, or removing a child changes directory version evidence
+/// without replacing the directory object. The session watcher uses that
+/// change to rescan membership.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DirectoryStamp {
+    identity: FileIdentity,
+    version: FileVersion,
+    child_count: u32,
+}
+
+/// Snapshot the ordinary directory at `path` without following its final component.
+#[must_use]
+pub(crate) fn directory_stamp(path: &Path) -> Option<DirectoryStamp> {
+    let source = DirectorySource::open(path).ok()?;
+    let metadata = source.file.metadata().ok()?;
+    metadata_is_plain_directory(&metadata).then_some(())?;
+    let mut child_count = 0_u32;
+    for entry in std::fs::read_dir(path).ok()? {
+        // A single unreadable child must not make the whole stamp unavailable.
+        // Count the attempt so a disappearing entry still changes membership.
+        let _ = entry;
+        child_count = child_count.saturating_add(1);
+    }
+    Some(DirectoryStamp {
+        identity: source.identity,
+        version: file_version(&source.file, &metadata).ok()?,
+        child_count,
+    })
 }
 
 /// One automatically discovered image and the object identity observed at scan time.
@@ -89,6 +132,11 @@ impl ScannedImage {
     #[must_use]
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    #[must_use]
+    pub(crate) const fn provenance(&self) -> ScanProvenance {
+        self.provenance
     }
 
     #[must_use]
@@ -2516,5 +2564,19 @@ mod tests {
 
         assert!(canonical_file_path(&link).unwrap().ends_with("linked.png"));
         assert!(scan_images(workspace.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn directory_stamp_changes_when_a_child_is_added() {
+        let workspace = TempWorkspace::new("directory_stamp").unwrap();
+        let first = super::directory_stamp(workspace.path()).expect("stamp empty folder");
+        fs::write(workspace.path().join("added.png"), b"fixture").unwrap();
+        let second = super::directory_stamp(workspace.path()).expect("stamp after add");
+        assert!(first.identity == second.identity);
+        assert!(first != second);
+        fs::remove_file(workspace.path().join("added.png")).unwrap();
+        let third = super::directory_stamp(workspace.path()).expect("stamp after remove");
+        assert!(first.identity == third.identity);
+        assert!(second != third);
     }
 }

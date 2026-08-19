@@ -86,16 +86,17 @@ const PORTAL_OPEN_URI_METHOD: &str = "OpenURI";
 
 #[cfg(target_os = "linux")]
 fn show_linux_open_with_dialog(path: &Path) -> OpenWithOutcome {
-    linux_open_uri(path).unwrap_or(OpenWithOutcome::Failed)
+    match file_uri(path) {
+        None => OpenWithOutcome::InvalidPath,
+        Some(uri) => linux_open_uri(&uri).unwrap_or(OpenWithOutcome::Failed),
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn linux_open_uri(path: &Path) -> Option<OpenWithOutcome> {
+fn linux_open_uri(uri: &str) -> Option<OpenWithOutcome> {
     use std::collections::HashMap;
     use zbus::blocking::Connection;
     use zbus::zvariant::{ObjectPath, OwnedObjectPath, Value};
-
-    let uri = file_uri(path)?;
     let connection = Connection::session().ok()?;
     let proxy = zbus::blocking::Proxy::new(
         &connection,
@@ -107,7 +108,7 @@ fn linux_open_uri(path: &Path) -> Option<OpenWithOutcome> {
     let mut options = HashMap::new();
     options.insert("ask", Value::from(true));
     let handle: OwnedObjectPath = proxy
-        .call(PORTAL_OPEN_URI_METHOD, &("", uri.as_str(), options))
+        .call(PORTAL_OPEN_URI_METHOD, &("", uri, options))
         .ok()?;
     let handle = ObjectPath::try_from(handle.as_str()).ok()?;
     let request = zbus::blocking::Proxy::new(
@@ -129,6 +130,7 @@ fn linux_open_uri(path: &Path) -> Option<OpenWithOutcome> {
 
 #[cfg(target_os = "linux")]
 fn file_uri(path: &Path) -> Option<String> {
+    use std::fmt::Write;
     use std::os::unix::ffi::OsStrExt;
 
     let path = path.canonicalize().ok()?;
@@ -138,7 +140,9 @@ fn file_uri(path: &Path) -> Option<String> {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
                 uri.push(char::from(byte));
             }
-            _ => uri.push_str(&format!("%{byte:02X}")),
+            _ => {
+                let _ = write!(uri, "%{byte:02X}");
+            }
         }
     }
     Some(uri)

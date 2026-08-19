@@ -161,6 +161,17 @@ job first stalled for one hour and fifty-one minutes inside `apt-get install`
 and was cancelled and rerun, completing in two minutes; every CI job now carries
 an explicit timeout so a stalled runner fails rather than holding a tag open.
 
+For v0.2.0, [main CI run 32153785138](https://github.com/blisspixel/viewr/actions/runs/32153785138)
+passed all seven jobs and [fuzz run 32153785164](https://github.com/blisspixel/viewr/actions/runs/32153785164)
+passed both targets on commit `183970282eae7e7698c46e9b4df65384055b2056`.
+[Release run 32154781070](https://github.com/blisspixel/viewr/actions/runs/32154781070)
+published the immutable [v0.2.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.2.0)
+on its second attempt after the first attempt lost three jobs at the apt-get
+step. Its Linux archive re-verifies from the release page with a matching
+SHA-256 sidecar, a 35-file internal manifest, and one attestation bound to
+`release.yml@refs/tags/v0.2.0` at that commit. The official archive verifier
+accepts that download.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)

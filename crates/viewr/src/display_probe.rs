@@ -279,20 +279,6 @@ fn x11_root_icc_profile(window: Option<&winit::window::Window>) -> Option<Vec<u8
 
     use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
-    let window = window?;
-    let RawDisplayHandle::Xlib(handle) = window.display_handle().ok()?.as_raw() else {
-        return None;
-    };
-    let display = handle.display?.as_ptr();
-    let screen = handle.screen;
-
-    let lib = CString::new("libX11.so.6").ok()?;
-    // Safety: soname is a live C string. The handle is released before return.
-    let x11 = unsafe { libc::dlopen(lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL) };
-    if x11.is_null() {
-        return None;
-    }
-
     type InternAtom = unsafe extern "C" fn(*mut c_void, *const i8, c_int) -> c_ulong;
     type RootWindow = unsafe extern "C" fn(*mut c_void, c_int) -> c_ulong;
     type GetWindowProperty = unsafe extern "C" fn(
@@ -310,6 +296,20 @@ fn x11_root_icc_profile(window: Option<&winit::window::Window>) -> Option<Vec<u8
         *mut *mut c_uchar,
     ) -> c_int;
     type XFree = unsafe extern "C" fn(*mut c_void) -> c_int;
+
+    let window = window?;
+    let RawDisplayHandle::Xlib(handle) = window.display_handle().ok()?.as_raw() else {
+        return None;
+    };
+    let display = handle.display?.as_ptr();
+    let screen = handle.screen;
+
+    let lib = CString::new("libX11.so.6").ok()?;
+    // Safety: soname is a live C string. The handle is released before return.
+    let x11 = unsafe { libc::dlopen(lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL) };
+    if x11.is_null() {
+        return None;
+    }
 
     let intern = unsafe { libc::dlsym(x11, c"XInternAtom".as_ptr()) };
     let root_window = unsafe { libc::dlsym(x11, c"XRootWindow".as_ptr()) };
@@ -340,7 +340,7 @@ fn x11_root_icc_profile(window: Option<&winit::window::Window>) -> Option<Vec<u8
         if root == 0 {
             continue;
         }
-        let max_longs = (viewr_protocol::MAX_COLOR_PROFILE_BYTES / 4) as c_long;
+        let max_longs = c_long::try_from(viewr_protocol::MAX_COLOR_PROFILE_BYTES / 4).ok()?;
         let mut actual_type = 0_u64 as c_ulong;
         let mut actual_format = 0_i32;
         let mut nitems = 0_u64 as c_ulong;

@@ -178,6 +178,11 @@ Shipped:
   decoder result from entering the old upload path until a compatible output
   transform exists. Preview generation, thumbnail upload, and export enforce the
   same boundary rather than silently reinterpreting unfamiliar pixels.
+- **`display_state`**: covered monitor-identity comparison, display-color
+  policy, and display-ICC admission. `App` supplies only the name, origin, size,
+  and scale winit already reports. A display ICC is never applied to pixels
+  here: managed compositors stay tagged sRGB, and a usable unmanaged profile is
+  recorded rather than converted.
 - **`decode`**: opens one source object and turns that exact handle into RGBA
   pixels. The live handle and native object identity travel with every accepted
   foreground or speculative result instead of being reconstructed from its path.

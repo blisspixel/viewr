@@ -164,6 +164,7 @@ fn run_internal(
             ..Default::default()
         },
         renderer: None,
+        display_monitor: None,
         playlist: None,
         playlist_scope: None,
         folder_scan_job: None,
@@ -731,6 +732,7 @@ impl HealTool {
 #[allow(clippy::struct_excessive_bools)] // independent UI/session mode bits
 struct App {
     renderer: Option<Renderer>,
+    display_monitor: Option<crate::display_state::MonitorIdentity>,
     session: crate::session::Session,
     playlist: Option<Playlist>,
     playlist_scope: Option<Arc<PlaylistScope>>,
@@ -2494,15 +2496,42 @@ impl App {
 
     fn toggle_fullscreen(&mut self) {
         self.is_fullscreen = !self.is_fullscreen;
+        if let Some(renderer) = self.renderer.as_ref() {
+            if self.is_fullscreen {
+                renderer
+                    .window()
+                    .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+            } else {
+                renderer.window().set_fullscreen(None);
+            }
+        } else {
+            return;
+        }
+        self.observe_current_display();
+    }
+
+    fn observe_current_display(&mut self) {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        if self.is_fullscreen {
-            renderer
-                .window()
-                .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-        } else {
-            renderer.window().set_fullscreen(None);
+        let current = renderer.window().current_monitor().and_then(|monitor| {
+            crate::display_state::monitor_identity(
+                monitor.name().as_deref(),
+                (monitor.position().x, monitor.position().y),
+                (monitor.size().width, monitor.size().height),
+                monitor.scale_factor(),
+            )
+        });
+        match crate::display_state::observe_display(self.display_monitor.as_ref(), current.as_ref())
+        {
+            crate::display_state::DisplayObservation::Unchanged => {}
+            crate::display_state::DisplayObservation::IdentityChanged
+            | crate::display_state::DisplayObservation::Unknown => {
+                self.display_monitor = current;
+                if let Some(renderer) = self.renderer.as_ref() {
+                    renderer.window().request_redraw();
+                }
+            }
         }
     }
 
@@ -5151,9 +5180,12 @@ impl ApplicationHandler<UserEvent> for App {
                     self.show_toast(recovery.notice());
                 }
                 let _ = self.renderer.as_mut().unwrap().render(None, None, |_| {});
-                let window = self.renderer.as_ref().unwrap().window();
-                window.set_visible(true);
-                window.request_redraw();
+                {
+                    let window = self.renderer.as_ref().unwrap().window();
+                    window.set_visible(true);
+                    window.request_redraw();
+                }
+                self.observe_current_display();
             }
             Err(e) => {
                 log::error!("failed to initialize gpu: {e}");
@@ -5215,6 +5247,8 @@ impl ApplicationHandler<UserEvent> for App {
                 | WindowEvent::DroppedFile(_)
                 | WindowEvent::ModifiersChanged(_)
                 | WindowEvent::Resized(_)
+                | WindowEvent::Moved(_)
+                | WindowEvent::ScaleFactorChanged { .. }
                 | WindowEvent::ThemeChanged(_)
                 | WindowEvent::Focused(_)
                 | WindowEvent::CursorLeft { .. }
@@ -5633,6 +5667,13 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.resize(size.width, size.height);
                     renderer.window().request_redraw();
                 }
+                self.observe_current_display();
+            }
+            WindowEvent::Moved(_) => {
+                self.observe_current_display();
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.observe_current_display();
             }
             WindowEvent::ThemeChanged(theme) => {
                 if let Some(renderer) = self.renderer.as_mut() {
@@ -5865,6 +5906,9 @@ impl ApplicationHandler<UserEvent> for App {
                     animation,
                     details,
                     color_profile,
+                    display_output: crate::display_state::output_status(
+                        self.display_monitor.as_ref(),
+                    ),
                     is_cropping,
                     crop_ratio,
                     custom_crop_ratio,

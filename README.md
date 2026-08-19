@@ -63,9 +63,9 @@ curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.2.0/install.
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-Both commands execute an installer fixed to the immutable v0.2.0 release. The
-installer resolves the latest stable archive, verifies its SHA-256 sidecar and
-internal manifest, and installs it without giving the application network access.
+The published command downloads the v0.2.0 installer, which installs the v0.2.0
+archive after verifying its SHA-256 sidecar and internal manifest, without
+giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
 manual archive verification, uninstall steps, platform prerequisites, or a source
 build, see [Installing viewr](docs/INSTALL.md).
@@ -148,12 +148,13 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 
 ## Project status
 
-v0.2.0 is the current public foundation preview, not a percentage-complete score
-or a claim that the product is finished. It is the fourth patch over the first
-public preview, v0.1.0, and that immutable release is the public install target.
+v0.2.0 is the current public preview and install target, not a percentage-complete
+score or a claim that the product is finished. It is the closed reliability
+architecture milestone after the published v0.1.x line, not a patch over v0.1.0.
+The first preview v0.1.0 and the v0.1.1 through v0.1.5 patches remain published.
 `main` continues the logical order in the
-[roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.2.0** reliability,
-then v0.3 display correctness through v0.9 publisher authentication, then v1.0.
+[roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.3.0** display
+correctness through v0.9 publisher authentication, then v1.0.
 The [release notes](docs/releases/v0.2.0.md) state the exact preview limits.
 
 ## Development

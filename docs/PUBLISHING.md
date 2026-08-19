@@ -6,7 +6,7 @@ trust bar required before 1.0.
 
 ## Current repository state
 
-Status last verified on 2026-08-02:
+Status last verified on 2026-08-18:
 
 - [x] The repository is public with `main` as its only long-lived branch and
   Apache-2.0 detected by GitHub.
@@ -39,13 +39,15 @@ Status last verified on 2026-08-02:
 - [x] Publish and verify annotated tag `v0.1.5`, the patch release that stops a
   malformed JPEG XL file from terminating the viewer and opens a folder handed
   to viewr from outside the window, under that same contract.
-- [ ] Publish and verify annotated tag `v0.2.0`, the reliability architecture
-  milestone, under that same contract.
+- [x] Publish and verify annotated tag `v0.2.0`, the reliability architecture
+  milestone, under that same contract. Published; see the GitHub release
+  [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0).
 
 ## Pre-1.0 release procedure
 
-This is the procedure used for `v0.1.0` and repeated for each patch. An
-unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
+This is the procedure used for `v0.1.0` and repeated for each later tag. The
+commands below are the worked `v0.2.0` example. The next allowed tag is
+`v0.3.0`. An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
@@ -161,7 +163,7 @@ an explicit timeout so a stalled runner fails rather than holding a tag open.
 
 ## Required before a broadly recommended 1.0
 
-The [version path in the roadmap](ROADMAP.md#version-path-to-an-exceptional-10)
+The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)
 owns the dependency order. This checklist summarizes the final distribution and
 acceptance conditions; it does not replace the intermediate reliability,
 fidelity, coherence, and release-candidate gates.

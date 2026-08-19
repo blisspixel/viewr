@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux GUI build dependencies
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           bash scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
       - name: Install pinned fuzz toolchain

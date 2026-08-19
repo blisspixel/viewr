@@ -120,9 +120,12 @@ disappears. This spec is the converged result of two rounds of design critique
   accent marks active or affirmative state only, never decoration.
 - Decoded image pixels use an sRGB GPU texture and mip chain. A bounded embedded
   RGB ICC profile is converted to sRGB before upload; Image Information reports
-  conversion or fallback status. This is correct for the current SDR working path,
-  not a claim of per-monitor output conversion, preserved wide-gamut values, CMYK
-  profile handling, or HDR presentation. Those are release roadmap items.
+  conversion or fallback status. The window's display identity is tracked, and
+  Image Information reports the sRGB swapchain as operating-system managed or as
+  a fallback, not as a per-display transform. This is correct for the current SDR
+  working path, not a claim of per-monitor output conversion, preserved wide-gamut
+  values, CMYK profile handling, or HDR presentation. Those are release roadmap
+  items.
 
 ## Typography and icons
 
@@ -390,8 +393,8 @@ and be validated before the motion can ship.
    there is never a black frame between images.
 3. Color fidelity from the source profile to the display that owns the window,
    with explicit fallback instead of silent guessing. Input RGB profile conversion
-   is implemented; per-display output, wide-gamut preservation, and HDR remain the
-   largest unfinished fidelity milestone.
+   is implemented. Full per-display output fidelity is the open v0.3 invariant;
+   wide-gamut preservation and HDR remain later work.
 
 Every other item here is refinement. These are what make the viewer feel correct
 in a way users trust without needing to name the implementation.

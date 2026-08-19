@@ -257,6 +257,8 @@ pub(crate) struct UiFrameOwned {
     pub details: Option<crate::image_info::ImageDetails>,
     /// How the displayed pixels were normalized for the sRGB render pipeline.
     pub color_profile: Option<crate::decode::ColorProfileStatus>,
+    /// How the current sRGB swapchain relates to the display that owns the window.
+    pub display_output: crate::display_state::DisplayOutputStatus,
     /// Crop tool active.
     pub is_cropping: bool,
     /// Active crop aspect lock.
@@ -2208,6 +2210,9 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     if let Some(color_profile) = frame.color_profile {
         ui.label(RichText::new(format!("Color · {}", color_profile.label())).color(colors.muted));
     }
+    ui.label(
+        RichText::new(format!("Display · {}", frame.display_output.label())).color(colors.muted),
+    );
     if let Some(animation) = frame.animation {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -3635,6 +3640,7 @@ mod tests {
             animation: None,
             details: None,
             color_profile: Some(crate::decode::ColorProfileStatus::AssumedSrgb),
+            display_output: crate::display_state::DisplayOutputStatus::SrgbFallback,
             is_cropping: false,
             crop_ratio: crate::crop::CropRatio::Free,
             custom_crop_ratio: (3, 5),
@@ -4554,6 +4560,55 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing panel menu item: {label}"));
             assert_eq!(node.keyboard_shortcut(), Some(shortcut));
         }
+    }
+
+    #[test]
+    fn image_information_reports_display_output_status() {
+        fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            output
+                .platform_output
+                .accesskit_update
+                .expect("display-status AccessKit update should be generated")
+                .nodes
+                .iter()
+                .flat_map(|(_, node)| [node.label(), node.value()])
+                .flatten()
+                .map(str::to_owned)
+                .collect()
+        }
+
+        let mut frame = accessibility_test_frame();
+        frame.display_output = crate::display_state::DisplayOutputStatus::SrgbFallback;
+        let fallback = exposed_text(&frame);
+        assert!(
+            fallback
+                .iter()
+                .any(|text| text.contains("Display · sRGB fallback")),
+            "missing fallback display status; exposed: {fallback:?}"
+        );
+
+        frame.display_output = crate::display_state::DisplayOutputStatus::SrgbOperatingSystem;
+        let managed = exposed_text(&frame);
+        assert!(
+            managed
+                .iter()
+                .any(|text| text.contains("Display · sRGB, operating-system managed")),
+            "missing OS-managed display status; exposed: {managed:?}"
+        );
+
+        frame.display_output = crate::display_state::DisplayOutputStatus::SrgbDisplayProfileRecorded;
+        let recorded = exposed_text(&frame);
+        assert!(
+            recorded
+                .iter()
+                .any(|text| text.contains("Display · sRGB, display profile recorded")),
+            "missing recorded display-profile status; exposed: {recorded:?}"
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ use objc2::ffi;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Imp, Sel};
 use objc2::sel;
-use objc2_app_kit::{NSApplication, NSModalResponseOK, NSOpenPanel, NSSavePanel, NSWorkspace};
+use objc2_app_kit::{NSApplication, NSModalResponseOK, NSOpenPanel, NSWorkspace};
 use objc2_foundation::{MainThreadMarker, NSArray, NSFileManager, NSString, NSURL};
 use winit::event_loop::EventLoopProxy;
 
@@ -133,6 +133,12 @@ pub(crate) fn restore_from_trash(
 
 /// Ask the user which application should open `path`, then hand the original
 /// file to that application through NSWorkspace.
+///
+/// `allowedFileTypes` and `openFile:withApplication:` are the synchronous
+/// chooser APIs. The replacements require Uniform Type Identifiers or a
+/// completion handler that would return before the user-mediated launch
+/// finishes.
+#[allow(deprecated)]
 pub(crate) fn show_open_with_chooser(path: &Path) -> crate::open_with::OpenWithOutcome {
     use crate::open_with::OpenWithOutcome;
 
@@ -148,11 +154,12 @@ pub(crate) fn show_open_with_chooser(path: &Path) -> crate::open_with::OpenWithO
         panel.setCanChooseDirectories(false);
         panel.setAllowsMultipleSelection(false);
         panel.setResolvesAliases(true);
-        panel.setTitle(&NSString::from_str("Open With"));
-        panel.setMessage(&NSString::from_str(
-            "Choose the application that should open this image.",
-        ));
-        panel.setPrompt(&NSString::from_str("Open"));
+        let title = NSString::from_str("Open With");
+        panel.setTitle(Some(&title));
+        let message = NSString::from_str("Choose the application that should open this image.");
+        panel.setMessage(Some(&message));
+        let prompt = NSString::from_str("Open");
+        panel.setPrompt(Some(&prompt));
         if let Ok(applications) = file_url(Path::new("/Applications")) {
             panel.setDirectoryURL(Some(&applications));
         }

@@ -18,9 +18,9 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0), the display-correct SDR milestone |
-| Active development line | `main`, working toward **v0.4.0** |
-| Next tag allowed | **v0.4.0** only after its exit criteria below are true. Further v0.3.x patches remain allowed for shipped defects |
+| Published install target | Immutable [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0), the file-coherence milestone |
+| Active development line | `main`, working toward **v0.5.0** |
+| Next tag allowed | **v0.5.0** only after its exit criteria below are true. Further v0.4.x patches remain allowed for shipped defects |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -28,7 +28,7 @@ Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding, an
 honest capability reporting, but camera RAW and multi-page viewing remain open.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current signed-attested but
-publisher-unsigned v0.3.0 archives. The v0.2.0 and v0.1.x archives remain published
+publisher-unsigned v0.4.0 archives. The v0.3.0, v0.2.0 and v0.1.x archives remain published
 history. Human assistive-technology evidence, platform
 signing and notarization, representative-hardware acceptance, and display
 fidelity remain open.
@@ -61,10 +61,10 @@ v0.2.0  Reliability architecture   [released]
 v0.3.0  Display-correct SDR preview  [released]
    |
    v
-v0.4.0  File-coherence preview  [next]
+v0.4.0  File-coherence preview  [released]
    |
    v
-v0.5.0  Format-contract preview
+v0.5.0  Format-contract preview  [next]
    |
    v
 v0.6.0  Integrated product-quality beta
@@ -99,8 +99,8 @@ v1.0.0  Broadly recommended release
 
 ### Immediate focus
 
-**Immediate focus: v0.4 file coherence, followed by v0.5 format contract.**
-The v0.3 display-correctness milestone is released and closed. Pure-policy seams and the owned-logic
+**Immediate focus: v0.5 format contract, followed by v0.6 product quality.**
+The v0.4 file-coherence milestone is released and closed. Pure-policy seams and the owned-logic
 coverage floor are evidenced (90.59 percent lines under the CI llvm-cov
 contract, with the launch-prerequisite `startup` seam at 98.40 percent). The
 residual whole-file exclusions are now exactly five native integration surfaces,
@@ -110,13 +110,13 @@ replace-latest decode queue closes when its last worker stops, so a thread that
 dies produces a named scheduling error rather than an operation that stays busy
 forever. Preserve bounded job,
 thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
-observable. Do the v0.4 file-coherence work without reopening unowned
+observable. Do the v0.5 format-contract work without reopening unowned
 event-loop races.
 
-Current position: v0.3.0 is released and verified, and the earlier v0.2.0
-reliability milestone plus the v0.1.1 through v0.1.5 patches remain published
-with the first preview's known issues recorded. Next is v0.4 file coherence,
-then v0.5 formats, then v0.6 product quality, then v0.7 through v0.9 evidence and
+Current position: v0.4.0 is released and verified, and the earlier v0.3.0
+display-correctness milestone plus v0.2.0 and the v0.1.1 through v0.1.5 patches
+remain published with the first preview's known issues recorded. Next is v0.5
+formats, then v0.6 product quality, then v0.7 through v0.9 evidence and
 trust.
 
 ### Release rules
@@ -142,7 +142,7 @@ but completed history does not override an open gate here.
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
 | Reliability architecture | Complete | Released as [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0) from [CI run 32153785138](https://github.com/blisspixel/viewr/actions/runs/32153785138), [fuzz run 32153785164](https://github.com/blisspixel/viewr/actions/runs/32153785164), and [release run 32154781070](https://github.com/blisspixel/viewr/actions/runs/32154781070) on commit `1839702`. Every background operation has one bounded event-loop-owned job, stale work cannot mutate a newer selection or edit, failure paths are observable including a decode worker that dies, native glue is limited to five named integration surfaces, race contracts are tested, and owned-logic line coverage is 90.59 percent against an 85 percent floor. |
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
-| File coherence | Partial for v0.4 | Session identity watcher coalesces source and folder changes, reloads when edits including an applied crop are safe, reminds with F5 when they are not, keeps the last good frame when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
+| File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32306011198](https://github.com/blisspixel/viewr/actions/runs/32306011198), [fuzz run 32306011193](https://github.com/blisspixel/viewr/actions/runs/32306011193) on behavior commit `7657a74`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
 | Integrated product quality | Open for v0.6 | Representative hardware polish matrices. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
@@ -184,7 +184,7 @@ behavior, installability, and maintainable proof of correctness.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.3.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.4.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, formats, and integrated product quality are completed first.
 
 - [x] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
@@ -203,7 +203,7 @@ coherence, formats, and integrated product quality are completed first.
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
 - [x] Make the release-state and quality-gate contract executable: canonical
-  documentation now agrees on the public unsigned v0.3.0 state, CI runs the exact
+  documentation now agrees on the public unsigned v0.4.0 state, CI runs the exact
   locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
   against an explicit transitive baseline without unexplained warnings.
 - [ ] For v0.9, produce and verify a signed Windows delivery, a Developer ID-signed and

@@ -39,7 +39,7 @@ content.
 
 ## Install
 
-v0.3.0 is the current public preview. Its portable archives are checksummed and
+v0.4.0 is the current public preview. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch.
@@ -47,7 +47,7 @@ security controls to force a launch.
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.3.0/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.4.0/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -57,13 +57,13 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.3.0/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.4.0/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The published command downloads the v0.3.0 installer, which installs the v0.3.0
+The published command downloads the v0.4.0 installer, which installs the v0.4.0
 archive after verifying its SHA-256 sidecar and internal manifest, without
 giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
@@ -153,14 +153,14 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 
 ## Project status
 
-v0.3.0 is the current public preview and install target, not a percentage-complete
-score or a claim that the product is finished. It is the closed display-correct
-SDR milestone after the published v0.2.0 reliability architecture release.
-The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, and v0.2.0 remain
-published. `main` continues the logical order in the
-[roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.4.0** file coherence
+v0.4.0 is the current public preview and install target, not a percentage-complete
+score or a claim that the product is finished. It is the closed file-coherence
+milestone after the published v0.3.0 display-correct SDR release.
+The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, and v0.3.0
+remain published. `main` continues the logical order in the
+[roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.5.0** format contract
 through v0.9 publisher authentication, then v1.0.
-The [release notes](docs/releases/v0.3.0.md) state the exact preview limits.
+The [release notes](docs/releases/v0.4.0.md) state the exact preview limits.
 
 ## Development
 

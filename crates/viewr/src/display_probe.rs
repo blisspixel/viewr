@@ -23,6 +23,7 @@ pub(crate) fn fetch_display_profile_bytes(monitor_name: Option<&str>) -> Option<
 }
 
 /// Read one regular file if it is within the protocol ICC bound.
+#[cfg(any(windows, test))]
 #[must_use]
 pub(crate) fn read_bounded_profile_file(path: &std::path::Path) -> Option<Vec<u8>> {
     let metadata = std::fs::metadata(path).ok()?;

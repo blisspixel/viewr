@@ -69,7 +69,7 @@ use crate::prefetch::{
 };
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-    durable_presentation_error, external_edit_pending_after_frame_transition,
+    decode_failure_toast, durable_presentation_error, external_edit_pending_after_frame_transition,
     image_open_in_progress, navigation_image_plan, preview_job_matches,
 };
 use crate::rating_state::{
@@ -186,6 +186,7 @@ fn run_internal(
         last_trashed: Vec::new(),
         last_trashed_scope: None,
         current_image: None,
+        current_preview: None,
         current_source: None,
         current_image_reuse: ImageReuseEligibility::Ineligible,
         animation: None,
@@ -808,6 +809,7 @@ struct App {
     last_trashed: Vec<TrashedFile>,
     last_trashed_scope: Option<Arc<PlaylistScope>>,
     current_image: Option<Arc<DecodedImage>>,
+    current_preview: Option<ImagePreview>,
     /// Live handle for the exact source object that supplied the displayed pixels.
     current_source: Option<Arc<crate::fs::ImageSource>>,
     /// Whether the displayed pixels are a pristine source decode safe to cache.
@@ -1534,6 +1536,7 @@ impl App {
             true
         };
         self.current_image = Some(image);
+        self.current_preview = preview.cloned();
         self.current_source = source;
         self.current_image_reuse = kind.image_reuse();
         let rating_transition = if self.session.presented_path.as_deref() == Some(path) {
@@ -1661,6 +1664,7 @@ impl App {
         self.auxiliary_job = None;
         self.session.load_error = None;
         self.current_image = None;
+        self.current_preview = None;
         self.current_source = None;
         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
         self.presented_rating =
@@ -1887,6 +1891,7 @@ impl App {
         renderer
             .set_image(image, None)
             .map_err(|error| error.to_string())?;
+        self.current_preview = None;
         renderer.window().request_redraw();
         Ok(())
     }
@@ -2568,17 +2573,57 @@ impl App {
             return;
         }
         self.display_monitor = current;
-        self.display_profile_usable = crate::display_state::should_fetch_profile(
+        self.display_hints = crate::display_probe::refresh_display_hints(
             self.display_hints,
             self.display_monitor.as_ref(),
-        ) && crate::display_probe::fetch_display_profile_bytes(
-            self.display_monitor
-                .as_ref()
-                .and_then(crate::display_state::MonitorIdentity::name),
-        )
-        .is_some_and(|bytes| crate::display_state::admit_display_profile(&bytes));
-        if let Some(renderer) = self.renderer.as_ref() {
-            renderer.window().request_redraw();
+        );
+        let output = if crate::display_state::should_fetch_profile(
+            self.display_hints,
+            self.display_monitor.as_ref(),
+        ) {
+            crate::display_probe::fetch_display_profile_bytes(
+                self.display_monitor
+                    .as_ref()
+                    .and_then(crate::display_state::MonitorIdentity::name),
+                self.renderer
+                    .as_ref()
+                    .map(|renderer| renderer.window().as_ref()),
+            )
+            .and_then(|bytes| {
+                crate::display_output::DisplayOutputNormalizer::from_profile_bytes(&bytes)
+            })
+            .unwrap_or_else(crate::display_output::DisplayOutputNormalizer::identity)
+        } else {
+            crate::display_output::DisplayOutputNormalizer::identity()
+        };
+        self.display_profile_usable = output.is_applied();
+        let had_image = self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.image_size().is_some());
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_display_output(output);
+        }
+        if had_image {
+            self.refresh_presented_display_pixels();
+        }
+        self.request_redraw();
+    }
+
+    fn refresh_presented_display_pixels(&mut self) {
+        let Some(image) = self.current_image.clone() else {
+            return;
+        };
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let preview = self.current_preview.as_ref();
+        if renderer.required_preview(&image).is_some() && preview.is_none() {
+            return;
+        }
+        if let Err(error) = renderer.set_image(&image, preview) {
+            log::error!("failed to refresh display color: {error}");
+            self.show_toast(format!("Could not update display color: {error}"));
         }
     }
 
@@ -5206,6 +5251,7 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 renderer.init_accessibility(event_loop, self.event_proxy.clone());
                 self.renderer = Some(renderer);
+                self.observe_current_display();
                 if let Some(image) = self.current_image.as_ref() {
                     let image = Arc::clone(image);
                     let source = self.current_source.clone();
@@ -5232,7 +5278,6 @@ impl ApplicationHandler<UserEvent> for App {
                     window.set_visible(true);
                     window.request_redraw();
                 }
-                self.observe_current_display();
             }
             Err(e) => {
                 log::error!("failed to initialize gpu: {e}");
@@ -6317,9 +6362,7 @@ impl ApplicationHandler<UserEvent> for App {
                     log::error!("decode failed");
                     let message = format!("Could not decode: {e}");
                     self.session.load_error = Some(message.clone());
-                    self.show_toast(format!(
-                        "{message}. The previous image remains visible; Retry is available."
-                    ));
+                    self.show_toast(decode_failure_toast(&message, self.current_image.is_some()));
                     if let Some(r) = self.renderer.as_mut() {
                         r.window().request_redraw();
                     }

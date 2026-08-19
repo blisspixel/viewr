@@ -85,6 +85,17 @@ pub(super) fn durable_presentation_error(kind: PresentationKind, message: &str) 
     matches!(kind, PresentationKind::Loaded).then(|| message.to_owned())
 }
 
+/// Decode-failure toast copy. The last-good-frame clause is true only when a
+/// previous picture is still on the canvas.
+#[must_use]
+pub(super) fn decode_failure_toast(message: &str, previous_image_visible: bool) -> String {
+    if previous_image_visible {
+        format!("{message}. The previous image remains visible; Retry is available.")
+    } else {
+        format!("{message}. Retry is available.")
+    }
+}
+
 pub(super) fn preview_job_matches(
     job_generation: u64,
     job_path: &Path,
@@ -103,8 +114,9 @@ pub(super) fn preview_job_matches(
 mod tests {
     use super::{
         ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-        durable_presentation_error, external_edit_pending_after_frame_transition,
-        image_open_in_progress, navigation_image_plan, preview_job_matches,
+        decode_failure_toast, durable_presentation_error,
+        external_edit_pending_after_frame_transition, image_open_in_progress,
+        navigation_image_plan, preview_job_matches,
     };
     use std::path::Path;
 
@@ -244,6 +256,18 @@ mod tests {
         assert_eq!(
             durable_presentation_error(PresentationKind::Cropped, message),
             None
+        );
+    }
+
+    #[test]
+    fn decode_failure_toast_mentions_a_previous_image_only_when_one_is_visible() {
+        assert_eq!(
+            decode_failure_toast("Could not decode: format error", true),
+            "Could not decode: format error. The previous image remains visible; Retry is available."
+        );
+        assert_eq!(
+            decode_failure_toast("Could not decode: format error", false),
+            "Could not decode: format error. Retry is available."
         );
     }
 

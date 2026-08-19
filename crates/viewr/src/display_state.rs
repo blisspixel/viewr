@@ -44,16 +44,17 @@ pub(crate) enum DisplayObservation {
 
 /// How the current swapchain should be described.
 ///
-/// This increment never applies a display transform. Every variant presents
-/// tagged sRGB. The distinction is why. The `Srgb` prefix is the contract, not
-/// a repeated type name.
+/// Every variant presents a tagged sRGB surface. Unmanaged paths convert
+/// working sRGB into the admitted display encoding before upload; the sRGB
+/// surface then round-trips those bytes to the framebuffer. The `Srgb` prefix
+/// is the contract, not a repeated type name.
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DisplayOutputStatus {
     /// sRGB surface; the operating system maps to the display when it can.
     SrgbOperatingSystem,
-    /// A display ICC was admitted but is not applied to pixels.
-    SrgbDisplayProfileRecorded,
+    /// Working sRGB was converted into an admitted unmanaged display ICC.
+    SrgbDisplayProfileApplied,
     /// No monitor identity or no usable profile; deterministic sRGB with no display claim.
     SrgbFallback,
 }
@@ -63,7 +64,7 @@ impl DisplayOutputStatus {
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::SrgbOperatingSystem => "sRGB, operating-system managed",
-            Self::SrgbDisplayProfileRecorded => "sRGB, display profile recorded",
+            Self::SrgbDisplayProfileApplied => "sRGB, display profile applied",
             Self::SrgbFallback => "sRGB fallback",
         }
     }
@@ -116,7 +117,7 @@ pub(crate) struct DisplayHints {
 pub(crate) enum DisplayColorPolicy {
     /// Present tagged sRGB and let the operating system or compositor convert.
     OsManagedSrgb,
-    /// The platform does not convert sRGB; a later slice may apply the ICC.
+    /// The platform does not convert sRGB; apply the admitted ICC to presented pixels.
     LegacyDisplayIcc,
     /// No trustworthy display; keep the deterministic sRGB fallback.
     UnavailableSrgbFallback,
@@ -201,7 +202,7 @@ pub(crate) fn admit_display_profile(bytes: &[u8]) -> bool {
 pub(crate) const fn status_for_policy(policy: DisplayColorPolicy) -> DisplayOutputStatus {
     match policy {
         DisplayColorPolicy::OsManagedSrgb => DisplayOutputStatus::SrgbOperatingSystem,
-        DisplayColorPolicy::LegacyDisplayIcc => DisplayOutputStatus::SrgbDisplayProfileRecorded,
+        DisplayColorPolicy::LegacyDisplayIcc => DisplayOutputStatus::SrgbDisplayProfileApplied,
         DisplayColorPolicy::UnavailableSrgbFallback => DisplayOutputStatus::SrgbFallback,
     }
 }
@@ -419,7 +420,7 @@ mod tests {
                 hints(DisplayOs::Linux, None, DisplaySession::X11),
                 true,
             ),
-            DisplayOutputStatus::SrgbDisplayProfileRecorded
+            DisplayOutputStatus::SrgbDisplayProfileApplied
         );
         assert_eq!(
             output_status(
@@ -494,8 +495,8 @@ mod tests {
             "sRGB, operating-system managed"
         );
         assert_eq!(
-            DisplayOutputStatus::SrgbDisplayProfileRecorded.label(),
-            "sRGB, display profile recorded"
+            DisplayOutputStatus::SrgbDisplayProfileApplied.label(),
+            "sRGB, display profile applied"
         );
         assert_eq!(DisplayOutputStatus::SrgbFallback.label(), "sRGB fallback");
     }
@@ -554,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn display_policy_records_legacy_icc_only_when_unmanaged_and_usable() {
+    fn display_policy_applies_legacy_icc_only_when_unmanaged_and_usable() {
         let desk = identity(Some("Desk"), (0, 0), (1920, 1080), 1.0);
         assert_eq!(
             display_color_policy(
@@ -582,7 +583,7 @@ mod tests {
         );
         assert_eq!(
             status_for_policy(DisplayColorPolicy::LegacyDisplayIcc),
-            DisplayOutputStatus::SrgbDisplayProfileRecorded
+            DisplayOutputStatus::SrgbDisplayProfileApplied
         );
     }
 

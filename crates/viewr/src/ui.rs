@@ -4601,14 +4601,13 @@ mod tests {
             "missing OS-managed display status; exposed: {managed:?}"
         );
 
-        frame.display_output =
-            crate::display_state::DisplayOutputStatus::SrgbDisplayProfileRecorded;
-        let recorded = exposed_text(&frame);
+        frame.display_output = crate::display_state::DisplayOutputStatus::SrgbDisplayProfileApplied;
+        let applied = exposed_text(&frame);
         assert!(
-            recorded
+            applied
                 .iter()
-                .any(|text| text.contains("Display · sRGB, display profile recorded")),
-            "missing recorded display-profile status; exposed: {recorded:?}"
+                .any(|text| text.contains("Display · sRGB, display profile applied")),
+            "missing applied display-profile status; exposed: {applied:?}"
         );
     }
 

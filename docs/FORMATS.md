@@ -119,12 +119,12 @@ returns no authority for file mutation.
   parent pixel allocation. Superseded worker reads and IPC requests stop and
   terminate their contained helper instead of occupying a decode slot until the
   hard deadline.
-- CMYK profile conversion, per-display output transforms, wide-gamut preservation,
-  and HDR presentation are not yet claimed. The window's display identity is
-  tracked and Image Information names operating-system managed, recorded, or
-  fallback sRGB, but output remains tagged sRGB rather than converted for that
-  display. `ROADMAP.md` defines the acceptance work required before those claims
-  can be made.
+- Unmanaged Windows-legacy and real X11 convert working sRGB into the admitted
+  display ICC before presentation and refresh that conversion when the window
+  changes monitor. Managed compositors stay tagged sRGB. CMYK profile
+  conversion, wide-gamut preservation, and HDR presentation are not yet
+  claimed. `ROADMAP.md` defines the acceptance work required before those
+  claims can be made.
 
 ## Metadata export behavior
 

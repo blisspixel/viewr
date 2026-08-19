@@ -39,13 +39,16 @@ class CiInstallPackagesTests(unittest.TestCase):
         attempt_seconds = self.assignments["attempt_seconds"]
         term_grace_seconds = self.assignments["term_grace_seconds"]
         self.assertEqual(attempts, 3)
-        self.assertGreaterEqual(attempt_seconds, 60)
+        self.assertGreaterEqual(attempt_seconds, 240)
         self.assertGreaterEqual(term_grace_seconds, 1)
         self.assertIn("timeout", self.script)
         self.assertIn("--signal=TERM", self.script)
         self.assertIn("--kill-after=", self.script)
         self.assertIn("Acquire::http::Timeout=30", self.script)
         self.assertIn("Acquire::https::Timeout=30", self.script)
+        self.assertIn("NEEDRESTART_SUSPEND=1", self.script)
+        self.assertIn("NEEDRESTART_MODE=l", self.script)
+        self.assertIn("DPkg::Lock::Timeout=60", self.script)
 
         delays = [attempt * 15 for attempt in range(1, attempts)]
         worst_case = attempts * (attempt_seconds + term_grace_seconds) + sum(delays)

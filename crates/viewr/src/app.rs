@@ -222,6 +222,7 @@ fn run_internal(
         show_about: false,
         show_update: false,
         external_edit_pending: false,
+        source_gone: false,
         modifiers: ModifiersState::default(),
         toast: None,
         toast_until: None,
@@ -883,6 +884,8 @@ struct App {
     show_update: bool,
     /// Whether another app may have changed the source since the last accepted decode.
     external_edit_pending: bool,
+    /// Whether the selected path no longer names the presented file.
+    source_gone: bool,
     /// Latest keyboard modifiers (for Shift+Delete, etc.).
     modifiers: ModifiersState,
     /// Bottom toast message.
@@ -1143,6 +1146,7 @@ impl App {
         self.cancel_open_with_check();
         self.stop_coherence_watch();
         self.pending_gone_notice = false;
+        self.source_gone = false;
         self.cancel_save_overwrite_for_source_change();
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
@@ -1625,6 +1629,7 @@ impl App {
         match kind {
             PresentationKind::Loaded => {
                 self.unsaved_crop = false;
+                self.source_gone = false;
                 self.prefetch_schedule.allow(path);
                 self.start_auxiliary_load(path);
             }
@@ -1729,6 +1734,7 @@ impl App {
         self.stop_coherence_watch();
         self.unsaved_crop = false;
         self.pending_gone_notice = false;
+        self.source_gone = false;
         self.last_coherence_action = None;
         self.current_image = None;
         self.current_preview = None;
@@ -2628,6 +2634,7 @@ impl App {
             }
             CoherenceAction::CurrentGone => {
                 self.external_edit_pending = false;
+                self.source_gone = true;
                 if announce {
                     self.show_toast(crate::file_coherence::current_gone_copy());
                 }
@@ -2666,14 +2673,17 @@ impl App {
         self.pending_gone_notice = false;
         match crate::file_coherence::gone_rescan_result(found_same_path, found_rename) {
             crate::file_coherence::GoneRescanResult::Reappeared => {
+                self.source_gone = false;
                 if !self.session.is_loading() && self.preview_job.is_none() {
                     self.reload_current_from_disk_quietly();
                 }
             }
             crate::file_coherence::GoneRescanResult::Renamed => {
+                self.source_gone = false;
                 self.show_toast(crate::file_coherence::renamed_copy());
             }
             crate::file_coherence::GoneRescanResult::Missing => {
+                self.source_gone = true;
                 self.show_toast(crate::file_coherence::current_gone_copy());
             }
         }
@@ -4919,6 +4929,9 @@ impl App {
             }
             JobPoll::Pending => unreachable!("pending save result returned early"),
         };
+        if matches!(terminal, SaveTerminalState::Succeeded) {
+            self.refresh_folder_membership();
+        }
         match save_close_disposition(close_requested, terminal, self.curation_worker.is_some()) {
             SaveCloseDisposition::StayOpen => {}
             SaveCloseDisposition::Exit => event_loop.exit(),
@@ -6109,6 +6122,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let show_about = self.show_about;
                 let show_update = self.show_update;
                 let external_edit_pending = self.external_edit_pending;
+                let source_gone = self.source_gone;
                 let source_image_size = self
                     .current_image
                     .as_ref()
@@ -6227,6 +6241,7 @@ impl ApplicationHandler<UserEvent> for App {
                     show_update,
                     rating,
                     external_edit_pending,
+                    source_gone,
                     file_path: path_str,
                     selected_file_name,
                     img_size,

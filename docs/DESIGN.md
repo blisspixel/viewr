@@ -175,9 +175,10 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   metadata is included, unsaved viewr edits are not, and the chosen app can
   modify the source. When that app changes the file, viewr reloads it if an
   in-progress or applied crop, heal, rotate, and flip are idle; otherwise a
-  path-free status asks for `F5`. A rename follows the same object in the
-  folder list. Cancellation and launch failure are distinct. A session watcher
-  also observes the current file and folder without writing history.
+  path-free status asks for `F5`. A missing path keeps that last good frame
+  with a durable status. A rename follows the same object in the folder list.
+  Cancellation and launch failure are distinct. A session watcher also observes
+  the current file and folder without writing history.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the

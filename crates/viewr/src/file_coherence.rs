@@ -344,13 +344,13 @@ pub(crate) const fn open_with_availability() -> OpenWithAvailability {
 /// Status copy when a silent reload would destroy in-memory edits.
 #[must_use]
 pub(crate) const fn reload_reminder_copy() -> &'static str {
-    "Source may have changed. Press F5 when it is safe to reload"
+    "Source may have changed. Press F5 when it is safe to reload."
 }
 
 /// Status copy when the selected path no longer names the presented file.
 #[must_use]
 pub(crate) const fn current_gone_copy() -> &'static str {
-    "This file is no longer at its selected path. The last good image remains visible"
+    "This file is no longer at its selected path. The last good image remains visible."
 }
 
 /// Status copy when a folder refresh followed the presented object to a new name.

@@ -85,8 +85,7 @@ const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
 const EXTERNAL_EDIT_BADGE: &str = "External F5";
 const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
-const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str =
-    "External app opened the displayed source. Press F5 to reload possible changes.";
+const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::reload_reminder_copy();
 pub(crate) const CROP_RECOVERY_STATUS: &str =
     "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
 pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";
@@ -244,6 +243,8 @@ pub(crate) struct UiFrameOwned {
     pub rating: RatingUiState,
     /// Whether an external handoff may have made the displayed pixels stale.
     pub external_edit_pending: bool,
+    /// Whether the selected path no longer names the presented file.
+    pub source_gone: bool,
     /// Privacy-safe basename for the currently presented pixels (display only).
     pub file_path: Option<String>,
     /// Privacy-safe basename of the currently selected file.
@@ -860,6 +861,8 @@ fn render_top_operation_status(
         add_status(ui, RATING_RECOVERY_STATUS);
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
         add_status(ui, status);
+    } else if frame.source_gone {
+        add_top_status(ui, crate::file_coherence::current_gone_copy(), colors);
     } else if frame.external_edit_pending {
         add_top_status_with_external_edit(ui, EXTERNAL_EDIT_STANDALONE_STATUS, true, colors);
     } else if frame.rating.outside_filter {
@@ -3625,6 +3628,7 @@ mod tests {
                 pending_disclosure: None,
             },
             external_edit_pending: false,
+            source_gone: false,
             file_path: Some("C:/photos/current.png".to_owned()),
             selected_file_name: Some("current.png".to_owned()),
             img_size: Some((1920, 1080)),
@@ -5177,6 +5181,26 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_source_is_persistent_polite_status() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.source_gone = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(crate::file_coherence::current_gone_copy())
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
     fn external_handoff_reminder_is_persistent_polite_status() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -5251,7 +5275,7 @@ mod tests {
                 node.role() == egui::accesskit::Role::Label
                     && node.value()
                         == Some(
-                            "External app opened the displayed source. Press F5 to reload possible changes. Could not open target.png",
+                            "Source may have changed. Press F5 when it is safe to reload. Could not open target.png",
                         )
                     && node.live() == Some(egui::accesskit::Live::Polite)
             })

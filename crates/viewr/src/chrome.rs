@@ -360,7 +360,6 @@ pub(crate) struct ChromeInput {
 pub(crate) enum ChromeControl {
     OpenSource,
     Reload,
-    #[cfg(target_os = "windows")]
     OpenWith,
     SaveAs,
     MoveToTrash,
@@ -387,7 +386,6 @@ impl ChromeControl {
     pub const ALL: &'static [Self] = &[
         Self::OpenSource,
         Self::Reload,
-        #[cfg(target_os = "windows")]
         Self::OpenWith,
         Self::SaveAs,
         Self::MoveToTrash,
@@ -486,8 +484,13 @@ impl ChromeViewModel {
             ChromeControl::Reload
             | ChromeControl::PermanentDelete
             | ChromeControl::EditTransform => current,
-            #[cfg(target_os = "windows")]
-            ChromeControl::OpenWith => current,
+            ChromeControl::OpenWith => {
+                current
+                    && matches!(
+                        crate::file_coherence::open_with_availability(),
+                        crate::file_coherence::OpenWithAvailability::NativeChooser
+                    )
+            }
             ChromeControl::SaveAs => current && !self.input.save_recovery_unsettled,
             ChromeControl::MoveToTrash => current && !self.input.restore_recovery_unsettled,
             ChromeControl::UndoTrash => {
@@ -894,10 +897,7 @@ mod tests {
     #[test]
     fn ready_state_defines_every_control_without_windowing() {
         let model = ChromeViewModel::new(ready_input());
-        assert_eq!(
-            ChromeControl::ALL.len(),
-            if cfg!(target_os = "windows") { 21 } else { 20 }
-        );
+        assert_eq!(ChromeControl::ALL.len(), 21);
         for &control in ChromeControl::ALL {
             let expected = control != ChromeControl::ApplyCrop;
             assert_eq!(model.is_enabled(control), expected, "{control:?}");
@@ -921,7 +921,6 @@ mod tests {
             let model = ChromeViewModel::new(input);
             for control in [
                 ChromeControl::Reload,
-                #[cfg(target_os = "windows")]
                 ChromeControl::OpenWith,
                 ChromeControl::SaveAs,
                 ChromeControl::MoveToTrash,

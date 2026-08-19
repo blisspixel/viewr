@@ -70,7 +70,8 @@ pipeline instead of inheriting one.
 - **AccessKit** nodes describe custom controls and crop state. A direct,
   default-feature-disabled `accesskit_winit` adapter delivers them to native
   assistive technology on all three targets. On Linux, cargo-deny confines the
-  generic D-Bus implementation to the AccessKit/AT-SPI path, environment validation
+  generic D-Bus implementation to the AccessKit/AT-SPI path and viewr's reviewed
+  OpenURI Open With chooser, environment validation
   accepts only Unix transports, and startup seccomp denies Internet socket creation
   before the adapter or application threads begin.
 
@@ -183,6 +184,7 @@ users who explicitly want it.
 - **No remote-service client is linked.** The application implements no HTTP,
   TLS, telemetry, or update client. Linux local accessibility IPC uses the generic
   D-Bus code supplied upstream, restricted to the AccessKit dependency path and
+  the reviewed OpenURI Open With chooser, and
   protected by a verified Internet-socket deny policy before threads start. This
   layered invariant is enforced in CI and at runtime (see `PRIVACY.md`).
 - **Ship sandboxed with network denied:** repository profiles target macOS App

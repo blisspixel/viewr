@@ -142,7 +142,7 @@ but completed history does not override an open gate here.
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
 | Reliability architecture | Complete | Released as [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0) from [CI run 32153785138](https://github.com/blisspixel/viewr/actions/runs/32153785138), [fuzz run 32153785164](https://github.com/blisspixel/viewr/actions/runs/32153785164), and [release run 32154781070](https://github.com/blisspixel/viewr/actions/runs/32154781070) on commit `1839702`. Every background operation has one bounded event-loop-owned job, stale work cannot mutate a newer selection or edit, failure paths are observable including a decode worker that dies, native glue is limited to five named integration surfaces, race contracts are tested, and owned-logic line coverage is 90.59 percent against an 85 percent floor. |
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
-| File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
+| File coherence | Partial for v0.4 | Session identity watcher coalesces source and folder changes, reloads when edits including an applied crop are safe, reminds with F5 when they are not, keeps the last good frame when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
 | Integrated product quality | Open for v0.6 | Representative hardware polish matrices. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
@@ -462,13 +462,18 @@ makes the application feel unreliable even when the decoder technically succeede
   obsolete work. The handoff persists no editor or history, exposes the external-
   app privacy boundary, and keeps a path-private `F5` reminder after successful
   delegation.
-- [ ] Add equivalent user-mediated chooser behavior on macOS and Linux only
+- [x] Add equivalent user-mediated chooser behavior on macOS and Linux only
   through supported workspace or desktop-portal APIs, with package-sandbox and
   native accessibility evidence. Do not substitute a shell command or silently
-  launch the default application.
-- [ ] Add a session-scoped file watcher for the current image and folder. Coalesce
+  launch the default application. macOS uses an application picker plus
+  NSWorkspace. Linux uses the desktop-portal OpenURI chooser with `ask`.
+  cargo-deny confines zbus to AccessKit plus that reviewed Open With path.
+- [x] Add a session-scoped file watcher for the current image and folder. Coalesce
   noisy events, preserve the old frame until a successful refresh, update the
-  playlist deterministically, and write no history or database.
+  playlist deterministically, and write no history or database. A covered
+  `file_coherence` policy decides reload, F5 reminder, current-gone, and folder
+  rescan. Unsaved crop, heal, rotate, or flip blocks silent reload. The last
+  good frame stays visible.
 - [ ] Add first-class frame/page navigation for multi-page TIFF and ICO, reusing
   the bounded animation/page model without auto-playing documents.
 - [ ] Ship camera RAW only through the path-free bounded worker, with orientation,

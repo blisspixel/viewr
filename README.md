@@ -75,7 +75,12 @@ build, see [Installing viewr](docs/INSTALL.md).
 - Opens a broad pure-Rust core format set, including JPEG, PNG, GIF, WebP, TIFF,
   SVG, JPEG XL, OpenEXR, and common bitmap formats.
 - Navigates naturally sorted folders without blanking the last good frame during
-  a cache miss or failed replacement.
+  a cache miss or failed replacement. A session watcher reloads a changed file
+  when in-memory edits are safe, asks for F5 when they are not, and follows a
+  rename in the current folder.
+- Opens the current file in another app through a native chooser on Windows,
+  macOS, and Linux. viewr never builds a shell command or launches a default
+  application on its own.
 - Provides GPU pan, zoom, fit, animation, rotation, crop, bounded Spot Heal,
   Save As, and format conversion.
 - Assigns embedded 0-to-5 XMP ratings and filters a folder by minimum rating

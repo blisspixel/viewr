@@ -25,6 +25,7 @@ mod edit_state;
 mod entry_state;
 pub mod ephemeral;
 pub mod error;
+mod file_coherence;
 pub mod fs;
 pub mod gpu;
 mod gpu_image;
@@ -35,6 +36,7 @@ pub(crate) mod job;
 mod keyboard_route;
 #[cfg(target_os = "macos")]
 mod macos;
+mod open_with;
 pub mod performance;
 /// Folder and navigation state.
 pub mod playlist;

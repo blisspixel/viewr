@@ -191,6 +191,13 @@ Shipped:
   deterministic sRGB fallback, and moving the window between unmanaged
   displays rebuilds the transform and re-uploads the current picture.
   Export, edits, and thumbnails stay in working sRGB.
+- **`file_coherence`**: covered session policy for external file and folder
+  changes. It maps source identity observations and directory stamps onto
+  reload, F5 reminder, current-gone, and folder-rescan actions, coalesces
+  noisy bursts, and blocks silent reload while crop, heal, rotate, flip, or
+  other work owns the current source. `App` owns the watcher thread and
+  playlist mutation. Open With availability is a native chooser on every
+  shipping host.
 - **`decode`**: opens one source object and turns that exact handle into RGBA
   pixels. The live handle and native object identity travel with every accepted
   foreground or speculative result instead of being reconstructed from its path.
@@ -382,18 +389,18 @@ Shipped:
   External platform errors are mapped to fixed path-free user categories and
   retry dispositions before they leave this boundary. Identifiers are not logged
   or persisted.
-- **`macos`**: the narrow native bridge for Finder and Open With requests plus
-  recoverable `NSFileManager` trash operations. It is absent from other builds.
-- **Windows Open With boundary**: the File and image context actions verify that
-  the current pathname still resolves to the retained accepted source on one
-  generation-cancellable background job, then call `SHOpenWithDialog` on the
-  event loop with `OAIF_EXEC`, a parent HWND, and one NUL-terminated UTF-16 path.
-  Navigation cancels and discards obsolete verification. No shell command, editor
-  preference, path log, or completion inference is introduced. Successful
-  delegation sets only a session-local, path-free `F5`
-  reminder owned by the last-good frame. A failed reload or navigation retains
-  both the pixels and reminder. Fresh accepted pixels or explicit invalidation of
-  the displayed frame clears that ownership and the reminder together.
+- **`macos`**: the narrow native bridge for Finder open-file delivery, the
+  Open With application picker plus NSWorkspace handoff, and recoverable
+  `NSFileManager` trash operations. It is absent from other builds.
+- **Open With boundary**: File and the image context action verify that the
+  current pathname still resolves to the retained accepted source on one
+  generation-cancellable background job, then present a native user-mediated
+  chooser on the event loop: Windows `SHOpenWithDialog`, macOS NSOpenPanel
+  plus NSWorkspace, or Linux desktop-portal OpenURI with `ask`. Navigation
+  cancels and discards obsolete verification. No shell command, editor
+  preference, path log, or completion inference is introduced. A session
+  watcher reloads a changed source when edits are safe; otherwise a
+  path-free `F5` reminder stays attached to the last-good frame.
 - **`sandbox` / `worker_limit`**: spawn and pool `viewr-decode`; platform-specific
   Job Object, process-group, seccomp, package-sandbox, memory, hard-deadline, and
   generation-cancellation controls for helpers.
@@ -587,7 +594,9 @@ shortcut, event, remaining crop recovery, rating, save, and curation integration
 transitions in `app.rs`, plus pure entry parsing, remain explicit v0.2 extraction
 debt.
 Meaningful decisions must keep moving behind narrow covered seams before later
-monitor, watcher, and page-state work expands them.
+page-state work expands them. File-coherence policy, including reload, F5
+reminder, gone, rename, and folder-rescan decisions, already lives in the
+covered `file_coherence` module.
 
 Source removal and Trash restore retain an explicit event-loop ownership boundary.
 The worker owns strong accepted-source validation, the Trash or permanent-delete

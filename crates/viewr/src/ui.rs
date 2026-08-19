@@ -80,8 +80,7 @@ const OPEN_SCOPE_SUMMARY: &str = "Open a file to start. Its folder is browsed wh
 const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
 const OPEN_FOLDER_SCOPE_HELP: &str =
     "Choose a folder explicitly and browse its supported images for this session.";
-#[cfg(target_os = "windows")]
-const OPEN_WITH_HELP: &str = "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. Press F5 to reload possible changes.";
+const OPEN_WITH_HELP: &str = "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost.";
 const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.";
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
 const EXTERNAL_EDIT_BADGE: &str = "External F5";
@@ -633,20 +632,16 @@ fn render_context_menu(
             if response.changed() {
                 actions.push(UiAction::SetHealFeather(feather));
             }
-            #[cfg(target_os = "windows")]
-            {
-                ui.separator();
-                let enabled = chrome.is_enabled(ChromeControl::OpenWith);
-                let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
-                open_with.widget_info(|| {
-                    WidgetInfo::labeled(WidgetType::Button, enabled, "Open With...")
-                });
-                if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
-                    actions.push(UiAction::OpenWith);
-                    close = true;
-                }
-                ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
+            ui.separator();
+            let enabled = chrome.is_enabled(ChromeControl::OpenWith);
+            let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
+            open_with
+                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, "Open With..."));
+            if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
+                actions.push(UiAction::OpenWith);
+                close = true;
             }
+            ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
         });
 
     if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
@@ -1048,18 +1043,15 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewM
             actions.push(UiAction::Reload);
             ui.close();
         }
-        #[cfg(target_os = "windows")]
-        {
-            let open_with = ui
-                .add_enabled(
-                    chrome.is_enabled(ChromeControl::OpenWith),
-                    egui::Button::new("Open With..."),
-                )
-                .on_hover_text(OPEN_WITH_HELP);
-            if open_with.clicked() {
-                actions.push(UiAction::OpenWith);
-                ui.close();
-            }
+        let open_with = ui
+            .add_enabled(
+                chrome.is_enabled(ChromeControl::OpenWith),
+                egui::Button::new("Open With..."),
+            )
+            .on_hover_text(OPEN_WITH_HELP);
+        if open_with.clicked() {
+            actions.push(UiAction::OpenWith);
+            ui.close();
         }
         if ui
             .add_enabled(
@@ -3562,16 +3554,15 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "windows")]
-    use super::OPEN_WITH_HELP;
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
         EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
-        OPEN_SCOPE_SUMMARY, PREVIEW_RECOVERY_STATUS, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
-        TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
-        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
-        crop_pixel_bounds, image_open_status, menu_tool_button, panels_menu, rating_filter_menu,
-        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
+        OPEN_SCOPE_SUMMARY, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, SAVE_RECOVERY_STATUS,
+        TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
+        actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
+        chrome_colors_for, context_tool_button, crop_pixel_bounds, image_open_status,
+        menu_tool_button, panels_menu, rating_filter_menu, rating_menu, rating_toast_is_status,
+        render, retry_open_label, undo_trash_menu_item,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -5074,7 +5065,6 @@ mod tests {
         assert!(!values.iter().any(|value| value.contains("metadata-free")));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn open_with_context_action_explains_source_and_reload_boundaries() {
         let context = egui::Context::default();

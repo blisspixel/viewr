@@ -42,12 +42,14 @@ Status last verified on 2026-08-18:
 - [x] Publish and verify annotated tag `v0.2.0`, the reliability architecture
   milestone, under that same contract. Published; see the GitHub release
   [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0).
+- [ ] Publish and verify annotated tag `v0.3.0`, the display-correct SDR
+  milestone, under that same contract.
 
 ## Pre-1.0 release procedure
 
 This is the procedure used for `v0.1.0` and repeated for each later tag. The
-commands below are the worked `v0.2.0` example. The next allowed tag is
-`v0.3.0`. An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
+commands below are the worked `v0.3.0` example. The next allowed tag is
+`v0.4.0`. An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
@@ -60,8 +62,8 @@ production environment.
 5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 
    ```text
-   git tag -a v0.2.0 -m "viewr 0.2.0"
-   git push origin v0.2.0
+   git tag -a v0.3.0 -m "viewr 0.3.0"
+   git push origin v0.3.0
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -79,9 +81,9 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.2.0 --repo blisspixel/viewr
-gh release verify v0.2.0 --repo blisspixel/viewr
-gh attestation verify viewr-0.2.0-x86_64-pc-windows-msvc.zip \
+gh release view v0.3.0 --repo blisspixel/viewr
+gh release verify v0.3.0 --repo blisspixel/viewr
+gh attestation verify viewr-0.3.0-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
@@ -191,12 +193,12 @@ fidelity, coherence, and release-candidate gates.
   X11 desktops without weakening the network-denied sandbox contract.
 - Complete cold-launch, animation, large-image, mixed-DPI, multi-monitor,
   profiled-display, update, and uninstall acceptance on representative hardware.
-- Close the tagged-SDR display-correctness gate in [Roadmap](ROADMAP.md). Wide-gamut
-  and HDR may remain later work if their unsupported state is explicit.
+- Close the file-coherence gate in [Roadmap](ROADMAP.md). Wide-gamut and HDR
+  may remain later work if their unsupported state is explicit.
 
 ## Current limits
 
-- v0.2.0 is public, immutable, checksummed, and attested, and v0.1.5, v0.1.4,
+- v0.3.0 is public, immutable, checksummed, and attested, and v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
   known-issues note. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an

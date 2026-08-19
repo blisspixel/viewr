@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## 0.3.0 - 2026-08-19
+
+### Fixed
+
+- A first-open decode failure no longer claims the previous image remains
+  visible when the canvas is empty. Retry stays available.
+
+### Color
+
+- Unmanaged Windows-legacy and real X11 convert working sRGB into the admitted
+  display ICC at GPU upload and refresh that conversion when the window changes
+  monitor. Managed compositors stay tagged sRGB so their transform is not
+  applied twice. Image Information reports operating-system managed, applied,
+  or fallback sRGB. Display-destination reference vectors for sRGB, Display P3,
+  and Adobe RGB are derived from the published matrices and transfer functions.
+
 ## 0.2.0 - 2026-08-18
 
 ### Changed

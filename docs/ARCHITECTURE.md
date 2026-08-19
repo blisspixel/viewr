@@ -181,7 +181,10 @@ Shipped:
 - **`display_state`**: covered monitor-identity comparison, display-color
   policy, and display-ICC admission. `App` supplies the name, origin, size, and
   scale winit already reports, plus the window-system class launch already
-  resolved. A display ICC is never applied to pixels here: managed compositors
+  resolved. A display ICC is fetched only when the policy would record it:
+  unmanaged Windows-legacy and real X11. `display_probe` reads Windows ICM
+  profile bytes under the protocol size cap; Linux X11 atom lookup is still
+  open. A display ICC is never applied to pixels here: managed compositors
   stay tagged sRGB, unmanaged X11 without an admitted profile reports the
   deterministic sRGB fallback, and a usable unmanaged profile is recorded
   rather than converted.

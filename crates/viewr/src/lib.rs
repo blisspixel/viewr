@@ -17,6 +17,7 @@ pub mod curate;
 mod curation_state;
 mod current_work;
 pub mod decode;
+mod display_probe;
 mod display_state;
 pub mod edit;
 mod edit_state;

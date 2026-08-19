@@ -24,6 +24,13 @@ pub(crate) struct MonitorIdentity {
     extent: MonitorExtent,
 }
 
+impl MonitorIdentity {
+    #[must_use]
+    pub(crate) fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+}
+
 /// What changed since the last observation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DisplayObservation {
@@ -177,10 +184,7 @@ pub(crate) fn display_color_policy(
 
 /// Admit display ICC bytes without building a pixel transform.
 ///
-/// The event loop does not fetch platform profile bytes yet. Tests already
-/// prove the bound, RGB, and rejection cases so the next slice cannot relax
-/// them.
-#[allow(dead_code)]
+/// Bound, parse, and accept display ICC bytes without building a pixel transform.
 #[must_use]
 pub(crate) fn admit_display_profile(bytes: &[u8]) -> bool {
     if bytes.is_empty() || bytes.len() > viewr_protocol::MAX_COLOR_PROFILE_BYTES {
@@ -251,6 +255,29 @@ pub(crate) fn observe_display(
         (Some(previous), Some(current)) if previous == current => DisplayObservation::Unchanged,
         (None | Some(_), Some(_)) => DisplayObservation::IdentityChanged,
     }
+}
+
+/// Whether a usable admitted profile would change the presentation policy.
+///
+/// Fetch only on unmanaged Windows-legacy and real X11 paths. Managed
+/// compositors stay tagged sRGB, so reading their ICC would be unused work
+/// and a double-transform risk if it were later applied.
+#[must_use]
+pub(crate) fn should_fetch_profile(hints: DisplayHints, monitor: Option<&MonitorIdentity>) -> bool {
+    matches!(
+        display_color_policy(hints, monitor, true),
+        DisplayColorPolicy::LegacyDisplayIcc
+    )
+}
+
+/// Whether a new observation requires another display-profile lookup.
+///
+/// An unchanged monitor keeps the last admission. Losing the monitor or
+/// moving to a different one drops or replaces that admission before the
+/// next frame.
+#[must_use]
+pub(crate) const fn should_refresh_profile(observation: DisplayObservation) -> bool {
+    !matches!(observation, DisplayObservation::Unchanged)
 }
 
 /// Describe the tagged-sRGB swapchain from monitor identity and host facts.
@@ -402,6 +429,38 @@ mod tests {
             ),
             DisplayOutputStatus::SrgbOperatingSystem
         );
+    }
+
+    #[test]
+    fn profile_refresh_follows_monitor_identity_changes() {
+        assert!(!should_refresh_profile(DisplayObservation::Unchanged));
+        assert!(should_refresh_profile(DisplayObservation::IdentityChanged));
+        assert!(should_refresh_profile(DisplayObservation::Unknown));
+    }
+
+    #[test]
+    fn profile_fetch_is_only_for_unmanaged_displays() {
+        let desk = identity(Some("Desk"), (0, 0), (1920, 1080), 1.0);
+        assert!(should_fetch_profile(
+            hints(DisplayOs::Linux, None, DisplaySession::X11),
+            Some(&desk),
+        ));
+        assert!(should_fetch_profile(
+            hints(DisplayOs::Windows, Some(false), DisplaySession::Native),
+            Some(&desk),
+        ));
+        assert!(!should_fetch_profile(
+            hints(DisplayOs::Linux, None, DisplaySession::Wayland),
+            Some(&desk),
+        ));
+        assert!(!should_fetch_profile(
+            hints(DisplayOs::Windows, None, DisplaySession::Native),
+            Some(&desk),
+        ));
+        assert!(!should_fetch_profile(
+            hints(DisplayOs::Linux, None, DisplaySession::X11),
+            None,
+        ));
     }
 
     #[test]

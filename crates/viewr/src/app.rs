@@ -166,6 +166,7 @@ fn run_internal(
         renderer: None,
         display_monitor: None,
         display_hints: initial_display_hints(),
+        display_profile_usable: false,
         playlist: None,
         playlist_scope: None,
         folder_scan_job: None,
@@ -771,6 +772,7 @@ struct App {
     renderer: Option<Renderer>,
     display_monitor: Option<crate::display_state::MonitorIdentity>,
     display_hints: crate::display_state::DisplayHints,
+    display_profile_usable: bool,
     session: crate::session::Session,
     playlist: Option<Playlist>,
     playlist_scope: Option<Arc<PlaylistScope>>,
@@ -2560,16 +2562,23 @@ impl App {
                 monitor.scale_factor(),
             )
         });
-        match crate::display_state::observe_display(self.display_monitor.as_ref(), current.as_ref())
-        {
-            crate::display_state::DisplayObservation::Unchanged => {}
-            crate::display_state::DisplayObservation::IdentityChanged
-            | crate::display_state::DisplayObservation::Unknown => {
-                self.display_monitor = current;
-                if let Some(renderer) = self.renderer.as_ref() {
-                    renderer.window().request_redraw();
-                }
-            }
+        let observation =
+            crate::display_state::observe_display(self.display_monitor.as_ref(), current.as_ref());
+        if !crate::display_state::should_refresh_profile(observation) {
+            return;
+        }
+        self.display_monitor = current;
+        self.display_profile_usable = crate::display_state::should_fetch_profile(
+            self.display_hints,
+            self.display_monitor.as_ref(),
+        ) && crate::display_probe::fetch_display_profile_bytes(
+            self.display_monitor
+                .as_ref()
+                .and_then(crate::display_state::MonitorIdentity::name),
+        )
+        .is_some_and(|bytes| crate::display_state::admit_display_profile(&bytes));
+        if let Some(renderer) = self.renderer.as_ref() {
+            renderer.window().request_redraw();
         }
     }
 
@@ -5944,7 +5953,7 @@ impl ApplicationHandler<UserEvent> for App {
                     display_output: crate::display_state::output_status(
                         self.display_monitor.as_ref(),
                         self.display_hints,
-                        false,
+                        self.display_profile_usable,
                     ),
                     is_cropping,
                     crop_ratio,

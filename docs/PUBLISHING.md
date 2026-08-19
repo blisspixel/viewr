@@ -45,12 +45,15 @@ Status last verified on 2026-08-18:
 - [x] Publish and verify annotated tag `v0.3.0`, the display-correct SDR
   milestone, under that same contract. Published; see the GitHub release
   [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0).
+- [x] Publish and verify annotated tag `v0.4.0`, the file-coherence
+  milestone, under that same contract. Published; see the GitHub release
+  [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0).
 
 ## Pre-1.0 release procedure
 
 This is the procedure used for `v0.1.0` and repeated for each later tag. The
-commands below are the worked `v0.3.0` example. The next allowed tag is
-`v0.4.0`. An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
+commands below are the worked `v0.4.0` example. The next allowed tag is
+`v0.5.0`. An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
@@ -63,8 +66,8 @@ production environment.
 5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
 
    ```text
-   git tag -a v0.3.0 -m "viewr 0.3.0"
-   git push origin v0.3.0
+   git tag -a v0.4.0 -m "viewr 0.4.0"
+   git push origin v0.4.0
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -82,9 +85,9 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.3.0 --repo blisspixel/viewr
-gh release verify v0.3.0 --repo blisspixel/viewr
-gh attestation verify viewr-0.3.0-x86_64-pc-windows-msvc.zip \
+gh release view v0.4.0 --repo blisspixel/viewr
+gh release verify v0.4.0 --repo blisspixel/viewr
+gh attestation verify viewr-0.4.0-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
@@ -185,6 +188,12 @@ matching SHA-256 sidecar, a 36-file internal manifest, and one attestation
 bound to `release.yml@refs/tags/v0.3.0` at that commit. The official archive
 verifier accepts that download.
 
+For v0.4.0, [main CI run 32306011198](https://github.com/blisspixel/viewr/actions/runs/32306011198)
+passed all seven jobs and [fuzz run 32306011193](https://github.com/blisspixel/viewr/actions/runs/32306011193)
+passed both targets on behavior commit `7657a74`. The tag workflow publishes
+the immutable [v0.4.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.4.0)
+from the versioned source.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)
@@ -204,12 +213,12 @@ fidelity, coherence, and release-candidate gates.
   X11 desktops without weakening the network-denied sandbox contract.
 - Complete cold-launch, animation, large-image, mixed-DPI, multi-monitor,
   profiled-display, update, and uninstall acceptance on representative hardware.
-- Close the file-coherence gate in [Roadmap](ROADMAP.md). Wide-gamut and HDR
+- Close the format-contract gate in [Roadmap](ROADMAP.md). Wide-gamut and HDR
   may remain later work if their unsupported state is explicit.
 
 ## Current limits
 
-- v0.3.0 is public, immutable, checksummed, and attested, and v0.2.0, v0.1.5, v0.1.4,
+- v0.4.0 is public, immutable, checksummed, and attested, and v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
   known-issues note. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an

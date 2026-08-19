@@ -42,8 +42,9 @@ Status last verified on 2026-08-18:
 - [x] Publish and verify annotated tag `v0.2.0`, the reliability architecture
   milestone, under that same contract. Published; see the GitHub release
   [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0).
-- [ ] Publish and verify annotated tag `v0.3.0`, the display-correct SDR
-  milestone, under that same contract.
+- [x] Publish and verify annotated tag `v0.3.0`, the display-correct SDR
+  milestone, under that same contract. Published; see the GitHub release
+  [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0).
 
 ## Pre-1.0 release procedure
 
@@ -173,6 +174,16 @@ step. Its Linux archive re-verifies from the release page with a matching
 SHA-256 sidecar, a 35-file internal manifest, and one attestation bound to
 `release.yml@refs/tags/v0.2.0` at that commit. The official archive verifier
 accepts that download.
+
+For v0.3.0, [main CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906)
+passed all seven jobs and [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889)
+passed both targets on commit `4cbcca1450f90cdb0061e890c4aa9c2cd9750205`.
+[Release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062)
+published the immutable [v0.3.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.3.0)
+from that commit. Its Linux archive re-verifies from the release page with a
+matching SHA-256 sidecar, a 36-file internal manifest, and one attestation
+bound to `release.yml@refs/tags/v0.3.0` at that commit. The official archive
+verifier accepts that download.
 
 ## Required before a broadly recommended 1.0
 

@@ -9,6 +9,7 @@ use winit::window::Window;
 
 use crate::color::{OutputColorTransform, WorkingColorEncoding};
 use crate::decode::DecodedImage;
+use crate::display_output::DisplayOutputNormalizer;
 use crate::error::Error;
 pub(crate) use crate::gpu_image::{
     ImagePreview, MAX_GPU_BASE_PIXELS, PERFORMANCE_PROBE_GPU_BASE_PIXELS, PreviewSpec,
@@ -37,6 +38,7 @@ pub struct Renderer {
     mipmap_blitter: wgpu::util::TextureBlitter,
     pipeline: wgpu::RenderPipeline,
     output_color_transform: OutputColorTransform,
+    display_output: DisplayOutputNormalizer,
     image: Option<Image>,
     placement: wgpu::Buffer,
     /// The egui context for immediate mode UI.
@@ -190,6 +192,7 @@ impl Renderer {
             mipmap_blitter,
             pipeline,
             output_color_transform,
+            display_output: DisplayOutputNormalizer::identity(),
             image: None,
             placement,
             egui_ctx,
@@ -270,6 +273,11 @@ impl Renderer {
         }
     }
 
+    /// Install the CPU display transform used at the next image or patch upload.
+    pub(crate) fn set_display_output(&mut self, output: DisplayOutputNormalizer) {
+        self.display_output = output;
+    }
+
     /// The current image size, if any.
     #[must_use]
     pub fn image_size(&self) -> Option<(u32, u32)> {
@@ -318,6 +326,7 @@ impl Renderer {
             self.required_preview(image),
             self.output_color_transform,
         )?;
+        let display_pixels = self.display_output.apply(upload.rgba)?;
         let (width, height) = upload.size;
         let mip_level_count = mip_level_count((width, height));
 
@@ -339,7 +348,7 @@ impl Renderer {
         });
         self.queue.write_texture(
             texture.as_image_copy(),
-            upload.rgba,
+            display_pixels.as_ref(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
@@ -403,12 +412,15 @@ impl Renderer {
         else {
             return false;
         };
+        let Ok(display_pixels) = self.display_output.apply(&patch.rgba) else {
+            return false;
+        };
 
         let mut destination = image.texture.as_image_copy();
         destination.origin = upload.origin;
         self.queue.write_texture(
             destination,
-            &patch.rgba,
+            display_pixels.as_ref(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(upload.bytes_per_row),

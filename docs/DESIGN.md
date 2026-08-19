@@ -122,14 +122,13 @@ disappears. This spec is the converged result of two rounds of design critique
   RGB ICC profile is converted to sRGB before upload; Image Information reports
   conversion or fallback status. The window's display identity is tracked, and
   Image Information reports the sRGB swapchain as operating-system managed, as
-  a recorded but unapplied display profile, or as a fallback, not as a
-  per-display transform. Unmanaged X11 without an admitted profile uses the
-  fallback rather than claiming compositor management. A first-open decode
-  failure says Retry is available; it does not claim a previous image remains
-  visible when the canvas is empty. This is correct for the current SDR working
-  path, not a claim of per-monitor output conversion, preserved wide-gamut
-  values, CMYK profile handling, or HDR presentation. Those are release
-  roadmap items.
+  a display profile applied on an unmanaged path, or as a fallback. Unmanaged
+  X11 without an admitted profile uses the fallback rather than claiming
+  compositor management. A first-open decode failure says Retry is available;
+  it does not claim a previous image remains visible when the canvas is empty.
+  This is correct for the current SDR working path, not a claim of preserved
+  wide-gamut values, CMYK profile handling, or HDR presentation. Those remain
+  later roadmap items.
 
 ## Typography and icons
 
@@ -397,8 +396,9 @@ and be validated before the motion can ship.
    there is never a black frame between images.
 3. Color fidelity from the source profile to the display that owns the window,
    with explicit fallback instead of silent guessing. Input RGB profile conversion
-   is implemented. Full per-display output fidelity is the open v0.3 invariant;
-   wide-gamut preservation and HDR remain later work.
+   is implemented. Unmanaged Windows-legacy and real X11 apply the admitted
+   display ICC to presented pixels and refresh it when the window changes
+   monitor. Wide-gamut preservation and HDR remain later work.
 
 Every other item here is refinement. These are what make the viewer feel correct
 in a way users trust without needing to name the implementation.

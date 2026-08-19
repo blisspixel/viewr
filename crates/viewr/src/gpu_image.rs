@@ -28,6 +28,7 @@ pub(crate) struct PreviewSpec {
 }
 
 /// A complete, validated preview prepared away from the event thread.
+#[derive(Clone)]
 pub(crate) struct ImagePreview {
     rgba: Vec<u8>,
     spec: PreviewSpec,

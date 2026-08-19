@@ -165,6 +165,7 @@ fn run_internal(
         },
         renderer: None,
         display_monitor: None,
+        display_hints: initial_display_hints(),
         playlist: None,
         playlist_scope: None,
         folder_scan_job: None,
@@ -287,6 +288,42 @@ fn build_event_loop() -> Result<EventLoop<UserEvent>, Error> {
             &error.to_string(),
         ))
     })
+}
+
+/// Host color-management facts that do not change after the window backend is chosen.
+fn initial_display_hints() -> crate::display_state::DisplayHints {
+    crate::display_state::DisplayHints {
+        os: crate::display_state::current_os(),
+        advanced_color: None,
+        session: host_display_session(),
+    }
+}
+
+fn host_display_session() -> crate::display_state::DisplaySession {
+    #[cfg(target_os = "linux")]
+    {
+        let support = crate::startup::resolve_window_support();
+        let backend = match support.session {
+            crate::startup::DisplaySession::Wayland => {
+                crate::display_state::LinuxWindowBackend::Wayland
+            }
+            crate::startup::DisplaySession::X11 => crate::display_state::LinuxWindowBackend::X11,
+            crate::startup::DisplaySession::None => crate::display_state::LinuxWindowBackend::None,
+        };
+        let wayland_reachable = match support.session {
+            crate::startup::DisplaySession::Wayland => true,
+            crate::startup::DisplaySession::X11 => {
+                !support.compositor_unreachable
+                    && std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty())
+            }
+            crate::startup::DisplaySession::None => false,
+        };
+        crate::display_state::linux_session(backend, wayland_reachable)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        crate::display_state::DisplaySession::Native
+    }
 }
 
 /// Application-level events delivered from native platform integrations.
@@ -733,6 +770,7 @@ impl HealTool {
 struct App {
     renderer: Option<Renderer>,
     display_monitor: Option<crate::display_state::MonitorIdentity>,
+    display_hints: crate::display_state::DisplayHints,
     session: crate::session::Session,
     playlist: Option<Playlist>,
     playlist_scope: Option<Arc<PlaylistScope>>,
@@ -5669,10 +5707,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.observe_current_display();
             }
-            WindowEvent::Moved(_) => {
-                self.observe_current_display();
-            }
-            WindowEvent::ScaleFactorChanged { .. } => {
+            WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 self.observe_current_display();
             }
             WindowEvent::ThemeChanged(theme) => {
@@ -5908,6 +5943,8 @@ impl ApplicationHandler<UserEvent> for App {
                     color_profile,
                     display_output: crate::display_state::output_status(
                         self.display_monitor.as_ref(),
+                        self.display_hints,
+                        false,
                     ),
                     is_cropping,
                     crop_ratio,

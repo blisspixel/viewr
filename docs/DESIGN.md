@@ -121,11 +121,13 @@ disappears. This spec is the converged result of two rounds of design critique
 - Decoded image pixels use an sRGB GPU texture and mip chain. A bounded embedded
   RGB ICC profile is converted to sRGB before upload; Image Information reports
   conversion or fallback status. The window's display identity is tracked, and
-  Image Information reports the sRGB swapchain as operating-system managed or as
-  a fallback, not as a per-display transform. This is correct for the current SDR
-  working path, not a claim of per-monitor output conversion, preserved wide-gamut
-  values, CMYK profile handling, or HDR presentation. Those are release roadmap
-  items.
+  Image Information reports the sRGB swapchain as operating-system managed, as
+  a recorded but unapplied display profile, or as a fallback, not as a
+  per-display transform. Unmanaged X11 without an admitted profile uses the
+  fallback rather than claiming compositor management. This is correct for the
+  current SDR working path, not a claim of per-monitor output conversion,
+  preserved wide-gamut values, CMYK profile handling, or HDR presentation.
+  Those are release roadmap items.
 
 ## Typography and icons
 

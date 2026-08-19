@@ -38,7 +38,9 @@ pub(crate) enum DisplayObservation {
 /// How the current swapchain should be described.
 ///
 /// This increment never applies a display transform. Every variant presents
-/// tagged sRGB. The distinction is why.
+/// tagged sRGB. The distinction is why. The `Srgb` prefix is the contract, not
+/// a repeated type name.
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DisplayOutputStatus {
     /// sRGB surface; the operating system maps to the display when it can.
@@ -70,6 +72,10 @@ pub(crate) enum DisplayOs {
 }
 
 /// Window-system class that decides whether the compositor already converts sRGB.
+///
+/// Linux constructs the compositor classes at runtime. Windows and macOS store
+/// `Native` and still match the others in the shared policy table.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DisplaySession {
     /// Not yet classified; treated as compositor-managed so we do not apply ICC.
@@ -78,6 +84,15 @@ pub(crate) enum DisplaySession {
     Xwayland,
     X11,
     Native,
+}
+
+/// The windowing backend the process actually presents through on Linux.
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LinuxWindowBackend {
+    Wayland,
+    X11,
+    None,
 }
 
 /// Facts the event loop can supply without parsing an ICC.
@@ -98,6 +113,24 @@ pub(crate) enum DisplayColorPolicy {
     LegacyDisplayIcc,
     /// No trustworthy display; keep the deterministic sRGB fallback.
     UnavailableSrgbFallback,
+}
+
+/// Map the windowing backend launch already resolved onto the color-session class.
+///
+/// A live Wayland compositor with an X11 window is Xwayland, which still color-
+/// manages. A dead `WAYLAND_DISPLAY` that fell back to X11 is real X11.
+#[cfg(any(target_os = "linux", test))]
+#[must_use]
+pub(crate) const fn linux_session(
+    backend: LinuxWindowBackend,
+    wayland_compositor_reachable: bool,
+) -> DisplaySession {
+    match backend {
+        LinuxWindowBackend::Wayland => DisplaySession::Wayland,
+        LinuxWindowBackend::X11 if wayland_compositor_reachable => DisplaySession::Xwayland,
+        LinuxWindowBackend::X11 => DisplaySession::X11,
+        LinuxWindowBackend::None => DisplaySession::Unknown,
+    }
 }
 
 /// Compile-time host, used when the event loop has no richer probe yet.
@@ -125,12 +158,10 @@ pub(crate) fn display_color_policy(
         return DisplayColorPolicy::UnavailableSrgbFallback;
     }
     match hints.os {
-        DisplayOs::Macos => DisplayColorPolicy::OsManagedSrgb,
         DisplayOs::Windows => match hints.advanced_color {
-            Some(true) => DisplayColorPolicy::OsManagedSrgb,
             Some(false) if profile_usable => DisplayColorPolicy::LegacyDisplayIcc,
             Some(false) => DisplayColorPolicy::UnavailableSrgbFallback,
-            None => DisplayColorPolicy::OsManagedSrgb,
+            Some(true) | None => DisplayColorPolicy::OsManagedSrgb,
         },
         DisplayOs::Linux => match hints.session {
             DisplaySession::X11 if profile_usable => DisplayColorPolicy::LegacyDisplayIcc,
@@ -140,11 +171,16 @@ pub(crate) fn display_color_policy(
             | DisplaySession::Unknown
             | DisplaySession::Native => DisplayColorPolicy::OsManagedSrgb,
         },
-        DisplayOs::Other => DisplayColorPolicy::OsManagedSrgb,
+        DisplayOs::Macos | DisplayOs::Other => DisplayColorPolicy::OsManagedSrgb,
     }
 }
 
 /// Admit display ICC bytes without building a pixel transform.
+///
+/// The event loop does not fetch platform profile bytes yet. Tests already
+/// prove the bound, RGB, and rejection cases so the next slice cannot relax
+/// them.
+#[allow(dead_code)]
 #[must_use]
 pub(crate) fn admit_display_profile(bytes: &[u8]) -> bool {
     if bytes.is_empty() || bytes.len() > viewr_protocol::MAX_COLOR_PROFILE_BYTES {
@@ -212,27 +248,23 @@ pub(crate) fn observe_display(
     match (previous, current) {
         (None, None) => DisplayObservation::Unchanged,
         (Some(_), None) => DisplayObservation::Unknown,
-        (None, Some(_)) => DisplayObservation::IdentityChanged,
         (Some(previous), Some(current)) if previous == current => DisplayObservation::Unchanged,
-        (Some(_), Some(_)) => DisplayObservation::IdentityChanged,
+        (None | Some(_), Some(_)) => DisplayObservation::IdentityChanged,
     }
 }
 
-/// Describe the tagged-sRGB swapchain from monitor identity alone.
+/// Describe the tagged-sRGB swapchain from monitor identity and host facts.
 ///
-/// Until a platform probe supplies ACM or session facts, unknown hosts keep
-/// compositor-managed sRGB so this path cannot apply a display ICC.
+/// Unknown ACM or session facts still fail toward compositor-managed sRGB so
+/// this path cannot apply a display ICC. A known unmanaged X11 session without
+/// an admitted profile reports the deterministic fallback instead.
 #[must_use]
-pub(crate) fn output_status(current: Option<&MonitorIdentity>) -> DisplayOutputStatus {
-    status_for_policy(display_color_policy(
-        DisplayHints {
-            os: current_os(),
-            advanced_color: None,
-            session: DisplaySession::Unknown,
-        },
-        current,
-        false,
-    ))
+pub(crate) fn output_status(
+    current: Option<&MonitorIdentity>,
+    hints: DisplayHints,
+    profile_usable: bool,
+) -> DisplayOutputStatus {
+    status_for_policy(display_color_policy(hints, current, profile_usable))
 }
 
 #[cfg(test)]
@@ -332,11 +364,68 @@ mod tests {
     #[test]
     fn output_status_follows_whether_a_monitor_is_identified() {
         let current = identity(Some("Desk"), (0, 0), (1920, 1080), 1.0);
+        let managed = hints(DisplayOs::Windows, None, DisplaySession::Native);
         assert_eq!(
-            output_status(Some(&current)),
+            output_status(Some(&current), managed, false),
             DisplayOutputStatus::SrgbOperatingSystem
         );
-        assert_eq!(output_status(None), DisplayOutputStatus::SrgbFallback);
+        assert_eq!(
+            output_status(None, managed, false),
+            DisplayOutputStatus::SrgbFallback
+        );
+    }
+
+    #[test]
+    fn unmanaged_x11_without_a_profile_reports_srgb_fallback() {
+        let current = identity(Some("Desk"), (0, 0), (1920, 1080), 1.0);
+        assert_eq!(
+            output_status(
+                Some(&current),
+                hints(DisplayOs::Linux, None, DisplaySession::X11),
+                false,
+            ),
+            DisplayOutputStatus::SrgbFallback
+        );
+        assert_eq!(
+            output_status(
+                Some(&current),
+                hints(DisplayOs::Linux, None, DisplaySession::X11),
+                true,
+            ),
+            DisplayOutputStatus::SrgbDisplayProfileRecorded
+        );
+        assert_eq!(
+            output_status(
+                Some(&current),
+                hints(DisplayOs::Linux, None, DisplaySession::Wayland),
+                false,
+            ),
+            DisplayOutputStatus::SrgbOperatingSystem
+        );
+    }
+
+    #[test]
+    fn linux_session_maps_the_resolved_window_backend() {
+        assert_eq!(
+            linux_session(LinuxWindowBackend::Wayland, true),
+            DisplaySession::Wayland
+        );
+        assert_eq!(
+            linux_session(LinuxWindowBackend::X11, true),
+            DisplaySession::Xwayland
+        );
+        assert_eq!(
+            linux_session(LinuxWindowBackend::X11, false),
+            DisplaySession::X11
+        );
+        assert_eq!(
+            linux_session(LinuxWindowBackend::None, false),
+            DisplaySession::Unknown
+        );
+        assert_eq!(
+            linux_session(LinuxWindowBackend::None, true),
+            DisplaySession::Unknown
+        );
     }
 
     #[test]
@@ -352,11 +441,7 @@ mod tests {
         assert_eq!(DisplayOutputStatus::SrgbFallback.label(), "sRGB fallback");
     }
 
-    fn hints(
-        os: DisplayOs,
-        advanced_color: Option<bool>,
-        session: DisplaySession,
-    ) -> DisplayHints {
+    fn hints(os: DisplayOs, advanced_color: Option<bool>, session: DisplaySession) -> DisplayHints {
         DisplayHints {
             os,
             advanced_color,
@@ -383,7 +468,7 @@ mod tests {
             display_color_policy(
                 hints(DisplayOs::Macos, None, DisplaySession::Native),
                 Some(&desk),
-                false
+                false,
             ),
             DisplayColorPolicy::OsManagedSrgb
         );
@@ -416,7 +501,7 @@ mod tests {
             display_color_policy(
                 hints(DisplayOs::Windows, Some(false), DisplaySession::Native),
                 Some(&desk),
-                true
+                true,
             ),
             DisplayColorPolicy::LegacyDisplayIcc
         );
@@ -424,7 +509,7 @@ mod tests {
             display_color_policy(
                 hints(DisplayOs::Linux, None, DisplaySession::X11),
                 Some(&desk),
-                true
+                true,
             ),
             DisplayColorPolicy::LegacyDisplayIcc
         );
@@ -432,7 +517,7 @@ mod tests {
             display_color_policy(
                 hints(DisplayOs::Windows, Some(false), DisplaySession::Native),
                 Some(&desk),
-                false
+                false,
             ),
             DisplayColorPolicy::UnavailableSrgbFallback
         );
@@ -452,7 +537,8 @@ mod tests {
         assert!(!admit_display_profile(b"not an ICC profile"));
         assert!(!admit_display_profile(&vec![
             0;
-            viewr_protocol::MAX_COLOR_PROFILE_BYTES + 1
+            viewr_protocol::MAX_COLOR_PROFILE_BYTES
+                + 1
         ]));
 
         let mut cmyk = moxcms::ColorProfile::new_srgb();

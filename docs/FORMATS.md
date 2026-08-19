@@ -121,9 +121,10 @@ returns no authority for file mutation.
   hard deadline.
 - CMYK profile conversion, per-display output transforms, wide-gamut preservation,
   and HDR presentation are not yet claimed. The window's display identity is
-  tracked, but output remains tagged sRGB rather than converted for that display.
-  `ROADMAP.md` defines the acceptance work required before those claims can be
-  made.
+  tracked and Image Information names operating-system managed, recorded, or
+  fallback sRGB, but output remains tagged sRGB rather than converted for that
+  display. `ROADMAP.md` defines the acceptance work required before those claims
+  can be made.
 
 ## Metadata export behavior
 

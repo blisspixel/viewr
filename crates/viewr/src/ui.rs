@@ -4601,7 +4601,8 @@ mod tests {
             "missing OS-managed display status; exposed: {managed:?}"
         );
 
-        frame.display_output = crate::display_state::DisplayOutputStatus::SrgbDisplayProfileRecorded;
+        frame.display_output =
+            crate::display_state::DisplayOutputStatus::SrgbDisplayProfileRecorded;
         let recorded = exposed_text(&frame);
         assert!(
             recorded

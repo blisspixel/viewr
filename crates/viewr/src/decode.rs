@@ -575,7 +575,7 @@ impl ColorNormalizer {
         Self::from_color_profile(&source)
     }
 
-    fn from_color_profile(source: &moxcms::ColorProfile) -> Self {
+    pub(crate) fn from_color_profile(source: &moxcms::ColorProfile) -> Self {
         if source.color_space != moxcms::DataColorSpace::Rgb {
             return Self::fallback();
         }

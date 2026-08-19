@@ -1,7 +1,7 @@
 # Installing viewr
 
-viewr is pre-1.0. v0.2.0 is the current public GitHub Release, a patch over the
-first public release v0.1.0. Its portable
+viewr is pre-1.0. v0.2.0 is the current public GitHub Release, the reliability
+architecture milestone after the v0.1.x line. Its portable
 archives are checksummed, manifest-verified, and attested, but the Windows
 artifacts are not Authenticode-signed and the macOS artifacts are not Developer
 ID-signed or notarized. Normal operating-system trust warnings may appear.

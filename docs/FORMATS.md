@@ -111,16 +111,20 @@ returns no authority for file mutation.
   target. The embedded 1.23 CI lane requires libde265 1.0.7 or newer because
   earlier adapters do not propagate HEVC VUI color. Untagged output follows
   libheif's deterministic sRGB decode fallback. ICC input is normalized to sRGB,
-  explicit sRGB CICP is accepted as tagged sRGB, and color spaces that the current
-  working path cannot convert remain visible as a fallback status rather than
-  being silently relabeled.
+  explicit sRGB CICP is accepted as tagged sRGB, Display P3 CICP is converted
+  into the sRGB working path, and color spaces that the current working path
+  cannot convert remain visible as a fallback status rather than being silently
+  relabeled.
 - Core and worker dimensions and declared RGBA output sizes are validated before
   parent pixel allocation. Superseded worker reads and IPC requests stop and
   terminate their contained helper instead of occupying a decode slot until the
   hard deadline.
 - CMYK profile conversion, per-display output transforms, wide-gamut preservation,
-  and HDR presentation are not yet claimed. `ROADMAP.md` defines the acceptance
-  work required before those claims can be made.
+  and HDR presentation are not yet claimed. The window's display identity is
+  tracked and Image Information names operating-system managed, recorded, or
+  fallback sRGB, but output remains tagged sRGB rather than converted for that
+  display. `ROADMAP.md` defines the acceptance work required before those claims
+  can be made.
 
 ## Metadata export behavior
 

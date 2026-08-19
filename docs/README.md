@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, first-release
+- [Install and update](INSTALL.md): current source builds, current v0.2.0
   one-command installers, manual downloads, platform integration, and uninstall.
 - [Privacy](PRIVACY.md): the local-only product boundary and metadata behavior.
 - [Ratings](RATINGS.md): embedded ratings, filters, interoperability, and recovery.
@@ -41,8 +41,8 @@ Start with the document that matches the task.
   over the first preview.
 - [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
   verification, platform limits, and the known issues that v0.1.1 fixes.
-- [Publishing](PUBLISHING.md): public-repository controls, the first pre-1.0
-  release procedure, verification, and the stronger 1.0 trust gate.
+- [Publishing](PUBLISHING.md): public-repository controls, the repeatable pre-1.0
+  tag procedure (next tag v0.3.0), verification, and the stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.
 

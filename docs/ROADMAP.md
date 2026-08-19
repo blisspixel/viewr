@@ -27,8 +27,9 @@ Phases 0 through 5 and Phase 7 are complete for their local repository scope.
 Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding, and
 honest capability reporting, but camera RAW and multi-page viewing remain open.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
-performance budgets, hosted multi-OS CI, and the signed-attested but
-publisher-unsigned v0.1.x archives. Human assistive-technology evidence, platform
+performance budgets, hosted multi-OS CI, and the current signed-attested but
+publisher-unsigned v0.2.0 archives. The v0.1.x archives remain published
+history. Human assistive-technology evidence, platform
 signing and notarization, representative-hardware acceptance, and display
 fidelity remain open.
 
@@ -107,14 +108,14 @@ each named with the reason it cannot run honestly under coverage, and the typed
 error set moved into the measured floor. Executor supervision is settled: every
 replace-latest decode queue closes when its last worker stops, so a thread that
 dies produces a named scheduling error rather than an operation that stays busy
-forever. Before tagging v0.2.0, run the full VERIFY.md
-gate. Preserve bounded job,
+forever. Preserve bounded job,
 thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
-observable. Do not start v0.3 monitor/profile work that deepens unowned
+observable. Do the v0.3 display-correctness work without reopening unowned
 event-loop races.
 
-Current position: v0.2.0 is released and verified, and the earlier patches remain
-published with the first preview's known issues recorded. v0.2.0 is the next planned minor release. After v0.2.0: v0.3 display correctness, then v0.4 file coherence,
+Current position: v0.2.0 is released and verified, and the earlier v0.1.1
+through v0.1.5 patches remain published with the first preview's known issues
+recorded. Next is v0.3 display correctness, then v0.4 file coherence,
 then v0.5 formats, then v0.6 product quality, then v0.7 through v0.9 evidence and
 trust.
 
@@ -140,7 +141,7 @@ but completed history does not override an open gate here.
 | First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. That playtest also found the window opening under a 137px dock, which [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4) fixed by bounding and placing the first window inside its monitor. An independent playtest of the published v0.1.4 Linux archive then measured that window at 1000 by 560 logical pixels at +140+40 on the same 1280 by 800 session, 29 physical pixels clear of the dock, matching the published bound and placement arithmetic. That round found the command line rejecting a folder while `viewr help` promised that a folder opens its first naturally sorted image, which [v0.1.5](https://github.com/blisspixel/viewr/releases/tag/v0.1.5) fixed by classifying every externally supplied path once. |
 | Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
 | Reliability architecture | Complete | Released as [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0). Every background operation has one bounded event-loop-owned job, stale work cannot mutate a newer selection or edit, failure paths are observable including a decode worker that dies, native glue is limited to five named integration surfaces, race contracts are tested, and owned-logic line coverage is 90.59 percent against an 85 percent floor. |
-| Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; per-display transforms, reference fixtures, wide-gamut, and HDR remain. |
+| Display correctness | Partial for v0.3 | Embedded RGB profiles normalize into the bounded sRGB path; sRGB, Display P3, and Adobe RGB reference vectors plus CMYK fallback are tested; worker Display P3 CICP converts instead of falling back; the window's monitor identity is observed; Linux window-system class is mapped onto the color policy so unmanaged X11 reports the sRGB fallback; per-display transforms, wide-gamut, and HDR remain. |
 | File coherence | Open for v0.4 | Session watcher, non-Windows Open With, deterministic external-edit states. |
 | Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
 | Integrated product quality | Open for v0.6 | Representative hardware polish matrices. |
@@ -182,9 +183,9 @@ behavior, installability, and maintainable proof of correctness.
 
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
-against a stable product candidate. The unsigned v0.1.0 preview remains honest
-while reliability, fidelity, coherence, formats, and integrated product quality
-are completed first.
+against a stable product candidate. The current unsigned attested preview is
+v0.2.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+coherence, formats, and integrated product quality are completed first.
 
 - [x] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
   commit and retain the [green CI run](https://github.com/blisspixel/viewr/actions/runs/30642307317)
@@ -202,7 +203,7 @@ are completed first.
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
 - [x] Make the release-state and quality-gate contract executable: canonical
-  documentation now agrees on the public unsigned v0.1.0 state, CI runs the exact
+  documentation now agrees on the public unsigned v0.2.0 state, CI runs the exact
   locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
   against an explicit transitive baseline without unexplained warnings.
 - [ ] For v0.9, produce and verify a signed Windows delivery, a Developer ID-signed and
@@ -418,10 +419,24 @@ and [`Surface`](https://docs.rs/wgpu/latest/wgpu/struct.Surface.html) APIs.
 - [ ] Upgrade the wgpu/egui-wgpu integration only after a focused compatibility
   spike proves surface color-space and HDR behavior on all three backends.
 - [ ] Resolve and refresh the profile for the display that currently contains the
-  window, including a move between differently profiled monitors.
-- [ ] Add CMYK/profile fallback fixtures plus sRGB, Display P3, and Adobe RGB
-  reference-vector tests. Keep a deterministic sRGB fallback when platform profile
-  information is unavailable.
+  window, including a move between differently profiled monitors. Monitor
+  identity is now observed through a covered `display_state` seam. Linux
+  window-system class is the same backend launch already resolved, so
+  unmanaged X11 reports the deterministic sRGB fallback instead of claiming
+  compositor management. A policy table admits a display ICC only on unmanaged
+  Windows-legacy and real X11 paths, and Image Information reports
+  operating-system managed, recorded, or fallback sRGB. In-app pixel
+  application is deferred until a passthrough surface exists so a managed
+  compositor is not applied twice.
+- [x] Add CMYK/profile fallback fixtures plus sRGB, Display P3, and Adobe RGB
+  reference-vector tests. Expected values are derived from the published
+  matrices and transfer functions rather than recorded from the library, so a
+  changed matrix, transfer function, or white point fails the gate; the
+  saturated cases move by tens of code values against a one-value tolerance. A
+  CMYK profile keeps its decoded pixels and reports the bounded sRGB fallback
+  instead of reinterpreting four ink channels as RGB, both as a parsed profile
+  and as the encoded bytes an embedded profile actually arrives in. Keep a
+  deterministic sRGB fallback when platform profile information is unavailable.
 - [ ] Enable wide-gamut and HDR presentation only after a higher-precision working
   path, tone mapping, capability checks, and real-display acceptance tests exist.
 

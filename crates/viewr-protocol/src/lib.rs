@@ -68,6 +68,12 @@ impl CicpColor {
     pub const fn is_srgb(self) -> bool {
         self.color_primaries == 1 && self.transfer_characteristics == 13
     }
+
+    /// Whether the coded values identify Display P3 (P3-D65 primaries, sRGB TF).
+    #[must_use]
+    pub const fn is_display_p3(self) -> bool {
+        self.color_primaries == 12 && self.transfer_characteristics == 13
+    }
 }
 
 /// Bounded color-space evidence attached to a worker pixel stream.
@@ -659,6 +665,34 @@ mod tests {
         write_ack(&mut frame).unwrap();
         read_ack(&mut Cursor::new(frame)).unwrap();
         assert!(read_ack(&mut Cursor::new(b"ACK0".to_vec())).is_err());
+    }
+
+    #[test]
+    fn cicp_identifies_srgb_and_display_p3_without_guessing_hdr() {
+        let srgb = CicpColor {
+            color_primaries: 1,
+            transfer_characteristics: 13,
+            matrix_coefficients: 0,
+            full_range: true,
+        };
+        let display_p3 = CicpColor {
+            color_primaries: 12,
+            transfer_characteristics: 13,
+            matrix_coefficients: 0,
+            full_range: true,
+        };
+        let hdr = CicpColor {
+            color_primaries: 9,
+            transfer_characteristics: 16,
+            matrix_coefficients: 9,
+            full_range: false,
+        };
+        assert!(srgb.is_srgb());
+        assert!(!srgb.is_display_p3());
+        assert!(display_p3.is_display_p3());
+        assert!(!display_p3.is_srgb());
+        assert!(!hdr.is_srgb());
+        assert!(!hdr.is_display_p3());
     }
 
     #[test]

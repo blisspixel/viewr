@@ -33,15 +33,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux GUI build dependencies
-        timeout-minutes: 10
+        timeout-minutes: 15
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            flatpak-builder \
-            libwayland-dev libxkbcommon-dev libx11-dev \
-            libxrandr-dev libxi-dev libgl1-mesa-dev
-
+          bash scripts/ci-install-packages.sh flatpak-builder libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
       # Installs the exact toolchain and components pinned in rust-toolchain.toml.
       - name: Set up Rust
         run: rustup show
@@ -167,14 +162,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install virtual-display and software-GPU dependencies
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 \
-            libx11-dev libxrandr-dev libxi-dev \
-            libgl1-mesa-dev mesa-vulkan-drivers xauth xvfb
-
+          bash scripts/ci-install-packages.sh --no-install-recommends libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev mesa-vulkan-drivers xauth xvfb
       - name: Set up pinned Rust
         run: rustup show
 
@@ -208,14 +198,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install native decoder build and runtime dependencies
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev \
-            libde265-dev libx265-dev libnuma-dev libheif-dev \
-            libheif-plugin-libde265 libheif-plugin-x265
-
+          bash scripts/ci-install-packages.sh --no-install-recommends build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev libde265-dev libx265-dev libnuma-dev libheif-dev libheif-plugin-libde265 libheif-plugin-x265
       - name: Set up pinned Rust
         run: rustup show
 
@@ -251,13 +236,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Linux GUI build dependencies
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwayland-dev libxkbcommon-dev libx11-dev \
-            libxrandr-dev libxi-dev libgl1-mesa-dev
-
+          bash scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
       - name: Set up Rust
         run: rustup show
 

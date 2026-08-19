@@ -432,6 +432,11 @@ fn normalize_worker_color_profile(
         viewr_protocol::WorkerColorProfile::Cicp(cicp) if cicp.is_srgb() => {
             crate::decode::ColorNormalizer::tagged_srgb()
         }
+        viewr_protocol::WorkerColorProfile::Cicp(cicp) if cicp.is_display_p3() => {
+            crate::decode::ColorNormalizer::from_color_profile(
+                &moxcms::ColorProfile::new_display_p3(),
+            )
+        }
         viewr_protocol::WorkerColorProfile::Cicp(_) => {
             crate::decode::ColorNormalizer::unsupported_profile()
         }
@@ -876,7 +881,8 @@ mod tests {
 
     #[test]
     fn worker_color_evidence_is_applied_or_falls_back_explicitly() {
-        let source = || crate::decode::SourceImage::new(vec![20, 40, 60, 255], 1, 1).unwrap();
+        let original = vec![20, 40, 60, 255];
+        let source = || crate::decode::SourceImage::new(original.clone(), 1, 1).unwrap();
 
         let unknown = normalize_worker_color_profile(
             source(),
@@ -905,6 +911,27 @@ mod tests {
             crate::decode::ColorProfileStatus::TaggedSrgb
         );
 
+        let p3 = normalize_worker_color_profile(
+            source(),
+            viewr_protocol::WorkerColorProfile::Cicp(viewr_protocol::CicpColor {
+                color_primaries: 12,
+                transfer_characteristics: 13,
+                matrix_coefficients: 0,
+                full_range: true,
+            }),
+            DecodeGeneration::unconditional(),
+        )
+        .unwrap();
+        assert_eq!(
+            p3.color_profile,
+            crate::decode::ColorProfileStatus::ConvertedToSrgb
+        );
+        assert_ne!(p3.rgba, original);
+        assert_eq!(
+            p3.working_color,
+            crate::color::WorkingColorEncoding::SRGB_RGBA8
+        );
+
         let hdr = normalize_worker_color_profile(
             source(),
             viewr_protocol::WorkerColorProfile::Cicp(viewr_protocol::CicpColor {
@@ -921,7 +948,6 @@ mod tests {
             crate::decode::ColorProfileStatus::EmbeddedProfileFallback
         );
 
-        let original = vec![20, 40, 60, 255];
         let icc = normalize_worker_color_profile(
             source(),
             viewr_protocol::WorkerColorProfile::Icc(display_p3_profile()),

@@ -69,7 +69,7 @@ use crate::prefetch::{
 };
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-    durable_presentation_error, external_edit_pending_after_frame_transition,
+    decode_failure_toast, durable_presentation_error, external_edit_pending_after_frame_transition,
     image_open_in_progress, navigation_image_plan, preview_job_matches,
 };
 use crate::rating_state::{
@@ -2568,6 +2568,10 @@ impl App {
             return;
         }
         self.display_monitor = current;
+        self.display_hints = crate::display_probe::refresh_display_hints(
+            self.display_hints,
+            self.display_monitor.as_ref(),
+        );
         self.display_profile_usable = crate::display_state::should_fetch_profile(
             self.display_hints,
             self.display_monitor.as_ref(),
@@ -2575,6 +2579,9 @@ impl App {
             self.display_monitor
                 .as_ref()
                 .and_then(crate::display_state::MonitorIdentity::name),
+            self.renderer
+                .as_ref()
+                .map(|renderer| renderer.window().as_ref()),
         )
         .is_some_and(|bytes| crate::display_state::admit_display_profile(&bytes));
         if let Some(renderer) = self.renderer.as_ref() {
@@ -6317,9 +6324,7 @@ impl ApplicationHandler<UserEvent> for App {
                     log::error!("decode failed");
                     let message = format!("Could not decode: {e}");
                     self.session.load_error = Some(message.clone());
-                    self.show_toast(format!(
-                        "{message}. The previous image remains visible; Retry is available."
-                    ));
+                    self.show_toast(decode_failure_toast(&message, self.current_image.is_some()));
                     if let Some(r) = self.renderer.as_mut() {
                         r.window().request_redraw();
                     }

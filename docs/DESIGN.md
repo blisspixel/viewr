@@ -124,10 +124,12 @@ disappears. This spec is the converged result of two rounds of design critique
   Image Information reports the sRGB swapchain as operating-system managed, as
   a recorded but unapplied display profile, or as a fallback, not as a
   per-display transform. Unmanaged X11 without an admitted profile uses the
-  fallback rather than claiming compositor management. This is correct for the
-  current SDR working path, not a claim of per-monitor output conversion,
-  preserved wide-gamut values, CMYK profile handling, or HDR presentation.
-  Those are release roadmap items.
+  fallback rather than claiming compositor management. A first-open decode
+  failure says Retry is available; it does not claim a previous image remains
+  visible when the canvas is empty. This is correct for the current SDR working
+  path, not a claim of per-monitor output conversion, preserved wide-gamut
+  values, CMYK profile handling, or HDR presentation. Those are release
+  roadmap items.
 
 ## Typography and icons
 

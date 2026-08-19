@@ -183,11 +183,12 @@ Shipped:
   scale winit already reports, plus the window-system class launch already
   resolved. A display ICC is fetched only when the policy would record it:
   unmanaged Windows-legacy and real X11. `display_probe` reads Windows ICM
-  profile bytes under the protocol size cap; Linux X11 atom lookup is still
-  open. A display ICC is never applied to pixels here: managed compositors
-  stay tagged sRGB, unmanaged X11 without an admitted profile reports the
-  deterministic sRGB fallback, and a usable unmanaged profile is recorded
-  rather than converted.
+  profile bytes under the protocol size cap, asks DisplayConfig whether
+  Advanced Color is enabled, and on real X11 reads the root-window
+  `_ICC_PROFILE` atom through libX11. A display ICC is never applied to pixels
+  here: managed compositors stay tagged sRGB, unmanaged X11 without an
+  admitted profile reports the deterministic sRGB fallback, and a usable
+  unmanaged profile is recorded rather than converted.
 - **`decode`**: opens one source object and turns that exact handle into RGBA
   pixels. The live handle and native object identity travel with every accepted
   foreground or speculative result instead of being reconstructed from its path.

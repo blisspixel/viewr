@@ -146,50 +146,53 @@ pub(crate) fn show_open_with_chooser(path: &Path) -> crate::open_with::OpenWithO
         return OpenWithOutcome::InvalidPath;
     };
     objc2::rc::autoreleasepool(|_| {
-        let Some(mtm) = MainThreadMarker::new() else {
-            return OpenWithOutcome::Failed;
-        };
-        let panel = NSOpenPanel::openPanel(mtm);
-        panel.setCanChooseFiles(true);
-        panel.setCanChooseDirectories(false);
-        panel.setAllowsMultipleSelection(false);
-        panel.setResolvesAliases(true);
-        let title = NSString::from_str("Open With");
-        panel.setTitle(Some(&title));
-        let message = NSString::from_str("Choose the application that should open this image.");
-        panel.setMessage(Some(&message));
-        let prompt = NSString::from_str("Open");
-        panel.setPrompt(Some(&prompt));
-        if let Ok(applications) = file_url(Path::new("/Applications")) {
-            panel.setDirectoryURL(Some(&applications));
-        }
-        panel.setAllowedFileTypes(Some(&NSArray::from_retained_slice(&[NSString::from_str(
-            "app",
-        )])));
-        if panel.runModal() != NSModalResponseOK {
-            return OpenWithOutcome::Cancelled;
-        }
-        let Some(application) = panel.URL() else {
-            return OpenWithOutcome::Cancelled;
-        };
-        let Some(file_path) = file_url_path(&file) else {
-            return OpenWithOutcome::InvalidPath;
-        };
-        let Some(application_path) = file_url_path(&application) else {
-            return OpenWithOutcome::Cancelled;
-        };
-        let Some(file_name) = path_as_nsstring(&file_path) else {
-            return OpenWithOutcome::InvalidPath;
-        };
-        let Some(application_name) = path_as_nsstring(&application_path) else {
-            return OpenWithOutcome::Cancelled;
-        };
-        if NSWorkspace::sharedWorkspace()
-            .openFile_withApplication(&file_name, Some(&application_name))
+        #[allow(deprecated)]
         {
-            OpenWithOutcome::Launched
-        } else {
-            OpenWithOutcome::Failed
+            let Some(mtm) = MainThreadMarker::new() else {
+                return OpenWithOutcome::Failed;
+            };
+            let panel = NSOpenPanel::openPanel(mtm);
+            panel.setCanChooseFiles(true);
+            panel.setCanChooseDirectories(false);
+            panel.setAllowsMultipleSelection(false);
+            panel.setResolvesAliases(true);
+            let title = NSString::from_str("Open With");
+            panel.setTitle(Some(&title));
+            let message = NSString::from_str("Choose the application that should open this image.");
+            panel.setMessage(Some(&message));
+            let prompt = NSString::from_str("Open");
+            panel.setPrompt(Some(&prompt));
+            if let Ok(applications) = file_url(Path::new("/Applications")) {
+                panel.setDirectoryURL(Some(&applications));
+            }
+            panel.setAllowedFileTypes(Some(&NSArray::from_retained_slice(&[NSString::from_str(
+                "app",
+            )])));
+            if panel.runModal() != NSModalResponseOK {
+                return OpenWithOutcome::Cancelled;
+            }
+            let Some(application) = panel.URL() else {
+                return OpenWithOutcome::Cancelled;
+            };
+            let Some(file_path) = file_url_path(&file) else {
+                return OpenWithOutcome::InvalidPath;
+            };
+            let Some(application_path) = file_url_path(&application) else {
+                return OpenWithOutcome::Cancelled;
+            };
+            let Some(file_name) = path_as_nsstring(&file_path) else {
+                return OpenWithOutcome::InvalidPath;
+            };
+            let Some(application_name) = path_as_nsstring(&application_path) else {
+                return OpenWithOutcome::Cancelled;
+            };
+            if NSWorkspace::sharedWorkspace()
+                .openFile_withApplication(&file_name, Some(&application_name))
+            {
+                OpenWithOutcome::Launched
+            } else {
+                OpenWithOutcome::Failed
+            }
         }
     })
 }

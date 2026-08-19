@@ -196,8 +196,9 @@ Shipped:
   reload, F5 reminder, current-gone, and folder-rescan actions, coalesces
   noisy bursts, and blocks silent reload while crop, heal, rotate, flip, or
   other work owns the current source. `App` owns the watcher thread and
-  playlist mutation. Open With availability is a native chooser on every
-  shipping host.
+  playlist mutation. A pending observation cannot act unless the presented
+  file is still the path that thread was started against. Open With
+  availability is a native chooser on every shipping host.
 - **`decode`**: opens one source object and turns that exact handle into RGBA
   pixels. The live handle and native object identity travel with every accepted
   foreground or speculative result instead of being reconstructed from its path.

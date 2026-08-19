@@ -5,6 +5,8 @@
 //! source and folder means, and whether Open With may use a native chooser.
 //! It writes no history and stores no paths.
 
+use std::path::Path;
+
 use crate::fs::ImageSourceMatch;
 
 /// What the retained current source looks like at its selected pathname.
@@ -155,6 +157,13 @@ pub(crate) const fn watch_can_start(
     presented_matches_selected: bool,
 ) -> bool {
     has_image && has_source && presented_matches_selected
+}
+
+/// A pending observation may act only while the presented file is still the
+/// path that watch thread was started against.
+#[must_use]
+pub(crate) fn watch_applies(loaded_path: Option<&Path>, watch_path: &Path) -> bool {
+    loaded_path == Some(watch_path)
 }
 
 #[must_use]
@@ -692,6 +701,14 @@ mod tests {
         assert!(!watch_can_start(true, true, false));
         assert!(!watch_can_start(false, true, true));
         assert!(watch_can_start(true, true, true));
+    }
+
+    #[test]
+    fn a_watch_observation_cannot_act_on_a_different_loaded_path() {
+        let watched = Path::new("current.jpg");
+        assert!(watch_applies(Some(watched), watched));
+        assert!(!watch_applies(Some(Path::new("other.jpg")), watched));
+        assert!(!watch_applies(None, watched));
     }
 
     #[test]

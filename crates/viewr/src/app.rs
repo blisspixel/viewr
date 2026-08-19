@@ -492,6 +492,7 @@ struct OpenWithContext {
 }
 
 struct CoherenceWatch {
+    path: PathBuf,
     cancel: Arc<AtomicBool>,
     latest: Arc<Mutex<Option<crate::file_coherence::CoherenceObservation>>>,
 }
@@ -2549,6 +2550,7 @@ impl App {
         let latest = Arc::new(Mutex::new(None));
         let worker_latest = Arc::clone(&latest);
         let event_proxy = self.event_proxy.clone();
+        let watch_path = path.clone();
         let spawn = std::thread::Builder::new()
             .name("viewr-file-coherence".into())
             .spawn(move || {
@@ -2563,7 +2565,11 @@ impl App {
                 );
             });
         if spawn.is_ok() {
-            self.coherence_watch = Some(CoherenceWatch { cancel, latest });
+            self.coherence_watch = Some(CoherenceWatch {
+                path: watch_path,
+                cancel,
+                latest,
+            });
         }
     }
 
@@ -2577,6 +2583,7 @@ impl App {
         let Some(watch) = self.coherence_watch.as_ref() else {
             return;
         };
+        let watch_path = watch.path.clone();
         let observation = watch
             .latest
             .lock()
@@ -2585,6 +2592,9 @@ impl App {
         let Some(observation) = observation else {
             return;
         };
+        if !crate::file_coherence::watch_applies(self.current_loaded_path(), &watch_path) {
+            return;
+        }
         let facts = crate::file_coherence::CoherenceFacts::from_observation(
             observation,
             crate::file_coherence::UnsavedEdits {

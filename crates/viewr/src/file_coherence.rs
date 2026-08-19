@@ -52,6 +52,7 @@ pub(crate) struct SessionBusy {
     pub healing: bool,
     pub cropping: bool,
     pub curating: bool,
+    pub rating: bool,
 }
 
 /// Disk observations gathered away from the event loop.
@@ -158,12 +159,13 @@ pub(crate) const fn watch_can_start(
 
 #[must_use]
 pub(crate) const fn session_is_busy(busy: SessionBusy) -> bool {
-    busy.loading || busy.saving || busy.healing || busy.cropping || busy.curating
+    busy.loading || busy.saving || busy.healing || busy.cropping || busy.curating || busy.rating
 }
 
 /// Decide the visible response. Busy work wins so a watcher cannot fight a
-/// load, save, crop, heal, or curation already in flight. Unsaved edits block
-/// silent reload. Folder membership changes never blank the last good frame.
+/// load, save, crop, heal, rating write, or curation already in flight.
+/// Unsaved edits block silent reload. Folder membership changes never blank
+/// the last good frame.
 #[must_use]
 pub(crate) fn decide(facts: CoherenceFacts) -> CoherenceAction {
     if session_is_busy(facts.busy) {
@@ -368,6 +370,7 @@ mod tests {
             healing: false,
             cropping: false,
             curating: false,
+            rating: false,
         }
     }
 
@@ -597,6 +600,17 @@ mod tests {
         );
         busy = idle();
         busy.curating = true;
+        assert_eq!(
+            decide(facts(
+                SourceObservation::Replaced,
+                FolderObservation::Unchanged,
+                clean(),
+                busy,
+            )),
+            CoherenceAction::Ignore
+        );
+        busy = idle();
+        busy.rating = true;
         assert_eq!(
             decide(facts(
                 SourceObservation::Replaced,

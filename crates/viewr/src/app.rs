@@ -2118,6 +2118,7 @@ impl App {
                     );
                     self.current_source = Some(Arc::new(verified.source));
                     self.current_rating_capability = RatingWriteCapability::WritableJpeg;
+                    self.start_coherence_watch();
                     self.start_auxiliary_load(&worker.path);
                 }
                 match worker.assignment {
@@ -2597,6 +2598,7 @@ impl App {
                 healing: self.heal.is_busy() || self.heal.painting,
                 cropping: self.crop_job.is_some(),
                 curating: self.curation_worker.is_some(),
+                rating: self.rating_write_worker.is_some(),
             },
         );
         self.apply_coherence_action(crate::file_coherence::coalesce(

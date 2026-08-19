@@ -132,7 +132,7 @@ pub(crate) fn restore_from_trash(
 }
 
 /// Ask the user which application should open `path`, then hand the original
-/// file to that application through NSWorkspace.
+/// file to that application through `NSWorkspace`.
 ///
 /// `allowedFileTypes` and `openFile:withApplication:` are the synchronous
 /// chooser APIs. The replacements require Uniform Type Identifiers or a

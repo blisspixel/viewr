@@ -6569,7 +6569,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        #[cfg(target_os = "windows")]
         self.finish_open_with_check();
         self.poll_coherence_watch();
         self.poll_rating_write(event_loop);

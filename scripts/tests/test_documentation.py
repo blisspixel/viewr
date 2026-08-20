@@ -320,6 +320,36 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("explicitly unsigned pre-1.0 preview", standards)
         self.assertIn("Publisher authentication remains a v0.9 and 1.0 gate", standards)
 
+    def test_first_run_and_help_copy_stay_one_catalog(self) -> None:
+        shortcuts = (REPOSITORY_ROOT / "crates/viewr/src/shortcuts.rs").read_text(
+            encoding="utf-8"
+        )
+        match = re.search(r'FIRST_RUN_SCOPE: &str = "([^"]+)";', shortcuts)
+        self.assertIsNotNone(match, "missing FIRST_RUN_SCOPE string")
+        scope = match.group(1)
+        self.assertIn("drop a file or folder", scope)
+
+        for relative_path in (
+            "docs/PRODUCT-QUALITY.md",
+            "scripts/accessibility-smoke.ps1",
+        ):
+            contents = (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
+            with self.subTest(document=relative_path):
+                self.assertIn(scope, contents)
+
+        readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("`A`/`D`", readme)
+        self.assertIn("`[` / `]`", readme)
+        self.assertIn("Space tap fits", readme)
+
+        product_quality = (REPOSITORY_ROOT / "docs/PRODUCT-QUALITY.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("It does not close v0.6", product_quality)
+        self.assertIn("Do not tag v0.6.0", product_quality)
+        roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        self.assertIn("PRODUCT-QUALITY.md", roadmap)
+
 
 if __name__ == "__main__":
     unittest.main()

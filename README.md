@@ -122,15 +122,17 @@ automatically.
 
 | Action | Control |
 | --- | --- |
-| Open file or folder | `Ctrl/Cmd+O`, `Ctrl/Cmd+Shift+O` |
-| Previous or next image | Left/Right, `A`/`D` |
-| Fit or actual size | Primary modifier + `0`/`1` |
+| Open file | `O`, `Ctrl/Cmd+O`, or drop a file |
+| Open folder | `Ctrl/Cmd+Shift+O`, or drop a folder |
+| Previous or next image | Left/Right, Home/End, Page Up/Page Down |
+| Previous or next page or frame | `[` / `]` |
+| Fit, pan, or actual size | Space tap fits; hold Space to pan; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
 | Zoom | `+`, `-`, wheel or trackpad |
-| Pan | Drag, or hold Space and drag |
 | Tools, folder previews, image information | `T`, `G`, `I` |
 | Rate or clear rating | `1` through `5`, `0` |
 | Crop or Spot Heal | `C`, `J` |
 | Reload after an external edit | `F5` |
+| Save As | `Ctrl/Cmd+Shift+S` |
 | Move current image to Trash | Delete |
 | Undo the latest recoverable Trash action | `U` |
 

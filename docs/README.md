@@ -11,6 +11,9 @@ Start with the document that matches the task.
 - [Formats](FORMATS.md): supported formats and current format-specific limits.
 - [Accessibility](ACCESSIBILITY.md): keyboard behavior, native semantics, and the
   manual release matrix.
+- [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
+  failure-recovery, and visual-polish matrix for v0.6. Representative hardware
+  evidence is still required before that tag.
 - [Performance](PERFORMANCE.md): measured budgets and current evidence.
 
 ## Understanding and contributing
@@ -47,7 +50,7 @@ Start with the document that matches the task.
 - [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
   verification, platform limits, and the known issues that v0.1.1 fixes.
 - [Publishing](PUBLISHING.md): public-repository controls, the repeatable pre-1.0
-  tag procedure (next tag v0.5.0), verification, and the stronger 1.0 trust gate.
+  tag procedure (next tag v0.6.0), verification, and the stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.
 

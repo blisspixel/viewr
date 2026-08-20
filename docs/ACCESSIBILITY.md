@@ -43,8 +43,10 @@ The minimum contract is:
   elided. Completed or failed rating-write toasts are polite because they are the
   outcome source. `Saving rating...` and ordinary transient toasts remain semantic
   but non-live, so a coexisting visual toast is not a second announcement source.
-- The empty state exposes the file-versus-folder session scope as visible text,
-  followed by separately named Open File and Open Folder actions.
+- The empty state exposes drop, file-versus-folder session scope, and the
+  local-only privacy line as visible text, followed by separately named Open File
+  and Open Folder actions. Opening and failure headings name the selected file.
+  Failure copy stays one short line with a named Retry action.
 - Crop exposes exact source-pixel origin, output dimensions, ratio, eight resize
   handles, and keyboard controls at every positive selection size. If application
   fails while the same source is current, the exact selection returns as the
@@ -64,7 +66,9 @@ The minimum contract is:
   state is quiet; abnormal startup fallback announces `Could not restore saved
   appearance. Using System.` once through the semantic status surface.
 - About is a named modal window, blocks background input, describes the local-only
-  privacy contract, and closes with an explicit button or Escape.
+  privacy contract, and closes with an explicit button or Escape. It exposes the
+  grouped shortcut catalog, including `[` / `]`, `F5`, `T` `G` `I`, Space-to-fit,
+  Save As, and Undo Trash. Close stays inside the minimum window.
 - Update viewr is a separate named modal window that blocks background input and
   exposes the running version and one clearly named Get latest release button. It
   closes with an explicit button or Escape. The application performs no automatic
@@ -114,7 +118,8 @@ filesystem APIs for metadata and alternate-stream checks, and an optional GExiv2
 probe. It creates three small disposable images beneath `target/` and verifies:
 
 - the application root and menu focusability;
-- the visible first-run file-versus-folder session scope and both open actions;
+- the visible first-run drop and file-versus-folder session scope and both open
+  actions;
 - the Update viewr and About modals' native window identities, action paths,
   truthful browser-handoff and local-only application boundaries, and close actions;
 - visible Appearance scope, descriptive System, Light, Dark, and Console radio
@@ -188,7 +193,7 @@ Run the same workflow on every platform:
 | Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
 | Ratings | On disposable JPEG copies, use Edit > Rating and `0` through `5`; confirm and cancel the first-write disclosure; apply All, 3+, 4+, and 5+ filters; navigate into and recover from no matches; then restart | Rating and filter radio state, shortcut ownership, current rating, filtered position, outside-filter state, write outcome, and Show all images are announced without color or star-glyph dependence; Cancel initially owns modal focus; unsupported files remain untouched; the embedded rating survives restart |
 | Update | Open Help > Get latest release; read its contents without activating the release action; close with its button and Escape | A modal named Update viewr exposes the running version, no-automatic-check behavior, browser handoff boundary, and one clearly named Get latest release button; background controls cannot activate and focus returns predictably |
-| About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, shortcuts, and privacy; background controls cannot activate while it is open; focus returns predictably |
+| About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, the grouped shortcut catalog including pages, reload, panels, and Space-to-fit, and privacy; background controls cannot activate while it is open; Close remains reachable on a short window; focus returns predictably |
 | Animation | Open GIF, WebP, and APNG fixtures and toggle playback from Image Information | Frame position and play/pause state are announced without flooding speech on every timed frame |
 | Pages | Open a multi-page TIFF and a multi-size ICO; use Image Information, View, `[`, and `]` | Page or icon identity, count, and dimensions are announced; documents do not play; crop and heal block a step |
 | Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |

@@ -121,9 +121,9 @@ struct App {
 
 There is no document database, plugin registry, or scene graph. The state is
 intentionally centralized so the winit event loop has one owner. The `session`,
-`crop`, `playlist`, `performance`, `job`, `prefetch`, `thumbs`, and `chrome`
-modules establish smaller state and logic seams without introducing a second
-mutable store. `App` remains a large orchestrator. Narrowing native event
+`crop`, `playlist`, `performance`, `job`, `prefetch`, `thumbs`, `chrome`, and
+`shortcuts` modules establish smaller state and logic seams without introducing a
+second mutable store. `App` remains a large orchestrator. Narrowing native event
 plumbing is explicit roadmap work.
 
 ## Modules
@@ -466,6 +466,9 @@ Shipped:
   window or a second mutable store. The same captured dock facts reserve the GPU
   viewport and drive the painted panels, preventing layout and visible chrome
   from observing different state.
+- **`shortcuts`**: covered first-run empty-state copy and the Help shortcut
+  catalog. About, the empty card, README essential controls, and the
+  product-quality matrix quote this catalog instead of a truncated summary.
 - **`ui`**: the thin `egui` and AccessKit adapter. It paints the conventional menu
   bar, fully hideable and collapsible docked tools and folder previews, left/right
   Image Information,

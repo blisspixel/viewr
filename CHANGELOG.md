@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Formats
+
+- Multi-page TIFF and multi-size ICO expose bounded, identifiable page
+  navigation. Documents never auto-play. `[` and `]` plus Image Information and
+  View step one page without wrapping. TIFF identity is Page N of M. ICO
+  identity is Icon N of M plus pixel size, starting on the already-presented
+  largest still. An in-progress crop or Spot Heal refuses a page change.
+  Animated GIF, WebP, and APNG use the same previous/next step while paused.
+- Camera RAW is explicitly deferred from 1.0. Listed RAW extensions still
+  produce the documented worker error. The reserved `raw` feature does not
+  decode.
+
 ## 0.4.0 - 2026-08-19
 
 ### File coherence

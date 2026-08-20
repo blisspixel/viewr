@@ -188,6 +188,7 @@ fn run_internal(
         current_source: None,
         current_image_reuse: ImageReuseEligibility::Ineligible,
         animation: None,
+        pages: None,
         image_details: None,
         auxiliary_job: None,
         open_with_job: None,
@@ -497,8 +498,14 @@ struct CoherenceWatch {
     latest: Arc<Mutex<Option<crate::file_coherence::CoherenceObservation>>>,
 }
 
+enum AuxiliarySequence {
+    None,
+    Animation(crate::animated::DecodedAnimation),
+    Pages(crate::pages::DecodedPages),
+}
+
 type AuxiliaryLoadResult = (
-    Result<Option<crate::animated::DecodedAnimation>, String>,
+    Result<AuxiliarySequence, String>,
     crate::image_info::ImageDetails,
     RatingObservation,
 );
@@ -524,12 +531,14 @@ struct CropRecovery {
     source_image: Arc<DecodedImage>,
     transform: Transform,
     animation: Option<crate::animated::AnimationPlayback>,
+    pages: Option<crate::pages::PageCursor>,
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
 }
 
 struct RestoredCropEditState {
     transform: Transform,
     animation: Option<crate::animated::AnimationPlayback>,
+    pages: Option<crate::pages::PageCursor>,
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
 }
 
@@ -538,6 +547,7 @@ impl CropRecovery {
         let Self {
             mut transform,
             animation,
+            pages,
             auxiliary_job,
             ..
         } = self;
@@ -545,6 +555,7 @@ impl CropRecovery {
         RestoredCropEditState {
             transform,
             animation,
+            pages,
             auxiliary_job,
         }
     }
@@ -823,6 +834,8 @@ struct App {
     current_image_reuse: ImageReuseEligibility,
     /// Timed frames for the current GIF, WebP, or APNG.
     animation: Option<crate::animated::AnimationPlayback>,
+    /// Still pages for the current multi-page TIFF or multi-size ICO.
+    pages: Option<crate::pages::PageCursor>,
     /// Best-effort facts for the current Image Information panel.
     image_details: Option<crate::image_info::ImageDetails>,
     /// Replace-latest animation and metadata result for the current source.
@@ -1729,6 +1742,7 @@ impl App {
         self.preview_job = None;
         self.preview_load_retry_blocked = false;
         self.animation = None;
+        self.pages = None;
         self.image_details = None;
         self.auxiliary_job = None;
         self.session.load_error = None;
@@ -1762,6 +1776,7 @@ impl App {
         self.preview_job = None;
         self.preview_load_retry_blocked = false;
         self.animation = None;
+        self.pages = None;
         self.auxiliary_job = None;
         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
         self.presented_rating =
@@ -1775,6 +1790,7 @@ impl App {
 
     fn start_auxiliary_load(&mut self, path: &Path) {
         self.animation = None;
+        self.pages = None;
         self.image_details = None;
         self.auxiliary_job = None;
         let path = path.to_owned();
@@ -1791,15 +1807,32 @@ impl App {
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
-            let animation = source.as_ref().map_or(Ok(None), |source| {
-                crate::animated::DecodedAnimation::load_background_if_current(
-                    &job_path,
-                    source,
-                    &current_generation,
-                    generation,
-                )
-            });
-            let animation = animation.map_err(|error| error.to_string());
+            let sequence = source
+                .as_ref()
+                .map_or(Ok(AuxiliarySequence::None), |source| {
+                    match crate::animated::DecodedAnimation::load_background_if_current(
+                        &job_path,
+                        source,
+                        &current_generation,
+                        generation,
+                    ) {
+                        Ok(Some(animation)) => Ok(AuxiliarySequence::Animation(animation)),
+                        Ok(None) => {
+                            match crate::pages::DecodedPages::load_background_if_current(
+                                &job_path,
+                                source,
+                                &current_generation,
+                                generation,
+                            ) {
+                                Ok(Some(pages)) => Ok(AuxiliarySequence::Pages(pages)),
+                                Ok(None) => Ok(AuxiliarySequence::None),
+                                Err(error) => Err(error),
+                            }
+                        }
+                        Err(error) => Err(error),
+                    }
+                });
+            let sequence = sequence.map_err(|error| error.to_string());
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
@@ -1830,7 +1863,7 @@ impl App {
             if current_generation.load(Ordering::Acquire) != generation {
                 return;
             }
-            let _ = completion.complete((animation, details, rating));
+            let _ = completion.complete((sequence, details, rating));
         });
         match scheduled {
             Ok(()) => self.auxiliary_job = Some(job),
@@ -1893,28 +1926,43 @@ impl App {
             playlist.set_rating(&path, rating.state);
         }
         match result {
-            Ok(Some(animation)) => {
+            Ok(AuxiliarySequence::Animation(animation)) => {
                 let mut playback =
                     crate::animated::AnimationPlayback::new(animation, Instant::now());
                 if self.transform.is_cropping || self.heal.active {
                     playback.pause();
                 }
                 let image = playback.current_image();
-                if let Err(error) = self.upload_realtime_image(&image) {
+                if let Err(error) = self.present_sequence_image(&image, true) {
                     self.show_toast(format!(
                         "Animation unavailable; showing first frame: {error}"
                     ));
                     return;
                 }
-                self.current_image = Some(image);
-                self.current_image_reuse = ImageReuseEligibility::Ineligible;
                 self.animation = Some(playback);
             }
-            Ok(None) => {}
+            Ok(AuxiliarySequence::Pages(pages)) => {
+                let mut cursor = crate::pages::PageCursor::new(pages);
+                if let Some(image) = self.current_image.as_ref() {
+                    cursor.select_matching(image.width, image.height);
+                }
+                let image = cursor.current_image();
+                let replace = self.current_image.as_ref().is_none_or(|current| {
+                    current.width != image.width || current.height != image.height
+                });
+                if let Err(error) = self.present_sequence_image(&image, replace) {
+                    self.show_toast(format!(
+                        "Pages unavailable; showing the first image: {error}"
+                    ));
+                    return;
+                }
+                self.pages = Some(cursor);
+            }
+            Ok(AuxiliarySequence::None) => {}
             Err(error) => {
-                log::debug!("animation playback unavailable");
+                log::debug!("container sequence unavailable");
                 self.show_toast(format!(
-                    "Animation unavailable; showing first frame: {error}"
+                    "Container pages unavailable; showing the first image: {error}"
                 ));
             }
         }
@@ -1936,6 +1984,64 @@ impl App {
         }
         self.current_image = Some(image);
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
+    }
+
+    fn present_sequence_image(
+        &mut self,
+        image: &Arc<DecodedImage>,
+        replace_displayed: bool,
+    ) -> Result<(), String> {
+        if !replace_displayed || self.transform.is_cropping || self.heal.active {
+            return Ok(());
+        }
+        self.upload_realtime_image(image)?;
+        self.current_image = Some(Arc::clone(image));
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
+        Ok(())
+    }
+
+    fn step_sequence(&mut self, delta: isize) {
+        if self.transform.is_cropping
+            || self.heal.active
+            || self.heal.history.can_undo()
+            || self.unsaved_crop
+        {
+            if self.animation.is_some() || self.pages.is_some() {
+                self.show_toast(crate::pages::edit_blocks_page_step_copy().to_owned());
+            }
+            return;
+        }
+        let previous_size = self
+            .current_image
+            .as_ref()
+            .map(|image| (image.width, image.height));
+        let image = if let Some(playback) = self.animation.as_mut() {
+            if !playback.step(delta) {
+                return;
+            }
+            playback.current_image()
+        } else if let Some(cursor) = self.pages.as_mut() {
+            if !cursor.step(delta) {
+                return;
+            }
+            cursor.current_image()
+        } else {
+            return;
+        };
+        if let Err(error) = self.upload_realtime_image(&image) {
+            self.animation = None;
+            self.pages = None;
+            self.show_toast(format!("Could not show that page: {error}"));
+            return;
+        }
+        let size_changed = previous_size
+            .is_some_and(|(width, height)| width != image.width || height != image.height);
+        self.current_image = Some(image);
+        self.current_image_reuse = ImageReuseEligibility::Ineligible;
+        if size_changed {
+            self.fit_to_view();
+        }
+        self.request_redraw();
     }
 
     fn toggle_animation_playback(&mut self) {
@@ -2323,6 +2429,7 @@ impl App {
 
     fn discard_animation_for_pixel_edit(&mut self) {
         self.animation = None;
+        self.pages = None;
         self.auxiliary_job = None;
     }
 
@@ -2976,6 +3083,8 @@ impl App {
             "f" | "F" => self.toggle_fullscreen(),
             "+" | "=" => self.zoom_at_viewport_center(1.15),
             "-" | "_" => self.zoom_at_viewport_center(1.0 / 1.15),
+            "[" => self.step_sequence(-1),
+            "]" => self.step_sequence(1),
             _ => {}
         }
     }
@@ -3335,9 +3444,26 @@ impl App {
         let restored = recovery.into_restored_edit_state();
         self.transform = restored.transform;
         self.animation = restored.animation;
+        self.pages = restored.pages;
         self.auxiliary_job = restored.auxiliary_job;
         self.request_redraw();
         true
+    }
+
+    fn capture_crop_recovery(
+        &mut self,
+        source_path: PathBuf,
+        source_image: Arc<DecodedImage>,
+    ) -> CropRecovery {
+        CropRecovery {
+            source_path,
+            source_generation: self.session.generation.load(Ordering::Acquire),
+            source_image,
+            transform: self.transform,
+            animation: self.animation.take(),
+            pages: self.pages.take(),
+            auxiliary_job: self.auxiliary_job.take(),
+        }
     }
 
     fn toggle_crop_mode(&mut self) {
@@ -5096,19 +5222,9 @@ impl App {
             return;
         };
 
-        let source_generation = self.session.generation.load(Ordering::Acquire);
-        let source_image = Arc::clone(&image);
-        let source_transform = self.transform;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
-        let recovery = CropRecovery {
-            source_path,
-            source_generation,
-            source_image,
-            transform: source_transform,
-            animation: self.animation.take(),
-            auxiliary_job: self.auxiliary_job.take(),
-        };
+        let recovery = self.capture_crop_recovery(source_path, Arc::clone(&image));
         let notify_proxy = self.event_proxy.clone();
         let (completion, job) = OneShotJob::new(CropJobContext { recovery, cancel }, move || {
             let _ = notify_proxy.send_event(UserEvent::Wake);
@@ -5134,6 +5250,7 @@ impl App {
             log::error!("crop worker spawn failed: {error}");
             let context = job.into_context();
             self.animation = context.recovery.animation;
+            self.pages = context.recovery.pages;
             self.auxiliary_job = context.recovery.auxiliary_job;
             self.show_toast("Could not start crop. Selection kept; press Enter to try again.");
             return;
@@ -6144,7 +6261,17 @@ impl ApplicationHandler<UserEvent> for App {
                             frame_index: playback.frame_index(),
                             frame_count: playback.frame_count(),
                             is_playing: playback.is_playing(),
+                            can_previous: playback.can_step(-1),
+                            can_next: playback.can_step(1),
                         });
+                let pages = self.pages.as_ref().map(|cursor| crate::ui::PageUiInfo {
+                    index: cursor.index(),
+                    count: cursor.count(),
+                    noun: cursor.kind().noun(),
+                    can_previous: cursor.can_step(-1),
+                    can_next: cursor.can_step(1),
+                    accessibility_label: cursor.accessibility_copy(),
+                });
                 let details = self.image_details.clone();
                 let color_profile = self.current_image.as_ref().map(|image| image.color_profile);
                 let is_cropping = self.transform.is_cropping;
@@ -6256,6 +6383,7 @@ impl ApplicationHandler<UserEvent> for App {
                     selected_file_name,
                     img_size,
                     animation,
+                    pages,
                     details,
                     color_profile,
                     display_output: crate::display_state::output_status(
@@ -6480,6 +6608,9 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         crate::ui::UiAction::ToggleAnimationPlayback => {
                             self.toggle_animation_playback();
+                        }
+                        crate::ui::UiAction::StepSequence(delta) => {
+                            self.step_sequence(delta);
                         }
                         crate::ui::UiAction::RetryLoad => {
                             self.retry_current_image_load();
@@ -7201,11 +7332,12 @@ mod test {
             source_image: Arc::clone(&source_image),
             transform,
             animation: None,
+            pages: None,
             auxiliary_job,
         };
         let output = || {
             (
-                Ok(None),
+                Ok(AuxiliarySequence::None),
                 crate::image_info::ImageDetails::default(),
                 RatingObservation {
                     state: RatingState::Unrated,

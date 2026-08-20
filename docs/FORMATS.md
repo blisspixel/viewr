@@ -10,23 +10,23 @@ Always available in the default build. Decoded with `image`, `jxl-oxide`, or
 `resvg` (SVG shapes/paths; text shaping features are off to keep the trusted
 dependency set lean).
 
-| Family | Extensions |
-|--------|------------|
-| JPEG | `.jpg`, `.jpeg` |
-| PNG / APNG | `.png` (APNG plays when multiple frames are present) |
-| GIF | `.gif` (including animation frames when present) |
-| WebP | `.webp` (including animation frames when present) |
-| BMP | `.bmp` |
-| TIFF | `.tif`, `.tiff` (one decoded image; no page navigator yet) |
-| ICO | `.ico` (one decoded image; no frame navigator yet) |
-| QOI | `.qoi` |
-| TGA | `.tga` |
-| PNM | `.ppm`, `.pgm`, `.pbm`, `.pnm` |
-| HDR / EXR | `.hdr`, `.exr` |
-| farbfeld | `.ff` |
-| DDS | `.dds` |
-| JPEG XL | `.jxl` |
-| SVG | `.svg` (bounded vector shapes and paths rasterized to RGBA; resource and unbounded-scratch features rejected) |
+| Family | Extensions | Decode | Animation | Pages | Metadata | Color |
+|--------|------------|--------|-----------|-------|----------|-------|
+| JPEG | `.jpg`, `.jpeg` | Yes | No | No | Bounded EXIF | Embedded RGB ICC converted to sRGB |
+| PNG / APNG | `.png` | Yes | Bounded GIF-style playback when APNG frames exist | No | PNG text / eXIf | Embedded RGB ICC converted to sRGB |
+| GIF | `.gif` | Yes | Bounded playback from content | No | No claimed EXIF path | Assumed sRGB unless a frame carries a usable profile |
+| WebP | `.webp` | Yes | Bounded playback from content | No | Bounded EXIF | Embedded RGB ICC converted to sRGB |
+| BMP | `.bmp` | Yes | No | No | No claimed EXIF path | Assumed sRGB |
+| TIFF | `.tif`, `.tiff` | Yes | Never; documents are not played | Bounded identifiable pages, no wrap | TIFF IFD metadata, including IFDs past the image prefix | Per-page RGB ICC converted to sRGB |
+| ICO | `.ico` | Yes | Never; icon sizes are not played | Bounded identifiable frames in directory order | No claimed EXIF path | Assumed sRGB unless a frame carries a usable profile |
+| QOI | `.qoi` | Yes | No | No | No claimed EXIF path | Assumed sRGB |
+| TGA | `.tga` | Yes | No | No | No claimed EXIF path | Assumed sRGB |
+| PNM | `.ppm`, `.pgm`, `.pbm`, `.pnm` | Yes | No | No | No claimed EXIF path | Assumed sRGB |
+| HDR / EXR | `.hdr`, `.exr` | Yes | No | No | No claimed EXIF path | Converted into the sRGB working path |
+| farbfeld | `.ff` | Yes | No | No | No claimed EXIF path | Assumed sRGB |
+| DDS | `.dds` | Yes | No | No | No claimed EXIF path | Assumed sRGB |
+| JPEG XL | `.jxl` | Yes | No claimed multi-frame navigator | No | No claimed EXIF path | Reviewed ICC / CICP into sRGB |
+| SVG | `.svg` | Bounded vector shapes and paths rasterized to RGBA | No | No | No claimed EXIF path | Enters sRGB without a complete source-to-output description |
 
 Golden-file style coverage for many of these lives in `crates/viewr/tests/corpus.rs`
 and unit tests under `decode` / `edit`.
@@ -50,9 +50,16 @@ returns no authority for file mutation.
   frame count, bounded decoded bytes, container delay, pause/resume, and loop
   behavior. Detection follows file content rather than the extension, and
   superseded animation work stops between frames. A still container remains a
-  still image.
-- TIFF and ICO currently expose one decoded image. Listing the container as
-  supported does not claim multi-page or icon-frame navigation.
+  still image. `[` and `]` step one frame without wrapping and pause timed
+  playback first. Frame identity is "Frame N of M".
+- TIFF pages and ICO frames reuse that same bounded sequence model but never
+  auto-play. Pages may differ in size. `[` and `]` plus Image Information and
+  View menu step one page without wrapping. TIFF identity is "Page N of M". ICO
+  identity is "Icon N of M" plus the current pixel size, starting on the
+  already-presented largest still when that size exists in the directory.
+  In-progress crop or Spot Heal blocks a page change instead of destroying the
+  edit. A still container remains a still image, and a decode that cannot read
+  every page keeps the first still image with an explicit status.
 - SVG decoding accepts bounded vector markup but rejects both embedded raster
   image data and external image hrefs with an explicit error. A selected SVG can
   neither read another local image nor expand its resource budget through a
@@ -159,7 +166,7 @@ is and exits, because there is no protocol frame on a terminal to answer.
 |--------|------------|----------------------|-------------|
 | AVIF | `.avif` | Error explaining missing feature | `--features avif` (+ system libavif) |
 | HEIC / HEIF | `.heic`, `.heif` | Error explaining missing feature | `--features heic` (+ system libheif) |
-| Camera RAW | `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`, `.orf`, `.raf` | **Deferred** honest error | Feature `raw` reserved; implementation not shipped |
+| Camera RAW | `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`, `.orf`, `.raf` | **Deferred from 1.0** honest error | Feature `raw` reserved; no decode, orientation, or color implementation ships in 1.0 |
 
 ### Building the worker with C backends
 

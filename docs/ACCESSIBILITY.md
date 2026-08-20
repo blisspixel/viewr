@@ -71,6 +71,10 @@ The minimum contract is:
   check; only activating Get latest release asks the operating system to open the
   official stable release in an external browser.
 - Animation exposes current frame, frame count, and pause/resume state.
+  Previous frame and Next frame are named buttons with `[` and `]`.
+- Multi-page TIFF and ICO expose current page or icon identity, count, and
+  dimensions. Previous and Next are named buttons with `[` and `]`. Documents
+  never auto-play.
 - Reload and Retry remain reachable and expose progress or failure as semantic
   text without clearing the last good image.
 - Open With is reachable from both File and the image right-click
@@ -186,6 +190,7 @@ Run the same workflow on every platform:
 | Update | Open Help > Get latest release; read its contents without activating the release action; close with its button and Escape | A modal named Update viewr exposes the running version, no-automatic-check behavior, browser handoff boundary, and one clearly named Get latest release button; background controls cannot activate and focus returns predictably |
 | About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, shortcuts, and privacy; background controls cannot activate while it is open; focus returns predictably |
 | Animation | Open GIF, WebP, and APNG fixtures and toggle playback from Image Information | Frame position and play/pause state are announced without flooding speech on every timed frame |
+| Pages | Open a multi-page TIFF and a multi-size ICO; use Image Information, View, `[`, and `]` | Page or icon identity, count, and dimensions are announced; documents do not play; crop and heal block a step |
 | Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |
 | Save | Open Save As to a new disposable destination and complete or cancel it; then choose an existing disposable destination, inspect the app-owned overwrite modal, cancel once, and repeat to confirm replacement | The native dialog is usable; the modal has an accurate name and recheck disclosure, initially focuses Cancel, exposes only Cancel and Replace file as enabled actions, changes nothing when canceled, replaces only the confirmed destination when accepted, and returns focus predictably after either outcome |
 | Trash | Use File > Move to Trash and `Delete` on disposable copies; confirm bare `B`, `M`, and normal-mode `X` do nothing; restore with `U`; inspect settled, active, and uncertain Undo ownership; try Delete during active Spot Heal; inspect a control-character filename in permanent-delete confirmation but cancel | Only the visible current image moves, the removed culling keys trigger no destructive or review action, active work has a specific result, confirmation is path-free and visually unambiguous, cancel is safe, unsettled Undo does not claim settled state, cross-folder Undo does not insert into the unrelated view, and restore uses only the exact receipt. Transient result announcement remains a manual target-OS check |

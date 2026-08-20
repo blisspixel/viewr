@@ -62,6 +62,9 @@ flate2 = { version = "1.1.9", default-features = false, features = ["rust_backen
 # PNG chunk integrity is checked before opt-in EXIF metadata reaches the parser.
 # The crate is already present through image-rs, but this is a direct use.
 crc32fast = "1.5.0"
+# Already used transitively by image-rs. Declared directly so multi-page TIFF
+# navigation can walk IFDs with the same decoder image-rs uses for page one.
+tiff = "0.11"
 # Already used transitively by image-rs. Declared directly for bounded,
 # pure-Rust embedded ICC conversion into the renderer's sRGB pipeline.
 moxcms = "0.8.1"

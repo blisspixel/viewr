@@ -259,20 +259,17 @@ fn decode_heic(_encoded: &[u8]) -> Result<DecodedOutput, String> {
     )
 }
 
-/// Camera RAW is deliberately deferred: `libraw-rs` is immature and heavy.
-/// Callers get a stable, honest error until a pure-Rust or well-packaged
-/// backend is chosen (tracked in docs/ROADMAP.md Phase 6 residuals).
+/// Camera RAW is deferred from 1.0. `libraw-rs` is still pre-1.0, and the
+/// isolated-worker bar is not met. Callers get a stable, honest error. See
+/// `docs/STACK.md` Decision 9 and `docs/FORMATS.md`.
 #[cfg(feature = "raw")]
 fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err(
-        "camera RAW decoding is not implemented yet (feature raw reserved; see docs/FORMATS.md)"
-            .into(),
-    )
+    Err("camera RAW is deferred from 1.0 (feature raw reserved; see docs/FORMATS.md)".into())
 }
 
 #[cfg(not(feature = "raw"))]
 fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err("camera RAW is deferred; see docs/FORMATS.md (build with --features raw when ready)".into())
+    Err("camera RAW is deferred from 1.0; see docs/FORMATS.md".into())
 }
 
 #[cfg(test)]

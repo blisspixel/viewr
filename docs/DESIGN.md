@@ -290,12 +290,22 @@ remain visibly read-only.
 
 - GIF, WebP, and APNG timing is content, not decorative interface motion. Frames
   are bounded in count and bytes, honor container delay and loop behavior, and can
-  be paused or resumed from Image Information.
+  be paused or resumed from Image Information. `[` and `]` step one frame without
+  wrapping and pause timed playback first.
 - Navigation and a successfully presented crop deterministically stop or discard
   playback state tied to the old source. A failed crop restores the paused
   playback and pending auxiliary ownership it captured. Rotation, flips, and
   pixel edits are applied consistently to each displayed frame. A late animation
   decode cannot replace a newer image.
+
+### Source pages
+
+- Multi-page TIFF and multi-size ICO are documents, not animations. They reuse
+  the bounded sequence model, never auto-play, and may differ in size. Image
+  Information and View expose Previous/Next with `[` and `]`. TIFF identity is
+  Page N of M. ICO identity is Icon N of M plus pixel size, starting on the
+  already-presented largest still. An in-progress crop or Spot Heal refuses a
+  page change instead of destroying the edit. A dimension change refits.
 
 ### Spot Heal
 

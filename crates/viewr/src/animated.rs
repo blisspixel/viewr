@@ -289,6 +289,15 @@ fn collect_frames<'a>(
     }
 }
 
+fn stepped_index(index: usize, delta: isize, count: usize) -> Option<usize> {
+    let next = index.checked_add_signed(delta)?;
+    if next == index || next >= count {
+        None
+    } else {
+        Some(next)
+    }
+}
+
 fn normalized_frame_delay(delay: image::Delay) -> Duration {
     let (numerator, denominator) = delay.numer_denom_ms();
     let denominator = u128::from(denominator.max(1));
@@ -359,6 +368,21 @@ impl AnimationPlayback {
     pub(crate) fn pause(&mut self) {
         self.playing = false;
         self.next_frame_at = None;
+    }
+
+    /// Pause timed playback and move by `delta` frames without wrapping.
+    pub(crate) fn step(&mut self, delta: isize) -> bool {
+        self.pause();
+        let Some(next) = stepped_index(self.frame_index, delta, self.animation.frames.len()) else {
+            return false;
+        };
+        self.frame_index = next;
+        true
+    }
+
+    #[must_use]
+    pub(crate) fn can_step(&self, delta: isize) -> bool {
+        stepped_index(self.frame_index, delta, self.animation.frames.len()).is_some()
     }
 
     /// Advance every due frame, returning whether the displayed frame changed.
@@ -657,6 +681,20 @@ mod tests {
         playback.toggle(now + Duration::from_millis(61));
         assert!(!playback.is_playing());
         assert_eq!(playback.next_deadline(), None);
+    }
+
+    #[test]
+    fn paused_step_does_not_wrap_or_resume() {
+        let now = Instant::now();
+        let mut playback = playback(AnimationRepeat::Infinite, now);
+        assert!(playback.step(1));
+        assert_eq!(playback.frame_index(), 1);
+        assert!(!playback.is_playing());
+        assert!(!playback.step(1));
+        assert!(playback.can_step(-1));
+        assert!(playback.step(-1));
+        assert_eq!(playback.frame_index(), 0);
+        assert!(!playback.can_step(-1));
     }
 
     #[test]

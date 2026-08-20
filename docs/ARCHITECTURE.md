@@ -295,7 +295,14 @@ Shipped:
   superseded work exits between frames, and frame decoding duplicates the already
   accepted source handle rather than reopening its path. Source version is
   checked before and after the full frame decode; a rewrite or rename discards
-  the animation instead of pairing it with stale accepted pixels.
+  the animation instead of pairing it with stale accepted pixels. `[` and `]`
+  pause timed playback and step one frame without wrapping.
+- **`pages`**: bounded TIFF page and ICO frame decode that reuses the animation
+  sequence ceilings without auto-play. Pages may differ in size. Identity is
+  "Page N of M" or "Icon N of M" plus dimensions. ICO starts on the already
+  presented largest still when that size exists. In-progress crop or Spot Heal
+  blocks a step. A still container, or a decode that cannot read every page,
+  keeps the first still image.
 - **`image_info`**: best-effort local format, size, camera, lens, exposure,
   aperture, ISO, focal length, date, and privacy-category inspection. Auxiliary
   work duplicates the retained `ImageSource` handle that supplied accepted pixels

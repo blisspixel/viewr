@@ -42,7 +42,7 @@ pub(crate) fn route_consumed_keyboard_key(key: &Key, is_cropping: bool, is_heali
     match key {
         Key::Character(character) => {
             let character = character.as_str();
-            matches!(character, "+" | "=" | "-" | "_" | "/")
+            matches!(character, "+" | "=" | "-" | "_" | "/" | "[" | "]")
                 || [
                     "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "f", "z", "y",
                 ]
@@ -154,6 +154,16 @@ mod tests {
         assert!(!route_consumed_keyboard_key(
             &Key::Named(NamedKey::Enter),
             true,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Character("[".into()),
+            false,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Character("]".into()),
+            false,
             false,
         ));
         assert!(!route_consumed_keyboard_key(

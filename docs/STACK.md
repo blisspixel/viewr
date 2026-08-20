@@ -147,9 +147,10 @@ current implementation.
 
 **Formats that need care** (AVIF, HEIC/HEIF, and camera RAW) are routed to a
 resource-limited worker rather than linked into the main process. AVIF and HEIC
-are feature-gated; RAW remains explicitly deferred. Every format must ship with
-golden-file decode tests and enter the fuzz corpus before it is claimed complete
-(see STANDARDS.md).
+are feature-gated. Camera RAW is explicitly deferred from 1.0; see Decision 9.
+Every format must ship with golden-file decode tests and enter the fuzz corpus
+before it is claimed complete (see STANDARDS.md). Multi-page TIFF and ICO reuse
+the bounded animation sequence without auto-play.
 
 ## Decision 5: Complete local appearance themes
 
@@ -219,6 +220,30 @@ bounded 16 MiB header reads, requires their exact consumed bytes and parsed resu
 to match, polls cancellation between segments, and cannot authorize writes. The
 exact optimized Windows GUI remains subject to the
 startup, first-pixel, navigation, idle, cache, and large-folder performance gate.
+
+## Decision 9: Camera RAW is deferred from 1.0
+
+**Chosen: keep listing RAW extensions, keep the isolated-worker `raw` feature
+reserved, and return a documented error. Do not ship a decode in 1.0.**
+
+The v0.5 format-contract gate required a decision, not a half-working decoder.
+Shipping camera RAW through the same path-free worker as AVIF/HEIC would still
+require orientation, color metadata, representative camera fixtures, fuzz seeds,
+and the same memory and deadline contracts. `libraw-rs` is still a 0.0.x
+binding. Default CI cannot carry LibRaw. Redistributable, representative camera
+samples are not in the tree. A DNG-only TIFF walk would claim RAW without
+meeting that bar.
+
+Folder navigation still steps onto `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`,
+`.orf`, and `.raf` so the failure is visible instead of a missing file. The
+`raw` feature continues to compile the same honest error. Post-1.0 may reopen
+this only when a backend meets the isolated-worker bar.
+
+**Rejected:**
+
+- Enabling `libraw-rs` behind `--features raw` without fixtures, color, or
+  orientation. That would turn a reserved feature into a false capability.
+- Decoding DNG as an ordinary TIFF page set and calling it camera RAW.
 
 ## Supporting crates (shipped)
 

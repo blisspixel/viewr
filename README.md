@@ -73,7 +73,9 @@ build, see [Installing viewr](docs/INSTALL.md).
 ## What it does
 
 - Opens a broad pure-Rust core format set, including JPEG, PNG, GIF, WebP, TIFF,
-  SVG, JPEG XL, OpenEXR, and common bitmap formats.
+  SVG, JPEG XL, OpenEXR, and common bitmap formats. Multi-page TIFF and
+  multi-size ICO step with `[` and `]` and never auto-play. Camera RAW remains
+  a documented error and is deferred from 1.0.
 - Navigates naturally sorted folders without blanking the last good frame during
   a cache miss or failed replacement. A session watcher reloads a changed file
   when in-memory edits are safe, asks for F5 when they are not, and follows a
@@ -81,8 +83,8 @@ build, see [Installing viewr](docs/INSTALL.md).
 - Opens the current file in another app through a native chooser on Windows,
   macOS, and Linux. viewr never builds a shell command or launches a default
   application on its own.
-- Provides GPU pan, zoom, fit, animation, rotation, crop, bounded Spot Heal,
-  Save As, and format conversion.
+- Provides GPU pan, zoom, fit, animation, page navigation, rotation, crop,
+  bounded Spot Heal, Save As, and format conversion.
 - Assigns embedded 0-to-5 XMP ratings and filters a folder by minimum rating
   without creating a catalog, sidecar, or activity history.
 - Shows a presence-only Source Privacy summary for sensitive EXIF categories.

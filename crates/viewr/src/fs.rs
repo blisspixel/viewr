@@ -1505,8 +1505,9 @@ pub const CORE_MIME_ASSOCIATIONS: &[(&str, &str)] = &[
 ];
 
 /// Formats decoded only by the `viewr-decode` worker (C-backed or deferred).
-/// Listed so folder navigation includes them; actual success depends on a
-/// co-located worker binary and its Cargo features (see `docs/FORMATS.md`).
+/// Listed so folder navigation includes them. AVIF/HEIC success depends on a
+/// co-located worker binary and its Cargo features. Camera RAW stays a
+/// documented error through 1.0 (see `docs/FORMATS.md`).
 const WORKER_EXTENSIONS: &[&str] = &[
     "avif", "heic", "heif", "cr2", "nef", "arw", "dng", "rw2", "orf", "raf",
 ];

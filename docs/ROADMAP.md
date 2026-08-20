@@ -24,8 +24,9 @@ Two rules hold across every phase:
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
-Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding, and
-honest capability reporting, but camera RAW and multi-page viewing remain open.
+Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding,
+honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
+explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current signed-attested but
 publisher-unsigned v0.4.0 archives. The v0.3.0, v0.2.0 and v0.1.x archives remain published
@@ -33,7 +34,8 @@ history. Human assistive-technology evidence, platform
 signing and notarization, representative-hardware acceptance, and display
 fidelity remain open.
 
-The shipped product already includes bounded GIF/WebP/APNG playback, eight-way
+The shipped product already includes bounded GIF/WebP/APNG playback, bounded
+TIFF page and ICO frame navigation, eight-way
 EXIF orientation, RGB ICC-to-sRGB normalization, trilinear GPU mips, GPU-limited
 previews with full-resolution export, last-good-frame navigation, async crop and
 Save As, image information, Reload (`F5`), Spot Heal, About, and System, Light,
@@ -100,7 +102,9 @@ v1.0.0  Broadly recommended release
 ### Immediate focus
 
 **Immediate focus: v0.5 format contract, followed by v0.6 product quality.**
-The v0.4 file-coherence milestone is released and closed. Pure-policy seams and the owned-logic
+The v0.4 file-coherence milestone is released and closed. TIFF/ICO page
+navigation and the RAW 1.0 deferral are implemented in this slice; the v0.5.0
+tag still waits for a green `main`. Pure-policy seams and the owned-logic
 coverage floor are evidenced (90.59 percent lines under the CI llvm-cov
 contract, with the launch-prerequisite `startup` seam at 98.40 percent). The
 residual whole-file exclusions are now exactly five native integration surfaces,
@@ -143,7 +147,7 @@ but completed history does not override an open gate here.
 | Reliability architecture | Complete | Released as [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0) from [CI run 32153785138](https://github.com/blisspixel/viewr/actions/runs/32153785138), [fuzz run 32153785164](https://github.com/blisspixel/viewr/actions/runs/32153785164), and [release run 32154781070](https://github.com/blisspixel/viewr/actions/runs/32154781070) on commit `1839702`. Every background operation has one bounded event-loop-owned job, stale work cannot mutate a newer selection or edit, failure paths are observable including a decode worker that dies, native glue is limited to five named integration surfaces, race contracts are tested, and owned-logic line coverage is 90.59 percent against an 85 percent floor. |
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
-| Format contract | Open for v0.5 | Multi-page navigation; RAW decision. |
+| Format contract | Open for v0.5 | Multi-page TIFF/ICO navigation and an explicit RAW 1.0 deferral. Tag v0.5.0 only after this slice is green on `main`. |
 | Integrated product quality | Open for v0.6 | Representative hardware polish matrices. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
@@ -474,11 +478,15 @@ makes the application feel unreliable even when the decoder technically succeede
   `file_coherence` policy decides reload, F5 reminder, current-gone, and folder
   rescan. Unsaved crop, heal, rotate, or flip blocks silent reload. The last
   good frame stays visible.
-- [ ] Add first-class frame/page navigation for multi-page TIFF and ICO, reusing
+- [x] Add first-class frame/page navigation for multi-page TIFF and ICO, reusing
   the bounded animation/page model without auto-playing documents.
+- [x] Decide camera RAW for 1.0: explicitly deferred. Shipping it still requires
+  the isolated-worker bar below. The `raw` feature stays reserved and continues
+  to return the documented error. Post-1.0 may reopen this if a backend meets
+  that bar.
 - [ ] Ship camera RAW only through the path-free bounded worker, with orientation,
   color metadata, representative camera fixtures, fuzz seeds, and the same memory
-  and deadline contracts as AVIF/HEIC.
+  and deadline contracts as AVIF/HEIC. This remains a post-1.0 candidate.
 - [ ] Decide clipboard open/copy and touch gestures from measured user workflows,
   not from feature-count pressure. They remain behind the work above.
 
@@ -806,9 +814,9 @@ of them just works.
 - [x] List AVIF/HEIC/RAW extensions in `fs` for browsing; decode routes through the worker.
 - [x] RAW currently returns a stable, documented unsupported error instead of a
   false success claim.
-- [ ] Implement and ship representative camera RAW families through the isolated
-  worker.
-- [ ] Add multi-page TIFF and ICO navigation instead of exposing only one decoded
+- [x] Explicitly defer camera RAW from 1.0. Representative families remain a
+  post-1.0 isolated-worker candidate, not a reserved silent feature.
+- [x] Add multi-page TIFF and ICO navigation instead of exposing only one decoded
   image.
 - [x] Carry worker color metadata into the main process and test both sides of
   the boundary (`viewr-protocol` V2, release C-worker pixel/profile comparisons,
@@ -876,6 +884,10 @@ but their absence remains visible and blocks v0.9 and a broadly recommended 1.0.
 Listed so the answer to "will you add X" is "it is tracked and weighed," not
 silence, and so that scope creep stays visible and deliberate.
 
+- Camera RAW through the path-free bounded worker once orientation, color
+  metadata, representative fixtures, fuzz seeds, and AVIF/HEIC memory and
+  deadline contracts all hold. libraw-rs remains pre-1.0, licensed camera
+  samples are not in tree, and default CI cannot carry LibRaw.
 - Optional, local-only, one-click-clearable recent folders.
 - Simple non-destructive adjustments (lossless rotate, straighten, basic exposure),
   only if they stay simple and never turn viewr into an editor.

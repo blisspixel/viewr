@@ -154,6 +154,8 @@ pub enum UiAction {
     ToggleRetainExif,
     /// Pause or resume the current animated image.
     ToggleAnimationPlayback,
+    /// Step the current animation frame or document page without wrapping.
+    StepSequence(isize),
     /// Retry decoding the selected path after a load failure.
     RetryLoad,
     /// Rotate the image clockwise.
@@ -253,6 +255,8 @@ pub(crate) struct UiFrameOwned {
     pub img_size: Option<(u32, u32)>,
     /// Playback state for an animated image.
     pub animation: Option<AnimationUiInfo>,
+    /// Still-page state for a multi-page TIFF or multi-size ICO.
+    pub pages: Option<PageUiInfo>,
     /// Best-effort local file and camera metadata.
     pub details: Option<crate::image_info::ImageDetails>,
     /// How the displayed pixels were normalized for the sRGB render pipeline.
@@ -397,6 +401,27 @@ pub struct AnimationUiInfo {
     pub frame_count: usize,
     /// Whether timed playback is active.
     pub is_playing: bool,
+    /// Whether a previous-frame step is available.
+    pub can_previous: bool,
+    /// Whether a next-frame step is available.
+    pub can_next: bool,
+}
+
+/// Still-page state shown in Image Information.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageUiInfo {
+    /// Zero-based displayed page index.
+    pub index: usize,
+    /// Total decoded pages or icon frames.
+    pub count: usize,
+    /// User-facing noun: "Page" or "Icon".
+    pub noun: &'static str,
+    /// Whether a previous-page step is available.
+    pub can_previous: bool,
+    /// Whether a next-page step is available.
+    pub can_next: bool,
+    /// Accessible name including page identity and dimensions.
+    pub accessibility_label: String,
 }
 
 impl UiFrameOwned {
@@ -1396,6 +1421,23 @@ fn view_menu(
             actions.push(UiAction::ZoomOut);
             ui.close();
         }
+        if let Some((previous, next, can_previous, can_next)) = sequence_menu_items(frame) {
+            ui.separator();
+            if ui
+                .add_enabled(can_previous, egui::Button::new(previous).shortcut_text("["))
+                .clicked()
+            {
+                actions.push(UiAction::StepSequence(-1));
+                ui.close();
+            }
+            if ui
+                .add_enabled(can_next, egui::Button::new(next).shortcut_text("]"))
+                .clicked()
+            {
+                actions.push(UiAction::StepSequence(1));
+                ui.close();
+            }
+        }
         ui.separator();
         let rating_filter_label = chrome.rating_filter_menu_label();
         ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
@@ -2208,31 +2250,148 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     ui.label(
         RichText::new(format!("Display · {}", frame.display_output.label())).color(colors.muted),
     );
-    if let Some(animation) = frame.animation {
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            let (label, tooltip) = if animation.is_playing {
-                ("Pause", "Pause animation")
-            } else {
-                ("Play", "Play animation")
-            };
-            if ui
-                .add(egui::Button::new(label).min_size(Vec2::new(64.0, 36.0)))
-                .on_hover_text(tooltip)
-                .clicked()
-            {
-                actions.push(UiAction::ToggleAnimationPlayback);
-            }
-            ui.label(
-                RichText::new(format!(
-                    "Frame {} of {}",
-                    animation.frame_index.saturating_add(1),
-                    animation.frame_count
-                ))
-                .color(colors.muted),
-            );
+    render_animation_controls(ui, actions, frame, colors);
+    render_page_controls(ui, actions, frame, colors);
+}
+
+fn render_animation_controls(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
+    let Some(animation) = frame.animation else {
+        return;
+    };
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        let (label, tooltip) = if animation.is_playing {
+            ("Pause", "Pause animation")
+        } else {
+            ("Play", "Play animation")
+        };
+        if ui
+            .add(egui::Button::new(label).min_size(Vec2::new(64.0, 36.0)))
+            .on_hover_text(tooltip)
+            .clicked()
+        {
+            actions.push(UiAction::ToggleAnimationPlayback);
+        }
+        render_sequence_step_button(
+            ui,
+            actions,
+            "Previous",
+            "Previous frame",
+            "[",
+            animation.can_previous,
+            -1,
+        );
+        render_sequence_step_button(
+            ui,
+            actions,
+            "Next",
+            "Next frame",
+            "]",
+            animation.can_next,
+            1,
+        );
+        ui.label(
+            RichText::new(format!(
+                "Frame {} of {}",
+                animation.frame_index.saturating_add(1),
+                animation.frame_count
+            ))
+            .color(colors.muted),
+        );
+    });
+}
+
+fn render_page_controls(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
+    let Some(pages) = frame.pages.as_ref() else {
+        return;
+    };
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        render_sequence_step_button(
+            ui,
+            actions,
+            "Previous",
+            &format!("Previous {}", pages.noun.to_ascii_lowercase()),
+            "[",
+            pages.can_previous,
+            -1,
+        );
+        render_sequence_step_button(
+            ui,
+            actions,
+            "Next",
+            &format!("Next {}", pages.noun.to_ascii_lowercase()),
+            "]",
+            pages.can_next,
+            1,
+        );
+        let label = format!(
+            "{} {} of {}",
+            pages.noun,
+            pages.index.saturating_add(1),
+            pages.count
+        );
+        let response = ui.label(RichText::new(&label).color(colors.muted));
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Label,
+                ui.is_enabled(),
+                &pages.accessibility_label,
+            )
         });
+    });
+}
+
+fn render_sequence_step_button(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    label: &str,
+    accessible_name: &str,
+    shortcut: &str,
+    enabled: bool,
+    delta: isize,
+) {
+    let response = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(label).min_size(Vec2::new(72.0, 36.0)),
+        )
+        .on_hover_text(format!("{accessible_name} ({shortcut})"));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible_name));
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_keyboard_shortcut(shortcut);
+    });
+    if response.clicked() {
+        actions.push(UiAction::StepSequence(delta));
     }
+}
+
+fn sequence_menu_items(frame: &UiFrameOwned) -> Option<(&'static str, &'static str, bool, bool)> {
+    if let Some(pages) = frame.pages.as_ref() {
+        let (previous, next) = match pages.noun {
+            "Icon" => ("Previous Icon", "Next Icon"),
+            _ => ("Previous Page", "Next Page"),
+        };
+        return Some((previous, next, pages.can_previous, pages.can_next));
+    }
+    frame.animation.map(|animation| {
+        (
+            "Previous Frame",
+            "Next Frame",
+            animation.can_previous,
+            animation.can_next,
+        )
+    })
 }
 
 fn format_and_size(details: &crate::image_info::ImageDetails) -> Option<String> {
@@ -3560,8 +3719,8 @@ mod tests {
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
         EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
-        OPEN_SCOPE_SUMMARY, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, SAVE_RECOVERY_STATUS,
-        TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
+        OPEN_SCOPE_SUMMARY, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, PageUiInfo,
+        SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
         actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
         chrome_colors_for, context_tool_button, crop_pixel_bounds, image_open_status,
         menu_tool_button, panels_menu, rating_filter_menu, rating_menu, rating_toast_is_status,
@@ -3633,6 +3792,7 @@ mod tests {
             selected_file_name: Some("current.png".to_owned()),
             img_size: Some((1920, 1080)),
             animation: None,
+            pages: None,
             details: None,
             color_profile: Some(crate::decode::ColorProfileStatus::AssumedSrgb),
             display_output: crate::display_state::DisplayOutputStatus::SrgbFallback,
@@ -4208,6 +4368,7 @@ mod tests {
         let _ = UiAction::PermanentDelete;
         let _ = UiAction::ToggleImageInfo;
         let _ = UiAction::ToggleAnimationPlayback;
+        let _ = UiAction::StepSequence(1);
         let _ = UiAction::RetryLoad;
         let _ = UiAction::ToggleToolsPanelVisibility;
         let _ = UiAction::ToggleToolsPanelExpansion;
@@ -5067,6 +5228,54 @@ mod tests {
             )
         );
         assert!(!values.iter().any(|value| value.contains("metadata-free")));
+    }
+
+    #[test]
+    fn page_navigator_publishes_identifiable_accessible_controls() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.pages = Some(PageUiInfo {
+            index: 1,
+            count: 3,
+            noun: "Page",
+            can_previous: true,
+            can_next: true,
+            accessibility_label: "Page 2 of 3, 800 by 600".into(),
+        });
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        assert!(
+            nodes.iter().any(|node| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Previous page")
+            }),
+            "missing accessible previous-page action"
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Next page")),
+            "missing accessible next-page action"
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.label() == Some("Page 2 of 3, 800 by 600")
+                    || node.value() == Some("Page 2 of 3, 800 by 600")),
+            "missing identifiable page position"
+        );
     }
 
     #[test]

@@ -37,6 +37,7 @@ mod keyboard_route;
 #[cfg(target_os = "macos")]
 mod macos;
 mod open_with;
+pub(crate) mod pages;
 pub mod performance;
 /// Folder and navigation state.
 pub mod playlist;

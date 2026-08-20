@@ -3980,6 +3980,7 @@ dependencies = [
  "same-file",
  "tempfile",
  "thiserror 2.0.20",
+ "tiff",
  "trash",
  "viewr-protocol",
  "viewr-seccomp",

@@ -201,11 +201,15 @@ matching SHA-256 sidecar, a 38-file internal manifest, and one attestation
 bound to `release.yml@refs/tags/v0.4.0` at that commit. The official archive
 verifier accepts that download.
 
-For v0.5.0, [main CI run 32331552204](https://github.com/blisspixel/viewr/actions/runs/32331552204)
-passed all seven jobs and [fuzz run 32331552210](https://github.com/blisspixel/viewr/actions/runs/32331552210)
-passed both targets on behavior commit `6e68d0f`. The tag workflow publishes
-the immutable [v0.5.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.5.0)
-from the versioned source.
+For v0.5.0, [main CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825)
+passed all seven jobs and [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800)
+passed both targets on commit `1a1eec191a763c78e863664c38a725ceb57143e4`.
+[Release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485)
+published the immutable [v0.5.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.5.0)
+from that commit. Its Linux archive re-verifies from the release page with a
+matching SHA-256 sidecar, a 38-file internal manifest, and one attestation
+bound to `release.yml@refs/tags/v0.5.0` at that commit. The official archive
+verifier accepts that download.
 
 ## Required before a broadly recommended 1.0
 

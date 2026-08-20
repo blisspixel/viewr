@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.4.0
+- [Install and update](INSTALL.md): current source builds, current v0.5.0
   one-command installers, manual downloads, platform integration, and uninstall.
 - [Privacy](PRIVACY.md): the local-only product boundary and metadata behavior.
 - [Ratings](RATINGS.md): embedded ratings, filters, interoperability, and recovery.
@@ -29,8 +29,9 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, ordered quality tracks,
   implemented phases, and explicit non-goals.
-- [v0.4.0 release notes](releases/v0.4.0.md): the current release, the closed
-  file-coherence milestone, and clearly stated platform limits.
+- [v0.5.0 release notes](releases/v0.5.0.md): the current release, the closed
+  format-contract milestone, and clearly stated platform limits.
+- [v0.4.0 release notes](releases/v0.4.0.md): the file-coherence milestone.
 - [v0.3.0 release notes](releases/v0.3.0.md): the display-correct SDR
   milestone.
 - [v0.2.0 release notes](releases/v0.2.0.md): the reliability architecture

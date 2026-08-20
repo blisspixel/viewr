@@ -35,6 +35,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/PERFORMANCE.md",
     "docs/PUBLISHING.md",
     "docs/PRIVACY.md",
+    "docs/PRODUCT-QUALITY.md",
     "docs/README.md",
     "docs/RATINGS.md",
     "docs/releases/v0.1.0.md",
@@ -628,6 +629,12 @@ class ReleaseArtifactTests(unittest.TestCase):
             "if: github.event_name == 'push' && github.ref_type == 'tag'", workflow
         )
         self.assertNotIn("\n    if: github.ref_type == 'tag'\n", workflow)
+        self.assertIn("name: product-quality-fixtures", workflow)
+        self.assertIn(
+            "if: github.ref_type != 'tag' && matrix.target == 'x86_64-unknown-linux-gnu'",
+            workflow,
+        )
+        self.assertIn("pattern: viewr-*", workflow)
 
     def test_release_workflow_uses_reviewed_notes_and_immutable_installers(
         self,

@@ -1,7 +1,11 @@
 # Sandboxed Decode Worker Plan (Phase 6 / Phase 7)
 
 ## The Problem
-To achieve "The VLC of Image Viewers" (Phase 6), we must support AVIF, HEIC, HEIF, and Camera RAW. However, there are no production-ready, pure-Rust decoders for these formats. They rely on massive C/C++ libraries (`libaom`, `libheif`, `libraw`). Linking them directly into our main binary violates our core security invariants because:
+Optional AVIF and HEIC support needs a mature C-backed decoder. Linking libheif
+directly into the main binary would violate the small trusted-core boundary.
+Camera RAW would require another large native stack and is explicitly deferred
+from 1.0 rather than weakening that boundary or overstating support.
+
 1. They bring in heavy build systems (`cmake`) and massive dependency trees.
 2. Parsing complex, untrusted images in C/C++ is historically the largest source of memory safety bugs (buffer overflows, RCEs).
 
@@ -12,7 +16,7 @@ The main `viewr` process remains pure-Rust, memory-safe, and dependency-light. W
 ### Architecture
 1. **Multi-Binary Workspace:** 
    - `crates/viewr` (Main UI, pure Rust, safe decoders: JPEG, PNG, JXL, SVG, etc.)
-   - `crates/viewr-decode` (The worker process, links to C libraries: AVIF, HEIC, RAW)
+   - `crates/viewr-decode` (The worker process, with optional AVIF and HEIC C backends; the reserved RAW feature does not decode)
 2. **IPC (Inter-Process Communication):**
    - Main process spawns `viewr-decode` and communicates over standard pipes (`stdin`/`stdout`).
    - Main sends a versioned frame containing a validated format identifier and at most 512 MiB of encoded input.
@@ -45,7 +49,7 @@ closed; helper execution never falls back to a same-named program on `PATH`.
 ## Why this is Exceptional
 Moving optional C decoders out of the UI process materially reduces blast radius, but process isolation is not zero risk and seccomp alone is not a complete sandbox. The defensible design layers bounded IPC, explicit resource limits, request timeouts, a network-denying process policy where implemented, and an enclosing OS package profile. Claims stay limited to controls that can be reproduced locally.
 
-## Implementation status (2026-07-22)
+## Implementation status (2026-08-20)
 
 | Item | Status |
 |------|--------|

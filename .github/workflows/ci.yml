@@ -86,7 +86,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           coverage run \
-            --source=scripts.release_artifact,scripts.performance_gate,scripts.software_gl_probe \
+            --source=scripts.release_artifact,scripts.performance_gate,scripts.product_quality_evidence,scripts.software_gl_probe \
             -m unittest discover -s scripts/tests
           coverage report --precision=2 --show-missing --fail-under=85
 
@@ -243,7 +243,7 @@ jobs:
         run: rustup show
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+      - uses: taiki-e/install-action@decb84fb327e5b809630c914eb4d1ca67cf59966 # v2.85.14
         with:
           tool: cargo-llvm-cov
 
@@ -272,11 +272,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+      - uses: taiki-e/install-action@decb84fb327e5b809630c914eb4d1ca67cf59966 # v2.85.14
         with:
           tool: cargo-deny,cargo-audit
 
-      - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+      - uses: taiki-e/install-action@decb84fb327e5b809630c914eb4d1ca67cf59966 # v2.85.14
         with:
           tool: cargo-about@0.9.1
 

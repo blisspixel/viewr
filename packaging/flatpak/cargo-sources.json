@@ -2888,14 +2888,14 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/libheif-sys/libheif-sys-5.3.0+1.23.0.crate",
-    "sha256": "5d2593dda939875015d3e1a9deccdb57381d4ef1fc9a96120731b25990579689",
-    "dest": "cargo/vendor/libheif-sys-5.3.0+1.23.0"
+    "url": "https://static.crates.io/crates/libheif-sys/libheif-sys-5.3.1+1.23.1.crate",
+    "sha256": "f554864c5f34c7f285ff6acdcadb64bcc2a3de1609e9135cec702c5edc703864",
+    "dest": "cargo/vendor/libheif-sys-5.3.1+1.23.1"
   },
   {
     "type": "inline",
-    "contents": "{\"package\": \"5d2593dda939875015d3e1a9deccdb57381d4ef1fc9a96120731b25990579689\", \"files\": {}}",
-    "dest": "cargo/vendor/libheif-sys-5.3.0+1.23.0",
+    "contents": "{\"package\": \"f554864c5f34c7f285ff6acdcadb64bcc2a3de1609e9135cec702c5edc703864\", \"files\": {}}",
+    "dest": "cargo/vendor/libheif-sys-5.3.1+1.23.1",
     "dest-filename": ".cargo-checksum.json"
   },
   {
@@ -5215,14 +5215,14 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/system-deps/system-deps-7.0.8.crate",
-    "sha256": "396a35feb67335377e0251fcbc1092fc85c484bd4e3a7a54319399da127796e7",
-    "dest": "cargo/vendor/system-deps-7.0.8"
+    "url": "https://static.crates.io/crates/system-deps/system-deps-8.0.0.crate",
+    "sha256": "83779a5c956bcb6ba627a4ecf0a9d7625db47d7537e0892d97f712ac995648a3",
+    "dest": "cargo/vendor/system-deps-8.0.0"
   },
   {
     "type": "inline",
-    "contents": "{\"package\": \"396a35feb67335377e0251fcbc1092fc85c484bd4e3a7a54319399da127796e7\", \"files\": {}}",
-    "dest": "cargo/vendor/system-deps-7.0.8",
+    "contents": "{\"package\": \"83779a5c956bcb6ba627a4ecf0a9d7625db47d7537e0892d97f712ac995648a3\", \"files\": {}}",
+    "dest": "cargo/vendor/system-deps-8.0.0",
     "dest-filename": ".cargo-checksum.json"
   },
   {

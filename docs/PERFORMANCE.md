@@ -160,12 +160,15 @@ state. After the probe began waiting for that deadline to become quiet, every
 focused and pointer-inside window completed at zero or one measured redraw without
 changing application scheduling or weakening the limit of two.
 
-The canonical release-mode Ubuntu performance job passed in
-[CI run 30592874307](https://github.com/blisspixel/viewr/actions/runs/30592874307)
-on 2026-07-30. It proves the regression budgets under the documented Ubuntu, Xvfb,
-and software-GPU environment. It does not replace the open target-hardware checks
-for Windows, macOS, representative Linux desktops, mixed-DPI displays, or profiled
-monitors.
+The latest `main` release-mode Ubuntu performance job passed in
+[CI run 32338720666](https://github.com/blisspixel/viewr/actions/runs/32338720666)
+on 2026-08-20 at commit `b2e1b77`: 117.82 ms first window, 282.89 ms first pixel,
+186.65 ms slowest sampled navigation, zero settled idle redraws, 312.25 MiB
+small-folder peak resident set, 330.08 MiB large-folder peak resident set, and four
+decoded cache entries at the exact 256 MiB byte budget. It proves the regression
+budgets under the documented Ubuntu, Xvfb, and software-GPU environment. It does
+not replace the open target-hardware checks for Windows, macOS, representative
+Linux desktops, mixed-DPI displays, or profiled monitors.
 
 ## Decode reference
 

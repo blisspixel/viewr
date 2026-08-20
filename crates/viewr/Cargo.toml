@@ -144,4 +144,5 @@ workspace = true
 winres = "0.1.12"
 
 [dev-dependencies]
+png = "0.18.1"
 roxmltree = "0.21.1"

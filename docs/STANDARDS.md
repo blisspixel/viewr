@@ -149,7 +149,7 @@ mutation testing.
   immediately.
 - Mutation testing (`cargo-mutants`) run regularly. It changes the code and checks
   that a test fails; surviving mutants reveal tests that cover a line without
-  actually asserting its behavior. This is how we keep the 80 percent honest.
+  actually asserting its behavior. This is how we keep the 85 percent honest.
 
 ## The untrusted-input path gets extra rigor
 

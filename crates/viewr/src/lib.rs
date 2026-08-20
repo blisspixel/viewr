@@ -51,6 +51,7 @@ pub(crate) mod sandbox;
 mod save_state;
 /// State for the selected, loading, and presented image.
 pub mod session;
+mod shortcuts;
 mod startup;
 pub mod theme;
 pub mod thumbs;

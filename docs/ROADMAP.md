@@ -145,7 +145,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Open for v0.6 | Representative hardware polish matrices. |
+| Integrated product quality | Open for v0.6 | Matrix in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Covered first-run/Help catalog and bounded empty/error copy. Representative hardware remains. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -499,8 +499,16 @@ broad feature category. They prove and refine the accumulated viewer.
 
 - [ ] Exercise first-time, fast-path, admin, failure-recovery, keyboard-only, and
   visual-polish workflows on published Windows, macOS, and Linux artifacts.
-- [ ] Close evidence-backed layout, spacing, copy, loading, empty, error, recovery,
-  and diagnostic issues without adding decorative controls or unrelated features.
+  [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) is the matrix. In-process tests now
+  cover Help, first-run drop copy, and bounded empty-state errors. Hardware rows
+  are unrecorded.
+- [x] Make About, the empty card, and README essential controls quote one covered
+  shortcut catalog. Help lists pages, reload, panels, Space-to-fit, Save As, and
+  Undo Trash. The first-run card names drop. Long decoder errors stay one short
+  line. `A` / `D` are not claimed as navigation keys.
+- [ ] Close remaining evidence-backed layout, spacing, copy, loading, empty, error,
+  recovery, and diagnostic issues without adding decorative controls or unrelated
+  features.
 - [x] Decide the resting zoom for a source smaller than the viewport. Settled
   against real fixtures and an independent playtest: fit no longer enlarges, so
   a source smaller than the viewport rests at actual size and the readout shows

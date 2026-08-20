@@ -1073,7 +1073,7 @@ try {
         }
     }
     Wait-ForElement `
-        -Name "Open a file to start. Its folder is browsed when access allows. Open Folder selects it explicitly for this session." `
+        -Name "Open a file to start, or drop a file or folder. Its folder is browsed when access allows. Open Folder selects it explicitly for this session." `
         -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Wait-ForElement -Name "Open File" -ControlType (
         [System.Windows.Automation.ControlType]::Button
@@ -1184,6 +1184,16 @@ try {
     $aboutModal = Wait-ForElement -Name "About viewr" -Prefix -ControlType (
         [System.Windows.Automation.ControlType]::Window
     )
+    foreach ($aboutText in @(
+        "[ / ]",
+        "F5  Reload file",
+        "T G I",
+        "Space  Fit"
+    )) {
+        Wait-ForElement -Name $aboutText -Prefix -Root $aboutModal -ControlType (
+            [System.Windows.Automation.ControlType]::Text
+        ) | Out-Null
+    }
     $closeAbout = Wait-ForElement -Name "Close" -Root $aboutModal -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )

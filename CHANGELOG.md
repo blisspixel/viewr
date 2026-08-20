@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Product quality
+
+- Help > About viewr lists the grouped shortcut catalog instead of a truncated
+  line. Pages (`[` / `]`), reload (`F5`), panels (`T` `G` `I`), Space-to-fit,
+  Save As, and Undo Trash are visible. On a short window the body scrolls so
+  Close stays reachable.
+- The first-run card names drop as well as Open File and Open Folder. A failed
+  open keeps one short error line and Retry.
+- README essential controls match the event-loop keys. `A` / `D` are not
+  navigation shortcuts.
+
 ## 0.5.0 - 2026-08-20
 
 ### Formats

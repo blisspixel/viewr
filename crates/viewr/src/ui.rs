@@ -76,7 +76,6 @@ const TOP_METADATA_GAP: f32 = 8.0;
 /// spacing the menu titles beside it use.
 const TOP_METADATA_SPACING: f32 = 2.0;
 
-const OPEN_SCOPE_SUMMARY: &str = "Open a file to start. Its folder is browsed when access allows. Open Folder selects it explicitly for this session.";
 const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
 const OPEN_FOLDER_SCOPE_HELP: &str =
     "Choose a folder explicitly and browse its supported images for this session.";
@@ -90,7 +89,7 @@ pub(crate) const CROP_RECOVERY_STATUS: &str =
     "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
 pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
-const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 250.0;
+const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
 const SAVE_OVERWRITE_FOCUS_STATE: &str = "save_overwrite_focus_initialized";
 
@@ -1677,62 +1676,71 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                 .inner_margin(egui::Margin::same(20)),
         )
         .show(ui.ctx(), |ui| {
-            ui.set_max_width(420.0);
-            ui.vertical_centered(|ui| {
-                ui.heading(RichText::new("About viewr").size(28.0).color(colors.text));
-                ui.label(
-                    RichText::new("A private, local-first image viewer")
-                        .size(14.0)
-                        .color(colors.muted),
-                );
-            });
-            ui.add_space(12.0);
-            Frame::new()
-                .fill(colors.raised)
-                .corner_radius(CornerRadius::same(8))
-                .inner_margin(egui::Margin::same(12))
+            ui.set_max_width(520.0);
+            let body_height = (ui.ctx().content_rect().height() - 80.0).clamp(180.0, 640.0);
+            ScrollArea::vertical()
+                .id_salt("about_body")
+                .max_height(body_height)
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading(RichText::new("About viewr").size(22.0).color(colors.text));
+                        ui.label(
+                            RichText::new("A private, local-first image viewer")
+                                .size(13.0)
+                                .color(colors.muted),
+                        );
+                    });
+                    ui.add_space(8.0);
+                    Frame::new()
+                        .fill(colors.raised)
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("No network access")
+                                    .color(colors.text)
+                                    .strong(),
+                            );
+                            ui.label("No telemetry, accounts, cloud sync, or background indexing.");
+                            ui.label(
+                                "Photos and edits stay local unless you explicitly save a copy.",
+                            );
+                        });
+                    ui.add_space(8.0);
+                    egui::Grid::new("about_build_details")
+                        .num_columns(2)
+                        .spacing(Vec2::new(16.0, 4.0))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Version").color(colors.muted));
+                            ui.label(env!("CARGO_PKG_VERSION"));
+                            ui.end_row();
+                            ui.label(RichText::new("Platform").color(colors.muted));
+                            ui.label(format!(
+                                "{} / {}",
+                                std::env::consts::OS,
+                                std::env::consts::ARCH
+                            ));
+                            ui.end_row();
+                            ui.label(RichText::new("License").color(colors.muted));
+                            ui.label(env!("CARGO_PKG_LICENSE"));
+                            ui.end_row();
+                        });
+                    ui.add_space(10.0);
                     ui.label(
-                        RichText::new("No network access")
-                            .color(colors.text)
+                        RichText::new("Shortcuts")
+                            .color(colors.muted)
+                            .small()
                             .strong(),
                     );
-                    ui.label("No telemetry, accounts, cloud sync, or background indexing.");
-                    ui.label("Photos and edits stay local unless you explicitly save a copy.");
+                    ui.add_space(4.0);
+                    render_about_shortcut_groups(ui, colors);
                 });
-            ui.add_space(12.0);
-            egui::Grid::new("about_build_details")
-                .num_columns(2)
-                .spacing(Vec2::new(16.0, 6.0))
-                .show(ui, |ui| {
-                    ui.label(RichText::new("Version").color(colors.muted));
-                    ui.label(env!("CARGO_PKG_VERSION"));
-                    ui.end_row();
-                    ui.label(RichText::new("Platform").color(colors.muted));
-                    ui.label(format!(
-                        "{} / {}",
-                        std::env::consts::OS,
-                        std::env::consts::ARCH
-                    ));
-                    ui.end_row();
-                    ui.label(RichText::new("License").color(colors.muted));
-                    ui.label(env!("CARGO_PKG_LICENSE"));
-                    ui.end_row();
-                });
-            ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "Shortcuts: O open, arrows browse, 1-5 rate, 0 clear, {PRIMARY_MODIFIER}+0 fit, {PRIMARY_MODIFIER}+1 actual size"
-                    ))
-                        .size(11.5)
-                        .color(colors.muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").clicked() {
-                        close_clicked = true;
-                    }
-                });
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    close_clicked = true;
+                }
             });
         });
     response.response.widget_info(|| {
@@ -1745,6 +1753,44 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseAbout);
     }
+}
+
+fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors) {
+    egui::Grid::new("about_shortcuts")
+        .num_columns(2)
+        .spacing(Vec2::new(20.0, 8.0))
+        .show(ui, |ui| {
+            for (index, group) in crate::shortcuts::ABOUT_SHORTCUT_GROUPS.iter().enumerate() {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(group.heading)
+                            .size(12.0)
+                            .color(colors.text)
+                            .strong(),
+                    );
+                    for item in group.items {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!(
+                                    "{}  {}",
+                                    crate::shortcuts::format_shortcut_keys(
+                                        item.keys,
+                                        PRIMARY_MODIFIER
+                                    ),
+                                    item.action
+                                ))
+                                .size(12.0)
+                                .color(colors.muted),
+                            )
+                            .extend(),
+                        );
+                    }
+                });
+                if index % 2 == 1 {
+                    ui.end_row();
+                }
+            }
+        });
 }
 
 fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
@@ -2090,12 +2136,14 @@ fn render_empty_state(
                             paint_empty_image_icon(ui.painter(), icon_rect, colors);
                         }
                         ui.add_space(12.0);
-                        let heading =
-                            image_open_status(is_opening, load_error.is_some(), selected_file_name)
-                                .unwrap_or_else(|| "Open an image".to_owned());
+                        let copy = crate::shortcuts::empty_state_copy(
+                            is_opening,
+                            load_error,
+                            selected_file_name,
+                        );
                         let heading_response = ui.add(
                             egui::Label::new(
-                                RichText::new(&heading)
+                                RichText::new(&copy.heading)
                                     .size(20.0)
                                     .color(colors.text)
                                     .strong(),
@@ -2107,12 +2155,11 @@ fn render_empty_state(
                             mark_as_polite_status(&heading_response);
                         }
                         ui.add_space(8.0);
-                        let description = if is_opening {
-                            "Decoding locally while the window stays responsive."
-                        } else {
-                            load_error.unwrap_or(OPEN_SCOPE_SUMMARY)
-                        };
-                        ui.label(RichText::new(description).size(13.0).color(colors.muted));
+                        ui.label(
+                            RichText::new(&copy.description)
+                                .size(13.0)
+                                .color(colors.muted),
+                        );
                         if !is_opening {
                             render_empty_state_actions(ui, actions, frame, chrome, colors);
                         }
@@ -3719,12 +3766,11 @@ mod tests {
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
         EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
-        OPEN_SCOPE_SUMMARY, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, PageUiInfo,
-        SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned,
-        actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
-        chrome_colors_for, context_tool_button, crop_pixel_bounds, image_open_status,
-        menu_tool_button, panels_menu, rating_filter_menu, rating_menu, rating_toast_is_status,
-        render, retry_open_label, undo_trash_menu_item,
+        OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
+        TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
+        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
+        crop_pixel_bounds, image_open_status, menu_tool_button, panels_menu, rating_filter_menu,
+        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -5560,7 +5606,7 @@ mod tests {
             .filter_map(|node| node.value())
             .collect::<Vec<_>>();
 
-        for expected in [OPEN_SCOPE_SUMMARY, LOCAL_PRIVACY_SUMMARY] {
+        for expected in [crate::shortcuts::FIRST_RUN_SCOPE, LOCAL_PRIVACY_SUMMARY] {
             assert!(
                 nodes.iter().any(|node| {
                     node.role() == egui::accesskit::Role::Label && node.value() == Some(expected)
@@ -5594,7 +5640,7 @@ mod tests {
         );
         let scope = nodes
             .iter()
-            .find(|node| node.value() == Some(OPEN_SCOPE_SUMMARY))
+            .find(|node| node.value() == Some(crate::shortcuts::FIRST_RUN_SCOPE))
             .expect("scope text node");
         let open_file = nodes
             .iter()
@@ -5783,17 +5829,102 @@ mod tests {
             .platform_output
             .accesskit_update
             .expect("AccessKit update should be generated");
-        let labels = update
+        let exposed = update
             .nodes
             .iter()
-            .filter_map(|(_, node)| node.label())
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
             .collect::<Vec<_>>();
-        for expected in ["About viewr", "Close"] {
+        for expected in [
+            "About viewr",
+            "Close",
+            "[ / ]  Previous / next page or frame",
+            "F5  Reload file",
+            "T G I  Panels",
+            "Space  Fit; hold to pan",
+            "U  Undo Trash",
+        ] {
             assert!(
-                labels.iter().any(|label| label.contains(expected)),
-                "missing About node: {expected}; labels: {labels:?}"
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing About node: {expected}; exposed: {exposed:?}"
             );
         }
+        assert!(
+            exposed
+                .iter()
+                .all(|text| !text.contains("A / D") && !text.contains("`A`/`D`")),
+            "About listed a navigation shortcut the event loop does not own: {exposed:?}"
+        );
+    }
+
+    #[test]
+    fn about_close_stays_inside_the_minimum_window() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_about = true;
+        let screen_rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(640.0, 480.0));
+        let mut input = accessibility_input();
+        input.screen_rect = Some(screen_rect);
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let close = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label() == Some("Close"))
+            .expect("About Close button");
+        let bounds = close.bounds().expect("About Close bounds");
+        assert!(
+            bounds.x0 >= f64::from(screen_rect.left())
+                && bounds.x1 <= f64::from(screen_rect.right())
+                && bounds.y0 >= f64::from(screen_rect.top())
+                && bounds.y1 <= f64::from(screen_rect.bottom()),
+            "About Close escaped the minimum window: {bounds:?}"
+        );
+    }
+
+    #[test]
+    fn empty_state_bounds_long_decoder_errors() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.dock.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.filmstrip.clear();
+        frame.selected_file_name = Some("night.png".to_owned());
+        let long_error = format!("{}\nsecond line", "é".repeat(200));
+        frame.load_error = Some(long_error.clone());
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("empty-state AccessKit update should be generated");
+        let values = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        let bounded = crate::shortcuts::bound_user_error(&long_error);
+        assert!(
+            values.contains(&bounded.as_str()),
+            "missing bounded empty-state error {bounded}; values: {values:?}"
+        );
+        assert!(
+            values
+                .iter()
+                .all(|value| *value != long_error && !value.contains('\n')),
+            "empty-state published an overflowing decoder error: {values:?}"
+        );
     }
 
     #[test]

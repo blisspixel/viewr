@@ -73,9 +73,11 @@ disappears. This spec is the converged result of two rounds of design critique
   hover is required to discover them.
 - Empty and loading states use an opaque themed card with tested AA text contrast.
   They remain readable on black, gray, white, and theme-driven image backgrounds.
-  The empty state explains ambient sibling browsing versus explicit session folder
-  selection without adding a confirmation step. Its measured card geometry is
-  stable across unchanged frames, so no resting content drifts vertically.
+  The empty state explains drop, ambient sibling browsing, and explicit session
+  folder selection without adding a confirmation step. Opening names the selected
+  file. A failed open keeps one short error line and Retry. Its measured card
+  geometry is stable across unchanged frames, so no resting content drifts
+  vertically.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws
   a precise border, rule-of-thirds guides, eight visible pointer handles, exact
   output dimensions, a compact aspect popover, and Apply/Cancel. The popover
@@ -350,9 +352,12 @@ generative fill, and an unbounded Poisson solve are outside this focused tool.
 ### Help, updates, and product identity
 
 - Help > About viewr opens a centered modal that blocks background input and
-  closes with its Close button, backdrop click, or Escape.
-- It exposes version, platform, license, core shortcuts, and the local-only
-  privacy contract. Its modal container has an explicit accessible window name.
+  closes with its Close button, backdrop click, or Escape. On a short window the
+  body scrolls so Close stays reachable.
+- It exposes version, platform, license, the grouped shortcut catalog, and the
+  local-only privacy contract. About, the empty state, and README essential
+  controls quote `shortcuts` instead of a truncated one-line summary. Its modal
+  container has an explicit accessible window name.
 - Help > Get latest release opens a separate centered modal with the running
   version and one prominent Get latest release action. It does not check a network,
   claim that the running build is latest, download, or install. The action opens

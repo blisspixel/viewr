@@ -1185,12 +1185,12 @@ try {
         [System.Windows.Automation.ControlType]::Window
     )
     foreach ($aboutText in @(
-        "[ / ]  Previous / next page or frame",
+        "[ / ]",
         "F5  Reload file",
-        "T G I  Tools, previews, information",
-        "Space  Fit; hold to pan"
+        "T G I",
+        "Space  Fit"
     )) {
-        Wait-ForElement -Name $aboutText -Root $aboutModal -ControlType (
+        Wait-ForElement -Name $aboutText -Prefix -Root $aboutModal -ControlType (
             [System.Windows.Automation.ControlType]::Text
         ) | Out-Null
     }

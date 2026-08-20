@@ -1677,25 +1677,25 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         )
         .show(ui.ctx(), |ui| {
             ui.set_max_width(520.0);
-            let body_height = (ui.ctx().content_rect().height() - 96.0).clamp(180.0, 640.0);
+            let body_height = (ui.ctx().content_rect().height() - 80.0).clamp(180.0, 640.0);
             ScrollArea::vertical()
                 .id_salt("about_body")
                 .max_height(body_height)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading(RichText::new("About viewr").size(28.0).color(colors.text));
+                        ui.heading(RichText::new("About viewr").size(22.0).color(colors.text));
                         ui.label(
                             RichText::new("A private, local-first image viewer")
-                                .size(14.0)
+                                .size(13.0)
                                 .color(colors.muted),
                         );
                     });
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
                     Frame::new()
                         .fill(colors.raised)
                         .corner_radius(CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(12))
+                        .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.label(
                                 RichText::new("No network access")
@@ -1707,10 +1707,10 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                                 "Photos and edits stay local unless you explicitly save a copy.",
                             );
                         });
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
                     egui::Grid::new("about_build_details")
                         .num_columns(2)
-                        .spacing(Vec2::new(16.0, 6.0))
+                        .spacing(Vec2::new(16.0, 4.0))
                         .show(ui, |ui| {
                             ui.label(RichText::new("Version").color(colors.muted));
                             ui.label(env!("CARGO_PKG_VERSION"));
@@ -1726,17 +1726,17 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                             ui.label(env!("CARGO_PKG_LICENSE"));
                             ui.end_row();
                         });
-                    ui.add_space(14.0);
+                    ui.add_space(10.0);
                     ui.label(
                         RichText::new("Shortcuts")
                             .color(colors.muted)
                             .small()
                             .strong(),
                     );
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     render_about_shortcut_groups(ui, colors);
                 });
-            ui.add_space(14.0);
+            ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Close").clicked() {
                     close_clicked = true;
@@ -1758,25 +1758,31 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
 fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors) {
     egui::Grid::new("about_shortcuts")
         .num_columns(2)
-        .spacing(Vec2::new(20.0, 10.0))
+        .spacing(Vec2::new(20.0, 8.0))
         .show(ui, |ui| {
             for (index, group) in crate::shortcuts::ABOUT_SHORTCUT_GROUPS.iter().enumerate() {
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new(group.heading)
-                            .size(12.5)
+                            .size(12.0)
                             .color(colors.text)
                             .strong(),
                     );
                     for item in group.items {
-                        ui.label(
-                            RichText::new(format!(
-                                "{}  {}",
-                                crate::shortcuts::format_shortcut_keys(item.keys, PRIMARY_MODIFIER),
-                                item.action
-                            ))
-                            .size(12.0)
-                            .color(colors.muted),
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!(
+                                    "{}  {}",
+                                    crate::shortcuts::format_shortcut_keys(
+                                        item.keys,
+                                        PRIMARY_MODIFIER
+                                    ),
+                                    item.action
+                                ))
+                                .size(12.0)
+                                .color(colors.muted),
+                            )
+                            .extend(),
                         );
                     }
                 });
@@ -5834,7 +5840,7 @@ mod tests {
             "Close",
             "[ / ]  Previous / next page or frame",
             "F5  Reload file",
-            "T G I  Tools, previews, information",
+            "T G I  Panels",
             "Space  Fit; hold to pan",
             "U  Undo Trash",
         ] {

@@ -103,7 +103,7 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             },
             ShortcutSpec {
                 keys: "T G I",
-                action: "Tools, previews, information",
+                action: "Panels",
             },
         ],
     },
@@ -200,7 +200,7 @@ mod tests {
         for expected in [
             "[ / ] Previous / next page or frame",
             "F5 Reload file",
-            "T G I Tools, previews, information",
+            "T G I Panels",
             "Space Fit; hold to pan",
             "O Open file",
             "Ctrl+Shift+S Save As",

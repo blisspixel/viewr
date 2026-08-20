@@ -303,6 +303,9 @@ class DocumentationTests(unittest.TestCase):
     def test_pre_one_version_path_builds_product_before_distribution(self) -> None:
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         standards = (REPOSITORY_ROOT / "docs/STANDARDS.md").read_text(encoding="utf-8")
+        publishing = (REPOSITORY_ROOT / "docs/PUBLISHING.md").read_text(
+            encoding="utf-8"
+        )
         ordered_gates = (
             "| **v0.2.0** | Reliability architecture beta |",
             "| **v0.3.0** | Display-correct SDR preview |",
@@ -319,6 +322,11 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Native platform trust | Deferred to v0.9", roadmap)
         self.assertIn("explicitly unsigned pre-1.0 preview", standards)
         self.assertIn("Publisher authentication remains a v0.9 and 1.0 gate", standards)
+        self.assertLess(
+            publishing.index("`docs/releases/v<version>.md`"),
+            publishing.index("git tag -a v0.6.0"),
+        )
+        self.assertNotIn("git tag -a v0.5.0", publishing)
 
     def test_first_run_and_help_copy_stay_one_catalog(self) -> None:
         shortcuts = (REPOSITORY_ROOT / "crates/viewr/src/shortcuts.rs").read_text(
@@ -349,6 +357,17 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Do not tag v0.6.0", product_quality)
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         self.assertIn("PRODUCT-QUALITY.md", roadmap)
+        release_artifact = (REPOSITORY_ROOT / "scripts/release_artifact.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"docs/PRODUCT-QUALITY.md"', release_artifact)
+        self.assertIn("Candidate workflow run", product_quality)
+        self.assertIn("scripts/product_quality_evidence.py gate", product_quality)
+        self.assertIn(
+            "--artifacts .agent/product-quality/<run-id>/artifacts", product_quality
+        )
+        self.assertIn("product-quality-fixtures", product_quality)
+        self.assertIn("gen_product_quality_fixtures", product_quality)
 
 
 if __name__ == "__main__":

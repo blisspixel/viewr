@@ -59,6 +59,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/PERFORMANCE.md",
     "docs/PUBLISHING.md",
     "docs/PRIVACY.md",
+    "docs/PRODUCT-QUALITY.md",
     "docs/README.md",
     "docs/RATINGS.md",
     "docs/releases/v0.1.0.md",

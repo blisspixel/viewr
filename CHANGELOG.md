@@ -7,6 +7,18 @@ and organized by user-visible concern.
 
 ### Product quality
 
+- The v0.6 manual matrix now uses stable check identifiers and binds Windows,
+  macOS, and Linux records to the checksummed archives from one non-publishing
+  candidate workflow run. The gate rejects incomplete, placeholder,
+  mixed-provenance, or failing records, verifies the successful manual workflow
+  run and candidate commit through GitHub CLI, and hashes the downloaded archives
+  and sidecars against every platform record. Manual candidate runs now retain a
+  fifth, non-published artifact containing the deterministic synthetic browse,
+  editing, failure, animation, page, and visual fixtures used by all three
+  platforms. A canonical per-file checksum manifest binds those shared fixture
+  bytes into every platform record.
+- Release archives now include the product-quality matrix linked by their
+  documentation index.
 - Help > About viewr lists the grouped shortcut catalog instead of a truncated
   line. Pages (`[` / `]`), reload (`F5`), panels (`T` `G` `I`), Space-to-fit,
   Save As, and Undo Trash are visible. On a short window the body scrolls so
@@ -15,6 +27,15 @@ and organized by user-visible concern.
   open keeps one short error line and Retry.
 - README essential controls match the event-loop keys. `A` / `D` are not
   navigation shortcuts.
+
+### Documentation
+
+- The sandbox plan now matches the v0.5 format contract: optional AVIF and HEIC
+  remain isolated worker formats, while Camera RAW is explicitly deferred from
+  1.0.
+- The release procedure now requires reviewed release notes in the candidate
+  commit before the annotated tag, matching the publishing workflow's enforced
+  order.
 
 ## 0.5.0 - 2026-08-20
 

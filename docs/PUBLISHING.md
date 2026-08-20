@@ -6,7 +6,7 @@ trust bar required before 1.0.
 
 ## Current repository state
 
-Status last verified on 2026-08-18:
+Status last verified on 2026-08-20:
 
 - [x] The repository is public with `main` as its only long-lived branch and
   Apache-2.0 detected by GitHub.
@@ -55,30 +55,51 @@ Status last verified on 2026-08-18:
 ## Pre-1.0 release procedure
 
 This is the procedure used for `v0.1.0` and repeated for each later tag. The
-commands below are the worked `v0.5.0` example. The next allowed tag is
-`v0.6.0`. An unsigned pre-1.0 release is acceptable only when its trust boundary is explicit.
+next allowed tag is `v0.6.0`. An unsigned pre-1.0 release is acceptable only
+when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
-1. Select one clean `main` commit and retain its green CI and fuzz links.
-2. Update the workspace version, CHANGELOG, README status, roadmap gate, and all
-   behavior-specific documentation.
-3. Run the complete local checks in [Verification](VERIFY.md).
-4. Confirm `THIRD_PARTY_LICENSES.txt` matches a fresh offline `cargo-about`
+1. On a feature branch, update the workspace version, CHANGELOG, README status,
+   roadmap gate, all behavior-specific documentation, and
+   `docs/releases/v<version>.md`. Commit and review the release notes before the
+   candidate build because the tag workflow uses that file as its only release
+   body. Generated notes are not accepted.
+2. Run the complete local checks in [Verification](VERIFY.md).
+3. Confirm `THIRD_PARTY_LICENSES.txt` matches a fresh offline `cargo-about`
    render and the Flatpak source map matches the lockfile.
-5. Confirm the tag is exactly `v<workspace-version>` and create an annotated tag:
+4. Integrate the release change through normal review. Select its exact clean
+   `main` commit only after CI and fuzz pass there, and retain both run links.
+5. For v0.6.0, complete the candidate-artifact and three-platform evidence
+   procedure in [Product quality](PRODUCT-QUALITY.md). Every record must identify
+   one candidate workflow run and its exact commit. Any later change to application
+   source, dependencies, workflows, packaging, or user-facing behavior instructions
+   invalidates those records and requires a new candidate run. Evidence and release
+   status records may be committed after the run. Validate the complete set with:
 
    ```text
-   git tag -a v0.5.0 -m "viewr 0.5.0"
-   git push origin v0.5.0
+   python -B scripts/product_quality_evidence.py gate \
+     docs/release-evidence/product-quality/v0.6.0 \
+     --artifacts .agent/product-quality/<run-id>/artifacts
+   ```
+
+6. Integrate the evidence and release-status records through normal review, then
+   confirm that no
+   application, dependency, workflow, packaging, or behavior-instruction change
+   has invalidated the candidate. Require green CI and fuzz on the intended tag
+   commit.
+7. Confirm the tag is exactly `v<workspace-version>`, then create and push an
+   annotated tag:
+
+   ```text
+   git tag -a v0.6.0 -m "viewr 0.6.0"
+   git push origin v0.6.0
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
    local Git verification merely to produce a signed tag.
 
-6. Commit and review `docs/releases/v<version>.md`. It is the only release body;
-   generated notes are not accepted.
-7. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
+8. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
    set, verify every archive and SHA-256 sidecar, add the fixed-version installer
    scripts and their sidecars, attest all 12 assets, and publish only that exact
    set. A manual workflow run is inspection-only and must never publish.

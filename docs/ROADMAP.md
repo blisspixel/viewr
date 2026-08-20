@@ -120,6 +120,33 @@ file-coherence milestone plus v0.3.0, v0.2.0, and the v0.1.1 through v0.1.5
 patches remain published with the first preview's known issues recorded. Next is
 v0.6 product quality, then v0.7 through v0.9 evidence and trust.
 
+The v0.6 execution order is deliberately narrow:
+
+1. Settle dependency and workflow maintenance on one clean `main` commit with
+   both CI and fuzz green. Maintenance is not product-quality evidence, but an
+   unsettled baseline makes every later artifact disposable.
+2. Finish only evidence-backed v0.6 product corrections, update version and
+   release documents, and obtain another green `main` commit.
+3. Dispatch the non-publishing `Release artifacts` workflow once for that commit.
+   Its four checksummed application archives plus deterministic synthetic fixture
+   artifact form the candidate set. Do not substitute a developer build or
+   combine workflow runs.
+4. Run [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) on representative Windows,
+   macOS, and Linux hardware using that run's fixture artifact. All records share
+   the candidate commit and workflow run while retaining their platform-specific
+   archive hashes.
+5. Treat a critical or high-severity defect as a candidate reset. Fix it, rerun
+   the automated gates, build a new candidate set, and repeat all affected
+   hardware rows. A lower-severity approved exception remains visible in its
+   GitHub issue and evidence record.
+6. Tag v0.6.0 only after the evidence validator accepts all three complete records
+   and the final release procedure is green. Then begin v0.7 human assistive-
+   technology evidence against the stable product surface.
+
+This order spends scarce hardware time last, after cheap deterministic checks,
+and prevents product changes from invalidating later accessibility and release
+readiness evidence.
+
 ### Release rules
 
 1. Patch releases such as v0.1.1 fix shipped behavior or security issues only.
@@ -136,7 +163,7 @@ but completed history does not override an open gate here.
 
 | Gate | Status | Evidence or next action |
 | --- | --- | --- |
-| Public repository and hosted quality | Complete | `main` is public. [CI run 30642307317](https://github.com/blisspixel/viewr/actions/runs/30642307317) passed all seven jobs and [fuzz run 30642307463](https://github.com/blisspixel/viewr/actions/runs/30642307463) passed both targets on release commit `86d3eef920ec5e523fbc6dbc286c4dcbd68e7f1b`. |
+| Public repository and hosted quality | Complete | `main` is public. [CI run 32338720666](https://github.com/blisspixel/viewr/actions/runs/32338720666) passed all seven jobs and [fuzz run 32338720642](https://github.com/blisspixel/viewr/actions/runs/32338720642) passed both targets on current main commit `b2e1b77c403d6d3de79a0984cf5efda3391c167c`. |
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. That playtest also found the window opening under a 137px dock, which [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4) fixed by bounding and placing the first window inside its monitor. An independent playtest of the published v0.1.4 Linux archive then measured that window at 1000 by 560 logical pixels at +140+40 on the same 1280 by 800 session, 29 physical pixels clear of the dock, matching the published bound and placement arithmetic. That round found the command line rejecting a folder while `viewr help` promised that a folder opens its first naturally sorted image, which [v0.1.5](https://github.com/blisspixel/viewr/releases/tag/v0.1.5) fixed by classifying every externally supplied path once. |
@@ -145,7 +172,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Open for v0.6 | Matrix in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Covered first-run/Help catalog and bounded empty/error copy. Representative hardware remains. |
+| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Covered first-run/Help catalog and bounded empty/error copy. One candidate workflow run, three complete representative-hardware records, downloaded archive hashes, verified run provenance, and a passing evidence gate remain. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -166,7 +193,7 @@ viewer. The research signal is consistent:
   failures. Its public downloads cover a Windows installer, macOS disk image,
   AppImage, Flatpak, and native repositories. See the official
   [feature page](https://interversehq.com/qview/),
-  [changelog](https://interversehq.com/qview/changelog/), and
+  [qView 7.0 release](https://github.com/jurplel/qView/releases/tag/7.0), and
   [downloads](https://interversehq.com/qview/download/).
 - ImageGlass treats live file-change refresh, multi-frame navigation, animation,
   color management, thumbnails, and touch input as viewer capabilities rather
@@ -498,10 +525,13 @@ still feels rough or fails under real platform conditions. These releases add no
 broad feature category. They prove and refine the accumulated viewer.
 
 - [ ] Exercise first-time, fast-path, admin, failure-recovery, keyboard-only, and
-  visual-polish workflows on published Windows, macOS, and Linux artifacts.
+  visual-polish workflows on the Windows, macOS, and Linux archives retained by
+  one non-publishing candidate workflow run.
   [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) is the matrix. In-process tests now
-  cover Help, first-run drop copy, and bounded empty-state errors. Hardware rows
-  are unrecorded.
+  cover Help, first-run drop copy, and bounded empty-state errors. Stable check
+  identifiers and `scripts/product_quality_evidence.py` reject incomplete,
+  placeholder, mixed-provenance, or failing gate records. Hardware rows are
+  unrecorded.
 - [x] Make About, the empty card, and README essential controls quote one covered
   shortcut catalog. Help lists pages, reload, panels, Space-to-fit, Save As, and
   Undo Trash. The first-run card names drop. Long decoder errors stay one short

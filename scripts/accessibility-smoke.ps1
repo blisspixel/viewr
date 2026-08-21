@@ -1302,6 +1302,13 @@ try {
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $rotateClockwise
+    $crop = Wait-ForElement -Name "Crop (C)" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $crop
+    Wait-ForElement -Name "Cancel" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
     $replacedPng = [Convert]::FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     )
@@ -1321,6 +1328,9 @@ try {
         -Name "Mark for batch trash" `
         -Prefix `
         -ControlType ([System.Windows.Automation.ControlType]::Button) | Out-Null
+    Wait-ForElementAbsent -Name "Cancel" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    ) | Out-Null
     $editMenu = Wait-ForElement -Name "Edit" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )

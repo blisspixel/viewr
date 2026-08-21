@@ -126,7 +126,7 @@ jobs:
 
       - name: Install pinned Flatpak SDK
         if: runner.os == 'Linux'
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: bash scripts/ci-install-flatpak-sdk.sh
 
       - name: Build and probe Flatpak sandbox

@@ -11,7 +11,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY_ROOT / "scripts" / "ci-install-flatpak-sdk.sh"
 WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
 MANIFEST = REPOSITORY_ROOT / "packaging" / "flatpak" / "com.github.blisspixel.viewr.yml"
+TOOLCHAIN = REPOSITORY_ROOT / "rust-toolchain.toml"
 ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(\d+)$")
+CHANNEL = re.compile(r'^channel\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 
 
 class CiInstallFlatpakSdkTests(unittest.TestCase):
@@ -71,6 +73,28 @@ class CiInstallFlatpakSdkTests(unittest.TestCase):
             if match := timeout_line.search(line):
                 last_timeout = int(match.group(1))
             if "bash scripts/ci-install-flatpak-sdk.sh" in line:
-                self.assertEqual(last_timeout, 15)
+                self.assertEqual(last_timeout, 20)
                 found = True
         self.assertTrue(found)
+
+    def test_flathub_miss_falls_back_to_the_pinned_toolchain(self) -> None:
+        match = CHANNEL.search(TOOLCHAIN.read_text(encoding="utf-8"))
+        self.assertIsNotNone(match)
+        channel = match.group(1)
+        self.assertEqual(channel, "1.96.0")
+        self.assertIn(f"RUST_VERSION={channel}", self.script)
+        self.assertIn("RUST_DIST_DATE=2026-05-28", self.script)
+        self.assertIn(
+            'RUST_URL="https://static.rust-lang.org/dist/${RUST_DIST_DATE}/${RUST_TARBALL}"',
+            self.script,
+        )
+        self.assertIn(
+            "c295047583a56238ea06b43f849f4b877fa12bfd4c7103f8d9a74c94c9c4e108",
+            self.script,
+        )
+        self.assertIn("curl --fail --location --proto =https --tlsv1.2", self.script)
+        self.assertIn("sha256sum -c", self.script)
+        self.assertIn("build-extension: true", self.script)
+        self.assertIn("--disable-download", self.script)
+        self.assertIn("install_flathub_rust_stable", self.script)
+        self.assertIn("install_pinned_rust_stable_extension", self.script)

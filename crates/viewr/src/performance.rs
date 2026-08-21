@@ -16,9 +16,46 @@ use winit::event_loop::EventLoopProxy;
 pub(crate) const PERFORMANCE_PROBE_TIMEOUT: Duration = Duration::from_mins(1);
 pub(crate) const PERFORMANCE_IDLE_OBSERVATION: Duration = Duration::from_millis(500);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GpuAdapterReport {
+    pub(crate) backend: String,
+    pub(crate) name: String,
+    pub(crate) device_type: String,
+    pub(crate) driver: String,
+}
+
+impl GpuAdapterReport {
+    pub(crate) fn from_wgpu(info: &wgpu::AdapterInfo) -> Self {
+        Self {
+            backend: info.backend.to_str().to_owned(),
+            name: info.name.clone(),
+            device_type: device_type_name(info.device_type).to_owned(),
+            driver: info.driver.clone(),
+        }
+    }
+}
+
+const fn device_type_name(device_type: wgpu::DeviceType) -> &'static str {
+    match device_type {
+        wgpu::DeviceType::Other => "other",
+        wgpu::DeviceType::IntegratedGpu => "integrated-gpu",
+        wgpu::DeviceType::DiscreteGpu => "discrete-gpu",
+        wgpu::DeviceType::VirtualGpu => "virtual-gpu",
+        wgpu::DeviceType::Cpu => "cpu",
+    }
+}
+
 /// Measurements produced by one explicit GUI performance probe.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PerformanceReport {
+    /// Backend used by the wgpu adapter that presented the measured frames.
+    pub adapter_backend: String,
+    /// Name reported by the wgpu adapter that presented the measured frames.
+    pub adapter_name: String,
+    /// Stable device-type category for the selected wgpu adapter.
+    pub adapter_device_type: String,
+    /// Driver name reported for the selected wgpu adapter.
+    pub adapter_driver: String,
     /// Application-entry to a visible initialized window, in microseconds.
     pub window_ready_us: u64,
     /// Application-entry to the first presented image frame, in microseconds.
@@ -55,7 +92,11 @@ impl PerformanceReport {
     pub fn to_json(&self) -> String {
         format!(
             concat!(
-                "{{\"window_ready_us\":{},",
+                "{{\"adapter_backend\":{},",
+                "\"adapter_name\":{},",
+                "\"adapter_device_type\":{},",
+                "\"adapter_driver\":{},",
+                "\"window_ready_us\":{},",
                 "\"first_pixel_us\":{},",
                 "\"max_navigation_us\":{},",
                 "\"idle_redraws\":{},",
@@ -70,6 +111,10 @@ impl PerformanceReport {
                 "\"decoded_cache_bytes\":{},",
                 "\"thumbnail_texture_entries\":{}}}"
             ),
+            json_string(&self.adapter_backend),
+            json_string(&self.adapter_name),
+            json_string(&self.adapter_device_type),
+            json_string(&self.adapter_driver),
             self.window_ready_us,
             self.first_pixel_us,
             self.max_navigation_us,
@@ -86,6 +131,31 @@ impl PerformanceReport {
             self.thumbnail_texture_entries,
         )
     }
+}
+
+fn json_string(value: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            '\u{08}' => encoded.push_str("\\b"),
+            '\u{0c}' => encoded.push_str("\\f"),
+            '\n' => encoded.push_str("\\n"),
+            '\r' => encoded.push_str("\\r"),
+            '\t' => encoded.push_str("\\t"),
+            '\u{00}'..='\u{1f}' => {
+                write!(encoded, "\\u{:04x}", u32::from(character))
+                    .expect("writing to a String cannot fail");
+            }
+            _ => encoded.push(character),
+        }
+    }
+    encoded.push('"');
+    encoded
 }
 
 pub(crate) fn duration_us(duration: Duration) -> u64 {
@@ -234,6 +304,10 @@ mod tests {
     #[test]
     fn report_json_is_stable_and_machine_readable() {
         let report = PerformanceReport {
+            adapter_backend: "vulkan".into(),
+            adapter_name: "Test Adapter".into(),
+            adapter_device_type: "discrete-gpu".into(),
+            adapter_driver: "Test Driver".into(),
             window_ready_us: 1,
             first_pixel_us: 2,
             max_navigation_us: 3,
@@ -251,7 +325,54 @@ mod tests {
         };
         assert_eq!(
             report.to_json(),
-            "{\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"idle_redraws\":4,\"idle_non_redraw_events\":10,\"idle_event_repaint_requests\":11,\"idle_scheduled_egui_repaints\":12,\"idle_window_focused\":true,\"idle_pointer_inside\":false,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
+            "{\"adapter_backend\":\"vulkan\",\"adapter_name\":\"Test Adapter\",\"adapter_device_type\":\"discrete-gpu\",\"adapter_driver\":\"Test Driver\",\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"idle_redraws\":4,\"idle_non_redraw_events\":10,\"idle_event_repaint_requests\":11,\"idle_scheduled_egui_repaints\":12,\"idle_window_focused\":true,\"idle_pointer_inside\":false,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
+        );
+    }
+
+    #[test]
+    fn adapter_report_uses_only_stable_path_free_wgpu_identity() {
+        let info = wgpu::AdapterInfo {
+            name: "Mesa Adapter".into(),
+            vendor: 0x1234,
+            device: 0x5678,
+            device_type: wgpu::DeviceType::Cpu,
+            device_pci_bus_id: "0000:01:00.0".into(),
+            driver: "llvmpipe".into(),
+            driver_info: "private/driver/location".into(),
+            backend: wgpu::Backend::Gl,
+            subgroup_min_size: 4,
+            subgroup_max_size: 32,
+            transient_saves_memory: false,
+        };
+
+        let adapter = GpuAdapterReport::from_wgpu(&info);
+
+        assert_eq!(adapter.backend, "gl");
+        assert_eq!(adapter.name, "Mesa Adapter");
+        assert_eq!(adapter.device_type, "cpu");
+        assert_eq!(adapter.driver, "llvmpipe");
+        assert!(!format!("{adapter:?}").contains("0000:01:00.0"));
+        assert!(!format!("{adapter:?}").contains("private/driver/location"));
+    }
+
+    #[test]
+    fn adapter_device_types_have_stable_names() {
+        for (device_type, expected) in [
+            (wgpu::DeviceType::Other, "other"),
+            (wgpu::DeviceType::IntegratedGpu, "integrated-gpu"),
+            (wgpu::DeviceType::DiscreteGpu, "discrete-gpu"),
+            (wgpu::DeviceType::VirtualGpu, "virtual-gpu"),
+            (wgpu::DeviceType::Cpu, "cpu"),
+        ] {
+            assert_eq!(device_type_name(device_type), expected);
+        }
+    }
+
+    #[test]
+    fn adapter_metadata_is_json_escaped_without_losing_unicode() {
+        assert_eq!(
+            json_string("GPU \"A\" \\ line\n\t\u{0001} café"),
+            "\"GPU \\\"A\\\" \\\\ line\\n\\t\\u0001 café\""
         );
     }
 

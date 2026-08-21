@@ -72,6 +72,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/releases/v0.3.0.md",
     "docs/releases/v0.4.0.md",
     "docs/releases/v0.5.0.md",
+    "docs/releases/v0.6.0.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-console-example.png",
@@ -206,6 +207,11 @@ def _load_identity(repository_root: Path) -> tuple[str, str]:
             "release toolchain must be pinned to an exact stable version"
         )
     return version, channel
+
+
+def _archive_documentation_paths(version: str) -> tuple[str, ...]:
+    current_release_notes = f"docs/releases/v{version}.md"
+    return tuple(dict.fromkeys((*ARCHIVE_DOCUMENTATION_PATHS, current_release_notes)))
 
 
 def _canonical_text(path: Path, description: str) -> bytes:
@@ -707,7 +713,7 @@ def _validated_manifest(
         f"bin/{main_binary}",
         f"bin/{worker_binary}",
     }
-    expected_paths.update(ARCHIVE_DOCUMENTATION_PATHS)
+    expected_paths.update(_archive_documentation_paths(version))
     expected_members = {f"{prefix}/{path}" for path in expected_paths}
     expected_members.add(f"{prefix}/{MANIFEST_NAME}")
     if set(names) != expected_members:
@@ -834,7 +840,7 @@ def build_release_artifact(
                 0o644,
                 _documentation_bytes(repository_root, relative_path),
             )
-            for relative_path in ARCHIVE_DOCUMENTATION_PATHS
+            for relative_path in _archive_documentation_paths(version)
         ),
         ArchiveEntry(f"bin/{main_binary}", 0o755, main_path),
         ArchiveEntry(f"bin/{worker_binary}", 0o755, worker_path),

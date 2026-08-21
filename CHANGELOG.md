@@ -16,13 +16,34 @@ and organized by user-visible concern.
   fifth, non-published artifact containing the deterministic synthetic browse,
   editing, failure, animation, page, and visual fixtures used by all three
   platforms. A canonical per-file checksum manifest binds those shared fixture
-  bytes into every platform record.
+  bytes into every platform record. Manual candidate artifacts use uncompressed
+  ZIPs so their remote metadata provides a useful pre-download size bound.
+- The evidence gate now binds records and their directory to v0.6.0, rejects
+  generic observations and high-severity exceptions, requires representative
+  platform metadata, and requires complete numeric candidate-binary performance
+  evidence. It freshly downloads the recorded workflow run, canonically verifies
+  all four archives, and binds the complete eight-session performance report set
+  to the archived executables. Recovery states that cannot be safely injected
+  through a production archive are named candidate-wide automated prerequisites
+  instead of vague hardware steps.
+- The GUI performance gate can write a non-overwriting, path-free JSON record
+  containing both tested executable SHA-256 values, sanitized renderer controls,
+  the actual wgpu adapter selected by every raw run, enforced budgets, exact
+  folder growth, numeric summary, and pass or fail state. It runs private copies
+  of the verified executable pair and rejects byte or adapter changes. The CI
+  software-GL presentation probe parses the same exact report schema and requires
+  viewr's actual adapter to be an identified OpenGL software renderer.
 - Release archives now include the product-quality matrix linked by their
-  documentation index.
+  documentation index and the reviewed release notes matching the workspace
+  version.
 - Help > About viewr lists the grouped shortcut catalog instead of a truncated
   line. Pages (`[` / `]`), reload (`F5`), panels (`T` `G` `I`), Space-to-fit,
   Save As, and Undo Trash are visible. On a short window the body scrolls so
   Close stays reachable.
+- Direct decoder tests cover GIF, animated WebP, and APNG through viewr's own
+  animation path. UI tests cover animation controls, stable empty, opening, and
+  error-card geometry, complete About identity and privacy content, Escape, and
+  modal input suppression.
 - The first-run card names drop as well as Open File and Open Folder. A failed
   open keeps one short error line and Retry.
 - README essential controls match the event-loop keys. `A` / `D` are not
@@ -36,6 +57,11 @@ and organized by user-visible concern.
 - The release procedure now requires reviewed release notes in the candidate
   commit before the annotated tag, matching the publishing workflow's enforced
   order.
+- Candidate preparation now keeps v0.5.0 as the truthful public install target
+  until v0.6.0 is tagged, while the application and packaged candidate surfaces
+  use 0.6.0. Only completed evidence, the release date, and public immutable-link
+  status updates are allowed after hardware testing without resetting the
+  candidate.
 
 ## 0.5.0 - 2026-08-20
 

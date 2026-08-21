@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from scripts import release_artifact
 
 SOURCE_DATE_EPOCH = 1_788_000_000
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TEST_WORKSPACE_VERSION = "1.2.3"
 EXPECTED_DOCUMENTATION_PATHS = {
     "CHANGELOG.md",
     "CONTRIBUTING.md",
@@ -48,6 +50,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/releases/v0.3.0.md",
     "docs/releases/v0.4.0.md",
     "docs/releases/v0.5.0.md",
+    "docs/releases/v0.6.0.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-console-example.png",
@@ -64,14 +67,17 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.repository = Path(self.temporary_directory.name)
         (self.repository / "target" / "release").mkdir(parents=True)
         (self.repository / "Cargo.toml").write_text(
-            '[workspace.package]\nversion = "1.2.3"\n',
+            f'[workspace.package]\nversion = "{TEST_WORKSPACE_VERSION}"\n',
             encoding="utf-8",
         )
         (self.repository / "rust-toolchain.toml").write_text(
             '[toolchain]\nchannel = "1.96.0"\n',
             encoding="utf-8",
         )
-        for relative_path in EXPECTED_DOCUMENTATION_PATHS:
+        for relative_path in {
+            *EXPECTED_DOCUMENTATION_PATHS,
+            f"docs/releases/v{TEST_WORKSPACE_VERSION}.md",
+        }:
             documentation = self.repository / relative_path
             documentation.parent.mkdir(parents=True, exist_ok=True)
             if relative_path in release_artifact.BINARY_DOCUMENTATION_PATHS:
@@ -234,12 +240,16 @@ class ReleaseArtifactTests(unittest.TestCase):
             first_sidecar,
         )
         manifest = release_artifact.verify_release_artifact(rebuilt)
-        self.assertEqual(manifest["version"], "1.2.3")
+        self.assertEqual(manifest["version"], TEST_WORKSPACE_VERSION)
         self.assertEqual(manifest["target"], "x86_64-pc-windows-msvc")
         self.assertEqual(manifest["rust_toolchain"], "1.96.0")
         self.assertEqual(manifest["source_date_epoch"], SOURCE_DATE_EPOCH)
 
-        prefix = "viewr-1.2.3-x86_64-pc-windows-msvc"
+        prefix = f"viewr-{TEST_WORKSPACE_VERSION}-x86_64-pc-windows-msvc"
+        expected_documentation_paths = {
+            *EXPECTED_DOCUMENTATION_PATHS,
+            f"docs/releases/v{TEST_WORKSPACE_VERSION}.md",
+        }
         with zipfile.ZipFile(rebuilt) as archive_file:
             self.assertEqual(
                 set(archive_file.namelist()),
@@ -248,12 +258,24 @@ class ReleaseArtifactTests(unittest.TestCase):
                     f"{prefix}/bin/viewr-decode.exe",
                     f"{prefix}/bin/viewr.exe",
                     f"{prefix}/release-manifest.json",
-                    *(f"{prefix}/{path}" for path in EXPECTED_DOCUMENTATION_PATHS),
+                    *(f"{prefix}/{path}" for path in expected_documentation_paths),
                 },
             )
             manifest_bytes = archive_file.read(f"{prefix}/release-manifest.json")
             self.assertTrue(manifest_bytes.endswith(b"\n"))
             self.assertEqual(json.loads(manifest_bytes), manifest)
+
+    def test_build_requires_release_notes_for_the_workspace_version(self) -> None:
+        current_notes = (
+            self.repository / "docs" / "releases" / f"v{TEST_WORKSPACE_VERSION}.md"
+        )
+        current_notes.unlink()
+
+        with self.assertRaisesRegex(
+            release_artifact.ReleaseError,
+            rf"docs/releases/v{re.escape(TEST_WORKSPACE_VERSION)}\.md",
+        ):
+            self.build()
 
     def test_build_rejects_an_unresolved_local_readme_link(self) -> None:
         (self.repository / "README.md").write_text(
@@ -630,6 +652,12 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertNotIn("\n    if: github.ref_type == 'tag'\n", workflow)
         self.assertIn("name: product-quality-fixtures", workflow)
+        self.assertEqual(
+            workflow.count(
+                "compression-level: ${{ github.ref_type == 'tag' && 6 || 0 }}"
+            ),
+            2,
+        )
         self.assertIn(
             "if: github.ref_type != 'tag' && matrix.target == 'x86_64-unknown-linux-gnu'",
             workflow,
@@ -650,21 +678,28 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("Attest every release asset", workflow)
         self.assertIn("Release assets do not match the exact expected set", workflow)
 
-    def test_public_installer_commands_never_execute_moving_branch_content(
+    def test_public_and_compiled_installers_use_immutable_release_assets(
         self,
     ) -> None:
-        surfaces = [
+        public_surfaces = [
             PROJECT_ROOT / "README.md",
             PROJECT_ROOT / "docs" / "INSTALL.md",
-            PROJECT_ROOT / "crates" / "viewr" / "src" / "cli.rs",
         ]
-        combined = "\n".join(path.read_text(encoding="utf-8") for path in surfaces)
+        public_commands = "\n".join(
+            path.read_text(encoding="utf-8") for path in public_surfaces
+        )
+        compiled_commands = (
+            PROJECT_ROOT / "crates" / "viewr" / "src" / "cli.rs"
+        ).read_text(encoding="utf-8")
+        combined = f"{public_commands}\n{compiled_commands}"
         self.assertNotIn("/main/install.ps1", combined)
         self.assertNotIn("/main/install.sh", combined)
         self.assertNotIn("/master/install.ps1", combined)
         self.assertNotIn("/master/install.sh", combined)
-        self.assertIn("/releases/download/v0.5.0/install.ps1", combined)
-        self.assertIn("/releases/download/v0.5.0/install.sh", combined)
+        self.assertIn("/releases/download/v0.5.0/install.ps1", public_commands)
+        self.assertIn("/releases/download/v0.5.0/install.sh", public_commands)
+        self.assertIn("/releases/download/v0.6.0/install.ps1", compiled_commands)
+        self.assertIn("/releases/download/v0.6.0/install.sh", compiled_commands)
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

@@ -20,6 +20,7 @@ use crate::gpu_policy::{
     PLACEMENT_BYTES, pack_placement, palette_to_color, select_srgb_surface_format,
     validate_patch_upload,
 };
+use crate::performance::GpuAdapterReport;
 use crate::theme::{self, Mode};
 
 /// Owns the GPU surface and everything needed to draw a frame.
@@ -31,6 +32,7 @@ pub struct Renderer {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     clear: wgpu::Color,
+    adapter_report: GpuAdapterReport,
     max_dim: u32,
     max_base_pixels: u64,
     bind_layout: wgpu::BindGroupLayout,
@@ -133,6 +135,9 @@ impl Renderer {
             })
             .await
             .map_err(|e| Error::Gpu(format!("request_device: {e}")))?;
+        // Keep only stable, path-free identity from the adapter that created the
+        // device. PCI identity and extended driver details never enter reports.
+        let adapter_report = GpuAdapterReport::from_wgpu(&adapter.get_info());
 
         let width = size.width.clamp(1, max_dim);
         let height = size.height.clamp(1, max_dim);
@@ -185,6 +190,7 @@ impl Renderer {
             surface,
             config,
             clear: palette_to_color(theme::palette_for(mode)),
+            adapter_report,
             max_dim,
             max_base_pixels: max_base_pixels.max(1),
             bind_layout,
@@ -209,6 +215,10 @@ impl Renderer {
     #[must_use]
     pub fn window(&self) -> &Arc<Window> {
         &self.window
+    }
+
+    pub(crate) fn performance_adapter(&self) -> &GpuAdapterReport {
+        &self.adapter_report
     }
 
     /// Initialize native accessibility before the initially hidden window is shown.

@@ -164,7 +164,9 @@ The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0, and
 v0.4.0 remain published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.6.0** product quality
 through v0.9 publisher authentication, then v1.0.
-The [release notes](docs/releases/v0.5.0.md) state the exact preview limits.
+The [current release notes](docs/releases/v0.5.0.md) state the exact published
+limits. The [v0.6.0 candidate notes](docs/releases/v0.6.0.md) describe the next
+scope but are not a download or publication claim.
 
 ## Development
 

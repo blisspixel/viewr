@@ -35,6 +35,8 @@ Start with the document that matches the task.
   implemented phases, and explicit non-goals.
 - [v0.5.0 release notes](releases/v0.5.0.md): the current release, the closed
   format-contract milestone, and clearly stated platform limits.
+- [v0.6.0 candidate release notes](releases/v0.6.0.md): reviewed prospective
+  notes for the open product-quality milestone; not publication evidence.
 - [v0.4.0 release notes](releases/v0.4.0.md): the file-coherence milestone.
 - [v0.3.0 release notes](releases/v0.3.0.md): the display-correct SDR
   milestone.

@@ -445,6 +445,105 @@ mod tests {
     use crate::decode::ColorProfileStatus;
     use crate::ephemeral::TempWorkspace;
     use std::fs::File;
+    use std::io::Write;
+
+    fn write_apng(path: &Path) {
+        let file = File::create(path).unwrap();
+        let mut encoder = png::Encoder::new(file, 2, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_animated(2, 0).unwrap();
+        encoder.set_frame_delay(1, 50).unwrap();
+        encoder.validate_sequence(true);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&[255, 0, 0, 255, 255, 0, 0, 255])
+            .unwrap();
+        writer
+            .write_image_data(&[0, 0, 255, 255, 0, 0, 255, 255])
+            .unwrap();
+        writer.finish().unwrap();
+    }
+
+    fn push_u24(bytes: &mut Vec<u8>, value: u32) {
+        assert!(value <= 0x00ff_ffff);
+        bytes.extend_from_slice(&value.to_le_bytes()[..3]);
+    }
+
+    fn push_webp_chunk(bytes: &mut Vec<u8>, kind: [u8; 4], payload: &[u8]) {
+        bytes.extend_from_slice(&kind);
+        bytes.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_le_bytes());
+        bytes.extend_from_slice(payload);
+        if !payload.len().is_multiple_of(2) {
+            bytes.push(0);
+        }
+    }
+
+    fn lossless_webp_chunk(image: &image::RgbaImage) -> Vec<u8> {
+        let mut still = Vec::new();
+        image::codecs::webp::WebPEncoder::new_lossless(&mut still)
+            .encode(
+                image.as_raw(),
+                image.width(),
+                image.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        assert_eq!(&still[..4], b"RIFF");
+        assert_eq!(&still[8..12], b"WEBP");
+        assert_eq!(&still[12..16], b"VP8L");
+        let payload_len =
+            usize::try_from(u32::from_le_bytes(still[16..20].try_into().unwrap())).unwrap();
+        let end = 20 + payload_len + (payload_len % 2);
+        assert_eq!(end, still.len());
+        still[12..end].to_vec()
+    }
+
+    fn write_animated_webp(path: &Path) {
+        let mut chunks = Vec::new();
+        let mut extended = vec![0x02, 0, 0, 0];
+        push_u24(&mut extended, 1);
+        push_u24(&mut extended, 0);
+        push_webp_chunk(&mut chunks, *b"VP8X", &extended);
+
+        let mut animation = Vec::new();
+        animation.extend_from_slice(&0_u32.to_le_bytes());
+        animation.extend_from_slice(&0_u16.to_le_bytes());
+        push_webp_chunk(&mut chunks, *b"ANIM", &animation);
+
+        for color in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+            let image = image::RgbaImage::from_pixel(2, 1, image::Rgba(color));
+            let mut payload = Vec::new();
+            push_u24(&mut payload, 0);
+            push_u24(&mut payload, 0);
+            push_u24(&mut payload, 1);
+            push_u24(&mut payload, 0);
+            push_u24(&mut payload, 25);
+            payload.push(0);
+            payload.extend_from_slice(&lossless_webp_chunk(&image));
+            push_webp_chunk(&mut chunks, *b"ANMF", &payload);
+        }
+
+        let riff_size = u32::try_from(4 + chunks.len()).unwrap();
+        let mut file = File::create(path).unwrap();
+        file.write_all(b"RIFF").unwrap();
+        file.write_all(&riff_size.to_le_bytes()).unwrap();
+        file.write_all(b"WEBP").unwrap();
+        file.write_all(&chunks).unwrap();
+    }
+
+    fn assert_two_frame_colors(animation: &DecodedAnimation) {
+        assert_eq!(animation.frames.len(), 2);
+        let first = &animation.frames[0].image.rgba[..4];
+        let second = &animation.frames[1].image.rgba[..4];
+        assert!(first[0] >= 254);
+        assert_eq!(&first[1..], &[0, 0, 255]);
+        assert!(second[2] >= 254);
+        assert_eq!(second[0], 0);
+        assert_eq!(second[1], 0);
+        assert_eq!(second[3], 255);
+        assert_eq!(animation.repeat, AnimationRepeat::Infinite);
+    }
 
     fn frame(id: u8, delay_ms: u64) -> AnimationFrame {
         AnimationFrame {
@@ -504,6 +603,36 @@ mod tests {
         assert_eq!(animation.frames[0].image.rgba[0], 255);
         assert_eq!(animation.frames[1].image.rgba[2], 255);
         assert_eq!(animation.repeat, AnimationRepeat::Infinite);
+    }
+
+    #[test]
+    fn apng_loader_decodes_frames_timing_and_looping() {
+        let workspace = TempWorkspace::new("animated_apng").unwrap();
+        let path = workspace.path().join("two-frames.png");
+        write_apng(&path);
+
+        let animation = DecodedAnimation::load_with_cancellation(&path, &|| true)
+            .unwrap()
+            .unwrap();
+
+        assert_two_frame_colors(&animation);
+        assert_eq!(animation.frames[0].delay, Duration::from_millis(20));
+        assert_eq!(animation.frames[1].delay, Duration::from_millis(20));
+    }
+
+    #[test]
+    fn animated_webp_loader_decodes_frames_timing_and_looping() {
+        let workspace = TempWorkspace::new("animated_webp").unwrap();
+        let path = workspace.path().join("two-frames.webp");
+        write_animated_webp(&path);
+
+        let animation = DecodedAnimation::load_with_cancellation(&path, &|| true)
+            .unwrap()
+            .unwrap();
+
+        assert_two_frame_colors(&animation);
+        assert_eq!(animation.frames[0].delay, Duration::from_millis(25));
+        assert_eq!(animation.frames[1].delay, Duration::from_millis(25));
     }
 
     #[test]

@@ -66,6 +66,9 @@ class DocumentationTests(unittest.TestCase):
 
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
+            ".github/ISSUE_TEMPLATE/bug_report.yml": (
+                "0.5.0, 0.6.0 candidate, or commit SHA",
+            ),
             "README.md": (
                 "v0.5.0 is the current public preview",
                 "checksummed and",
@@ -152,6 +155,12 @@ class DocumentationTests(unittest.TestCase):
                 "GitHub build-provenance attestation",
                 "not Authenticode-signed",
                 "notarized",
+            ),
+            "docs/releases/v0.6.0.md": (
+                "integrated product-quality beta",
+                "Their presence in the source tree",
+                "only after the artifact-bound Windows",
+                "security controls to launch viewr",
             ),
             "CHANGELOG.md": (
                 "## 0.5.0 - 2026-08-20",
@@ -300,6 +309,26 @@ class DocumentationTests(unittest.TestCase):
                 self.assertIn(package, install)
         self.assertIn("`viewr doctor` checks the windowing libraries", install)
 
+    def test_documentation_never_instructs_a_platform_security_bypass(self) -> None:
+        documents = [
+            *REPOSITORY_ROOT.glob("*.md"),
+            *(REPOSITORY_ROOT / "docs").rglob("*.md"),
+            *(REPOSITORY_ROOT / ".github").rglob("*.md"),
+            *(REPOSITORY_ROOT / "packaging").rglob("*.md"),
+        ]
+        forbidden = (
+            "spctl --master-disable",
+            "xattr -dr com.apple.quarantine",
+            "set-executionpolicy bypass",
+            "set-executionpolicy unrestricted",
+            "--no-sandbox",
+        )
+        for document in sorted(set(documents)):
+            contents = document.read_text(encoding="utf-8").casefold()
+            for instruction in forbidden:
+                with self.subTest(document=document, instruction=instruction):
+                    self.assertNotIn(instruction, contents)
+
     def test_pre_one_version_path_builds_product_before_distribution(self) -> None:
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         standards = (REPOSITORY_ROOT / "docs/STANDARDS.md").read_text(encoding="utf-8")
@@ -364,7 +393,7 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Candidate workflow run", product_quality)
         self.assertIn("scripts/product_quality_evidence.py gate", product_quality)
         self.assertIn(
-            "--artifacts .agent/product-quality/<run-id>/artifacts", product_quality
+            "downloads that\nrun into a fresh temporary directory", product_quality
         )
         self.assertIn("product-quality-fixtures", product_quality)
         self.assertIn("gen_product_quality_fixtures", product_quality)

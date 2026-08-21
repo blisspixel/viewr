@@ -5325,6 +5325,59 @@ mod tests {
     }
 
     #[test]
+    fn animation_controls_publish_playback_and_step_semantics() {
+        for (is_playing, playback_action, hidden_action) in
+            [(false, "Play", "Pause"), (true, "Pause", "Play")]
+        {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut frame = accessibility_test_frame();
+            frame.animation = Some(super::AnimationUiInfo {
+                frame_index: 1,
+                frame_count: 3,
+                is_playing,
+                can_previous: true,
+                can_next: true,
+            });
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update should be generated");
+            let nodes = update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .collect::<Vec<_>>();
+
+            for expected in [playback_action, "Previous frame", "Next frame"] {
+                assert!(
+                    nodes.iter().any(|node| {
+                        node.role() == egui::accesskit::Role::Button
+                            && node.label() == Some(expected)
+                    }),
+                    "missing accessible animation action {expected}"
+                );
+            }
+            assert!(
+                nodes.iter().all(|node| {
+                    node.role() != egui::accesskit::Role::Button
+                        || node.label() != Some(hidden_action)
+                }),
+                "animation exposed both playback actions"
+            );
+            assert!(
+                nodes.iter().any(|node| {
+                    node.label() == Some("Frame 2 of 3") || node.value() == Some("Frame 2 of 3")
+                }),
+                "missing identifiable animation position"
+            );
+        }
+    }
+
+    #[test]
     fn open_with_context_action_explains_source_and_reload_boundaries() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -5672,15 +5725,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn empty_state_geometry_stays_stable_across_unchanged_frames() {
+    fn assert_empty_state_geometry_stays_stable(frame: &UiFrameOwned, state: &str) {
         let context = egui::Context::default();
         context.enable_accesskit();
-        let mut frame = accessibility_test_frame();
-        frame.dock.has_image = false;
-        frame.file_path = None;
-        frame.playlist_pos = None;
-        frame.filmstrip.clear();
         let screen_rect =
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1_000.0, 720.0));
         let mut observed = Vec::new();
@@ -5689,7 +5736,7 @@ mod tests {
             let mut input = accessibility_input();
             input.screen_rect = Some(screen_rect);
             let output = context.run_ui(input, |ui| {
-                let _ = render(ui, &frame);
+                let _ = render(ui, frame);
             });
             let update = output
                 .platform_output
@@ -5715,9 +5762,27 @@ mod tests {
             assert!(
                 (previous.y0 - current.y0).abs() <= 1.0
                     && (previous.height() - current.height()).abs() <= 1.0,
-                "unchanged empty state moved between frames: {observed:?}"
+                "unchanged {state} state moved between frames: {observed:?}"
             );
         }
+    }
+
+    #[test]
+    fn empty_opening_and_error_geometry_stays_stable_across_unchanged_frames() {
+        let mut frame = accessibility_test_frame();
+        frame.dock.has_image = false;
+        frame.file_path = None;
+        frame.playlist_pos = None;
+        frame.filmstrip.clear();
+        assert_empty_state_geometry_stays_stable(&frame, "empty");
+
+        frame.is_opening = true;
+        frame.selected_file_name = Some("opening.png".to_owned());
+        assert_empty_state_geometry_stays_stable(&frame, "opening");
+
+        frame.is_opening = false;
+        frame.load_error = Some("The selected image could not be decoded".to_owned());
+        assert_empty_state_geometry_stays_stable(&frame, "error");
     }
 
     #[test]
@@ -5837,6 +5902,12 @@ mod tests {
             .collect::<Vec<_>>();
         for expected in [
             "About viewr",
+            "A private, local-first image viewer",
+            "No network access",
+            "No telemetry, accounts, cloud sync, or background indexing.",
+            "Photos and edits stay local unless you explicitly save a copy.",
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_LICENSE"),
             "Close",
             "[ / ]  Previous / next page or frame",
             "F5  Reload file",
@@ -5849,11 +5920,42 @@ mod tests {
                 "missing About node: {expected}; exposed: {exposed:?}"
             );
         }
+        let platform = format!("{} / {}", std::env::consts::OS, std::env::consts::ARCH);
+        assert!(
+            exposed.iter().any(|text| text.contains(&platform)),
+            "missing About platform: {platform}; exposed: {exposed:?}"
+        );
         assert!(
             exposed
                 .iter()
                 .all(|text| !text.contains("A / D") && !text.contains("`A`/`D`")),
             "About listed a navigation shortcut the event loop does not own: {exposed:?}"
+        );
+
+        let filtered = actions_owned_by_modal(
+            vec![UiAction::Open, UiAction::CloseAbout, UiAction::Trash],
+            &frame,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(filtered[0], UiAction::CloseAbout));
+
+        let mut escape_input = accessibility_input();
+        escape_input.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut escape_actions = Vec::new();
+        let _ = context.run_ui(escape_input, |ui| {
+            escape_actions = render(ui, &frame);
+        });
+        assert!(
+            escape_actions
+                .iter()
+                .any(|action| matches!(action, UiAction::CloseAbout)),
+            "Escape did not close About"
         );
     }
 

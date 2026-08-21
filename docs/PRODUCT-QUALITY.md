@@ -45,9 +45,11 @@ Run the manual matrix against archives built once from one candidate commit. Do
 not test a local developer build or combine archives from different workflow
 runs.
 
-1. Put the intended v0.6 runtime, package contents, version, changelog, and
-   reviewed release notes on `main`. Confirm the normal CI and fuzz workflows are
-   green for that exact commit.
+1. Put the intended v0.6 runtime, package contents, workspace version, compiled
+   installer commands, unreleased changelog, and reviewed prospective release
+   notes on `main`. Keep README and INSTALL accurate that v0.5.0 is still the
+   public download until v0.6.0 is tagged. Confirm the normal CI and fuzz
+   workflows are green for that exact commit.
 2. Dispatch `Release artifacts` on `main` once. A branch dispatch repeats CI and
    fuzzing, builds all four target archives, verifies them, generates one
    deterministic synthetic fixture artifact, and retains all five artifacts for
@@ -56,10 +58,8 @@ runs.
    ```text
    gh workflow run release.yml --repo blisspixel/viewr --ref main
    gh run list --repo blisspixel/viewr --workflow release.yml --event workflow_dispatch
-   gh run download <run-id> --repo blisspixel/viewr \
-     --dir .agent/product-quality/<run-id>/artifacts
-   python -B scripts/release_artifact.py verify \
-     .agent/product-quality/<run-id>/artifacts/viewr-<target>/<archive>
+   gh run download <run-id> --repo blisspixel/viewr --dir .agent/product-quality/<run-id>/artifacts
+   python -B scripts/release_artifact.py verify .agent/product-quality/<run-id>/artifacts/viewr-<target>/<archive>
    ```
 
 3. Record the run URL and its exact `headSha`. Windows, macOS, and Linux must use
@@ -68,10 +68,12 @@ runs.
    differ.
 4. If application source, dependencies, workflows, packaging, or user-facing
    behavior instructions change after the candidate build, discard every result
-   and start with a new run. Committing completed evidence and updating release
-   status do not change the candidate application that was exercised. The final
-   tag workflow still reruns the complete automated release gate and its published
-   assets receive their own checksum and provenance verification.
+   and start with a new run. Only completed evidence, the release date, and public
+   release-status or immutable-download links may change without resetting the
+   candidate. Those status-only changes do not alter application behavior. The
+   final tag workflow still reruns the complete automated release gate, rebuilds
+   the archives with the final public documents, and gives every published asset
+   its own checksum and provenance verification.
 
 This separates two claims cleanly. v0.6 proves the integrated product on exact
 candidate bytes before tagging. v0.8 later proves clean install, update,
@@ -89,13 +91,19 @@ and workflow run.
 | Platform | Representative hardware | Status |
 | --- | --- | --- |
 | Windows | Typical laptop or desktop at 100%, 150%, and 200% scale, including a move between displays with different scale factors | Not yet recorded |
-| macOS | Retina laptop plus an external display, including a live move between them | Not yet recorded |
+| macOS | Apple Silicon Retina laptop plus an external display, including a live move between them | Not yet recorded |
 | Linux | Native Wayland and X11 or Xwayland sessions at a typical desktop scale, plus a Mesa software-GPU session | Not yet recorded |
 
 A platform record may combine explicitly named hosts or sessions when one machine
 cannot cover the row. Its metadata and observations must say which host or
 session produced each result. Lack of suitable hardware is not a pass; keep the
 row open until the coverage exists.
+
+The v0.6 macOS hardware claim is explicitly Apple Silicon. The aarch64 archive
+must be the macOS record's artifact. The x86_64 macOS archive remains covered by
+native hosted build, tests, archive verification, checksums, and final release
+attestation, but Intel hardware acceptance is deferred to the v0.8 complete
+artifact matrix. Do not imply that the v0.6 record tested Intel hardware.
 
 ## Candidate fixture artifact
 
@@ -111,10 +119,8 @@ same fixture roles from the candidate checkout without treating a developer
 build as the application under test:
 
 ```text
-cargo run --release --locked -p viewr \
-  --example gen_product_quality_fixtures -- <new-output-directory>
-python -B scripts/product_quality_evidence.py fixture-manifest \
-  <new-output-directory>
+cargo run --release --locked -p viewr --example gen_product_quality_fixtures -- <new-output-directory>
+python -B scripts/product_quality_evidence.py fixture-manifest <new-output-directory>
 ```
 
 Use `browse/1-red.png`, `browse/2-green.png`, and `browse/10-blue.png` for open,
@@ -140,9 +146,9 @@ Run the same workflow on every platform.
 | ID | Action | Required result |
 | --- | --- | --- |
 | PQ-FT-01 | Launch with no path | The window opens at the documented monitor-bounded size. The empty card names Open File, Open Folder, drop, sibling browsing versus explicit folder consent, and the local-only privacy line. No confirmation step is added. |
-| PQ-FT-02 | Open `browse/1-red.png` | The image appears without changing window size. When access allows, Left and Right browse its folder in natural order. The last good frame stays visible during a later miss. |
+| PQ-FT-02 | Open `browse/1-red.png`, browse the three images in natural order, then open a disposable copy of `editing/source.png`, overwrite that copy with `failure/malformed.png`, and press F5 | Each image appears without changing window size. Natural order is red, green, blue. The forced later miss keeps the last good frame visible and reports the reload failure. |
 | PQ-FT-03 | Drop `browse/1-red.png`, then the `browse/` folder | The drop is classified the same way as a command-line path: a folder starts the Open Folder browse; a file opens as a file. |
-| PQ-FT-04 | Open Folder | The session browses that folder explicitly. Sandboxed file-only grants remain one image until this consent exists. |
+| PQ-FT-04 | Choose `browse/` with Open Folder, then cite the candidate workflow's `tests/sandbox_profiles.rs` job and `selected_file_scan_outcomes_cover_success_and_limits` in the observation | The portable archive browses the selected folder explicitly. The package-profile checks prove the sandbox grants, while the exact entry-state test proves that a failed sibling scan retains only the selected image until explicit folder consent exists. The portable archive is not misrepresented as a sandbox package. |
 | PQ-FT-05 | Open Help > About viewr | Version, platform, license, privacy, and the grouped shortcut catalog are readable. Background controls cannot activate. Close and Escape dismiss it. On the 640 by 480 minimum window, Close stays reachable. |
 | PQ-FT-06 | Open both files under `failure/` | The card heading names the selected file, the error is one short line, Retry is present, and menus stay usable. |
 
@@ -153,9 +159,9 @@ Run the same workflow on every platform.
 | PQ-PW-01 | Keyboard-only first image | `O` or `Ctrl/Cmd+O` opens a file; `Ctrl/Cmd+Shift+O` opens a folder; Left/Right, Home/End, Page Up/Page Down browse. |
 | PQ-PW-02 | Open `sequences/two-page.tiff` and `sequences/two-size.ico` | `[` and `]` plus Image Information and View step one page. Documents do not play. Crop and Spot Heal block a step. |
 | PQ-PW-03 | Open all three `sequences/two-frame.*` animations | GIF, WebP, and APNG play in bounds. While paused, `[` and `]` step frames. |
-| PQ-PW-04 | Open `visual/small.png` and `visual/large.png` | Space tap fits. Hold Space to pan. `Ctrl/Cmd+0` fits, `Ctrl/Cmd+1` is actual size, `+` / `-` zoom at the cursor. The small source rests at 100 percent. |
+| PQ-PW-04 | Open `visual/small.png` and `visual/large.png` | Space tap fits. Hold Space to pan. `Ctrl/Cmd+0` fits, `Ctrl/Cmd+1` is actual size, and `+` / `-` zoom around the viewport center. Wheel or trackpad zoom keeps the pointer location fixed. The small source rests at 100 percent. |
 | PQ-PW-05 | Panels | `T`, `G`, and `I` show Tools, Folder Previews, and Image Information. Persistent chrome never covers the photo. |
-| PQ-PW-06 | Replace a disposable copy of `editing/source.png` with `editing/replacement.png` | `F5` reloads without blanking. An external change with unsaved edits keeps the last good frame and asks for F5. |
+| PQ-PW-06 | Replace a disposable copy of `editing/source.png` with `editing/replacement.png` and press F5. Repeat after making an unsaved crop before the external replacement | The clean case reloads without blanking. The unsaved-edit case keeps the last good frame, does not discard the crop, and asks for F5. |
 | PQ-PW-07 | Save As and Trash a disposable `editing/source.png` | `Ctrl/Cmd+Shift+S` exports. Delete moves the visible image to Trash. `U` restores the recoverable receipt when the platform can prove it. |
 
 ### Admin
@@ -163,7 +169,7 @@ Run the same workflow on every platform.
 | ID | Action | Required result |
 | --- | --- | --- |
 | PQ-AD-01 | `viewr doctor` | Reports binaries, worker protocol, windowing libraries, and graphics runtimes. A passing last line is not proof that a window opened. |
-| PQ-AD-02 | Clean install of the current preview | The published installer command uses the immutable v0.5.0 asset until v0.6 is tagged. No background updater runs. |
+| PQ-AD-02 | Inspect the installation contract in the candidate archive | README and INSTALL identify v0.5.0 as the current immutable public download until v0.6.0 is tagged. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, and rollback acceptance remain the v0.8 gate. |
 | PQ-AD-03 | Help > Get latest release | The Update modal names the running version, refuses to check a network, and only the explicit button hands the release URL to the browser. |
 | PQ-AD-04 | Unsigned preview | OS trust warnings may appear. Docs do not tell anyone to disable platform security. |
 
@@ -173,9 +179,21 @@ Run the same workflow on every platform.
 | --- | --- | --- |
 | PQ-RC-01 | Launch directly with `failure/malformed.png` | The empty canvas does not claim a previous image is visible. Retry stays available. |
 | PQ-RC-02 | Delete a disposable `editing/source.png` outside viewr | The last good frame stays. A polite status says the selected path no longer names that file. |
-| PQ-RC-03 | Worker or preview loss | Named recovery status, not a silent busy state. Crop or preview work that cannot continue says to close and reopen before trying that path again. |
-| PQ-RC-04 | Restore ownership unsettled | Undo Trash does not claim a settled receipt. A new Trash move waits. |
-| PQ-RC-05 | Launch missing a windowing library or GPU runtime | The process prints an actionable message and exits non-zero. `doctor` names the same gap. |
+
+### Candidate automated prerequisites
+
+The following fault states have no safe deterministic trigger in the production
+interface on every platform. They are candidate-wide automated prerequisites,
+not instructions to add a hidden release fault mode. Each platform record still
+contains these IDs, but its observation cites the exact candidate CI run and the
+named test or controlled job. The same provenance is expected in all three
+records.
+
+| ID | Automated procedure | Required result |
+| --- | --- | --- |
+| PQ-RC-03 | In the exact candidate CI test job, run the workspace suite containing `crop_preview_disconnect_copy_and_recovery_priority_are_truthful`, `dropped_and_panicking_workers_have_stable_terminal_failures`, and `dropped_worker_and_panicking_worker_are_observable_terminal_failures`. | Executor loss becomes a named terminal recovery state. Crop or preview work that cannot continue tells the user to close and reopen before retrying that path. |
+| PQ-RC-04 | In the exact candidate CI test job, run the workspace suite containing `recovery_blocks_only_actions_that_need_the_unsettled_owner` and its Undo Trash unsettled-state assertions. | Undo Trash does not claim a settled receipt, and another Trash move stays blocked while restore ownership is unsettled. |
+| PQ-RC-05 | In the exact candidate CI test and GUI-performance jobs, run the startup support matrix, missing-library copy tests, doctor tests, and Linux Xvfb software-Mesa presentation probe. | Missing presentation dependencies produce actionable non-zero launch diagnostics, `doctor` names the same class of gap, and the controlled software-GPU environment presents successfully. |
 
 ### Visual polish and budgets
 
@@ -183,8 +201,70 @@ Run the same workflow on every platform.
 | --- | --- | --- |
 | PQ-VS-01 | Empty, opening, and error cards | Opaque themed surfaces, AA text, stable geometry across unchanged frames, no vertical drift. |
 | PQ-VS-02 | Light, Dark, Console, and inspection backgrounds | Chrome tokens stay AA. Image pixels are unchanged by Appearance. |
-| PQ-VS-03 | Mixed DPI and multi-monitor | Text, focus rings, and panels stay usable at 100%, 150%, and 200%. Moving the window between monitors refreshes the display profile on unmanaged Windows-legacy and real X11. |
-| PQ-VS-04 | Startup and navigation | Window-ready, first-pixel, navigation, idle-redraw, and memory numbers meet [PERFORMANCE.md](PERFORMANCE.md) on CI and do not regress on representative hardware. |
+| PQ-VS-03 | Move the window repeatedly between the differently scaled displays or sessions named in the platform metadata, then cite `profile_refresh_follows_monitor_identity_changes` and `returning_to_a_prior_monitor_is_a_new_identity` from the candidate workflow | Text, focus rings, and panels stay usable throughout the required platform scale coverage. The manual result records every move. The named automated checks prove display-profile refresh on monitor identity changes without pretending a portable archive exposes internal ICC-refresh state. |
+| PQ-VS-04 | Run the candidate-binary performance procedure below | Window-ready, first-pixel, navigation, idle-redraw, memory, 50,000-file, and decoded-cache numbers meet [PERFORMANCE.md](PERFORMANCE.md). The observation records every numeric summary value and both tested executable SHA-256 values. |
+
+## Candidate-binary performance procedure
+
+Use the extracted, archive-verified candidate binary, not a local build. Run the
+harness from a clean checkout of the recorded candidate commit. It creates and
+deletes its own deterministic 16-image, 50,000-image, and 4096-square cache-stress
+corpora. The fixture artifact alone is intentionally small and is not performance
+evidence.
+
+First verify the archive and sidecar as described above. The archive extracts into
+an archive-prefix directory, and both `viewr` and `viewr-decode` are under `bin/`.
+Run the required session commands from the candidate checkout. The harness removes
+an inherited `VIEWR_DECODE_BIN`, requires the colocated worker, copies both
+verified executables into a private harness directory, and hashes those copies
+before and after the complete run. On Windows, make the tested display primary
+and run this one-line PowerShell command first at 100% scale. Repeat it at 150%
+and 200% after changing the primary display scale, session label, and filename to
+`windows-150` and `windows-200`:
+
+```text
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.6.0/performance/windows-100.json
+```
+
+On macOS, make the built-in Retina display the main display and run once with
+`macos-retina`, then make the external display the main display and run once with
+`macos-external`. Use the same value for the session label and filename. The
+report records a one-way SHA-256 identity, built-in and Retina flags, and measured
+scale for the main display. On Linux, run in the native sessions named below:
+
+```text
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.0/performance/<session>.json
+```
+
+Use `linux-wayland` and `linux-x11` in the corresponding native sessions. For the
+Xwayland variant, also set `WINIT_UNIX_BACKEND=x11` so the measured report records
+that explicit backend selection. The Wayland session does not require Xwayland or
+`DISPLAY`; its actual renderer identity comes from viewr's wgpu adapter. For the
+required software renderer, use an X11 or Xwayland session with `DISPLAY`, install
+`glxinfo`, confirm that `glxinfo -B` names Mesa llvmpipe or softpipe, then run:
+
+```text
+WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.6.0/performance/linux-mesa-software.json
+```
+
+The complete committed report set is exactly `windows-100`, `windows-150`,
+`windows-200`, `macos-retina`, `macos-external`, `linux-wayland`, `linux-x11`, and
+`linux-mesa-software`, each with the `.json` suffix. Each report contains no path,
+refuses to overwrite earlier evidence, includes both candidate executable SHA-256
+values, measured display or session evidence, sanitized renderer controls, and all
+raw probe records, enforced budgets, exact folder-growth value, summary, and pass
+or fail state. Each raw probe records the backend, name, device type, and driver
+of the wgpu adapter that actually presented its frames. Only the software-Mesa
+session also records the environment's OpenGL query. The gate rejects impossible
+platform backends, adapter changes within one session, and raw runs copied between
+any required sessions. Copy the
+worst-case rollup into PQ-VS-04: window ready ms, first pixel ms, navigation
+maximum ms, idle redraws, small RSS MiB, large RSS MiB, folder growth MiB,
+large-folder image count, cache-stress entry count and MiB, `viewr` SHA-256,
+`viewr-decode` SHA-256, and every report path. A generated failed report remains defect evidence. If the
+harness fails before it can create a report, record the console diagnostic as a
+Fail observation and do not invent numeric values. A failed or missing report
+cannot close the gate.
 
 ## Recording a result
 
@@ -197,27 +277,48 @@ Fixture manifest SHA-256, Artifact filename, Artifact SHA-256, Package type,
 Operating system, Display scale, Graphics adapter, and Run date. Fixture artifact
 is `product-quality-fixtures`; package type is `portable archive`. A second table
 contains Check, Result, and Observation. It records every ID above exactly once
-with Pass, Fail, or Approved exception. Every observation is substantive. An
-approved exception links the reviewed GitHub issue that owns it.
+with Pass, Fail, or Approved exception. Every observation is substantive and
+names what was exercised, what was observed, and which named host or session
+produced it. Generic text such as `Observed expected behavior`, `Pass`, or `OK`
+is rejected. An approved exception links the reviewed GitHub issue that owns it
+and starts with `Low severity:` or `Medium severity:`. Critical and high-severity
+exceptions cannot pass. The validator requires each manual row to name its
+row-specific controls and outcomes plus the host or session. PQ-FT-04 and
+PQ-VS-03 also cite their named candidate-workflow checks. PQ-RC-03 through
+PQ-RC-05 are hard prerequisites: all three records repeat the same exact
+candidate-run observation, and no exception can close them. PQ-VS-04 is also a
+hard prerequisite and cannot close through an exception.
 
 Validate each completed record and then the three-platform gate:
 
 ```text
 python -B scripts/product_quality_evidence.py check <platform-record.md>
-python -B scripts/product_quality_evidence.py gate \
-  docs/release-evidence/product-quality/v0.6.0 \
-  --artifacts .agent/product-quality/<run-id>/artifacts
+python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.0
 ```
 
-The gate rejects missing or duplicate rows, placeholder observations, invalid
-archive provenance, mixed candidate runs, and every recorded failure. It also
-uses GitHub CLI to prove that the recorded URL is a successful manual `Release
-artifacts` run on `main` at the recorded commit, then compares every recorded
-digest with the downloaded archive and its sidecar. The check command accepts a
-complete failing record so a defect can be preserved honestly before it is
-fixed. The gate also requires the exact nonempty synthetic fixture set generated
-by that workflow run, verifies its per-file checksums, and requires every platform
-to record the same checksum-manifest digest.
+The gate rejects missing or duplicate rows, generic observations, invalid archive
+provenance, mixed candidate runs, incomplete performance sessions, and every
+recorded failure. It uses GitHub CLI to prove that the recorded URL is a successful
+manual `Release artifacts` run on `main` at the recorded commit and downloads that
+run into a fresh temporary directory itself. It verifies all four archives with
+the canonical archive verifier, including automated Intel macOS coverage, checks
+the recorded archive digests, and compares every performance report's two
+executable SHA-256 values with `bin/viewr[.exe]` and `bin/viewr-decode[.exe]` in
+the applicable archive manifest. It
+also recomputes every report summary from its retained raw runs and rejects hidden
+playlist, cache, thumbnail, idle, adapter, or budget failures. The software-Mesa
+session must prove that the actual viewr adapter is the controlled GL software
+adapter, not merely that an unrelated graphics query found one. A caller-supplied
+local artifact directory is never treated as run provenance. Manual candidate
+runs store retained artifacts without compression so GitHub's reported artifact
+sizes bound the bytes extracted by the CLI; the gate checks those sizes before
+download and checks file and aggregate limits again afterward. Tag runs may use
+normal artifact compression because they are not accepted as candidate evidence.
+
+The check command accepts a complete failing record so a defect can be preserved
+honestly before it is fixed. The gate also requires the exact nonempty synthetic
+fixture set downloaded from that workflow run, verifies its per-file checksums,
+and requires every platform to record the same checksum-manifest digest.
 
 Use only synthetic filenames and fixtures. Do not include a personal image,
 private path, raw metadata, or unrelated screen content. If the tested artifact

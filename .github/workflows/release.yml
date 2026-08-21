@@ -100,6 +100,7 @@ jobs:
           name: product-quality-fixtures
           path: target/product-quality-fixtures/
           if-no-files-found: error
+          compression-level: ${{ github.ref_type == 'tag' && 6 || 0 }}
           retention-days: 30
 
       - name: Retain checksummed release artifact
@@ -108,6 +109,7 @@ jobs:
           name: viewr-${{ matrix.target }}
           path: target/release-artifacts/
           if-no-files-found: error
+          compression-level: ${{ github.ref_type == 'tag' && 6 || 0 }}
           retention-days: 30
 
   publish:

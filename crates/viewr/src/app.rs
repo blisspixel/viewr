@@ -5360,6 +5360,56 @@ impl App {
         event_loop.exit();
     }
 
+    fn performance_probe_adapter(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) -> Option<crate::performance::GpuAdapterReport> {
+        if let Some(renderer) = self.renderer.as_ref() {
+            return Some(renderer.performance_adapter().clone());
+        }
+        self.fail_performance_probe(event_loop, "probe never initialized a GPU adapter".into());
+        None
+    }
+
+    fn complete_performance_probe(&mut self, event_loop: &ActiveEventLoop, playlist_len: usize) {
+        let Some(adapter) = self.performance_probe_adapter(event_loop) else {
+            return;
+        };
+        let probe = self.performance_probe.as_ref().unwrap();
+        let Some(window_ready) = probe.window_ready else {
+            self.fail_performance_probe(event_loop, "probe never observed a visible window".into());
+            return;
+        };
+        let Some(first_pixel) = probe.first_pixel else {
+            self.fail_performance_probe(event_loop, "probe never presented an image frame".into());
+            return;
+        };
+        let (idle_window_focused, idle_pointer_inside) = idle_window_state(self.renderer.as_ref());
+        let report = crate::performance::PerformanceReport {
+            adapter_backend: adapter.backend,
+            adapter_name: adapter.name,
+            adapter_device_type: adapter.device_type,
+            adapter_driver: adapter.driver,
+            window_ready_us: crate::performance::duration_us(window_ready),
+            first_pixel_us: crate::performance::duration_us(first_pixel),
+            max_navigation_us: crate::performance::duration_us(probe.max_navigation),
+            idle_redraws: probe.idle_redraws,
+            idle_non_redraw_events: probe.idle_non_redraw_events,
+            idle_event_repaint_requests: probe.idle_event_repaint_requests,
+            idle_scheduled_egui_repaints: probe.idle_scheduled_egui_repaints,
+            idle_window_focused,
+            idle_pointer_inside,
+            peak_resident_bytes: probe.peak_resident_bytes,
+            playlist_entries: playlist_len,
+            decoded_cache_entries: self.prefetch.len(),
+            decoded_cache_bytes: u64::try_from(self.prefetch.bytes()).unwrap_or(u64::MAX),
+            thumbnail_texture_entries: self.thumb_textures.len(),
+        };
+        let outcome = validate_performance_report(report);
+        self.performance_probe.as_mut().unwrap().outcome = Some(outcome);
+        event_loop.exit();
+    }
+
     fn performance_probe_timeout_message(&self) -> String {
         let visible = self.visible_filmstrip_paths();
         let ready_thumbnails = visible
@@ -5451,7 +5501,6 @@ impl App {
             }
             return;
         }
-
         if !self.performance_probe_is_settled() {
             if let Some(probe) = self.performance_probe.as_mut()
                 && probe.idle_until.is_some()
@@ -5485,35 +5534,7 @@ impl App {
             return;
         }
 
-        let probe = self.performance_probe.as_ref().unwrap();
-        let Some(window_ready) = probe.window_ready else {
-            self.fail_performance_probe(event_loop, "probe never observed a visible window".into());
-            return;
-        };
-        let Some(first_pixel) = probe.first_pixel else {
-            self.fail_performance_probe(event_loop, "probe never presented an image frame".into());
-            return;
-        };
-        let (idle_window_focused, idle_pointer_inside) = idle_window_state(self.renderer.as_ref());
-        let report = crate::performance::PerformanceReport {
-            window_ready_us: crate::performance::duration_us(window_ready),
-            first_pixel_us: crate::performance::duration_us(first_pixel),
-            max_navigation_us: crate::performance::duration_us(probe.max_navigation),
-            idle_redraws: probe.idle_redraws,
-            idle_non_redraw_events: probe.idle_non_redraw_events,
-            idle_event_repaint_requests: probe.idle_event_repaint_requests,
-            idle_scheduled_egui_repaints: probe.idle_scheduled_egui_repaints,
-            idle_window_focused,
-            idle_pointer_inside,
-            peak_resident_bytes: probe.peak_resident_bytes,
-            playlist_entries: playlist_len,
-            decoded_cache_entries: self.prefetch.len(),
-            decoded_cache_bytes: u64::try_from(self.prefetch.bytes()).unwrap_or(u64::MAX),
-            thumbnail_texture_entries: self.thumb_textures.len(),
-        };
-        let outcome = validate_performance_report(report);
-        self.performance_probe.as_mut().unwrap().outcome = Some(outcome);
-        event_loop.exit();
+        self.complete_performance_probe(event_loop, playlist_len);
     }
 }
 

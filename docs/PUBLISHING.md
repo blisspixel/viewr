@@ -60,11 +60,13 @@ when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
-1. On a feature branch, update the workspace version, CHANGELOG, README status,
-   roadmap gate, all behavior-specific documentation, and
-   `docs/releases/v<version>.md`. Commit and review the release notes before the
-   candidate build because the tag workflow uses that file as its only release
-   body. Generated notes are not accepted.
+1. On a feature branch, update the workspace version, compiled version-specific
+   commands, unreleased CHANGELOG, candidate status, behavior-specific
+   documentation, and `docs/releases/v<version>.md`. Commit and review the
+   prospective release notes before the candidate build because the tag workflow
+   uses that file as its only release body. Generated notes are not accepted.
+   Keep README and INSTALL accurate that the prior immutable release remains the
+   public install target until the new tag exists.
 2. Run the complete local checks in [Verification](VERIFY.md).
 3. Confirm `THIRD_PARTY_LICENSES.txt` matches a fresh offline `cargo-about`
    render and the Flatpak source map matches the lockfile.
@@ -74,20 +76,22 @@ production environment.
    procedure in [Product quality](PRODUCT-QUALITY.md). Every record must identify
    one candidate workflow run and its exact commit. Any later change to application
    source, dependencies, workflows, packaging, or user-facing behavior instructions
-   invalidates those records and requires a new candidate run. Evidence and release
-   status records may be committed after the run. Validate the complete set with:
+   invalidates those records and requires a new candidate run. Completed evidence,
+   the release date, public release-status or immutable-download links, and the
+   test assertions that pin those public strings may be committed after the run
+   because they do not alter application behavior. Nothing else is a status-only
+   exception. Validate the complete set with:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate \
-     docs/release-evidence/product-quality/v0.6.0 \
-     --artifacts .agent/product-quality/<run-id>/artifacts
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.0
    ```
 
-6. Integrate the evidence and release-status records through normal review, then
-   confirm that no
-   application, dependency, workflow, packaging, or behavior-instruction change
-   has invalidated the candidate. Require green CI and fuzz on the intended tag
-   commit.
+6. Integrate the evidence and status-only release change through normal review.
+   Date the CHANGELOG entry, advance README and INSTALL to the immutable v0.6.0
+   URLs, and update the roadmap evidence. Then confirm that no application,
+   dependency, workflow, packaging, or behavior-instruction change has invalidated
+   the candidate. Require green CI and fuzz on the intended tag commit. The tag
+   workflow rebuilds and verifies archives containing the final public documents.
 7. Confirm the tag is exactly `v<workspace-version>`, then create and push an
    annotated tag:
 

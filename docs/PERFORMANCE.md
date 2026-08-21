@@ -119,9 +119,18 @@ python -B scripts/performance_gate.py --binary target/release/viewr
 ```
 
 On Windows, pass `--no-xvfb` and use `target/debug/viewr.exe` when console output
-is needed from a local developer build. Add `--idle-diagnostics` to retain the
-fixed per-run attribution above even when the gate is green. The normal release
-GUI remains a windowed application without a console.
+is needed from a local developer build. Add `--idle-diagnostics` to print the
+fixed per-run attribution above even when the gate is green. Add
+`--session-label <label> --report-file <new-path>.json` to retain a path-free,
+binary-digest-bound record of every run, the aggregate values, exact enforced
+folder growth, sanitized renderer controls, actual wgpu adapter identity, budgets,
+and pass or fail state. The harness copies the verified application and decoder
+executables into a private directory, runs only those copies, and rejects any
+byte change. The lowercase session label must match the report filename stem, and
+the command refuses to overwrite an existing report. The normal release GUI
+remains a windowed application without a console. A launch, timeout, or parse
+failure can occur before a structured report exists; preserve that diagnostic as
+a failed quality observation instead of inventing measurements.
 
 Decode-only measurements remain available separately:
 
@@ -160,15 +169,19 @@ state. After the probe began waiting for that deadline to become quiet, every
 focused and pointer-inside window completed at zero or one measured redraw without
 changing application scheduling or weakening the limit of two.
 
-The latest `main` release-mode Ubuntu performance job passed in
-[CI run 32338720666](https://github.com/blisspixel/viewr/actions/runs/32338720666)
-on 2026-08-20 at commit `b2e1b77`: 117.82 ms first window, 282.89 ms first pixel,
-186.65 ms slowest sampled navigation, zero settled idle redraws, 312.25 MiB
-small-folder peak resident set, 330.08 MiB large-folder peak resident set, and four
-decoded cache entries at the exact 256 MiB byte budget. It proves the regression
-budgets under the documented Ubuntu, Xvfb, and software-GPU environment. It does
-not replace the open target-hardware checks for Windows, macOS, representative
-Linux desktops, mixed-DPI displays, or profiled monitors.
+The last audited maintenance baseline passed its release-mode Ubuntu performance
+job in [CI run 32419502385](https://github.com/blisspixel/viewr/actions/runs/32419502385)
+on 2026-08-20 at commit `8cbe724`: 108.94 ms first window, 257.93 ms first pixel,
+199.20 ms slowest sampled navigation, zero settled idle redraws, 313.16 MiB
+small-folder peak resident set, 329.70 MiB large-folder peak resident set, 50,000
+images, and four decoded cache entries at the exact 256 MiB byte budget. It proves
+the regression budgets under the documented Ubuntu, Xvfb, and software-GPU
+environment. The README badge and GitHub branch page are the live status. This
+immutable baseline does not replace the open target-hardware checks for Windows,
+macOS, representative Linux desktops, mixed-DPI displays, or profiled monitors.
+The CI software-GL presentation probe also parses the exact performance report
+schema and accepts success only when viewr's measured adapter is an identified
+OpenGL software renderer, rather than trusting the ambient environment alone.
 
 ## Decode reference
 

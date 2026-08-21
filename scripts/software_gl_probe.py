@@ -13,7 +13,7 @@ Timing is deliberately not asserted here; `performance_gate.py` owns budgets.
 from __future__ import annotations
 
 import argparse
-import json
+import re
 import shutil
 import subprocess
 import sys
@@ -21,9 +21,16 @@ import tempfile
 from pathlib import Path
 from typing import Sequence
 
-from scripts.performance_gate import deterministic_png
+from scripts.performance_gate import (
+    PerformanceGateError,
+    deterministic_png,
+    parse_report,
+)
 
 PROBE_TIMEOUT_SECONDS = 180
+SOFTWARE_ADAPTER_PATTERN = re.compile(
+    r"\b(?:llvmpipe|softpipe|software rasterizer)\b", re.IGNORECASE
+)
 
 
 class SoftwareGlProbeError(RuntimeError):
@@ -51,16 +58,22 @@ def probe_command(binary: Path, image: Path) -> list[str]:
 
 
 def presented(report: str) -> bool:
-    """Whether the probe reported a presented first frame."""
+    """Whether the exact probe report proves software-OpenGL presentation."""
 
     try:
-        measurements = json.loads(report)
-    except json.JSONDecodeError as error:
-        raise SoftwareGlProbeError(f"probe report was not JSON: {error}") from error
-    first_pixel = measurements.get("first_pixel_us")
-    if not isinstance(first_pixel, int):
-        raise SoftwareGlProbeError("probe report has no first_pixel_us measurement")
-    return first_pixel > 0
+        measurements = parse_report(report)
+    except PerformanceGateError as error:
+        raise SoftwareGlProbeError(f"probe report was invalid: {error}") from error
+    adapter_text = f"{measurements.adapter_name} {measurements.adapter_driver}"
+    if (
+        measurements.adapter_backend != "gl"
+        or measurements.adapter_device_type not in {"cpu", "other"}
+        or SOFTWARE_ADAPTER_PATTERN.search(adapter_text) is None
+    ):
+        raise SoftwareGlProbeError(
+            "probe did not use an identified OpenGL software adapter"
+        )
+    return measurements.first_pixel_us > 0
 
 
 def run(binary: Path) -> int:

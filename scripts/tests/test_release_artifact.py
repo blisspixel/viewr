@@ -662,6 +662,11 @@ class ReleaseArtifactTests(unittest.TestCase):
             "if: github.ref_type != 'tag' && matrix.target == 'x86_64-unknown-linux-gnu'",
             workflow,
         )
+        self.assertEqual(
+            workflow.count("${{ runner.temp }}/product-quality-fixtures"),
+            3,
+        )
+        self.assertNotIn("target/product-quality-fixtures", workflow)
         self.assertIn("pattern: viewr-*", workflow)
 
     def test_release_workflow_uses_reviewed_notes_and_immutable_installers(

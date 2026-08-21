@@ -423,6 +423,8 @@ class PerformanceGateTests(unittest.TestCase):
             report(
                 window_ready_us=300,
                 first_pixel_us=900,
+                max_navigation_us=30,
+                idle_redraws=1,
                 idle_non_redraw_events=1,
                 idle_window_focused=False,
                 peak_resident_bytes=1,
@@ -431,6 +433,8 @@ class PerformanceGateTests(unittest.TestCase):
             report(
                 window_ready_us=100,
                 first_pixel_us=500,
+                max_navigation_us=10,
+                idle_redraws=3,
                 idle_non_redraw_events=3,
                 idle_pointer_inside=True,
                 peak_resident_bytes=3,
@@ -439,6 +443,8 @@ class PerformanceGateTests(unittest.TestCase):
             report(
                 window_ready_us=200,
                 first_pixel_us=700,
+                max_navigation_us=20,
+                idle_redraws=2,
                 peak_resident_bytes=2,
                 decoded_cache_bytes=2,
             ),
@@ -446,6 +452,8 @@ class PerformanceGateTests(unittest.TestCase):
         combined = _median_report(reports)
         self.assertEqual(combined.window_ready_us, 200)
         self.assertEqual(combined.first_pixel_us, 700)
+        self.assertEqual(combined.max_navigation_us, 30)
+        self.assertEqual(combined.idle_redraws, 3)
         self.assertEqual(combined.peak_resident_bytes, 3)
         self.assertEqual(combined.decoded_cache_bytes, 3)
         self.assertEqual(combined.idle_non_redraw_events, 3)
@@ -547,6 +555,61 @@ class PerformanceGateTests(unittest.TestCase):
         self.assertNotIn("private-folder", json.dumps(rendered))
         self.assertNotIn("private/path", json.dumps(rendered))
 
+    def test_evidence_summary_includes_large_and_cache_stress_interactions(
+        self,
+    ) -> None:
+        def render(large: ProbeReport, cache_stress: ProbeReport) -> dict[str, object]:
+            small_reports = [report(max_navigation_us=10_000, idle_redraws=0)]
+            large_reports = [large]
+            return _evidence_report(
+                {"viewr": "f" * 64, "viewr-decode": "e" * 64},
+                "windows-200",
+                "Windows",
+                {"display_scale_percent": 200},
+                Budgets(3000, 5000, 500, 2, 768, 96),
+                small_reports,
+                large_reports,
+                cache_stress,
+                _median_report(small_reports),
+                _median_report(large_reports),
+                200 * 1024 * 1024,
+                [],
+            )["summary"]
+
+        large_worst = render(
+            report(
+                playlist_entries=50_000,
+                window_ready_us=400_000,
+                first_pixel_us=600_000,
+                max_navigation_us=300_000,
+                idle_redraws=2,
+            ),
+            report(
+                playlist_entries=8,
+                max_navigation_us=20_000,
+                idle_redraws=1,
+            ),
+        )
+        self.assertEqual(large_worst["window_ready_ms"], 400.0)
+        self.assertEqual(large_worst["first_pixel_ms"], 600.0)
+        self.assertEqual(large_worst["navigation_max_ms"], 300.0)
+        self.assertEqual(large_worst["idle_redraws"], 2)
+
+        cache_worst = render(
+            report(
+                playlist_entries=50_000,
+                max_navigation_us=20_000,
+                idle_redraws=1,
+            ),
+            report(
+                playlist_entries=8,
+                max_navigation_us=300_000,
+                idle_redraws=2,
+            ),
+        )
+        self.assertEqual(cache_worst["navigation_max_ms"], 300.0)
+        self.assertEqual(cache_worst["idle_redraws"], 2)
+
     def test_evaluate_reports_every_timing_memory_and_cache_violation(self) -> None:
         budgets = Budgets(3000, 5000, 500, 2, 768, 96)
         small = report(
@@ -566,7 +629,7 @@ class PerformanceGateTests(unittest.TestCase):
             decoded_cache_bytes=256 * 1024 * 1024 + 1,
             thumbnail_texture_entries=10,
         )
-        failures = evaluate(small, large, budgets, 16, 50_000)
+        failures = evaluate(small, large, report(), budgets, 16, 50_000)
         self.assertEqual(len(failures), 14)
         self.assertTrue(any("window ready" in failure for failure in failures))
         self.assertTrue(any("first pixel" in failure for failure in failures))
@@ -588,7 +651,52 @@ class PerformanceGateTests(unittest.TestCase):
             peak_resident_bytes=(200 + 96) * 1024 * 1024,
             playlist_entries=50_000,
         )
-        self.assertEqual(evaluate(small, large, budgets, 16, 50_000), [])
+        self.assertEqual(evaluate(small, large, report(), budgets, 16, 50_000), [])
+
+    def test_evaluate_enforces_large_and_cache_stress_interactions(self) -> None:
+        budgets = Budgets(3000, 5000, 500, 2, 768, 96)
+        cases = (
+            (
+                "large window ready",
+                report(playlist_entries=50_000, window_ready_us=3_000_001),
+                report(),
+                "window ready",
+            ),
+            (
+                "large first pixel",
+                report(playlist_entries=50_000, first_pixel_us=5_000_001),
+                report(),
+                "first pixel",
+            ),
+            (
+                "large navigation",
+                report(playlist_entries=50_000, max_navigation_us=500_001),
+                report(),
+                "sampled navigation",
+            ),
+            (
+                "large idle",
+                report(playlist_entries=50_000, idle_redraws=3),
+                report(),
+                "large idle redraws",
+            ),
+            (
+                "cache navigation",
+                report(playlist_entries=50_000),
+                report(max_navigation_us=500_001),
+                "sampled navigation",
+            ),
+            (
+                "cache idle",
+                report(playlist_entries=50_000),
+                report(idle_redraws=3),
+                "cache-stress idle redraws",
+            ),
+        )
+        for label, large, cache_stress, expected in cases:
+            with self.subTest(label=label):
+                failures = evaluate(report(), large, cache_stress, budgets, 16, 50_000)
+                self.assertTrue(any(expected in failure for failure in failures))
 
     def test_cache_stress_gate_exercises_byte_eviction_and_accounting(self) -> None:
         image_bytes = 4096 * 4096 * 4
@@ -641,10 +749,11 @@ class PerformanceGateTests(unittest.TestCase):
             peak_resident_bytes=350 * 1024 * 1024,
             playlist_entries=50_000,
         )
-        self.assertEqual(evaluate(small, large, budgets, 16, 50_000), [])
+        self.assertEqual(evaluate(small, large, report(), budgets, 16, 50_000), [])
         failures = evaluate(
             small,
             large,
+            report(),
             budgets,
             16,
             50_000,

@@ -339,6 +339,7 @@ def _idle_diagnostics(
 def evaluate(
     small: ProbeReport,
     large: ProbeReport,
+    cache_stress: ProbeReport,
     budgets: Budgets,
     small_count: int,
     large_count: int,
@@ -352,15 +353,34 @@ def evaluate(
         if actual > limit:
             failures.append(f"{label}: {actual:.2f} {unit} exceeds {limit:.2f} {unit}")
 
-    over(small.window_ready_us / 1000, budgets.window_ready_ms, "window ready", "ms")
-    over(small.first_pixel_us / 1000, budgets.first_pixel_ms, "first pixel", "ms")
     over(
-        small.max_navigation_us / 1000,
+        max(small.window_ready_us, large.window_ready_us) / 1000,
+        budgets.window_ready_ms,
+        "window ready",
+        "ms",
+    )
+    over(
+        max(small.first_pixel_us, large.first_pixel_us) / 1000,
+        budgets.first_pixel_ms,
+        "first pixel",
+        "ms",
+    )
+    over(
+        max(
+            small.max_navigation_us,
+            large.max_navigation_us,
+            cache_stress.max_navigation_us,
+        )
+        / 1000,
         budgets.navigation_ms,
         "sampled navigation",
         "ms",
     )
-    for label, report in (("small", small), ("large", large)):
+    for label, report in (
+        ("small", small),
+        ("large", large),
+        ("cache-stress", cache_stress),
+    ):
         if report.idle_redraws > budgets.idle_redraws:
             failures.append(
                 f"{label} idle redraws: {report.idle_redraws} exceeds "
@@ -837,6 +857,7 @@ def _evidence_report(
 ) -> dict[str, object]:
     """Return path-free, byte-bound evidence for one complete gate execution."""
 
+    retained_reports = (*small_reports, *large_reports, cache_stress)
     return {
         "schema": 3,
         "status": "fail" if failures else "pass",
@@ -847,10 +868,17 @@ def _evidence_report(
         "renderer_controls": _renderer_controls(),
         "budgets": asdict(budgets),
         "summary": {
-            "window_ready_ms": round(small.window_ready_us / 1000, 2),
-            "first_pixel_ms": round(small.first_pixel_us / 1000, 2),
-            "navigation_max_ms": round(small.max_navigation_us / 1000, 2),
-            "idle_redraws": max(small.idle_redraws, large.idle_redraws),
+            "window_ready_ms": round(
+                max(small.window_ready_us, large.window_ready_us) / 1000, 2
+            ),
+            "first_pixel_ms": round(
+                max(small.first_pixel_us, large.first_pixel_us) / 1000, 2
+            ),
+            "navigation_max_ms": round(
+                max(report.max_navigation_us for report in retained_reports) / 1000,
+                2,
+            ),
+            "idle_redraws": max(report.idle_redraws for report in retained_reports),
             "small_rss_mib": round(small.peak_resident_bytes / (1024 * 1024), 2),
             "small_rss_floor_mib": round(small_rss_floor_bytes / (1024 * 1024), 2),
             "large_rss_mib": round(large.peak_resident_bytes / (1024 * 1024), 2),
@@ -980,10 +1008,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(
         "performance: "
-        f"window={small.window_ready_us / 1000:.2f} ms, "
-        f"first-pixel={small.first_pixel_us / 1000:.2f} ms, "
-        f"navigation-max={small.max_navigation_us / 1000:.2f} ms, "
-        f"idle-redraws={max(small.idle_redraws, large.idle_redraws)}, "
+        f"window={max(small.window_ready_us, large.window_ready_us) / 1000:.2f} ms, "
+        "first-pixel="
+        f"{max(small.first_pixel_us, large.first_pixel_us) / 1000:.2f} ms, "
+        "navigation-max="
+        f"{max(small.max_navigation_us, large.max_navigation_us, cache_stress.max_navigation_us) / 1000:.2f} ms, "
+        "idle-redraws="
+        f"{max(small.idle_redraws, large.idle_redraws, cache_stress.idle_redraws)}, "
         f"small-rss={small.peak_resident_bytes / (1024 * 1024):.2f} MiB, "
         f"large-rss={large.peak_resident_bytes / (1024 * 1024):.2f} MiB, "
         f"large-folder={large.playlist_entries} images, "
@@ -993,6 +1024,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     failures = evaluate(
         small,
         large,
+        cache_stress,
         budgets,
         args.small_count,
         args.large_count,

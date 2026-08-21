@@ -202,7 +202,7 @@ records.
 | PQ-VS-01 | Empty, opening, and error cards | Opaque themed surfaces, AA text, stable geometry across unchanged frames, no vertical drift. |
 | PQ-VS-02 | Light, Dark, Console, and inspection backgrounds | Chrome tokens stay AA. Image pixels are unchanged by Appearance. |
 | PQ-VS-03 | Move the window repeatedly between the differently scaled displays or sessions named in the platform metadata, then cite `profile_refresh_follows_monitor_identity_changes` and `returning_to_a_prior_monitor_is_a_new_identity` from the candidate workflow | Text, focus rings, and panels stay usable throughout the required platform scale coverage. The manual result records every move. The named automated checks prove display-profile refresh on monitor identity changes without pretending a portable archive exposes internal ICC-refresh state. |
-| PQ-VS-04 | Run the candidate-binary performance procedure below | Window-ready, first-pixel, navigation, idle-redraw, memory, 50,000-file, and decoded-cache numbers meet [PERFORMANCE.md](PERFORMANCE.md). The observation records every numeric summary value and both tested executable SHA-256 values. |
+| PQ-VS-04 | Run the candidate-binary performance procedure below | Window-ready, first-pixel, navigation, idle-redraw, memory, 50,000-file, and decoded-cache numbers meet [PERFORMANCE.md](PERFORMANCE.md). The observation records every required rollup value and both tested executable SHA-256 values. |
 
 ## Candidate-binary performance procedure
 

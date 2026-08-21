@@ -33,6 +33,11 @@ and organized by user-visible concern.
   of the verified executable pair and rejects byte or adapter changes. The CI
   software-GL presentation probe parses the same exact report schema and requires
   viewr's actual adapter to be an identified OpenGL software renderer.
+- Performance summaries and budget enforcement use the slower small-folder or
+  large-folder median for window and first-pixel timing, plus the worst navigation
+  and idle redraw result across every retained run. The evidence validator
+  independently recomputes the same envelope, so a slow or noisy non-small run
+  cannot be omitted while the report still passes.
 - Release archives now include the product-quality matrix linked by their
   documentation index and the reviewed release notes matching the workspace
   version.

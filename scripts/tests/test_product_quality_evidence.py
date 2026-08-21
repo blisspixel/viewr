@@ -346,6 +346,31 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_performance_summary_uses_every_retained_navigation_and_idle(self) -> None:
+        small = [self.probe_report(16, 312.25) for _ in range(3)]
+        large = [self.probe_report(50_000, 330.08) for _ in range(3)]
+        cache_stress = self.probe_report(8, 330.08)
+        large[0]["window_ready_us"] = 710_000
+        large[1]["window_ready_us"] = 720_000
+        large[2]["window_ready_us"] = 730_000
+        large[0]["first_pixel_us"] = 810_000
+        large[1]["first_pixel_us"] = 820_000
+        large[2]["first_pixel_us"] = 830_000
+        large[1]["max_navigation_us"] = 610_000
+        cache_stress["idle_redraws"] = 2
+
+        summary = evidence._expected_performance_summary(small, large, cache_stress)
+
+        self.assertEqual(summary["window_ready_ms"], 720.0)
+        self.assertEqual(summary["first_pixel_ms"], 820.0)
+        self.assertEqual(summary["navigation_max_ms"], 610.0)
+        self.assertEqual(summary["idle_redraws"], 2)
+
+        large[1]["max_navigation_us"] = 400_000
+        cache_stress["max_navigation_us"] = 730_000
+        summary = evidence._expected_performance_summary(small, large, cache_stress)
+        self.assertEqual(summary["navigation_max_ms"], 730.0)
+
     def write_candidate_gate(self) -> Path:
         artifact_root = self.directory / "artifacts"
         fixture_root = artifact_root / evidence.FIXTURE_ARTIFACT
@@ -1232,6 +1257,28 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             for one in [*runs["small"], *runs["large"], runs["cache_stress"]]:
                 one.update(fields)
 
+        def set_cache_stress_idle_over_budget(report: dict[str, object]) -> None:
+            report["runs"]["cache_stress"]["idle_redraws"] = 3
+            report["summary"]["idle_redraws"] = 3
+
+        def set_large_window_over_budget(report: dict[str, object]) -> None:
+            for one in report["runs"]["large"]:
+                one["window_ready_us"] = 3_001_000
+            report["summary"]["window_ready_ms"] = 3001.0
+
+        def set_large_first_pixel_over_budget(report: dict[str, object]) -> None:
+            for one in report["runs"]["large"]:
+                one["first_pixel_us"] = 5_001_000
+            report["summary"]["first_pixel_ms"] = 5001.0
+
+        def set_large_navigation_over_budget(report: dict[str, object]) -> None:
+            report["runs"]["large"][0]["max_navigation_us"] = 600_000
+            report["summary"]["navigation_max_ms"] = 600.0
+
+        def set_cache_navigation_over_budget(report: dict[str, object]) -> None:
+            report["runs"]["cache_stress"]["max_navigation_us"] = 600_000
+            report["summary"]["navigation_max_ms"] = 600.0
+
         cases = (
             (
                 "windows-100",
@@ -1261,6 +1308,31 @@ class ProductQualityEvidenceTests(unittest.TestCase):
                     "first_pixel_ms", report["summary"]["first_pixel_ms"] + 1
                 ),
                 "summary does not match retained runs",
+            ),
+            (
+                "windows-100",
+                set_large_window_over_budget,
+                "performance summary exceeds a release budget",
+            ),
+            (
+                "windows-100",
+                set_large_first_pixel_over_budget,
+                "performance summary exceeds a release budget",
+            ),
+            (
+                "windows-100",
+                set_large_navigation_over_budget,
+                "performance summary exceeds a release budget",
+            ),
+            (
+                "windows-100",
+                set_cache_navigation_over_budget,
+                "performance summary exceeds a release budget",
+            ),
+            (
+                "windows-100",
+                set_cache_stress_idle_over_budget,
+                "exceeds a cache or idle limit",
             ),
             (
                 "linux-mesa-software",
@@ -1352,6 +1424,24 @@ class ProductQualityEvidenceTests(unittest.TestCase):
                     evidence.validate_candidate_gate(
                         self.directory, artifact_root, self.run_metadata()
                     )
+
+    def test_candidate_gate_does_not_apply_large_folder_rss_budget_to_cache_stress(
+        self,
+    ) -> None:
+        artifact_root = self.write_candidate_gate()
+        path = self.directory / "performance" / "windows-100.json"
+        report = evidence.json.loads(path.read_text(encoding="utf-8"))
+        report["runs"]["cache_stress"]["peak_resident_bytes"] = 1024 * 1024 * 1024
+        path.write_text(
+            evidence.json.dumps(report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        records = evidence.validate_candidate_gate(
+            self.directory, artifact_root, self.run_metadata()
+        )
+
+        self.assertEqual(len(records), 3)
 
     def test_candidate_gate_rejects_reused_session_runs_and_display_identity(
         self,

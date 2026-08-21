@@ -56,6 +56,9 @@ and organized by user-visible concern.
 
 ### Documentation
 
+- README now presents ratings, rotation, crop, bounded Spot Heal, Save As, and
+  conversion as intentional viewer tools. Deeper work stays with an editor
+  chosen through native Open With, without a catalog or subscription.
 - The sandbox plan now matches the v0.5 format contract: optional AVIF and HEIC
   remain isolated worker formats, while Camera RAW is explicitly deferred from
   1.0.

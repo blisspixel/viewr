@@ -4,16 +4,19 @@
 
 [![CI](https://github.com/blisspixel/viewr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/blisspixel/viewr/actions/workflows/ci.yml)
 
-Tired of photo software that wants to become a cloud library, editing suite,
-storefront, and subscription? viewr rejects the spyware-and-bloatware pattern of
-turning a simple utility into a data-collection platform. It stays a viewer. Open
-a file or folder, move through photos quickly, inspect metadata, rate the keepers,
-make a small edit, and get back to what you were doing.
+Tired of photo software that wants to become a cloud library, storefront, and
+subscription? viewr rejects the spyware-and-bloatware pattern of turning a simple
+utility into a data-collection platform. It keeps the photo at the center. Open a
+file or folder, move through photos quickly, inspect metadata, use ratings to
+narrow the keepers, crop or rotate, repair a small blemish with Spot Heal, save a
+JPEG, PNG, WebP, or BMP copy, and get back to what you were doing.
 
-viewr is a focused desktop image viewer for Windows, macOS, and Linux. **No
-tracking is literal.** The application has no account, cloud service, telemetry,
-analytics, advertising, background indexer, activity history, crash-report
-uploader, or automatic update check.
+viewr is a focused desktop image viewer for Windows, macOS, and Linux. Focused
+does not mean bare. Its small editing tools are deliberate parts of the viewing
+workflow, without the catalog, project, cloud, and subscription machinery of a
+full editing suite. **No tracking is literal.** The application has no account,
+cloud service, telemetry, analytics, advertising, background indexer, activity
+history, crash-report uploader, or automatic update check.
 
 ## Why viewr
 
@@ -22,9 +25,10 @@ uploader, or automatic update check.
   CI.
 - **Private by construction.** The application dependency graph contains no HTTP
   or TLS client. Photos, paths, metadata, ratings, and diagnostics stay local.
-- **Focused, not bare.** Folder navigation, ratings, privacy inspection, crop,
-  Spot Heal, conversion, and safe Trash cover the useful viewer workflow without
-  a catalog or subscription.
+- **Focused, not bare.** Folder navigation, ratings, rotation, crop, bounded Spot
+  Heal, Save As, and conversion are intentional core viewer tools. Deeper work
+  stays with an editor you choose through native Open With, without adding a
+  catalog or subscription.
 - **Cross-platform.** The same Rust codebase is built and tested on Windows,
   macOS, and Linux, with native dialogs, menus, shortcuts, and accessibility
   semantics.

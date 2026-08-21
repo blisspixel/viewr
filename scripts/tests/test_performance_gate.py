@@ -400,17 +400,17 @@ class PerformanceGateTests(unittest.TestCase):
             )
 
         with mock.patch(
-            "scripts.performance_gate.ctypes.windll.shcore.GetScaleFactorForDevice",
-            return_value=150,
-        ) as get_scale:
+            "scripts.performance_gate.ctypes.windll", create=True
+        ) as windll:
+            get_scale = windll.shcore.GetScaleFactorForDevice
+            get_scale.return_value = 150
             self.assertEqual(_windows_scale_percent(), 150)
-        get_scale.assert_called_once_with(0)
-        with mock.patch(
-            "scripts.performance_gate.ctypes.windll.shcore.GetScaleFactorForDevice",
-            return_value=0,
-        ):
+            get_scale.assert_called_once_with(0)
+            get_scale.reset_mock(return_value=True)
+            get_scale.return_value = 0
             with self.assertRaisesRegex(PerformanceGateError, "could not measure"):
                 _windows_scale_percent()
+            get_scale.assert_called_once_with(0)
         with mock.patch(
             "scripts.performance_gate.subprocess.run",
             side_effect=subprocess.TimeoutExpired("viewr", 90),

@@ -82,15 +82,17 @@ The Ubuntu 24.04 GUI performance job builds the locked release workspace and run
 the probe under Xvfb with Mesa's software GPU. The harness creates deterministic
 PNGs, hard-links or copies them into temporary corpora, and deletes the entire
 temporary workspace on exit. The 1920x1080 timing and folder-scaling corpora run
-three times;
-window/first-image timings use the median, while navigation, absolute resources,
-and capacity measurements use the worst result. Folder-growth RSS uses the
-highest large-folder peak minus the lowest small-folder peak so a noisy small run
-cannot hide growth. A separate eight-image 4096x4096 corpus runs once. Each decoded
+three times. Window and first-image timings use the slower of the small-folder and
+large-folder medians. Navigation and idle redraws use the worst result across all
+six timed runs and the cache-stress process. Folder-growth RSS uses the highest
+large-folder peak minus the lowest small-folder peak so a noisy small run cannot
+hide growth. A separate eight-image 4096x4096 corpus runs once. Each decoded
 neighbor is 64 MiB, so retaining five would require 320 MiB; the gate requires real
 neighbor retention, exact byte accounting, and eviction to at most four entries
 under the 256 MiB budget. This prevents the byte-limit assertion from passing on a
-corpus that only exercises the five-entry limit.
+corpus that only exercises the five-entry limit. Cache-stress RSS is retained as a
+diagnostic but is not compared with the 768 MiB limit, which applies to the
+50,000-file corpus.
 
 | Measurement | Enforced limit |
 |---|---:|

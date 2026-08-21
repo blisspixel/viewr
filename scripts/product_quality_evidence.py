@@ -920,24 +920,44 @@ def _expected_performance_summary(
     large: Sequence[Mapping[str, object]],
     cache_stress: Mapping[str, object],
 ) -> dict[str, int | float]:
+    retained_reports = (*small, *large, cache_stress)
     small_peak = max(int(report["peak_resident_bytes"]) for report in small)
     small_floor = min(int(report["peak_resident_bytes"]) for report in small)
     large_peak = max(int(report["peak_resident_bytes"]) for report in large)
     return {
         "window_ready_ms": round(
-            int(statistics.median(int(report["window_ready_us"]) for report in small))
+            max(
+                int(
+                    statistics.median(
+                        int(report["window_ready_us"]) for report in small
+                    )
+                ),
+                int(
+                    statistics.median(
+                        int(report["window_ready_us"]) for report in large
+                    )
+                ),
+            )
             / 1000,
             2,
         ),
         "first_pixel_ms": round(
-            int(statistics.median(int(report["first_pixel_us"]) for report in small))
+            max(
+                int(
+                    statistics.median(int(report["first_pixel_us"]) for report in small)
+                ),
+                int(
+                    statistics.median(int(report["first_pixel_us"]) for report in large)
+                ),
+            )
             / 1000,
             2,
         ),
         "navigation_max_ms": round(
-            max(int(report["max_navigation_us"]) for report in small) / 1000, 2
+            max(int(report["max_navigation_us"]) for report in retained_reports) / 1000,
+            2,
         ),
-        "idle_redraws": max(int(report["idle_redraws"]) for report in (*small, *large)),
+        "idle_redraws": max(int(report["idle_redraws"]) for report in retained_reports),
         "small_rss_mib": round(small_peak / (1024 * 1024), 2),
         "small_rss_floor_mib": round(small_floor / (1024 * 1024), 2),
         "large_rss_mib": round(large_peak / (1024 * 1024), 2),
@@ -1199,6 +1219,10 @@ def _validate_performance_report(
             raise EvidenceError(
                 f"{path}: a retained probe run exceeds a cache or idle limit"
             )
+    if int(cache_stress["idle_redraws"]) > 2:
+        raise EvidenceError(
+            f"{path}: a retained probe run exceeds a cache or idle limit"
+        )
     if (
         int(cache_stress["decoded_cache_entries"]) != 4
         or int(cache_stress["decoded_cache_bytes"]) != decoded_limit

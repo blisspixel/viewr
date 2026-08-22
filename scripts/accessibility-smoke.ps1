@@ -547,7 +547,7 @@ function Expand-NestedMenuItem {
 
     # Nested AccessKit menu rows often stay collapsed after Invoke alone.
     # Prefer ExpandCollapse, then a real pointer click on the row, then Invoke,
-    # then focused Right Arrow (the conventional keyboard expansion path).
+    # then Right Arrow only when the provider accepts focus on the nested row.
     [void](Try-ExpandSubmenuElement -Element $Element)
     if (-not (Invoke-ElementClick -Element $Element)) {
         try {
@@ -573,7 +573,10 @@ function Expand-NestedMenuItem {
     catch [System.Windows.Automation.ElementNotAvailableException] {
         # Tree refreshed; keyboard path still has a chance.
     }
-    Send-ApplicationKey -VirtualKey 0x27 -PreferredFocusElement $fresh
+    Send-ApplicationKey `
+        -VirtualKey 0x27 `
+        -PreferredFocusElement $fresh `
+        -RequirePreferredFocus
 }
 
 function Get-ToggleState {
@@ -734,10 +737,6 @@ function Open-ViewSubmenu {
                     if ($null -ne $preferredFocusElement) {
                         Expand-NestedMenuItem -Element $preferredFocusElement
                     }
-                    else {
-                        # Right Arrow expands the focused nested row under AccessKit.
-                        Send-ApplicationKey -VirtualKey 0x27
-                    }
                     $expandFallbackCount += 1
                     $nextExpandAt = [DateTime]::UtcNow.AddMilliseconds(500)
                 }
@@ -868,9 +867,6 @@ function Open-EditSubmenu {
                     if ($null -ne $preferredFocusElement) {
                         Expand-NestedMenuItem -Element $preferredFocusElement
                     }
-                    else {
-                        Send-ApplicationKey -VirtualKey 0x27
-                    }
                     $expandFallbackCount += 1
                     $nextExpandAt = [DateTime]::UtcNow.AddMilliseconds(500)
                 }
@@ -925,9 +921,11 @@ function Set-ApplicationFocusHint {
     # later failure carries its context, then continue.
     try {
         $Element.SetFocus()
+        return $true
     }
     catch {
-        Write-Output "accessibility-smoke: focus hint not applied: $($_.Exception.Message)"
+        Write-Host "accessibility-smoke: focus hint not applied: $($_.Exception.Message)"
+        return $false
     }
 }
 
@@ -936,15 +934,19 @@ function Send-ApplicationKey {
         [Parameter(Mandatory)]
         [ValidateRange(1, 255)]
         [int]$VirtualKey,
-        [System.Windows.Automation.AutomationElement]$PreferredFocusElement
+        [System.Windows.Automation.AutomationElement]$PreferredFocusElement,
+        [switch]$RequirePreferredFocus
     )
 
     $applicationRoot = [System.Windows.Automation.AutomationElement]::FromHandle(
         $script:Window
     )
-    Set-ApplicationFocusHint -Element $applicationRoot
+    [void](Set-ApplicationFocusHint -Element $applicationRoot)
     if ($null -ne $PreferredFocusElement) {
-        Set-ApplicationFocusHint -Element $PreferredFocusElement
+        $preferredFocusApplied = Set-ApplicationFocusHint -Element $PreferredFocusElement
+        if ($RequirePreferredFocus -and -not $preferredFocusApplied) {
+            return
+        }
     }
     Start-Sleep -Milliseconds 50
     if (-not [ViewrAccessibilityNativeMethods]::SendKeyPress(

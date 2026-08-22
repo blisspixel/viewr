@@ -7,6 +7,37 @@ and organized by user-visible concern.
 
 ### Product quality
 
+- Fullscreen is immersive: persistent chrome hides and the photo uses the whole
+  window. `F` and `F11` toggle it. Escape closes a context menu, then cancels
+  crop, then leaves Spot Heal, then exits fullscreen. Spot Heal still docks its
+  inspector while it is active.
+- Space tap fits without clearing rotation, flip, or crop. Pan requires holding
+  Space; the resting cursor over the photo is an arrow.
+- Folder browsing continues while a replacement decode is in flight. The last
+  good frame stays until the newly selected image is ready.
+- Decode failures are one unprefixed sentence. A toast is reserved for the
+  last-good-frame case. The first-run card names Open File, Open Folder, and drop
+  in one spoken sentence.
+- View exposes Play/Pause for GIF, WebP, and APNG. Image Information and the
+  Update modal keep Close reachable on the 640 by 480 minimum window. ICO
+  identity includes pixel size. Extra mouse buttons step the folder.
+- File decode uses extra cores: `logical CPUs minus one`, at least two and at
+  most six, so prefetch and the current image are not stuck behind a dual-decoder
+  gate on a typical desktop. Foreground opens still outrank speculative work.
+  Folder rating discovery uses the same cap for independent JPEG header reads and
+  keeps playlist order. The 256 MiB neighbor cache and four-job prefetch bound
+  are unchanged.
+- An empty rating filter recovers from the keyboard: Escape, Left, and Right show
+  all images. Opening a file shows Reading folder... while siblings are scanned.
+  `G` explains when Folder Previews need more than one image. Spot Heal Undo and
+  Redo quote the same shortcuts as Edit, and bare `U` does not restore Trash while
+  the tool is open. `J` now observes the same in-progress and failed-load blockers
+  as pointer controls. Automatic folder-browse failures name Open Folder.
+- JPEG rating writes work on macOS and Linux as well as Windows. The Unix path
+  copies the accepted source, rewrites the bounded header, preserves mode, and
+  replaces the pathname only after verification. A same-directory hard link
+  retains the exact original through post-write verification. Extra hard links
+  stay read-only.
 - The v0.6 manual matrix now uses stable check identifiers and binds Windows,
   macOS, and Linux records to the checksummed archives from one non-publishing
   candidate workflow run. The gate rejects incomplete, placeholder,
@@ -43,14 +74,12 @@ and organized by user-visible concern.
   version.
 - Help > About viewr lists the grouped shortcut catalog instead of a truncated
   line. Pages (`[` / `]`), reload (`F5`), panels (`T` `G` `I`), Space-to-fit,
-  Save As, and Undo Trash are visible. On a short window the body scrolls so
-  Close stays reachable.
+  fullscreen (`F` / `F11`), Escape, Save As, and Undo Trash are visible. On a
+  short window the body scrolls so Close stays reachable.
 - Direct decoder tests cover GIF, animated WebP, and APNG through viewr's own
   animation path. UI tests cover animation controls, stable empty, opening, and
   error-card geometry, complete About identity and privacy content, Escape, and
   modal input suppression.
-- The first-run card names drop as well as Open File and Open Folder. A failed
-  open keeps one short error line and Retry.
 - README essential controls match the event-loop keys. `A` / `D` are not
   navigation shortcuts.
 

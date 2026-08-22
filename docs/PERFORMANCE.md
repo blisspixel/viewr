@@ -111,6 +111,11 @@ These limits are deliberately looser than a fast development machine. They are
 stable regression tripwires for a shared virtual runner, not universal latency
 promises or a substitute for profiling target hardware.
 
+File decode uses extra cores without growing those memory caps. Concurrent file
+decodes are `logical_cpus - 1`, at least two and at most six. Foreground opens
+still outrank prefetch and thumbnails. The GUI probe continues to measure
+latency and resident set, not core utilization.
+
 ## How to reproduce
 
 On Linux:

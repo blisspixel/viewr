@@ -33,7 +33,7 @@ pub(crate) struct ShortcutGroup {
 }
 
 /// First-run card copy when no file is selected.
-pub(crate) const FIRST_RUN_SCOPE: &str = "Open a file to start, or drop a file or folder. Its folder is browsed when access allows. Open Folder selects it explicitly for this session.";
+pub(crate) const FIRST_RUN_SCOPE: &str = "Open File, Open Folder, or drop a file or folder. A dropped file also browses its folder when access allows. Open Folder selects the folder for this session.";
 /// Shown while the first decode of a launch or retry is in progress.
 pub(crate) const OPENING_DESCRIPTION: &str = "Decoding locally while the window stays responsive.";
 const MAX_EMPTY_ERROR_CHARS: usize = 160;
@@ -44,7 +44,7 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
         heading: "Open",
         items: &[
             ShortcutSpec {
-                keys: "O",
+                keys: "{primary}+O",
                 action: "Open file",
             },
             ShortcutSpec {
@@ -67,6 +67,10 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             ShortcutSpec {
                 keys: "Home / End",
                 action: "First / last image",
+            },
+            ShortcutSpec {
+                keys: "Page Up / Page Down",
+                action: "Previous / next image",
             },
             ShortcutSpec {
                 keys: "[ / ]",
@@ -98,8 +102,12 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
                 action: "Zoom",
             },
             ShortcutSpec {
-                keys: "F",
+                keys: "F / F11",
                 action: "Fullscreen",
+            },
+            ShortcutSpec {
+                keys: "Esc",
+                action: "Leave tool or fullscreen",
             },
             ShortcutSpec {
                 keys: "T G I",
@@ -202,7 +210,10 @@ mod tests {
             "F5 Reload file",
             "T G I Panels",
             "Space Fit; hold to pan",
-            "O Open file",
+            "Ctrl+O Open file",
+            "Page Up / Page Down Previous / next image",
+            "F / F11 Fullscreen",
+            "Esc Leave tool or fullscreen",
             "Ctrl+Shift+S Save As",
             "Delete Move to Trash",
             "U Undo Trash",
@@ -229,13 +240,9 @@ mod tests {
         assert_eq!(opening.description, OPENING_DESCRIPTION);
         assert!(!opening.show_retry);
 
-        let failed = empty_state_copy(
-            false,
-            Some("Could not decode: truncated"),
-            Some("night.png"),
-        );
+        let failed = empty_state_copy(false, Some("truncated"), Some("night.png"));
         assert_eq!(failed.heading, "Could not open night.png");
-        assert_eq!(failed.description, "Could not decode: truncated");
+        assert_eq!(failed.description, "truncated");
         assert!(failed.show_retry);
     }
 

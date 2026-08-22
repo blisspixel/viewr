@@ -50,6 +50,36 @@ pub(crate) fn current_work_blocker<const N: usize>(
     work.into_iter().flatten().next()
 }
 
+/// Folder browsing may replace an in-flight decode. The last good frame stays
+/// until the newly selected image is ready.
+#[must_use]
+pub(crate) const fn blocks_browse(work: CurrentWork) -> bool {
+    !matches!(work, CurrentWork::ImagePreparation)
+}
+
+/// Select the first browse blocker after ignoring replaceable image preparation.
+#[must_use]
+pub(crate) fn browse_work_blocker<const N: usize>(
+    work: [Option<CurrentWork>; N],
+) -> Option<CurrentWork> {
+    current_work_blocker(work.map(|entry| entry.filter(|active| blocks_browse(*active))))
+}
+
+/// Spot Heal needs a settled selected source even when a last good frame remains visible.
+#[must_use]
+pub(crate) const fn spot_heal_source_blocker(
+    image_open_in_progress: bool,
+    image_open_failed: bool,
+) -> Option<&'static str> {
+    if image_open_in_progress {
+        Some("Wait for the image to finish opening before using Spot Heal")
+    } else if image_open_failed {
+        Some("Retry the failed image load before using Spot Heal")
+    } else {
+        None
+    }
+}
+
 #[must_use]
 pub(crate) fn blocked_action_message(action: &str, blocker: CurrentWork) -> String {
     let work = match blocker {
@@ -169,6 +199,35 @@ mod tests {
             blocked_action_message("saving a copy", CurrentWork::SourceVerification),
             "Wait for source verification to finish before saving a copy"
         );
+    }
+
+    #[test]
+    fn browse_and_spot_heal_preflight_inspect_every_relevant_fact() {
+        assert!(!blocks_browse(CurrentWork::ImagePreparation));
+        assert!(blocks_browse(CurrentWork::Crop));
+        assert!(blocks_browse(CurrentWork::FolderScan));
+        assert!(blocks_browse(CurrentWork::SpotHeal));
+        assert_eq!(
+            browse_work_blocker([
+                Some(CurrentWork::ImagePreparation),
+                Some(CurrentWork::Crop),
+                Some(CurrentWork::Save),
+            ]),
+            Some(CurrentWork::Crop)
+        );
+        assert_eq!(
+            browse_work_blocker([Some(CurrentWork::ImagePreparation), None]),
+            None
+        );
+        assert_eq!(
+            spot_heal_source_blocker(true, true),
+            Some("Wait for the image to finish opening before using Spot Heal")
+        );
+        assert_eq!(
+            spot_heal_source_blocker(false, true),
+            Some("Retry the failed image load before using Spot Heal")
+        );
+        assert_eq!(spot_heal_source_blocker(false, false), None);
     }
 
     #[test]

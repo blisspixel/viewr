@@ -417,13 +417,14 @@ Shipped:
   and versioned native file identity used to bind a displayed source to guarded
   mutation.
 - **`ratings`**: bounded JPEG header, XMP, and existing IFD0 `0x4746` parsing;
-  complete rating-state reconciliation; and the narrow Windows source-write
+  complete rating-state reconciliation; and the narrow JPEG source-write
   transaction. XMP is canonical. An existing valid SimpleRating mirror is updated
   without growing or relocating the TIFF directory. The transaction snapshots the
-  retained accepted source, stages beside it under source-equivalent security,
-  revalidates identity and bytes, calls `ReplaceFileW`, reopens and verifies the
-  candidate, and either removes the retained original or reconciles it. Other
-  platforms expose the reader and remain read-only.
+  retained accepted source, stages beside it, revalidates identity and bytes,
+  replaces the pathname, reopens and verifies the candidate, and either removes
+  the retained original or restores it. Windows uses `ReplaceFileW` and copies
+  source ACLs onto staging files. Unix preserves mode, refuses extra hard links,
+  and replaces by rename after a same-directory backup.
 - **`playlist`**: one canonical naturally ordered folder catalog plus rating state
   and a derived minimum-rating projection. Navigation, Home and End, Folder
   Previews, and prefetch consume projected canonical indices. Trash and Undo retain
@@ -550,6 +551,18 @@ treatment.
 
 The rule: **the UI thread only ever draws things that are already ready.** All
 "getting ready" happens off-thread and arrives as messages.
+
+File decode concurrency is `logical_cpus - 1`, floored at two and capped at six.
+Foreground waiters outrank speculative work. The ceiling is RAM, not a leftover
+dual-core default: one 64 Mi pixel RGBA working image is 256 MiB, matching the
+neighbor cache. Sixteen simultaneous full decodes would thrash that budget.
+Prefetch still owns at most four jobs and the filmstrip at most nine; they share
+the permit so extra cores fill those slots instead of serializing behind two
+decodes. Folder rating discovery uses the same core cap for independent JPEG
+header reads and keeps playlist order. Isolated AVIF/HEIC helpers remain a pool
+of two processes. Folder enumeration stays one identity-bound I/O thread. JPEG XL
+already parallelizes chunks inside one file. The trusted core does not add a
+data-parallel runtime.
 
 ## Current architecture pressure
 

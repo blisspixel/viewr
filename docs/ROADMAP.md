@@ -28,11 +28,11 @@ Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding,
 honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
-performance budgets, hosted multi-OS CI, and the current signed-attested but
-publisher-unsigned v0.5.0 archives. The v0.4.0, v0.3.0, v0.2.0 and v0.1.x archives remain published
-history. Human assistive-technology evidence, platform
-signing and notarization, representative-hardware acceptance, and display
-fidelity remain open.
+performance budgets, hosted multi-OS CI, and the current checksummed and attested
+but publisher-unsigned v0.5.0 archives. The v0.4.0, v0.3.0, v0.2.0, and v0.1.x
+archives remain published history. Human assistive-technology evidence, platform
+signing and notarization, representative-hardware acceptance, and display fidelity
+remain open.
 
 The shipped product already includes bounded GIF/WebP/APNG playback, bounded
 TIFF page and ICO frame navigation, eight-way
@@ -122,9 +122,8 @@ v0.6 product quality, then v0.7 through v0.9 evidence and trust.
 
 The v0.6 execution order is deliberately narrow:
 
-1. Settle dependency and workflow maintenance on one clean `main` commit with
-   both CI and fuzz green. Maintenance is not product-quality evidence, but an
-   unsettled baseline makes every later artifact disposable.
+1. Keep one clean `main` commit with both CI and fuzz green. Maintenance and
+   product-quality polish both reset later artifacts.
 2. Integrate the versioned v0.6 candidate preparation: evidence-backed product
    corrections, the hardened evidence gate, prospective reviewed release notes,
    and the final candidate behavior documents. Obtain another green `main`
@@ -165,7 +164,7 @@ but completed history does not override an open gate here.
 
 | Gate | Status | Evidence or next action |
 | --- | --- | --- |
-| Public repository and hosted quality | Complete | `main` is public. The last audited maintenance baseline is commit `bc1d15f131c3fae5dba5370f032462ced486ae64`: [CI run 32444956046](https://github.com/blisspixel/viewr/actions/runs/32444956046) passed all seven jobs and [fuzz run 32444973887](https://github.com/blisspixel/viewr/actions/runs/32444973887) passed both targets. The README badge and GitHub branch page are the live status. |
+| Public repository and hosted quality | Complete | `main` is public and protected. The README badge and GitHub branch page are the live status. Commit `50b68b199aad6aba20cc071f6214c3dfc8dadccf` passed [CI run 32522737172](https://github.com/blisspixel/viewr/actions/runs/32522737172), [fuzz run 32522767859](https://github.com/blisspixel/viewr/actions/runs/32522767859), and non-publishing [candidate run 32523854323](https://github.com/blisspixel/viewr/actions/runs/32523854323). Later product-quality polish on this line requires a fresh candidate run. |
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. That playtest also found the window opening under a 137px dock, which [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4) fixed by bounding and placing the first window inside its monitor. An independent playtest of the published v0.1.4 Linux archive then measured that window at 1000 by 560 logical pixels at +140+40 on the same 1280 by 800 session, 29 physical pixels clear of the dock, matching the published bound and placement arithmetic. That round found the command line rejecting a folder while `viewr help` promised that a folder opens its first naturally sorted image, which [v0.1.5](https://github.com/blisspixel/viewr/releases/tag/v0.1.5) fixed by classifying every externally supplied path once. |
@@ -174,7 +173,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Candidate commit `7408cd8` passed [CI run 32438378680](https://github.com/blisspixel/viewr/actions/runs/32438378680), [fuzz run 32438902890](https://github.com/blisspixel/viewr/actions/runs/32438902890), and non-publishing [candidate run 32439394777](https://github.com/blisspixel/viewr/actions/runs/32439394777), but an evidence audit rejected that run for omitting slower large-folder navigation and a cache-stress redraw from its summary. The corrected commit `9d7d4ba` then passed [CI run 32446285655](https://github.com/blisspixel/viewr/actions/runs/32446285655), [fuzz run 32446298413](https://github.com/blisspixel/viewr/actions/runs/32446298413), and non-publishing [candidate run 32446870783](https://github.com/blisspixel/viewr/actions/runs/32446870783). The later README positioning correction changes a canonical archive document outside the permitted post-candidate evidence and release-status updates, so that run and every result bound to it cannot close v0.6. Next, select one exact clean `main` commit after this correction has passed CI and fuzz, then produce one fresh candidate run. Three complete representative-hardware records, the exact eight-session report set, verified run provenance, and a passing evidence gate then remain before evidence integration and tagging. |
+| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Commit `50b68b1` passed CI, fuzz, and non-publishing [candidate run 32523854323](https://github.com/blisspixel/viewr/actions/runs/32523854323) after the README positioning correction. Later viewing-instrument polish on this line (immersive fullscreen, Space-tap fit, browse-during-decode) changes candidate behavior, so that run cannot close v0.6. Next, land one clean `main` commit with CI and fuzz green, dispatch one fresh `Release artifacts` run, then complete three representative-hardware records, the eight-session report set, and the evidence gate. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -207,7 +206,12 @@ viewer. The research signal is consistent:
 
 viewr already has a stronger privacy and hostile-input story than those references.
 What is missing is not another toolbar. It is end-to-end fidelity, complete edge
-behavior, installability, and maintainable proof of correctness.
+behavior, installability, and maintainable proof of correctness. Decode already
+leaves the UI thread; concurrent file work and folder rating discovery now follow
+the machine's cores with a RAM-safe ceiling instead of a hard dual-decoder gate.
+That is preload quality, not a thread-pool product. JPEG rating writes now
+cover Windows, macOS, and Linux for ordinary identity-bound files. Extra Unix
+hard links stay read-only.
 
 ### Release-close gates, v0.7 through v0.9: accessibility and trusted distribution
 
@@ -585,7 +589,9 @@ approved behavior and safety contract is in `docs/RATINGS.md`.
   can consume hostile metadata without an ignored runtime vulnerability.
 - [x] Prove failure-atomic ordinary-JPEG replacement, exact source-version checks,
   permission and security-metadata preservation, rollback, unrelated-metadata
-  preservation, and cross-tool interoperability.
+  preservation, and cross-tool interoperability. Windows uses ReplaceFileW and
+  source ACLs. Unix preserves mode, refuses extra hard links, and replaces by
+  rename after a same-directory backup.
 - [x] Refactor Playlist to retain one canonical catalog and a tested filtered
   index projection. Prove deterministic navigation, prefetch, Trash, and Undo
   against canonical positions before adding UI state.
@@ -665,9 +671,9 @@ cover ordering and cache eviction.
 
 Make viewing excellent, not merely functional.
 
-- [x] GPU pan by dragging or holding Space, focal-point scroll zoom, and explicit
-  keyboard commands for fit (`0`), actual pixels (`1`), zoom in (`+`), and zoom
-  out (`-`). A Space tap resets fit; double-click toggles fit and actual pixels.
+- [x] GPU pan while holding Space, focal-point scroll zoom, and explicit keyboard
+  commands for fit (`Ctrl/Cmd+0`), actual pixels (`Ctrl/Cmd+1`), zoom in (`+`),
+  and zoom out (`-`). A Space tap fits; double-click toggles fit and actual pixels.
 - [x] Rotate 90 degrees either direction, and flip.
 - [x] Fullscreen and a frameless immersive mode that is just the picture.
 - [x] System-driven default image background via winit, updating live when the

@@ -68,7 +68,8 @@ The minimum contract is:
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape. It exposes the
   grouped shortcut catalog, including `[` / `]`, `F5`, `T` `G` `I`, Space-to-fit,
-  Save As, and Undo Trash. Close stays inside the minimum window.
+  `F` / `F11`, Escape, Save As, and Undo Trash. Close stays inside the minimum
+  window.
 - Update viewr is a separate named modal window that blocks background input and
   exposes the running version and one clearly named Get latest release button. It
   closes with an explicit button or Escape. The application performs no automatic

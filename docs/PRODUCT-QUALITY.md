@@ -16,11 +16,11 @@ smoke test, and this matrix quote one covered catalog:
 
 - `crates/viewr/src/shortcuts.rs` owns empty-state copy and About shortcut groups.
 - About lists Open, Browse, View, and Edit keys, including `[` / `]`, `F5`,
-  `T` `G` `I`, Space-to-fit, Save As, and Undo Trash.
+  `T` `G` `I`, Space-to-fit, `F` / `F11`, Escape, Save As, and Undo Trash.
 - The empty card heading distinguishes first-run, opening, and failure. First-run
   copy is:
 
-  `Open a file to start, or drop a file or folder. Its folder is browsed when access allows. Open Folder selects it explicitly for this session.`
+  `Open File, Open Folder, or drop a file or folder. A dropped file also browses its folder when access allows. Open Folder selects the folder for this session.`
 
 - Decoder and I/O errors on that card stay one short line. Retry remains named.
 - `A` / `D` are not navigation keys. Left and Right, Home and End, and Page Up

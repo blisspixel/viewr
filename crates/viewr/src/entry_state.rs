@@ -147,19 +147,21 @@ pub(crate) const fn folder_scan_user_message(
     disposition: FolderScanDisposition,
 ) -> Option<&'static str> {
     match disposition {
-        FolderScanDisposition::InstallSelectedOnlyLimitExceeded => {
-            Some("Folder is too large for safe automatic browsing. Opened only the selected image")
-        }
-        FolderScanDisposition::InstallSelectedOnlyScanFailed => {
-            Some("Folder browsing is unavailable. Opened only the selected image")
-        }
+        FolderScanDisposition::InstallSelectedOnlyLimitExceeded => Some(
+            "Folder is too large for safe automatic browsing. Opened only this file. Use Open Folder to browse the rest.",
+        ),
+        FolderScanDisposition::InstallSelectedOnlyScanFailed => Some(
+            "Folder browsing is unavailable. Opened only this file. Use Open Folder to browse the rest.",
+        ),
         FolderScanDisposition::OpenFolderEmpty => {
             Some("The selected folder contains no supported images")
         }
         FolderScanDisposition::OpenFolderLimitExceeded => {
             Some("The selected folder exceeds safe browsing limits")
         }
-        FolderScanDisposition::OpenFolderFailed => Some("Could not read the selected folder"),
+        FolderScanDisposition::OpenFolderFailed => {
+            Some("Could not read the selected folder. Try Open Folder again.")
+        }
         FolderScanDisposition::Discard
         | FolderScanDisposition::InstallScanAt(_)
         | FolderScanDisposition::InstallSelectedOnly
@@ -316,7 +318,19 @@ mod tests {
     fn user_messages_are_truthful_and_path_free() {
         assert_eq!(
             folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyLimitExceeded),
-            Some("Folder is too large for safe automatic browsing. Opened only the selected image")
+            Some(
+                "Folder is too large for safe automatic browsing. Opened only this file. Use Open Folder to browse the rest.",
+            )
+        );
+        assert_eq!(
+            folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyScanFailed),
+            Some(
+                "Folder browsing is unavailable. Opened only this file. Use Open Folder to browse the rest.",
+            )
+        );
+        assert_eq!(
+            folder_scan_user_message(FolderScanDisposition::OpenFolderFailed),
+            Some("Could not read the selected folder. Try Open Folder again.")
         );
         assert_eq!(
             folder_scan_user_message(FolderScanDisposition::OpenFolderEmpty),

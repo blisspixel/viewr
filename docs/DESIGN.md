@@ -87,7 +87,14 @@ disappears. This spec is the converged result of two rounds of design critique
 - Zoom is focal-point anchored (pixel under cursor stays put). Trackpad pixel
   deltas and wheel detents both supported.
 - Space held + drag = temporary pan (classic hand tool); Space tap without drag
-  resets fit.
+  resets fit. Fit clears zoom and pan only; rotation, flip, and an in-progress
+  crop stay. Left-drag without Space does not pan. The resting cursor over the
+  photo is the arrow; Grab appears only while Space is held.
+- Fullscreen (`F` or `F11`) is immersive: the top bar and docked panels hide, and
+  the photo uses the whole window. Stored panel flags are unchanged, so exiting
+  restores them. Spot Heal still docks its inspector while it is active. Escape
+  closes a context menu, then cancels crop, then leaves Spot Heal, then exits
+  fullscreen. Chrome does not reappear on a timer or mouse move.
 
 ## Color
 
@@ -195,9 +202,8 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 
 Ratings are implemented for the deliberately narrow writable profile defined by
 `docs/RATINGS.md`. Ordinary, identity-bound JPEG files with supported metadata
-are writable on Windows. Rating discovery and filtering work across the loaded
-folder on every platform, while unsupported containers and non-Windows builds
-remain visibly read-only.
+are writable on Windows, macOS, and Linux. Unix sources with extra hard links,
+and unsupported containers, remain visibly read-only.
 
 - The source image is the only durable rating record. viewr writes standard
   embedded 0-to-5 metadata after one explicit disclosure per session and does not
@@ -208,6 +214,8 @@ remain visibly read-only.
   over rating shortcuts.
 - Edit owns rating assignment. View owns the session-only minimum-rating filter.
   The current textual rating and any active filter remain visible outside menus.
+  When no image matches the filter, Escape or folder-navigation keys restore All
+  images instead of doing nothing.
 - One canonical natural-order folder catalog owns Trash and Undo positions. A
   filter derives visible indices for navigation, Folder Previews, and prefetch.
 - Unsupported, malformed, conflicting, read-only, changed, or unsafe sources stay

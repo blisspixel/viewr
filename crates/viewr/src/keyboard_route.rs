@@ -80,6 +80,21 @@ pub(crate) const fn escape_action(context: EscapeContext) -> EscapeAction {
     }
 }
 
+/// A widget popup owns an event if it was open before processing or remains open
+/// afterward. Escape can close a popup while egui processes the event, so the
+/// post-event state alone is not sufficient.
+#[must_use]
+pub(crate) const fn widget_popup_owns_event(was_open: bool, is_open: bool) -> bool {
+    was_open || is_open
+}
+
+/// A widget popup owns its Escape press, and a held key must not advance to the
+/// viewer's next Escape layer after that popup closes.
+#[must_use]
+pub(crate) const fn escape_press_reaches_app(repeat: bool, widget_popup_owns_event: bool) -> bool {
+    !repeat && !widget_popup_owns_event
+}
+
 #[must_use]
 pub(crate) fn is_space_key(key: &Key) -> bool {
     matches!(key, Key::Named(NamedKey::Space))
@@ -102,6 +117,28 @@ pub(crate) const fn space_press_starts_hold(space_held: bool) -> bool {
 #[must_use]
 pub(crate) const fn space_tap_fits(space_dragged: bool, input_owned_by_overlay: bool) -> bool {
     !space_dragged && !input_owned_by_overlay
+}
+
+/// Key repeat belongs only to continuous viewer actions. Discrete commands such
+/// as dialogs, mode and panel toggles, transforms, Escape, reload, delete, and
+/// undo run once per physical key press.
+#[must_use]
+pub(crate) fn repeated_viewer_action_allowed(key: &Key, is_cropping: bool) -> bool {
+    match key {
+        Key::Character(character) => {
+            matches!(character.as_str(), "+" | "=" | "-" | "_" | "[" | "]")
+        }
+        Key::Named(
+            NamedKey::ArrowRight
+            | NamedKey::ArrowLeft
+            | NamedKey::Home
+            | NamedKey::End
+            | NamedKey::PageUp
+            | NamedKey::PageDown,
+        ) => true,
+        Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp) => is_cropping,
+        _ => false,
+    }
 }
 
 #[must_use]
@@ -388,6 +425,14 @@ mod tests {
             }),
             EscapeAction::None
         );
+        assert!(escape_press_reaches_app(false, false));
+        assert!(!escape_press_reaches_app(true, false));
+        assert!(!escape_press_reaches_app(false, true));
+        assert!(!escape_press_reaches_app(true, true));
+        assert!(!widget_popup_owns_event(false, false));
+        assert!(widget_popup_owns_event(true, false));
+        assert!(widget_popup_owns_event(false, true));
+        assert!(widget_popup_owns_event(true, true));
     }
 
     #[test]
@@ -405,6 +450,47 @@ mod tests {
         assert_eq!(rating_assignment_for_key("4", true), None);
         assert_eq!(rating_assignment_for_key("9", false), None);
         assert_eq!(rating_assignment_for_key("t", false), None);
+    }
+
+    #[test]
+    fn key_repeat_is_limited_to_continuous_viewer_actions() {
+        for key in [
+            Key::Character("+".into()),
+            Key::Character("-".into()),
+            Key::Character("[".into()),
+            Key::Character("]".into()),
+            Key::Named(NamedKey::ArrowLeft),
+            Key::Named(NamedKey::ArrowRight),
+            Key::Named(NamedKey::Home),
+            Key::Named(NamedKey::End),
+            Key::Named(NamedKey::PageUp),
+            Key::Named(NamedKey::PageDown),
+        ] {
+            assert!(repeated_viewer_action_allowed(&key, false), "{key:?}");
+        }
+        for key in [
+            Key::Character("0".into()),
+            Key::Character("c".into()),
+            Key::Character("j".into()),
+            Key::Character("r".into()),
+            Key::Character("t".into()),
+            Key::Character("u".into()),
+            Key::Named(NamedKey::Delete),
+            Key::Named(NamedKey::Enter),
+            Key::Named(NamedKey::Escape),
+            Key::Named(NamedKey::F5),
+            Key::Named(NamedKey::F11),
+        ] {
+            assert!(!repeated_viewer_action_allowed(&key, false), "{key:?}");
+        }
+        assert!(!repeated_viewer_action_allowed(
+            &Key::Named(NamedKey::ArrowUp),
+            false
+        ));
+        assert!(repeated_viewer_action_allowed(
+            &Key::Named(NamedKey::ArrowUp),
+            true
+        ));
     }
 
     #[test]

@@ -77,6 +77,10 @@ Sources reviewed 2026-07-29.
   `1` through `5` assign that exact rating. Key repeat is ignored.
 - Rating keys work only in normal image-viewing mode when no text or numeric field,
   modal, menu, popup, Crop, Spot Heal, or destructive action owns input.
+- Rating assignment waits while folder rating discovery is reading the bounded
+  source headers. Filter choices remain available so selecting All images can
+  cancel discovery. This serialization prevents a scan that observed the old
+  value from replacing a newly committed rating in the playlist and status.
 - Fit Image to View moves to the primary modifier plus `0`. Actual Size moves to
   the primary modifier plus `1`. Both remain visible in View.
 - Edit > Rating exposes Unrated and 1 through 5 for discovery and pointer or
@@ -111,8 +115,9 @@ derived projection of indices, never a second mutable playlist.
   positions. Embedded ratings move and restore with the exact file.
 - Rating discovery is in-memory, bounded, cancellable, generation-tagged, and
   limited to the explicitly opened folder. It creates no watcher or persistent
-  index. A 50,000-file folder must remain within the existing performance and
-  memory budgets.
+  index. It never overlaps a rating write for the same playlist generation. A
+  50,000-file folder must remain within the existing performance and memory
+  budgets.
 
 ## Source-write safety boundary
 

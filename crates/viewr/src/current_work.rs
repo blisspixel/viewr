@@ -11,7 +11,6 @@ pub(crate) enum CurrentWork {
     TrashMove,
     PermanentDelete,
     TrashRestore,
-    #[cfg(target_os = "windows")]
     SourceVerification,
     FolderScan,
     ImagePreparation,
@@ -19,6 +18,15 @@ pub(crate) enum CurrentWork {
     Save,
     SpotHeal,
     RatingWrite,
+}
+
+/// An action may operate inside one selected edit mode while every live
+/// interaction and every other foreground owner remains exclusive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ActiveModeAllowance {
+    None,
+    Crop,
+    SpotHeal,
 }
 
 #[must_use]
@@ -39,8 +47,40 @@ pub(crate) fn image_preparation_work(
 }
 
 #[must_use]
-pub(crate) fn crop_work(selection_active: bool, worker_active: bool) -> Option<CurrentWork> {
-    (selection_active || worker_active).then_some(CurrentWork::Crop)
+pub(crate) const fn crop_work(
+    mode_active: bool,
+    interaction_active: bool,
+    worker_active: bool,
+    allowance: ActiveModeAllowance,
+) -> Option<CurrentWork> {
+    if worker_active
+        || interaction_active
+        || (mode_active && !matches!(allowance, ActiveModeAllowance::Crop))
+    {
+        Some(CurrentWork::Crop)
+    } else {
+        None
+    }
+}
+
+/// Selected modes may be allowed for their own safe commands, but a live stroke
+/// or worker remains exclusive. An idle Spot Heal tool is therefore not
+/// unfinished edit-history work by itself.
+#[must_use]
+pub(crate) const fn spot_heal_work(
+    mode_active: bool,
+    worker_active: bool,
+    stroke_active: bool,
+    allowance: ActiveModeAllowance,
+) -> Option<CurrentWork> {
+    if worker_active
+        || stroke_active
+        || (mode_active && !matches!(allowance, ActiveModeAllowance::SpotHeal))
+    {
+        Some(CurrentWork::SpotHeal)
+    } else {
+        None
+    }
 }
 
 #[must_use]
@@ -86,7 +126,6 @@ pub(crate) fn blocked_action_message(action: &str, blocker: CurrentWork) -> Stri
         CurrentWork::TrashMove => "the move to Trash",
         CurrentWork::PermanentDelete => "the permanent delete",
         CurrentWork::TrashRestore => "the Trash restore",
-        #[cfg(target_os = "windows")]
         CurrentWork::SourceVerification => "source verification",
         CurrentWork::FolderScan => "the folder scan",
         CurrentWork::ImagePreparation => "image preparation",
@@ -120,9 +159,18 @@ mod tests {
 
     #[test]
     fn busy_action_copy_is_specific_and_prioritized() {
-        assert_eq!(crop_work(true, false), Some(CurrentWork::Crop));
-        assert_eq!(crop_work(false, true), Some(CurrentWork::Crop));
-        assert_eq!(crop_work(false, false), None);
+        assert_eq!(
+            crop_work(true, false, false, ActiveModeAllowance::None),
+            Some(CurrentWork::Crop)
+        );
+        assert_eq!(
+            crop_work(false, false, true, ActiveModeAllowance::None),
+            Some(CurrentWork::Crop)
+        );
+        assert_eq!(
+            crop_work(false, false, false, ActiveModeAllowance::None),
+            None
+        );
         assert_eq!(
             current_work_blocker([
                 None,
@@ -194,7 +242,6 @@ mod tests {
             blocked_action_message("moving this file to Trash", CurrentWork::SpotHeal),
             "Wait for Spot Heal to finish before moving this file to Trash"
         );
-        #[cfg(target_os = "windows")]
         assert_eq!(
             blocked_action_message("saving a copy", CurrentWork::SourceVerification),
             "Wait for source verification to finish before saving a copy"
@@ -228,6 +275,43 @@ mod tests {
             Some("Retry the failed image load before using Spot Heal")
         );
         assert_eq!(spot_heal_source_blocker(false, false), None);
+    }
+
+    #[test]
+    fn mode_allowances_never_allow_live_interactions_or_workers() {
+        assert_eq!(
+            crop_work(true, false, false, ActiveModeAllowance::Crop),
+            None
+        );
+        assert_eq!(
+            crop_work(true, true, false, ActiveModeAllowance::Crop),
+            Some(CurrentWork::Crop)
+        );
+        assert_eq!(
+            crop_work(true, false, true, ActiveModeAllowance::Crop),
+            Some(CurrentWork::Crop)
+        );
+        assert_eq!(
+            crop_work(true, false, false, ActiveModeAllowance::SpotHeal),
+            Some(CurrentWork::Crop)
+        );
+
+        assert_eq!(
+            spot_heal_work(true, false, false, ActiveModeAllowance::SpotHeal),
+            None
+        );
+        assert_eq!(
+            spot_heal_work(true, true, false, ActiveModeAllowance::SpotHeal),
+            Some(CurrentWork::SpotHeal)
+        );
+        assert_eq!(
+            spot_heal_work(true, false, true, ActiveModeAllowance::SpotHeal),
+            Some(CurrentWork::SpotHeal)
+        );
+        assert_eq!(
+            spot_heal_work(true, false, false, ActiveModeAllowance::Crop),
+            Some(CurrentWork::SpotHeal)
+        );
     }
 
     #[test]

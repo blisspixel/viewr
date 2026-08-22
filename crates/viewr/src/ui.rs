@@ -318,6 +318,8 @@ pub(crate) struct UiFrameOwned {
     pub curation_recovery_status: Option<String>,
     /// A folder scan is still deciding the active playlist scope.
     pub folder_scan_busy: bool,
+    /// A native Open With request is still verifying the bound source.
+    pub source_verification_busy: bool,
     /// 1-based index and total in the folder playlist, if known.
     pub playlist_pos: Option<(usize, usize)>,
     /// Physical display pixels per source-image pixel (`1.0` = actual size).
@@ -439,10 +441,13 @@ impl UiFrameOwned {
             heal_busy: self.heal_busy,
             heal_painting: self.heal_painting,
             curation_busy: self.curation_status.is_some(),
+            source_verification_busy: self.source_verification_busy,
             folder_scan_busy: self.folder_scan_busy,
             is_cropping: self.is_cropping,
             heal_supported: self.heal_supported,
-            has_heal_source: self.heal_source.is_some(),
+            has_alternate_heal_source: self
+                .heal_source
+                .is_some_and(|(_, candidate_count)| candidate_count >= 2),
             has_undo_edit: self.has_undo_edit,
             has_redo_edit: self.has_redo_edit,
             has_undo_trash: self.has_undo_trash,
@@ -455,6 +460,7 @@ impl UiFrameOwned {
             rating_capability: self.rating.capability,
             rating_filter: self.rating.filter,
             rating_write_busy: self.rating.write_busy,
+            rating_discovery_busy: self.rating.discovery_busy,
             rating_recovery_unsettled: self.rating.recovery_unsettled,
             rating_folder_count: self.rating.folder_count,
         })
@@ -3928,6 +3934,7 @@ mod tests {
             curation_status: None,
             curation_recovery_status: None,
             folder_scan_busy: false,
+            source_verification_busy: false,
             playlist_pos: Some((1, 2)),
             pixel_scale: 1.0,
             toast: None,
@@ -4080,10 +4087,11 @@ mod tests {
         assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.heal_busy = false;
         frame.dock.heal_active = true;
-        assert!(control_enabled(&frame, ChromeControl::EditTransform));
+        assert!(!control_enabled(&frame, ChromeControl::EditTransform));
         assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.dock.heal_active = false;
         frame.is_cropping = true;
+        assert!(control_enabled(&frame, ChromeControl::EditTransform));
         assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         frame.is_cropping = false;
         frame.folder_scan_busy = true;
@@ -4092,6 +4100,16 @@ mod tests {
         frame.curation_status = Some("Restoring 1 file from Trash...".to_owned());
         assert!(!control_enabled(&frame, ChromeControl::UndoTrash));
         assert!(!control_enabled(&frame, ChromeControl::EditTransform));
+    }
+
+    #[test]
+    fn rating_discovery_disables_writes_but_keeps_filter_cancellation_available() {
+        let mut frame = accessibility_test_frame();
+        frame.rating.discovery_busy = true;
+
+        assert!(!control_enabled(&frame, ChromeControl::RatingChoice));
+        assert!(control_enabled(&frame, ChromeControl::RatingMenu));
+        assert!(control_enabled(&frame, ChromeControl::RatingFilterMenu));
     }
 
     #[test]
@@ -6220,6 +6238,20 @@ mod tests {
                 "missing Spot Heal node: {expected}; labels: {labels:?}"
             );
         }
+    }
+
+    #[test]
+    fn spot_heal_refresh_requires_a_distinct_alternate_source() {
+        let mut frame = accessibility_test_frame();
+        frame.dock.heal_active = true;
+        frame.heal_source = None;
+        assert!(!control_enabled(&frame, ChromeControl::HealRefreshSource));
+
+        frame.heal_source = Some((0, 1));
+        assert!(!control_enabled(&frame, ChromeControl::HealRefreshSource));
+
+        frame.heal_source = Some((0, 2));
+        assert!(control_enabled(&frame, ChromeControl::HealRefreshSource));
     }
 
     #[test]

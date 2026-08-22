@@ -12,7 +12,12 @@ and organized by user-visible concern.
   crop, then leaves Spot Heal, then exits fullscreen. Spot Heal still docks its
   inspector while it is active.
 - Space tap fits without clearing rotation, flip, or crop. Pan requires holding
-  Space; the resting cursor over the photo is an arrow.
+  Space; the resting cursor over the photo is an arrow. Key auto-repeat is
+  limited to continuous navigation, Crop nudging, page or frame stepping, and
+  zoom, so dialogs, toggles, transforms, Escape, reload, delete, and history
+  commands run once per press. Holding Escape cannot cascade through several
+  overlays, tools, filters, or fullscreen states, and a widget menu consumes its
+  own Escape without also changing the active viewer tool.
 - Folder browsing continues while a replacement decode is in flight. The last
   good frame stays until the newly selected image is ready.
 - Decode failures are one unprefixed sentence. A toast is reserved for the
@@ -30,9 +35,25 @@ and organized by user-visible concern.
 - An empty rating filter recovers from the keyboard: Escape, Left, and Right show
   all images. Opening a file shows Reading folder... while siblings are scanned.
   `G` explains when Folder Previews need more than one image. Spot Heal Undo and
-  Redo quote the same shortcuts as Edit, and bare `U` does not restore Trash while
-  the tool is open. `J` now observes the same in-progress and failed-load blockers
-  as pointer controls. Automatic folder-browse failures name Open Folder.
+  Redo quote the same shortcuts as Edit and now work while the idle tool remains
+  open. A collected or processing stroke disables history and Refresh Source,
+  and Refresh Source reports why it cannot run instead of silently discarding a
+  new stroke. Bare `U` does not restore Trash while the tool is open. `J` now
+  observes the same in-progress and failed-load blockers as pointer controls.
+  Automatic folder-browse failures name Open Folder. Menus and accessible
+  controls now disable rating, delete, history, and unavailable transform actions
+  under the same folder, source-verification, edit, and worker owners enforced by
+  keyboard dispatch. Rotate and flip remain available inside an idle Crop
+  selection, where the crop geometry follows the transform, but a live crop drag
+  remains exclusive. Crop and Spot Heal wait for folder scanning and Open With
+  verification before starting, and switching tools cannot discard a live heal
+  stroke. Filmstrip controls now reflect the same browse blockers as keyboard
+  navigation. Refresh Source is disabled when no distinct alternate patch exists.
+  Manual reload waits for an active rating transaction instead of racing the
+  source replacement. A rating write also waits for folder rating discovery, so
+  a stale scan result cannot replace the newly committed in-memory value.
+  Explicit file, folder, and filmstrip browsing cancel superseded Open With
+  verification before a native chooser can appear later.
 - JPEG rating writes work on macOS and Linux as well as Windows. The Unix path
   copies the accepted source, rewrites the bounded header, preserves mode, and
   replaces the pathname only after verification. A same-directory hard link
@@ -99,6 +120,9 @@ and organized by user-visible concern.
   use 0.6.0. Only completed evidence, the release date, and public immutable-link
   status updates are allowed after hardware testing without resetting the
   candidate.
+- The source-install guide now includes the canonical target-specific commands to
+  build and independently verify a local release archive, matching the path
+  referenced by the verification guide.
 
 ## 0.5.0 - 2026-08-20
 

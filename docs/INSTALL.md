@@ -137,6 +137,20 @@ The binaries are written to `target/release`. Keep the main executable and worke
 from the same build together. On Linux, the build also needs the normal Wayland/X11
 development packages listed in `.github/workflows/ci.yml`.
 
+Maintainers can exercise the canonical release-archive contract for one supported
+target without publishing anything. Build with an explicit target, then package
+and independently verify the resulting archive:
+
+```text
+cargo build --release --workspace --locked --target <target>
+python -B scripts/release_artifact.py build --target <target> --binary-dir target/<target>/release
+python -B scripts/release_artifact.py verify target/release-artifacts/viewr-<version>-<target>.zip
+```
+
+`<target>` must be one of the four release targets listed under Manual release
+installation. The builder also verifies the archive before returning, while the
+last command demonstrates the standalone verification path used after download.
+
 Optional AVIF and HEIC support requires native libheif dependencies and a separate
 worker build:
 

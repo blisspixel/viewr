@@ -1,7 +1,8 @@
 # Ratings and folder filtering
 
 Status: implemented for bounded rating discovery and filtering, with source writes
-limited to ordinary supported JPEG files on Windows.
+limited to ordinary supported JPEG files. Unix sources with extra hard links stay
+read-only.
 
 viewr supports durable integer ratings because they improve a real folder
 workflow: rate the image in front of you, then narrow navigation to the strongest
@@ -50,13 +51,13 @@ state.
   are distinct states.
 - An explicit new rating may reconcile otherwise valid conflicting rating fields,
   but only after the normal first-write disclosure and source-safety checks.
-- The initial writable scope is ordinary content-detected JPEG on Windows. TIFF
-  remains read-only until endian, BigTIFF, multi-page, strip and tile offsets, and
-  unknown metadata preservation are proven. PNG, WebP, HEIF, AVIF, JPEG XL,
-  camera RAW, GIF, SVG, BMP, and other formats remain visibly unsupported for
-  rating writes until each container has equivalent proof. Non-Windows builds
-  currently read supported JPEG ratings and filter in memory but do not write
-  ratings. There is no persistence fallback.
+- The initial writable scope is ordinary content-detected JPEG on Windows, macOS,
+  and Linux. Unix writes refuse extra hard links so replacing one name cannot
+  change another. TIFF remains read-only until endian, BigTIFF, multi-page, strip
+  and tile offsets, and unknown metadata preservation are proven. PNG, WebP, HEIF,
+  AVIF, JPEG XL, camera RAW, GIF, SVG, BMP, and other formats remain visibly
+  unsupported for rating writes until each container has equivalent proof. There
+  is no persistence fallback.
 
 Adobe defines `xmp:Rating` as `-1` for Rejected and `0` through `5` for ratings.
 Microsoft maps `System.SimpleRating` to `xmp:Rating` and IFD tag `18246`, or
@@ -89,8 +90,8 @@ Sources reviewed 2026-07-29.
 - An active filter is persistent and explicit, for example
   `3 / 3 rated 4+ · 12 total`.
 - If no image matches, the loaded-folder surface says `No images are rated 4 or
-  higher.` and exposes `Show all images`. It never falls back to the first-run Open
-  File card.
+  higher.` and exposes `Show all images`. Escape, Left, and Right also show all
+  images. It never falls back to the first-run Open File card.
 
 ## Navigation and state ownership
 
@@ -115,7 +116,7 @@ derived projection of indices, never a second mutable playlist.
 
 ## Source-write safety boundary
 
-The Windows writer is enabled only for a source that passes all of these checks:
+The writer is enabled only for a source that passes all of these checks:
 
 1. The rating path uses `quick-xml` 0.41 directly, outside the advisory-affected
    transitive versions. JPEG header bytes, segment count, XMP packet size, XML
@@ -128,12 +129,15 @@ The Windows writer is enabled only for a source that passes all of these checks:
    native identity plus file length and change timestamps, rejects links and
    reparse points, snapshots from that handle, compares the complete snapshot,
    and revalidates immediately before replacement.
-3. The pristine snapshot and candidate are created beside the source with its
-   owner, group, and discretionary access-control list applied at `CreateFileW`.
-   The pristine copy is delete-on-close and immediately unlinked. The complete
-   candidate is synced and verified before `ReplaceFileW` runs with neither
-   ignore-ACL flag.
+3. Staging is beside the source. Windows applies its owner, group, and
+   discretionary access-control list at `CreateFileW`; the pristine snapshot is
+   delete-on-close and immediately unlinked. Unix uses private temporary files,
+   copies the source mode to the candidate, and rejects a source that already has
+   another hard link. Every complete candidate is synced and verified before the
+   pathname replacement.
 4. Replacement retains the exact original under a private transaction name.
+   Windows uses `ReplaceFileW`. Unix first creates and verifies a same-directory
+   hard-link backup, then atomically renames the candidate over the source name.
    Post-commit verification reopens the candidate, checks its rating and complete
    image tail, rechecks candidate and backup path binding, and only then removes
    the original. Verification failure restores the retained original when that can
@@ -154,17 +158,18 @@ dependency, so the new untrusted parser does not broaden either exception.
 
 Every release runs malformed and oversized metadata fixtures; rating values from
 absent through 5 plus Rejected, duplicates, conflicts, and invalid values; exact
-payload and unrelated-segment preservation; actual Windows success, stale-source,
-partial replacement, rollback, path-binding, security-descriptor, and transaction-
-cleanup tests; playlist and worker race tests; native UI Automation; Windows Shell
-Property System interoperability; local GExiv2 interoperability through a supplied
-Python executable or the default GIMP 3 Python when present; privacy and dependency
-gates; meaningful coverage; and the 50,000-file performance corpus.
+payload and unrelated-segment preservation; success, stale-source, path-binding,
+and transaction-cleanup tests on Windows, macOS, and Linux; Windows partial-
+replacement, rollback, security-descriptor, Shell Property System, and native UI
+Automation tests; local GExiv2 interoperability through a supplied Python
+executable or the default GIMP 3 Python when present; playlist and worker race
+tests; privacy and dependency gates; meaningful coverage; and the 50,000-file
+performance corpus.
 
-`ReplaceFileW` is the narrow final pathname operation. Another process can still
-replace a path after the last check. Abrupt process or power loss after replacement
-but before cleanup can also leave a source-protected `.viewr-rating-backup-*`
-original, and an unreconciled failure may retain a protected work copy for manual
-recovery. viewr will not broadly delete such names at startup because it cannot
-safely infer ownership across concurrent processes. These are explicit recovery
-boundaries, not hidden rating storage.
+`ReplaceFileW` on Windows and rename on Unix are the narrow final pathname
+operations. Another process can still replace a path after the last check. Abrupt
+process or power loss after replacement but before cleanup can also leave a private
+`.viewr-rating-backup-*` original, and an unreconciled Windows failure may retain a
+protected work copy for manual recovery. viewr will not broadly delete such names
+at startup because it cannot safely infer ownership across concurrent processes.
+These are explicit recovery boundaries, not hidden rating storage.

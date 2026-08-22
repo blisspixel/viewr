@@ -85,10 +85,45 @@ pub(super) fn durable_presentation_error(kind: PresentationKind, message: &str) 
     matches!(kind, PresentationKind::Loaded).then(|| message.to_owned())
 }
 
+const DECODE_ERROR_PREFIXES: &[&str] = &[
+    "Could not decode: ",
+    "could not decode: ",
+    "could not open image: ",
+    "open/decode failed: ",
+    "decode failed: ",
+];
+
+/// Strip stacked decoder prefixes so the empty card can show one human sentence.
+#[must_use]
+pub(super) fn user_facing_decode_error(error: impl std::fmt::Display) -> String {
+    let raw = error.to_string();
+    let mut current = raw.lines().next().unwrap_or(&raw).trim();
+    while let Some(next) = DECODE_ERROR_PREFIXES.iter().find_map(|prefix| {
+        current.get(..prefix.len()).and_then(|head| {
+            head.eq_ignore_ascii_case(prefix)
+                .then(|| current[prefix.len()..].trim())
+        })
+    }) {
+        current = next;
+    }
+    if current.is_empty() {
+        "The image could not be decoded".to_owned()
+    } else {
+        current.to_owned()
+    }
+}
+
+/// One-line status for a failed decode outside the empty-state card.
+#[must_use]
+pub(super) fn decode_failure_status(error: impl std::fmt::Display) -> String {
+    format!("Could not decode: {}", user_facing_decode_error(error))
+}
+
 /// Decode-failure toast copy. The last-good-frame clause is true only when a
 /// previous picture is still on the canvas.
 #[must_use]
-pub(super) fn decode_failure_toast(message: &str, previous_image_visible: bool) -> String {
+pub(super) fn decode_failure_toast(error: &str, previous_image_visible: bool) -> String {
+    let message = decode_failure_status(error);
     if previous_image_visible {
         format!("{message}. The previous image remains visible; Retry is available.")
     } else {
@@ -114,9 +149,9 @@ pub(super) fn preview_job_matches(
 mod tests {
     use super::{
         ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-        decode_failure_toast, durable_presentation_error,
+        decode_failure_status, decode_failure_toast, durable_presentation_error,
         external_edit_pending_after_frame_transition, image_open_in_progress,
-        navigation_image_plan, preview_job_matches,
+        navigation_image_plan, preview_job_matches, user_facing_decode_error,
     };
     use std::path::Path;
 
@@ -262,7 +297,17 @@ mod tests {
     #[test]
     fn decode_failure_toast_mentions_a_previous_image_only_when_one_is_visible() {
         assert_eq!(
-            decode_failure_toast("Could not decode: format error", true),
+            user_facing_decode_error(
+                "Could not decode: could not open image: open/decode failed: truncated"
+            ),
+            "truncated"
+        );
+        assert_eq!(
+            decode_failure_status("could not open image: unsupported core image format"),
+            "Could not decode: unsupported core image format"
+        );
+        assert_eq!(
+            decode_failure_toast("format error", true),
             "Could not decode: format error. The previous image remains visible; Retry is available."
         );
         assert_eq!(

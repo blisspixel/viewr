@@ -294,6 +294,23 @@ impl PageCursor {
         )
     }
 
+    /// Visible identity. ICO also reports the current pixel size.
+    #[must_use]
+    pub(crate) fn visible_copy(&self) -> String {
+        match self.kind() {
+            PageKind::Tiff => self.position_copy(),
+            PageKind::Ico => {
+                let image = self.current_image();
+                format!(
+                    "{} · {}×{}",
+                    self.position_copy(),
+                    image.width,
+                    image.height
+                )
+            }
+        }
+    }
+
     #[must_use]
     pub(crate) fn accessibility_copy(&self) -> String {
         let image = self.current_image();
@@ -783,6 +800,7 @@ mod tests {
         let mut cursor = PageCursor::new(pages);
         cursor.select_matching(32, 32);
         assert_eq!(cursor.position_copy(), "Icon 2 of 2");
+        assert_eq!(cursor.visible_copy(), "Icon 2 of 2 · 32×32");
         assert!(cursor.step(-1));
         assert_eq!(cursor.current_image().width, 16);
     }

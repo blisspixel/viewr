@@ -1073,7 +1073,7 @@ try {
         }
     }
     Wait-ForElement `
-        -Name "Open a file to start, or drop a file or folder. Its folder is browsed when access allows. Open Folder selects it explicitly for this session." `
+        -Name "Open File, Open Folder, or drop a file or folder. A dropped file also browses its folder when access allows. Open Folder selects the folder for this session." `
         -ControlType ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Wait-ForElement -Name "Open File" -ControlType (
         [System.Windows.Automation.ControlType]::Button
@@ -1356,11 +1356,11 @@ try {
     Wait-ForElement -Name "Refresh source" -Prefix -ControlType (
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
-    $finishSpotHeal = Wait-ForElement -Name "Done" -ControlType (
+    $finishSpotHeal = Wait-ForElement -Name "Done Esc" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     )
     Activate-Element -Element $finishSpotHeal
-    Wait-ForElementAbsent -Name "Done" -ControlType (
+    Wait-ForElementAbsent -Name "Done Esc" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
     $collapseTools = Wait-ForElement -Name "Collapse tools panel" -ControlType (
@@ -1552,6 +1552,18 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
     Send-ApplicationKey -VirtualKey 0x27
+    Wait-ForElement -Name "Rating: 4 of 5" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    Open-ViewSubmenu `
+        -Name "Rating Filter: All images" `
+        -ExpectedChildName "All images" `
+        -ExpectedChildControlType ([System.Windows.Automation.ControlType]::RadioButton)
+    $ratingFiveFilter = Wait-ForSelectionState `
+        -Name "Rating filter: At least 5" `
+        -Selected $false
+    Select-Element -Element $ratingFiveFilter
     Wait-ForElement -Name "No images are rated 5 or higher." -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null

@@ -204,13 +204,14 @@ A promise you can verify beats a promise you have to trust.
   displayed, or logged. Replacement, missing, unsupported, unavailable, and
   platform Trash outcomes enter diagnostics only as fixed categories.
 - viewr **does not use companion files as product state** (no `_picks.txt`, XMP
-  sidecar, or thumbnail cache). Explicit Save As and Windows JPEG rating writes
+  sidecar, or thumbnail cache). Explicit Save As and JPEG rating writes
   do use private same-directory transaction files so the destination can be
   replaced atomically. They are not an index or durable metadata store.
 - Durable ratings are the one narrow, explicit exception to the normal
-  no-source-mutation viewer behavior. On Windows, ordinary identity-bound JPEGs
-  with supported metadata can store a disclosed 0-to-5 preference in standard
-  embedded `xmp:Rating`. Other formats and platforms remain read-only. viewr
+  no-source-mutation viewer behavior. Ordinary identity-bound JPEGs with
+  supported metadata can store a disclosed 0-to-5 preference in standard
+  embedded `xmp:Rating`. Unix sources with extra hard links stay read-only.
+  Other formats remain read-only. viewr
   never creates a rating database, companion file, alternate stream, metadata
   timestamp field, separate timestamp record, or viewing-history record. Rating
   an image intentionally replaces that source
@@ -221,12 +222,14 @@ A promise you can verify beats a promise you have to trust.
   and is never persisted.
 - Windows rating snapshots and candidates receive the accepted source's owner,
   group, and discretionary access-control list at creation. The pristine snapshot
-  is delete-on-close and immediately unlinked. Normal completion removes the work
-  file and retained original. A process or power loss in the narrow interval after
-  replacement can leave a source-protected `.viewr-rating-backup-*` original; an
-  unreconciled failure can retain a protected work copy for manual recovery.
-  viewr does not broadly delete these names on startup because another process may
-  own one and a random file must never be mistaken for safe debris.
+  is delete-on-close and immediately unlinked. Unix staging is private and
+  same-directory, the candidate receives the source mode, and a verified hard-link
+  backup retains the exact original. Normal completion removes the work file and
+  retained original. A process or power loss in the narrow interval after
+  replacement can leave a `.viewr-rating-backup-*` original; an unreconciled
+  Windows failure can retain a protected work copy for manual recovery. viewr does
+  not broadly delete these names on startup because another process may own one and
+  a random file must never be mistaken for safe debris.
 - Spot-heal strokes, repair regions, and undo/redo pixel patches exist only in
   bounded RAM. Navigation clears them. Decoded pixels, bounded history, and GPU
   presentation commit together; presentation failure restores exact pixels and

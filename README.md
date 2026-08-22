@@ -21,8 +21,8 @@ history, crash-report uploader, or automatic update check.
 ## Why viewr
 
 - **Fast by design.** Decoding begins while the window initializes, neighboring
-  images are prefetched within fixed memory limits, and performance budgets run in
-  CI.
+  images are prefetched within fixed memory limits, extra cores fill those slots,
+  and performance budgets run in CI.
 - **Private by construction.** The application dependency graph contains no HTTP
   or TLS client. Photos, paths, metadata, ratings, and diagnostics stay local.
 - **Focused, not bare.** Folder navigation, ratings, rotation, crop, bounded Spot
@@ -131,6 +131,7 @@ automatically.
 | Previous or next image | Left/Right, Home/End, Page Up/Page Down |
 | Previous or next page or frame | `[` / `]` |
 | Fit, pan, or actual size | Space tap fits; hold Space to pan; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
+| Fullscreen | `F` or `F11`; Escape leaves after crop and Spot Heal |
 | Zoom | `+`, `-`, wheel or trackpad |
 | Tools, folder previews, image information | `T`, `G`, `I` |
 | Rate or clear rating | `1` through `5`, `0` |
@@ -144,10 +145,8 @@ Menus expose the same actions and shortcuts. There is no flag, review queue,
 batch-trash mode, or bare-letter delete shortcut. Detailed interaction behavior is
 in [Design](docs/DESIGN.md) and [Accessibility](docs/ACCESSIBILITY.md).
 
-Rating **writes** are currently limited to ordinary supported JPEG files on
-Windows. macOS and Linux builds read embedded ratings and filter a folder by
-them, but do not write a rating back to a file yet. The exact scope, states, and
-safety contract are in [Ratings](docs/RATINGS.md).
+Ratings write 0-to-5 into ordinary JPEG files as standard XMP. Scope, states,
+and the write-safety contract are in [Ratings](docs/RATINGS.md).
 
 ## Appearance
 

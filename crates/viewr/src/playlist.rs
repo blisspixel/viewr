@@ -104,6 +104,14 @@ impl Playlist {
         self.filter
     }
 
+    /// An active filter with no matches can return to All without the Open card.
+    #[must_use]
+    pub(crate) fn empty_filter_can_show_all(&self) -> bool {
+        !matches!(self.filter, RatingFilter::All)
+            && self.visible_indices.is_empty()
+            && !self.outside_filter
+    }
+
     pub(crate) fn current_rating(&self) -> RatingState {
         self.ratings
             .get(self.index)
@@ -402,7 +410,17 @@ mod tests {
             let mut playlist = rated_playlist(0);
             playlist.set_filter(RatingFilter::AtLeast(Rating::new(threshold).unwrap()));
             assert_eq!(playlist.visible_indices, expected);
+            assert!(!playlist.empty_filter_can_show_all());
         }
+        let mut none = rated_playlist(0);
+        for index in 0..7 {
+            none.set_rating(&path(index), RatingState::Unrated);
+        }
+        assert_eq!(
+            none.set_filter(RatingFilter::AtLeast(Rating::new(5).unwrap())),
+            FilterSelection::Empty
+        );
+        assert!(none.empty_filter_can_show_all());
     }
 
     #[test]
@@ -609,7 +627,9 @@ mod tests {
         assert!(!playlist.has_loading_ratings());
         assert_eq!(playlist.visible_position(), None);
         assert_eq!(playlist.set_filter(threshold), FilterSelection::Empty);
+        assert!(playlist.empty_filter_can_show_all());
         assert_eq!(playlist.show_all(), FilterSelection::Empty);
+        assert!(!playlist.empty_filter_can_show_all());
         assert_eq!(playlist.navigation_target(1), None);
         assert_eq!(playlist.navigation_target(0), None);
         assert!(!playlist.dismiss_outside_filter());

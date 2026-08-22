@@ -290,6 +290,8 @@ pub(crate) struct UiFrameOwned {
     pub restore_recovery_unsettled: bool,
     /// Hand tool is currently dragging.
     pub is_panning: bool,
+    /// Space is held for the temporary pan tool.
+    pub space_held: bool,
     /// A decode or display-preparation job is blocking image actions.
     pub is_loading: bool,
     /// A selected source is decoding or preparing its first display preview.
@@ -421,6 +423,8 @@ pub struct PageUiInfo {
     pub can_next: bool,
     /// Accessible name including page identity and dimensions.
     pub accessibility_label: String,
+    /// Visible page or icon identity, including ICO pixel size.
+    pub visible_label: String,
 }
 
 impl UiFrameOwned {
@@ -539,7 +543,9 @@ fn render_background(
     chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
-    render_top_menu(ui, actions, frame, chrome);
+    if !frame.dock.immersive {
+        render_top_menu(ui, actions, frame, chrome);
+    }
 
     if rating_filter_is_empty(frame) {
         render_filtered_empty_state(ui, actions, frame);
@@ -600,6 +606,7 @@ fn render_context_menu(
     let mut close = false;
     egui::Window::new("Quick Tools")
         .fixed_pos(Pos2::new(pos[0], pos[1]))
+        .constrain_to(ui.ctx().content_rect())
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
@@ -617,45 +624,48 @@ fn render_context_menu(
                     close = true;
                 }
             });
-            ui.separator();
-            let mut radius = frame.heal_brush_radius;
-            ui.label(
-                RichText::new("Heal Brush Radius")
-                    .size(11.5)
-                    .color(colors.muted),
-            );
-            let slider = egui::Slider::new(
-                &mut radius,
-                crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
-            )
-            .suffix(" px");
-            let adjust_enabled = chrome.is_enabled(ChromeControl::HealAdjust);
-            let response = ui.add_enabled(adjust_enabled, slider);
-            response.widget_info(|| {
-                WidgetInfo::slider(
-                    ui.is_enabled() && adjust_enabled,
-                    f64::from(radius),
-                    "Heal brush radius",
+            if frame.dock.heal_active {
+                ui.separator();
+                let mut radius = frame.heal_brush_radius;
+                ui.label(
+                    RichText::new("Heal Brush Radius")
+                        .size(11.5)
+                        .color(colors.muted),
+                );
+                let slider = egui::Slider::new(
+                    &mut radius,
+                    crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
                 )
-            });
-            if response.changed() {
-                actions.push(UiAction::SetHealBrushRadius(radius));
-            }
-            let mut feather = frame.heal_feather_percent;
-            ui.label(RichText::new("Heal Feather").size(11.5).color(colors.muted));
-            let response = ui.add_enabled(
-                adjust_enabled,
-                egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT).suffix("%"),
-            );
-            response.widget_info(|| {
-                WidgetInfo::slider(
-                    ui.is_enabled() && adjust_enabled,
-                    f64::from(feather),
-                    "Heal feather",
-                )
-            });
-            if response.changed() {
-                actions.push(UiAction::SetHealFeather(feather));
+                .suffix(" px");
+                let adjust_enabled = chrome.is_enabled(ChromeControl::HealAdjust);
+                let response = ui.add_enabled(adjust_enabled, slider);
+                response.widget_info(|| {
+                    WidgetInfo::slider(
+                        ui.is_enabled() && adjust_enabled,
+                        f64::from(radius),
+                        "Heal brush radius",
+                    )
+                });
+                if response.changed() {
+                    actions.push(UiAction::SetHealBrushRadius(radius));
+                }
+                let mut feather = frame.heal_feather_percent;
+                ui.label(RichText::new("Heal Feather").size(11.5).color(colors.muted));
+                let response = ui.add_enabled(
+                    adjust_enabled,
+                    egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT)
+                        .suffix("%"),
+                );
+                response.widget_info(|| {
+                    WidgetInfo::slider(
+                        ui.is_enabled() && adjust_enabled,
+                        f64::from(feather),
+                        "Heal feather",
+                    )
+                });
+                if response.changed() {
+                    actions.push(UiAction::SetHealFeather(feather));
+                }
             }
             ui.separator();
             let enabled = chrome.is_enabled(ChromeControl::OpenWith);
@@ -895,6 +905,9 @@ fn render_top_operation_status(
             "Outside current filter. Next or Previous returns to matching images.",
             colors,
         );
+    } else if frame.folder_scan_busy && frame.dock.has_image {
+        ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
+        add_status(ui, "Reading folder...");
     }
 }
 
@@ -1029,8 +1042,10 @@ fn render_top_image_facts(
         if has_detail {
             ui.add_space(TOP_METADATA_GAP);
         }
-        let response =
-            ui.add(egui::Label::new(RichText::new(&name).size(12.5).color(colors.text)).truncate());
+        let response = ui.add(
+            egui::Label::new(RichText::new(&name).size(13.5).strong().color(colors.text))
+                .truncate(),
+        );
         let _ = response.on_hover_text(name);
     }
 }
@@ -1379,64 +1394,8 @@ fn view_menu(
     let colors = chrome_colors(ui);
     ui.menu_button(RichText::new("View").size(13.5).color(colors.text), |ui| {
         ui.set_min_width(228.0);
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::ViewImage),
-                egui::Button::new("Fit Image to View")
-                    .shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::FitToView);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::ViewImage),
-                egui::Button::new("Actual Size").shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ActualSize);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::ViewImage),
-                egui::Button::new("Zoom In").shortcut_text("+"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ZoomIn);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::ViewImage),
-                egui::Button::new("Zoom Out").shortcut_text("-"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ZoomOut);
-            ui.close();
-        }
-        if let Some((previous, next, can_previous, can_next)) = sequence_menu_items(frame) {
-            ui.separator();
-            if ui
-                .add_enabled(can_previous, egui::Button::new(previous).shortcut_text("["))
-                .clicked()
-            {
-                actions.push(UiAction::StepSequence(-1));
-                ui.close();
-            }
-            if ui
-                .add_enabled(can_next, egui::Button::new(next).shortcut_text("]"))
-                .clicked()
-            {
-                actions.push(UiAction::StepSequence(1));
-                ui.close();
-            }
-        }
+        view_zoom_menu(ui, actions, chrome);
+        view_sequence_menu(ui, actions, frame);
         ui.separator();
         let rating_filter_label = chrome.rating_filter_menu_label();
         ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
@@ -1445,13 +1404,7 @@ fn view_menu(
             });
         });
         ui.separator();
-        if ui
-            .add(egui::Button::new("Fullscreen").shortcut_text("F"))
-            .clicked()
-        {
-            actions.push(UiAction::ToggleFullscreen);
-            ui.close();
-        }
+        view_fullscreen_menu(ui, actions, frame);
         ui.separator();
         ui.menu_button("Panels", |ui| panels_menu(ui, actions, chrome));
         ui.menu_button("Panel Position", |ui| {
@@ -1468,6 +1421,95 @@ fn view_menu(
             },
         );
     });
+}
+
+fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+    let enabled = chrome.is_enabled(ChromeControl::ViewImage);
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new("Fit Image to View").shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::FitToView);
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new("Actual Size").shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::ActualSize);
+        ui.close();
+    }
+    if ui
+        .add_enabled(enabled, egui::Button::new("Zoom In").shortcut_text("+"))
+        .clicked()
+    {
+        actions.push(UiAction::ZoomIn);
+        ui.close();
+    }
+    if ui
+        .add_enabled(enabled, egui::Button::new("Zoom Out").shortcut_text("-"))
+        .clicked()
+    {
+        actions.push(UiAction::ZoomOut);
+        ui.close();
+    }
+}
+
+fn view_sequence_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let Some((previous, next, can_previous, can_next)) = sequence_menu_items(frame) else {
+        return;
+    };
+    ui.separator();
+    if let Some(animation) = frame.animation {
+        let label = if animation.is_playing {
+            "Pause Animation"
+        } else {
+            "Play Animation"
+        };
+        if ui.add(egui::Button::new(label)).clicked() {
+            actions.push(UiAction::ToggleAnimationPlayback);
+            ui.close();
+        }
+    }
+    if ui
+        .add_enabled(can_previous, egui::Button::new(previous).shortcut_text("["))
+        .clicked()
+    {
+        actions.push(UiAction::StepSequence(-1));
+        ui.close();
+    }
+    if ui
+        .add_enabled(can_next, egui::Button::new(next).shortcut_text("]"))
+        .clicked()
+    {
+        actions.push(UiAction::StepSequence(1));
+        ui.close();
+    }
+}
+
+fn view_fullscreen_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let fullscreen_label = if frame.dock.immersive {
+        "Exit Fullscreen"
+    } else {
+        "Fullscreen"
+    };
+    if ui
+        .add(
+            egui::Button::new(fullscreen_label)
+                .shortcut_text("F / F11")
+                .selected(frame.dock.immersive),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::ToggleFullscreen);
+        ui.close();
+    }
 }
 
 fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1808,58 +1850,75 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         .show(ui.ctx(), |ui| {
             ui.set_max_width(560.0);
             ui.vertical(|ui| {
-                ui.heading(RichText::new("Update viewr").size(26.0).color(colors.text));
-                ui.label(
-                    RichText::new(format!("Current version: {}", env!("CARGO_PKG_VERSION")))
-                        .size(13.0)
-                        .color(colors.muted),
-                );
-                ui.add_space(12.0);
-                ui.label(
-                    RichText::new("viewr never checks for or downloads updates by itself.")
-                        .size(13.0)
-                        .color(colors.text),
-                );
-                ui.label(
-                    RichText::new(
-                        "Updates are explicit and come from the official GitHub release.",
-                    )
-                        .size(13.0)
-                        .color(colors.muted),
-                );
-                ui.label(
-                    RichText::new(
-                        "Open the latest stable release in your browser, review its version and checksums, then close viewr before installing it.",
-                    )
-                    .size(13.0)
-                    .color(colors.text),
-                );
-                ui.add_space(10.0);
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("Get latest release")
-                                .strong()
-                                .color(colors.accent_ink),
-                        )
-                        .fill(colors.accent)
-                        .min_size(Vec2::new(180.0, 36.0)),
-                    )
-                    .on_hover_text(crate::cli::OFFICIAL_LATEST_RELEASE_URL)
-                    .clicked()
-                {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(
-                        crate::cli::OFFICIAL_LATEST_RELEASE_URL,
-                    ));
+                let body_height = (ui.ctx().content_rect().height() - 80.0).clamp(180.0, 640.0);
+                let mut handoff = false;
+                ScrollArea::vertical()
+                    .id_salt("update_body")
+                    .max_height(body_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.heading(RichText::new("Update viewr").size(22.0).color(colors.text));
+                        ui.label(
+                            RichText::new(format!(
+                                "Current version: {}",
+                                env!("CARGO_PKG_VERSION")
+                            ))
+                            .size(13.0)
+                            .color(colors.muted),
+                        );
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(
+                                "viewr never checks for or downloads updates by itself.",
+                            )
+                            .size(13.0)
+                            .color(colors.text),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "Updates are explicit and come from the official GitHub release.",
+                            )
+                            .size(13.0)
+                            .color(colors.muted),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "Open the latest stable release in your browser, review its version and checksums, then close viewr before installing it.",
+                            )
+                            .size(13.0)
+                            .color(colors.text),
+                        );
+                        ui.add_space(10.0);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("Get latest release")
+                                        .strong()
+                                        .color(colors.accent_ink),
+                                )
+                                .fill(colors.accent)
+                                .min_size(Vec2::new(180.0, 36.0)),
+                            )
+                            .on_hover_text(crate::cli::OFFICIAL_LATEST_RELEASE_URL)
+                            .clicked()
+                        {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(
+                                crate::cli::OFFICIAL_LATEST_RELEASE_URL,
+                            ));
+                            handoff = true;
+                        }
+                        ui.label(
+                            RichText::new(
+                                "This hands off only the release URL to your default browser. viewr itself does not connect to GitHub or run an updater.",
+                            )
+                            .size(12.0)
+                            .color(colors.muted),
+                        );
+                    });
+                if handoff {
+                    close_clicked = true;
                 }
-                ui.label(
-                    RichText::new(
-                        "This hands off only the release URL to your default browser. viewr itself does not connect to GitHub or run an updater.",
-                    )
-                    .size(12.0)
-                    .color(colors.muted),
-                );
-                ui.add_space(14.0);
+                ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Close").clicked() {
                         close_clicked = true;
@@ -2082,7 +2141,16 @@ fn render_filtered_empty_state(
                             .color(colors.muted),
                         );
                         ui.add_space(16.0);
-                        if ui.button("Show all images").clicked() {
+                        let show_all = ui
+                            .add(egui::Button::new("Show all images").shortcut_text("Esc"))
+                            .on_hover_text("Esc or Left/Right also shows all images");
+                        show_all.widget_info(|| {
+                            WidgetInfo::labeled(WidgetType::Button, true, "Show all images")
+                        });
+                        show_all.ctx.accesskit_node_builder(show_all.id, |node| {
+                            node.set_keyboard_shortcut("Esc");
+                        });
+                        if show_all.clicked() {
                             actions.push(UiAction::ShowAllRatings);
                         }
                     });
@@ -2113,6 +2181,7 @@ fn render_empty_state(
         (screen.center().y - EMPTY_STATE_EXPECTED_HEIGHT * 0.5)
             .clamp(minimum_card_top, maximum_card_top),
     );
+    let copy = crate::shortcuts::empty_state_copy(is_opening, load_error, selected_file_name);
     Area::new("empty_state".into())
         .fixed_pos(card_position)
         .constrain_to(screen)
@@ -2136,11 +2205,6 @@ fn render_empty_state(
                             paint_empty_image_icon(ui.painter(), icon_rect, colors);
                         }
                         ui.add_space(12.0);
-                        let copy = crate::shortcuts::empty_state_copy(
-                            is_opening,
-                            load_error,
-                            selected_file_name,
-                        );
                         let heading_response = ui.add(
                             egui::Label::new(
                                 RichText::new(&copy.heading)
@@ -2171,7 +2235,7 @@ fn render_empty_state(
                     });
                 });
             card.response.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Panel, true, "Open an image source")
+                WidgetInfo::labeled(WidgetType::Panel, true, copy.heading.as_str())
             });
         });
 }
@@ -2265,10 +2329,15 @@ fn render_image_info_panel(
                     }
                 });
             });
-            render_file_info(ui, actions, frame);
-            render_capture_info(ui, frame);
-            render_source_privacy(ui, frame);
-            render_export_privacy(ui, actions, frame);
+            ScrollArea::vertical()
+                .id_salt("image_info_body")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    render_file_info(ui, actions, frame);
+                    render_capture_info(ui, frame);
+                    render_source_privacy(ui, frame);
+                    render_export_privacy(ui, actions, frame);
+                });
         });
 }
 
@@ -2382,12 +2451,7 @@ fn render_page_controls(
             pages.can_next,
             1,
         );
-        let label = format!(
-            "{} {} of {}",
-            pages.noun,
-            pages.index.saturating_add(1),
-            pages.count
-        );
+        let label = pages.visible_label.clone();
         let response = ui.label(RichText::new(&label).color(colors.muted));
         response.widget_info(|| {
             WidgetInfo::labeled(
@@ -2931,7 +2995,9 @@ fn render_heal_panel(
                     if ui
                         .add_enabled(
                             heal.enabled,
-                            egui::Button::new("Done").selected(heal.selected),
+                            egui::Button::new("Done")
+                                .shortcut_text("Esc")
+                                .selected(heal.selected),
                         )
                         .clicked()
                     {
@@ -3021,7 +3087,7 @@ fn render_heal_controls(
         if ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::UndoEdit),
-                egui::Button::new("Undo"),
+                egui::Button::new("Undo").shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
             )
             .clicked()
         {
@@ -3030,7 +3096,7 @@ fn render_heal_controls(
         if ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::RedoEdit),
-                egui::Button::new("Redo"),
+                egui::Button::new("Redo").shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
             )
             .clicked()
         {
@@ -3050,17 +3116,6 @@ fn render_heal_guidance(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeC
                     .color(colors.text),
             );
         });
-    } else {
-        ui.add(
-            egui::Label::new(
-                RichText::new(format!(
-                    "Drag to paint  |  / next source  |  {PRIMARY_MODIFIER}+Z undo  |  Esc finish"
-                ))
-                .size(11.0)
-                .color(colors.muted),
-            )
-            .wrap(),
-        );
     }
     ui.add_space(8.0);
     ui.add(
@@ -3756,8 +3811,10 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
     } else if frame.is_panning {
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-    } else {
+    } else if frame.space_held {
         ui.ctx().set_cursor_icon(CursorIcon::Grab);
+    } else {
+        ui.ctx().set_cursor_icon(CursorIcon::Default);
     }
 }
 
@@ -3811,6 +3868,7 @@ mod tests {
                 show_image_info: true,
                 image_info_side: DockSide::Right,
                 heal_active: false,
+                immersive: false,
             },
             retain_exif: false,
             background_override: None,
@@ -3856,6 +3914,7 @@ mod tests {
             has_undo_trash: true,
             restore_recovery_unsettled: false,
             is_panning: false,
+            space_held: false,
             is_loading: false,
             is_opening: false,
             load_error: None,
@@ -5152,11 +5211,35 @@ mod tests {
         assert!(nodes.iter().any(|node| {
             node.role() == egui::accesskit::Role::Button && node.label() == Some("Show all images")
         }));
+        assert!(nodes.iter().any(|node| {
+            node.role() == egui::accesskit::Role::Button
+                && node.label() == Some("Show all images")
+                && node.keyboard_shortcut() == Some("Esc")
+        }));
         assert!(
             nodes
                 .iter()
                 .all(|node| { !matches!(node.label(), Some("Open File" | "Open Folder")) })
         );
+    }
+
+    #[test]
+    fn first_image_names_a_busy_folder_scan() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.folder_scan_busy = true;
+        frame.playlist_pos = None;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("folder-scan status AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Reading folder...") || node.label() == Some("Reading folder...")
+        }));
     }
 
     #[test]
@@ -5288,6 +5371,7 @@ mod tests {
             can_previous: true,
             can_next: true,
             accessibility_label: "Page 2 of 3, 800 by 600".into(),
+            visible_label: "Page 2 of 3".into(),
         });
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
@@ -5679,8 +5763,7 @@ mod tests {
         let card = nodes
             .iter()
             .find(|node| {
-                node.role() == egui::accesskit::Role::Pane
-                    && node.label() == Some("Open an image source")
+                node.role() == egui::accesskit::Role::Pane && node.label() == Some("Open an image")
             })
             .expect("empty-state card node");
         let card_bounds = card.bounds().expect("empty-state card bounds");
@@ -5725,12 +5808,22 @@ mod tests {
         );
     }
 
+    fn empty_state_pane_label(frame: &UiFrameOwned) -> String {
+        crate::shortcuts::empty_state_copy(
+            frame.is_opening,
+            frame.load_error.as_deref(),
+            frame.selected_file_name.as_deref(),
+        )
+        .heading
+    }
+
     fn assert_empty_state_geometry_stays_stable(frame: &UiFrameOwned, state: &str) {
         let context = egui::Context::default();
         context.enable_accesskit();
         let screen_rect =
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1_000.0, 720.0));
         let mut observed = Vec::new();
+        let pane_label = empty_state_pane_label(frame);
 
         for _ in 0..8 {
             let mut input = accessibility_input();
@@ -5748,7 +5841,7 @@ mod tests {
                     .iter()
                     .find_map(|(_, node)| {
                         (node.role() == egui::accesskit::Role::Pane
-                            && node.label() == Some("Open an image source"))
+                            && node.label() == Some(pane_label.as_str()))
                         .then(|| node.bounds())
                         .flatten()
                     })
@@ -6068,6 +6161,39 @@ mod tests {
                 "update surface made an unsupported claim: {forbidden}; exposed text: {exposed:?}"
             );
         }
+    }
+
+    #[test]
+    fn update_close_stays_inside_the_minimum_window() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_update = true;
+        let screen_rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(640.0, 480.0));
+        let mut input = accessibility_input();
+        input.screen_rect = Some(screen_rect);
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let close = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label() == Some("Close"))
+            .expect("Update Close button");
+        let bounds = close.bounds().expect("Update Close bounds");
+        assert!(
+            bounds.x0 >= f64::from(screen_rect.left())
+                && bounds.x1 <= f64::from(screen_rect.right())
+                && bounds.y0 >= f64::from(screen_rect.top())
+                && bounds.y1 <= f64::from(screen_rect.bottom()),
+            "Update Close escaped the minimum window: {bounds:?}"
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ trust bar required before 1.0.
 
 ## Current repository state
 
-Status last verified on 2026-08-20:
+Status last verified on 2026-08-22:
 
 - [x] The repository is public with `main` as its only long-lived branch and
   Apache-2.0 detected by GitHub.

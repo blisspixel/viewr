@@ -4,21 +4,20 @@
 //! `System.SimpleRating` EXIF mirror at IFD0 tag `0x4746`. Writes update an
 //! existing valid mirror in place but never grow or relocate a TIFF IFD. This
 //! keeps MakerNote and unknown offset-bearing metadata byte-for-byte intact.
+//! Unix writes use a verified same-directory replace and refuse extra hard links.
 
 use crate::fs::{ImageSource, ImageSourceMatch, RatingScanSource};
-#[cfg(any(target_os = "windows", test))]
 use quick_xml::Writer;
 use quick_xml::events::BytesStart;
 use quick_xml::events::Event;
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::reader::NsReader;
 use std::fmt;
-#[cfg(target_os = "windows")]
 use std::fs::File;
-#[cfg(target_os = "windows")]
-use std::io::{self, Seek, SeekFrom, Write};
-use std::io::{BufReader, Read};
-use std::path::Path;
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const XMP_APP1_PREFIX: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 const EXTENDED_XMP_APP1_PREFIX: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
@@ -27,7 +26,6 @@ const XMP_META_NAMESPACE: &[u8] = b"adobe:ns:meta/";
 const XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xap/1.0/";
 const RDF_NAMESPACE: &[u8] = b"http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const SIMPLE_RATING_TAG: u16 = 0x4746;
-#[cfg(any(target_os = "windows", test))]
 const MAX_JPEG_BYTES: u64 = viewr_protocol::MAX_ENCODED_INPUT_BYTES;
 const MAX_HEADER_BYTES: usize = 16 * 1024 * 1024;
 const MAX_HEADER_SEGMENTS: usize = 1024;
@@ -37,7 +35,6 @@ const MAX_XML_ATTRIBUTES_PER_ELEMENT: usize = 64;
 const MAX_XML_ATTRIBUTES_TOTAL: usize = 4096;
 const MAX_XML_NAMESPACE_DECLARATIONS: usize = 32;
 const MAX_XML_EVENTS: usize = 4096;
-#[cfg(any(target_os = "windows", test))]
 const COPY_BUFFER_BYTES: usize = 128 * 1024;
 
 /// A validated user rating.
@@ -217,7 +214,6 @@ impl JpegSegment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JpegHeader {
     segments: Vec<JpegSegment>,
-    #[cfg(any(target_os = "windows", test))]
     encoded_len: u64,
 }
 
@@ -266,7 +262,6 @@ impl<R: Read> Read for SnapshotReader<R> {
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
 impl JpegHeader {
     fn encode(&self) -> Result<Vec<u8>, MetadataError> {
         let capacity = usize::try_from(self.encoded_len).map_err(|_| MetadataError::Unsupported)?;
@@ -350,12 +345,12 @@ fn observe_source_while_with_hook(
     let state = rating_from_header(&header).unwrap_or(RatingState::Unsupported);
     let capability = if matches!(state, RatingState::Unsupported | RatingState::Unreadable) {
         RatingWriteCapability::UnsupportedMetadata
-    } else if source.matches_path_while(path, &mut keep_going) != ImageSourceMatch::Same {
+    } else if source.matches_path_while(path, &mut keep_going) != ImageSourceMatch::Same
+        || source.extra_hard_links()
+    {
         RatingWriteCapability::UnsafeSource
-    } else if cfg!(target_os = "windows") {
-        RatingWriteCapability::WritableJpeg
     } else {
-        RatingWriteCapability::ReadOnlyFormat
+        RatingWriteCapability::WritableJpeg
     };
     RatingObservation { state, capability }
 }
@@ -365,6 +360,81 @@ const fn unsafe_rating_observation() -> RatingObservation {
         state: RatingState::Unreadable,
         capability: RatingWriteCapability::UnsafeSource,
     }
+}
+
+/// Discover ratings for a folder. Independent header reads may use extra cores.
+///
+/// Returns `None` when cancelled. Result order matches `files`. This seam still
+/// returns no write capability.
+#[must_use]
+pub(crate) fn scan_folder_ratings_while(
+    files: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)>,
+    keep_going: impl Fn() -> bool + Sync,
+    parallelism: usize,
+) -> Option<Vec<(PathBuf, RatingState)>> {
+    if files.is_empty() {
+        return Some(Vec::new());
+    }
+    if !keep_going() {
+        return None;
+    }
+    let workers = parallelism.max(1).min(files.len());
+    if workers == 1 {
+        let mut ratings = Vec::with_capacity(files.len());
+        for (path, provenance) in files {
+            if !keep_going() {
+                return None;
+            }
+            let rating = scan_path_rating_while(&path, provenance, &keep_going);
+            ratings.push((path, rating));
+        }
+        return Some(ratings);
+    }
+
+    let next = AtomicUsize::new(0);
+    let cancelled = AtomicBool::new(false);
+    let slots: Vec<Mutex<Option<RatingState>>> =
+        (0..files.len()).map(|_| Mutex::new(None)).collect();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    if cancelled.load(Ordering::Acquire) || !keep_going() {
+                        cancelled.store(true, Ordering::Release);
+                        return;
+                    }
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((path, provenance)) = files.get(index) else {
+                        return;
+                    };
+                    let rating = scan_path_rating_while(path, *provenance, || {
+                        !cancelled.load(Ordering::Acquire) && keep_going()
+                    });
+                    if cancelled.load(Ordering::Acquire) || !keep_going() {
+                        cancelled.store(true, Ordering::Release);
+                        return;
+                    }
+                    *slots[index]
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rating);
+                }
+            });
+        }
+    });
+
+    if cancelled.load(Ordering::Acquire) || !keep_going() {
+        return None;
+    }
+
+    let mut ratings = Vec::with_capacity(files.len());
+    for ((path, _), slot) in files.into_iter().zip(slots) {
+        let rating = slot
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)?;
+        ratings.push((path, rating));
+    }
+    Some(ratings)
 }
 
 /// Read only the bounded rating header for in-memory folder discovery.
@@ -533,7 +603,6 @@ fn read_jpeg_header_while(
 
     Ok(JpegHeader {
         segments,
-        #[cfg(any(target_os = "windows", test))]
         encoded_len: u64::try_from(total).map_err(|_| MetadataError::Unsupported)?,
     })
 }
@@ -961,7 +1030,6 @@ fn parse_exif_rating(tiff: &[u8]) -> Result<Option<RatingState>, MetadataError> 
     Ok(rating)
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn exif_rating_value_offset(tiff: &[u8]) -> Result<Option<(usize, Endian)>, MetadataError> {
     let endian = Endian::read(tiff)?;
     if endian.u16(tiff, 2)? != 42 {
@@ -1042,7 +1110,6 @@ impl Endian {
         })
     }
 
-    #[cfg(any(target_os = "windows", test))]
     fn put_u16(self, bytes: &mut [u8], offset: usize, value: u16) -> Result<(), MetadataError> {
         let encoded = match self {
             Self::Little => value.to_le_bytes(),
@@ -1056,7 +1123,6 @@ impl Endian {
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn rewrite_header(
     header: &JpegHeader,
     assignment: RatingAssignment,
@@ -1127,7 +1193,6 @@ fn rewrite_header(
     .encode()
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn app1_segment(prefix: &[u8], packet: &[u8]) -> Result<JpegSegment, MetadataError> {
     let payload_len = prefix
         .len()
@@ -1152,7 +1217,6 @@ fn app1_segment(prefix: &[u8], packet: &[u8]) -> Result<JpegSegment, MetadataErr
     })
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn new_xmp_packet(rating: Rating) -> String {
     format!(
         r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:Rating="{}"/></rdf:RDF></x:xmpmeta>"#,
@@ -1160,7 +1224,6 @@ fn new_xmp_packet(rating: Rating) -> String {
     )
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn rewrite_xmp_packet(
     packet: &[u8],
     assignment: RatingAssignment,
@@ -1247,7 +1310,6 @@ fn rewrite_xmp_packet(
     Ok(output)
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn rewrite_start(
     reader: &NsReader<&[u8]>,
     element: BytesStart<'_>,
@@ -1288,7 +1350,6 @@ fn rewrite_start(
     Ok(rewritten)
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn unique_rating_prefix(attributes: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
     for suffix in 0_u8..=64 {
         let candidate = if suffix == 0 {
@@ -1305,7 +1366,6 @@ fn unique_rating_prefix(attributes: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
     b"viewrRatingSafe".to_vec()
 }
 
-#[cfg(target_os = "windows")]
 fn map_metadata_write_error(error: MetadataError) -> RatingWriteError {
     match error {
         MetadataError::NotJpeg => RatingWriteError::ReadOnlyFormat,
@@ -1314,7 +1374,6 @@ fn map_metadata_write_error(error: MetadataError) -> RatingWriteError {
     }
 }
 
-#[cfg(target_os = "windows")]
 fn map_io_error(error: &io::Error) -> RatingWriteError {
     if error.kind() == io::ErrorKind::PermissionDenied {
         RatingWriteError::PermissionDenied
@@ -1323,22 +1382,178 @@ fn map_io_error(error: &io::Error) -> RatingWriteError {
     }
 }
 
-#[cfg(target_os = "windows")]
 pub(crate) fn write_rating(
     path: &Path,
     source: &ImageSource,
     assignment: RatingAssignment,
 ) -> Result<VerifiedRatingWrite, RatingWriteError> {
-    write_rating_windows(path, source, assignment)
+    #[cfg(target_os = "windows")]
+    {
+        write_rating_windows(path, source, assignment)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        write_rating_unix(path, source, assignment)
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn write_rating(
-    _path: &Path,
-    _source: &ImageSource,
-    _assignment: RatingAssignment,
+#[allow(
+    clippy::too_many_lines,
+    reason = "the Unix transaction stays linear so every failure has an adjacent rollback decision"
+)]
+fn write_rating_unix(
+    path: &Path,
+    source: &ImageSource,
+    assignment: RatingAssignment,
 ) -> Result<VerifiedRatingWrite, RatingWriteError> {
-    Err(RatingWriteError::ReadOnlyFormat)
+    if source.matches_path(path) != ImageSourceMatch::Same {
+        return Err(RatingWriteError::SourceChanged);
+    }
+    if source.extra_hard_links() {
+        return Err(RatingWriteError::SourceChanged);
+    }
+    let parent = path.parent().ok_or(RatingWriteError::WriteFailed)?;
+    let source_file = source
+        .clone_for_decode()
+        .map_err(|error| map_io_error(&error))?;
+    let source_metadata = source_file
+        .metadata()
+        .map_err(|error| map_io_error(&error))?;
+    if source_metadata.len() > MAX_JPEG_BYTES {
+        return Err(RatingWriteError::UnsupportedMetadata);
+    }
+    drop(source_file);
+
+    let mut pristine =
+        unix_named_temp(parent, ".viewr-rating-pristine-").map_err(|error| map_io_error(&error))?;
+    copy_accepted_source(source, pristine.as_file_mut()).map_err(|error| map_io_error(&error))?;
+    pristine
+        .as_file_mut()
+        .flush()
+        .and_then(|()| pristine.as_file().sync_all())
+        .map_err(|error| map_io_error(&error))?;
+
+    let mut pristine_reader = BufReader::new(
+        pristine
+            .as_file()
+            .try_clone()
+            .map_err(|error| map_io_error(&error))?,
+    );
+    pristine_reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| map_io_error(&error))?;
+    let original_header =
+        read_jpeg_header(&mut pristine_reader).map_err(map_metadata_write_error)?;
+    reject_metadata_signatures_in_tail(&mut pristine_reader).map_err(map_metadata_write_error)?;
+    let expected_header =
+        rewrite_header(&original_header, assignment).map_err(map_metadata_write_error)?;
+    let pristine_len = pristine
+        .as_file()
+        .metadata()
+        .map_err(|error| map_io_error(&error))?
+        .len();
+    let candidate_len = pristine_len
+        .checked_sub(original_header.encoded_len)
+        .and_then(|tail| tail.checked_add(u64::try_from(expected_header.len()).ok()?))
+        .ok_or(RatingWriteError::UnsupportedMetadata)?;
+    if candidate_len > MAX_JPEG_BYTES {
+        return Err(RatingWriteError::UnsupportedMetadata);
+    }
+
+    let mut work =
+        unix_named_temp(parent, ".viewr-rating-work-").map_err(|error| map_io_error(&error))?;
+    work.as_file()
+        .set_permissions(source_metadata.permissions())
+        .map_err(|error| map_io_error(&error))?;
+    work.write_all(&expected_header)
+        .map_err(|error| map_io_error(&error))?;
+    pristine_reader
+        .seek(SeekFrom::Start(original_header.encoded_len))
+        .map_err(|error| map_io_error(&error))?;
+    copy_bounded(&mut pristine_reader, work.as_file_mut(), MAX_JPEG_BYTES)
+        .map_err(|error| map_io_error(&error))?;
+    work.as_file_mut()
+        .flush()
+        .and_then(|()| work.as_file().sync_all())
+        .map_err(|error| map_io_error(&error))?;
+    verify_candidate(
+        work.as_file(),
+        pristine.as_file(),
+        original_header.encoded_len,
+        &expected_header,
+        assignment,
+    )
+    .map_err(map_metadata_write_error)?;
+
+    if source.matches_path(path) != ImageSourceMatch::Same
+        || !accepted_matches_snapshot(source, pristine.as_file())
+            .map_err(|error| map_io_error(&error))?
+    {
+        return Err(RatingWriteError::SourceChanged);
+    }
+
+    let backup = unix_backup_path(path, parent).map_err(|error| map_io_error(&error))?;
+    if !source.same_object_at_path(&backup)
+        || !accepted_matches_snapshot(source, pristine.as_file()).unwrap_or(false)
+    {
+        let _ = std::fs::remove_file(&backup);
+        return Err(RatingWriteError::SourceChanged);
+    }
+    if work.persist(path).is_err() {
+        let _ = std::fs::remove_file(&backup);
+        return Err(RatingWriteError::WriteFailed);
+    }
+
+    let rollback = || rollback_unix_rating(path, &backup);
+    let verified = ImageSource::open(path).map_err(|_| rollback())?;
+    let verified_file = verified.clone_for_decode().map_err(|_| rollback())?;
+    let candidate_is_valid = verify_candidate(
+        &verified_file,
+        pristine.as_file(),
+        original_header.encoded_len,
+        &expected_header,
+        assignment,
+    )
+    .is_ok();
+    drop(verified_file);
+    if !candidate_is_valid
+        || candidate_binding_error(&verified, path).is_some()
+        || !source.same_object_at_path(&backup)
+        || !accepted_matches_snapshot(source, pristine.as_file()).unwrap_or(false)
+    {
+        return Err(rollback());
+    }
+    if std::fs::remove_file(&backup).is_err() {
+        return Err(rollback());
+    }
+    Ok(VerifiedRatingWrite {
+        source: verified,
+        state: assignment.expected_state(),
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_named_temp(parent: &Path, prefix: &str) -> io::Result<tempfile::NamedTempFile> {
+    tempfile::Builder::new().prefix(prefix).tempfile_in(parent)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_backup_path(path: &Path, parent: &Path) -> io::Result<std::path::PathBuf> {
+    let backup = vacant_transaction_path(parent, ".viewr-rating-backup-")?;
+    if let Err(error) = std::fs::hard_link(path, &backup) {
+        let _ = std::fs::remove_file(&backup);
+        return Err(error);
+    }
+    Ok(backup)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn rollback_unix_rating(path: &Path, backup: &Path) -> RatingWriteError {
+    match std::fs::rename(backup, path) {
+        Ok(()) => RatingWriteError::VerificationRestored,
+        Err(_) => RatingWriteError::RecoveryFailed,
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1520,7 +1735,6 @@ fn write_rating_windows(
     })
 }
 
-#[cfg(target_os = "windows")]
 fn candidate_binding_error(source: &ImageSource, path: &Path) -> Option<RatingWriteError> {
     match source.matches_path(path) {
         ImageSourceMatch::Same => None,
@@ -1531,7 +1745,6 @@ fn candidate_binding_error(source: &ImageSource, path: &Path) -> Option<RatingWr
     }
 }
 
-#[cfg(target_os = "windows")]
 fn copy_accepted_source(source: &ImageSource, destination: &mut File) -> io::Result<()> {
     let mut reader = source.clone_for_decode()?;
     let length = reader.metadata()?.len();
@@ -1551,7 +1764,6 @@ fn copy_accepted_source(source: &ImageSource, destination: &mut File) -> io::Res
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
 fn copy_bounded(reader: &mut impl Read, writer: &mut impl Write, limit: u64) -> io::Result<u64> {
     let mut copied = 0_u64;
     let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
@@ -1573,7 +1785,6 @@ fn copy_bounded(reader: &mut impl Read, writer: &mut impl Write, limit: u64) -> 
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn reject_metadata_signatures_in_tail(reader: &mut impl Read) -> Result<(), MetadataError> {
     let longest = [
         XMP_APP1_PREFIX.len(),
@@ -1615,7 +1826,6 @@ fn reject_metadata_signatures_in_tail(reader: &mut impl Read) -> Result<(), Meta
     }
 }
 
-#[cfg(target_os = "windows")]
 fn accepted_matches_snapshot(source: &ImageSource, snapshot: &File) -> io::Result<bool> {
     let mut current = source.clone_for_decode()?;
     let mut pristine = snapshot.try_clone()?;
@@ -1623,7 +1833,6 @@ fn accepted_matches_snapshot(source: &ImageSource, snapshot: &File) -> io::Resul
     files_equal(&mut current, &mut pristine, MAX_JPEG_BYTES)
 }
 
-#[cfg(target_os = "windows")]
 fn files_equal(left: &mut impl Read, right: &mut impl Read, limit: u64) -> io::Result<bool> {
     let mut compared = 0_u64;
     let mut left_buffer = vec![0_u8; COPY_BUFFER_BYTES];
@@ -1649,7 +1858,6 @@ fn files_equal(left: &mut impl Read, right: &mut impl Read, limit: u64) -> io::R
     }
 }
 
-#[cfg(target_os = "windows")]
 fn verify_candidate(
     candidate: &File,
     pristine: &File,
@@ -1688,7 +1896,6 @@ fn verify_candidate(
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
 fn vacant_transaction_path(parent: &Path, prefix: &str) -> io::Result<std::path::PathBuf> {
     let temporary = tempfile::Builder::new()
         .prefix(prefix)
@@ -2394,6 +2601,64 @@ mod tests {
     }
 
     #[test]
+    fn folder_rating_scan_keeps_order_with_several_workers() {
+        let workspace = TempWorkspace::new("rating_folder_parallel").unwrap();
+        for (name, rating) in [("a.jpg", "1"), ("b.jpg", "2"), ("c.jpg", "5")] {
+            fs::write(
+                workspace.path().join(name),
+                jpeg(&[segment(0xe1, &xmp_with_rating(rating))]),
+            )
+            .unwrap();
+        }
+        let files = crate::fs::scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .into_iter()
+            .map(|entry| {
+                let (path, provenance) = entry.into_parts();
+                (path, Some(provenance))
+            })
+            .collect::<Vec<_>>();
+        let sequential = scan_folder_ratings_while(files.clone(), || true, 1).unwrap();
+        let parallel = scan_folder_ratings_while(files, || true, 4).unwrap();
+        assert_eq!(sequential, parallel);
+        assert_eq!(
+            sequential
+                .iter()
+                .map(|(_, state)| *state)
+                .collect::<Vec<_>>(),
+            [
+                RatingState::Rated(Rating(1)),
+                RatingState::Rated(Rating(2)),
+                RatingState::Rated(Rating(5)),
+            ]
+        );
+    }
+
+    #[test]
+    fn folder_rating_scan_returns_none_when_cancelled() {
+        let workspace = TempWorkspace::new("rating_folder_cancel").unwrap();
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            fs::write(
+                workspace.path().join(name),
+                jpeg(&[segment(0xe1, &xmp_with_rating("3"))]),
+            )
+            .unwrap();
+        }
+        let files = crate::fs::scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .into_iter()
+            .map(|entry| {
+                let (path, provenance) = entry.into_parts();
+                (path, Some(provenance))
+            })
+            .collect::<Vec<_>>();
+        let calls = AtomicUsize::new(0);
+        let result =
+            scan_folder_ratings_while(files, || calls.fetch_add(1, Ordering::Relaxed) < 1, 4);
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn folder_rating_scan_rejects_a_same_length_header_rewrite() {
         let workspace = TempWorkspace::new("rating_folder_rewrite").unwrap();
         let path = workspace.path().join("photo.jpg");
@@ -2489,9 +2754,8 @@ mod tests {
         assert_eq!(reject_metadata_signatures_in_tail(&mut ordinary), Ok(()));
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_transaction_replaces_verifies_and_rebinds_source() {
+    fn jpeg_rating_write_replaces_verifies_and_rebinds_source() {
         let workspace = TempWorkspace::new("rating_transaction").unwrap();
         let path = workspace.path().join("photo.jpg");
         let original = jpeg(&[
@@ -2519,9 +2783,8 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_transaction_rejects_stale_source_without_mutation() {
+    fn jpeg_rating_write_rejects_stale_source_without_mutation() {
         let workspace = TempWorkspace::new("rating_stale_source").unwrap();
         let path = workspace.path().join("photo.jpg");
         let original = jpeg(&[segment(0xe1, &xmp_with_rating("2"))]);
@@ -2540,6 +2803,66 @@ mod tests {
             observe_source(&ImageSource::open(&path).unwrap(), &path).state,
             RatingState::Rated(Rating(3))
         );
+    }
+
+    #[test]
+    fn ordinary_jpeg_is_writable_when_the_source_is_a_single_regular_file() {
+        let workspace = TempWorkspace::new("rating_writable_jpeg").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("2"))])).unwrap();
+        let source = ImageSource::open(&path).unwrap();
+        let observation = observe_source(&source, &path);
+        assert_eq!(observation.state, RatingState::Rated(Rating(2)));
+        assert_eq!(observation.capability, RatingWriteCapability::WritableJpeg);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extra_hard_links_stay_read_only() {
+        let workspace = TempWorkspace::new("rating_hard_link").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        let linked = workspace.path().join("alias.jpg");
+        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("2"))])).unwrap();
+        std::fs::hard_link(&path, &linked).unwrap();
+        let source = ImageSource::open(&path).unwrap();
+        assert!(source.extra_hard_links());
+        assert_eq!(
+            observe_source(&source, &path).capability,
+            RatingWriteCapability::UnsafeSource
+        );
+        assert!(matches!(
+            write_rating(&path, &source, RatingAssignment::Set(Rating(5))),
+            Err(RatingWriteError::SourceChanged)
+        ));
+        assert_eq!(
+            observe_source(&ImageSource::open(&path).unwrap(), &path).state,
+            RatingState::Rated(Rating(2))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_rating_replacement_preserves_mode_and_removes_transaction_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let workspace = TempWorkspace::new("rating_unix_mode").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        fs::write(&path, jpeg(&[segment(0xe1, &xmp_with_rating("2"))])).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        let source = ImageSource::open(&path).unwrap();
+
+        let written = write_rating(&path, &source, RatingAssignment::Set(Rating(4))).unwrap();
+
+        assert_eq!(written.state, RatingState::Rated(Rating(4)));
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        let entries = fs::read_dir(workspace.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries, [std::ffi::OsString::from("photo.jpg")]);
     }
 
     #[cfg(target_os = "windows")]

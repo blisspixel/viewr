@@ -56,6 +56,8 @@ pub struct ChromeLayout {
     pub image_info: Option<DockSide>,
     /// Physical pixels per logical UI point.
     pub scale_factor: f64,
+    /// Fullscreen hides persistent chrome so the photo uses the whole window.
+    pub immersive: bool,
 }
 
 /// Convert persistent panel state into physical-pixel image insets.
@@ -89,7 +91,11 @@ pub fn viewport_insets(layout: ChromeLayout) -> crate::view::ViewportInsets {
     crate::view::ViewportInsets {
         left: left * scale,
         right: right * scale,
-        top: TOP_BAR_HEIGHT * scale,
+        top: if layout.immersive {
+            0.0
+        } else {
+            TOP_BAR_HEIGHT * scale
+        },
         bottom: match layout.filmstrip {
             DockState::Hidden => 0.0,
             DockState::Collapsed => FILMSTRIP_RAIL_HEIGHT,
@@ -111,6 +117,8 @@ pub(crate) struct DockInput {
     pub show_image_info: bool,
     pub image_info_side: DockSide,
     pub heal_active: bool,
+    /// Fullscreen viewing: persistent chrome hides without changing stored panel flags.
+    pub immersive: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,16 +221,23 @@ pub(crate) struct DockViewModel {
     pub image_info: Option<DockSide>,
     pub image_info_side: DockSide,
     pub heal: bool,
+    pub immersive: bool,
     panels: [PanelToggleView; 3],
 }
 
 impl DockViewModel {
     #[must_use]
     pub fn new(input: DockInput) -> Self {
-        let tools_state = panel_state(input.has_image, input.show_tools, input.tools_expanded);
+        let show_tools = if input.immersive {
+            input.heal_active
+        } else {
+            input.show_tools
+        };
+        let tools_expanded = input.tools_expanded || (input.immersive && input.heal_active);
+        let tools_state = panel_state(input.has_image, show_tools, tools_expanded);
         let filmstrip_state = panel_state(
             input.has_image && input.has_multiple_images,
-            input.show_filmstrip,
+            input.show_filmstrip && !input.immersive,
             input.filmstrip_expanded,
         );
         Self {
@@ -233,9 +248,11 @@ impl DockViewModel {
             filmstrip: BottomDockView {
                 state: filmstrip_state,
             },
-            image_info: (input.has_image && input.show_image_info).then_some(input.image_info_side),
+            image_info: (input.has_image && input.show_image_info && !input.immersive)
+                .then_some(input.image_info_side),
             image_info_side: input.image_info_side,
             heal: input.has_image && input.heal_active,
+            immersive: input.immersive,
             panels: [
                 PanelToggleView {
                     kind: PanelKind::Tools,
@@ -275,6 +292,7 @@ impl DockViewModel {
             filmstrip: self.filmstrip.state,
             image_info: self.image_info,
             scale_factor,
+            immersive: self.immersive,
         }
     }
 }
@@ -864,6 +882,7 @@ mod tests {
                 show_image_info: true,
                 image_info_side: DockSide::Right,
                 heal_active: false,
+                immersive: false,
             },
             is_loading: false,
             is_opening: false,
@@ -1363,6 +1382,7 @@ mod tests {
             filmstrip: DockState::Expanded,
             image_info: Some(DockSide::Right),
             scale_factor: 1.5,
+            immersive: false,
         });
         assert!((insets.left - TOOLS_PANEL_WIDTH * 1.5).abs() < f32::EPSILON);
         assert!((insets.right - IMAGE_INFO_PANEL_WIDTH * 1.5).abs() < f32::EPSILON);
@@ -1376,6 +1396,7 @@ mod tests {
             filmstrip: DockState::Collapsed,
             image_info: None,
             scale_factor: 1.25,
+            immersive: false,
         });
         assert!((insets.right - (TOOLS_RAIL_WIDTH + HEAL_PANEL_WIDTH) * 1.25).abs() < f32::EPSILON);
         assert!((insets.bottom - FILMSTRIP_RAIL_HEIGHT * 1.25).abs() < f32::EPSILON);
@@ -1387,6 +1408,7 @@ mod tests {
             filmstrip: DockState::Hidden,
             image_info: Some(DockSide::Right),
             scale_factor: 1.0,
+            immersive: false,
         });
         assert!(insets.left.abs() < f32::EPSILON);
         assert!((insets.right - TOOLS_PANEL_WIDTH - IMAGE_INFO_PANEL_WIDTH).abs() < f32::EPSILON);
@@ -1400,9 +1422,35 @@ mod tests {
             filmstrip: DockState::Hidden,
             image_info: None,
             scale_factor: -1.0,
+            immersive: false,
         });
         assert!(insets.left.abs() < f32::EPSILON);
         assert!(insets.right.abs() < f32::EPSILON);
+        assert!(insets.top.abs() < f32::EPSILON);
+        assert!(insets.bottom.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn immersive_fullscreen_hides_persistent_chrome() {
+        let mut dock = ready_input().dock;
+        dock.immersive = true;
+        let layout = DockViewModel::new(dock).layout(1.0);
+        assert_eq!(layout.tools, DockState::Hidden);
+        assert_eq!(layout.filmstrip, DockState::Hidden);
+        assert!(layout.image_info.is_none());
+        let insets = viewport_insets(layout);
+        assert!(insets.left.abs() < f32::EPSILON);
+        assert!(insets.right.abs() < f32::EPSILON);
+        assert!(insets.top.abs() < f32::EPSILON);
+        assert!(insets.bottom.abs() < f32::EPSILON);
+
+        dock.heal_active = true;
+        let layout = DockViewModel::new(dock).layout(1.0);
+        assert_eq!(layout.tools, DockState::Expanded);
+        assert!(layout.heal);
+        assert_eq!(layout.filmstrip, DockState::Hidden);
+        let insets = viewport_insets(layout);
+        assert!((insets.left - (TOOLS_PANEL_WIDTH + HEAL_PANEL_WIDTH)).abs() < f32::EPSILON);
         assert!(insets.top.abs() < f32::EPSILON);
         assert!(insets.bottom.abs() < f32::EPSILON);
     }

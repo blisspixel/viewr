@@ -46,8 +46,29 @@ const MAX_CONTAINER_CHUNKS: usize = 4096;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 const JXL_CODESTREAM_SIGNATURE: &[u8] = b"\xff\x0a";
 const JXL_CONTAINER_SIGNATURE: &[u8] = b"\0\0\0\x0cJXL \r\n\x87\n";
-const MAX_CONCURRENT_FILE_DECODES: usize = 2;
+const MIN_CONCURRENT_FILE_DECODES: usize = 2;
+const MAX_CONCURRENT_FILE_DECODES: usize = 6;
 const BACKGROUND_DECODE_QUEUE_CAPACITY: usize = 8;
+
+/// How many files may decode at once on a machine with `logical_cpus` processors.
+///
+/// The UI and GPU keep one core. The floor is the historical dual-decoder gate.
+/// The ceiling bounds peak working RAM: one file may allocate a 64 Mi pixel
+/// RGBA image before the neighbor cache evicts it.
+#[must_use]
+pub(crate) fn max_concurrent_file_decodes_for(logical_cpus: usize) -> usize {
+    logical_cpus
+        .saturating_sub(1)
+        .clamp(MIN_CONCURRENT_FILE_DECODES, MAX_CONCURRENT_FILE_DECODES)
+}
+
+#[must_use]
+pub(crate) fn max_concurrent_file_decodes() -> usize {
+    max_concurrent_file_decodes_for(
+        std::thread::available_parallelism()
+            .map_or(MIN_CONCURRENT_FILE_DECODES, std::num::NonZeroUsize::get),
+    )
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct DecodeGeneration<'a> {
@@ -245,11 +266,12 @@ struct DecodeExecutor {
 
 impl DecodeExecutor {
     fn new() -> Result<Self, String> {
+        let concurrent = max_concurrent_file_decodes();
         let (background, background_rx) =
             std::sync::mpsc::sync_channel::<DecodeJob>(BACKGROUND_DECODE_QUEUE_CAPACITY);
         let background_rx = std::sync::Arc::new(std::sync::Mutex::new(background_rx));
-        let mut threads = Vec::with_capacity(MAX_CONCURRENT_FILE_DECODES * 2);
-        for index in 0..MAX_CONCURRENT_FILE_DECODES {
+        let mut threads = Vec::with_capacity(concurrent * 2);
+        for index in 0..concurrent {
             let receiver = std::sync::Arc::clone(&background_rx);
             let thread = std::thread::Builder::new()
                 .name(format!("viewr-decode-background-{index}"))
@@ -270,8 +292,8 @@ impl DecodeExecutor {
         }
 
         let foreground = std::sync::Arc::new(LatestJobQueue::default());
-        let foreground_workers = std::sync::Arc::new(AtomicUsize::new(MAX_CONCURRENT_FILE_DECODES));
-        for index in 0..MAX_CONCURRENT_FILE_DECODES {
+        let foreground_workers = std::sync::Arc::new(AtomicUsize::new(concurrent));
+        for index in 0..concurrent {
             let foreground_rx = std::sync::Arc::clone(&foreground);
             let live_workers = std::sync::Arc::clone(&foreground_workers);
             let thread = std::thread::Builder::new()
@@ -373,6 +395,7 @@ struct DecodeGateState {
 }
 
 struct DecodeGate {
+    limit: usize,
     state: std::sync::Mutex<DecodeGateState>,
     available: std::sync::Condvar,
 }
@@ -401,6 +424,7 @@ fn acquire_decode_permit(priority: DecodePriority) -> DecodePermit {
     static GATE: std::sync::OnceLock<std::sync::Arc<DecodeGate>> = std::sync::OnceLock::new();
     let gate = GATE.get_or_init(|| {
         std::sync::Arc::new(DecodeGate {
+            limit: max_concurrent_file_decodes(),
             state: std::sync::Mutex::new(DecodeGateState::default()),
             available: std::sync::Condvar::new(),
         })
@@ -418,7 +442,7 @@ fn acquire_decode_permit_from(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if matches!(priority, DecodePriority::Foreground) {
         state.waiting_foreground += 1;
-        while state.active >= MAX_CONCURRENT_FILE_DECODES {
+        while state.active >= gate.limit {
             state = gate
                 .available
                 .wait(state)
@@ -426,7 +450,7 @@ fn acquire_decode_permit_from(
         }
         state.waiting_foreground = state.waiting_foreground.saturating_sub(1);
     } else {
-        while state.active >= MAX_CONCURRENT_FILE_DECODES || state.waiting_foreground > 0 {
+        while state.active >= gate.limit || state.waiting_foreground > 0 {
             state = gate
                 .available
                 .wait(state)
@@ -1629,8 +1653,9 @@ mod tests {
         CloseLatestJobQueueOnLastExit, ColorNormalizer, ColorProfileStatus, DecodeGate,
         DecodeGateState, DecodeGeneration, DecodePriority, DecodedImage, GenerationReader,
         LatestJobQueue, MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES,
-        MAX_SVG_ATTRIBUTE_BYTES, MAX_SVG_ATTRIBUTES, MAX_SVG_GEOMETRY_TOKENS, PNG_SIGNATURE,
-        SourceImage, SourceOpen, acquire_decode_permit_from, positive_f32_to_px,
+        MAX_SVG_ATTRIBUTE_BYTES, MAX_SVG_ATTRIBUTES, MAX_SVG_GEOMETRY_TOKENS,
+        MIN_CONCURRENT_FILE_DECODES, PNG_SIGNATURE, SourceImage, SourceOpen,
+        acquire_decode_permit_from, max_concurrent_file_decodes_for, positive_f32_to_px,
         run_guarded_latest_queue, svg_geometry_tokens, try_schedule_background,
         validate_dimensions,
     };
@@ -2829,8 +2854,30 @@ mod tests {
     }
 
     #[test]
+    fn decode_concurrency_follows_cores_with_a_ram_safe_ceiling() {
+        assert_eq!(
+            max_concurrent_file_decodes_for(1),
+            MIN_CONCURRENT_FILE_DECODES
+        );
+        assert_eq!(
+            max_concurrent_file_decodes_for(2),
+            MIN_CONCURRENT_FILE_DECODES
+        );
+        assert_eq!(max_concurrent_file_decodes_for(4), 3);
+        assert_eq!(
+            max_concurrent_file_decodes_for(8),
+            MAX_CONCURRENT_FILE_DECODES
+        );
+        assert_eq!(
+            max_concurrent_file_decodes_for(32),
+            MAX_CONCURRENT_FILE_DECODES
+        );
+    }
+
+    #[test]
     fn decode_gate_caps_concurrency_and_prioritizes_foreground_waiters() {
         let gate = Arc::new(DecodeGate {
+            limit: MIN_CONCURRENT_FILE_DECODES,
             state: Mutex::new(DecodeGateState::default()),
             available: Condvar::new(),
         });
@@ -2840,7 +2887,7 @@ mod tests {
             acquire_decode_permit_from(Arc::clone(&gate), DecodePriority::Background);
         assert_eq!(
             gate.state.lock().unwrap().active,
-            MAX_CONCURRENT_FILE_DECODES
+            MIN_CONCURRENT_FILE_DECODES
         );
 
         let (acquired, acquisition_order) = mpsc::channel();

@@ -745,6 +745,24 @@ impl ImageSource {
             .is_some_and(|(left, right)| left == right)
     }
 
+    /// Extra directory entries share this inode. Rating writes refuse that object
+    /// so a rename cannot silently change another name.
+    #[must_use]
+    #[allow(clippy::unused_self)] // Windows nlink is not a rating-write gate
+    pub(crate) fn extra_hard_links(&self) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            self.file
+                .metadata()
+                .map_or(true, |metadata| metadata.nlink() != 1)
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn open_without_identity_for_test(path: &Path) -> io::Result<Self> {
         let mut source = Self::open(path)?;

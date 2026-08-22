@@ -46,8 +46,8 @@ use crate::curation_state::{
     restore_result_message, single_trash_result_message,
 };
 use crate::current_work::{
-    CurrentWork, blocked_action_message, crop_work, curation_action_preflight, curation_work,
-    current_work_blocker, image_preparation_work,
+    CurrentWork, blocked_action_message, browse_work_blocker, crop_work, curation_action_preflight,
+    curation_work, current_work_blocker, image_preparation_work, spot_heal_source_blocker,
 };
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
@@ -60,8 +60,10 @@ use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
 use crate::keyboard_route::{
-    is_space_key, is_trash_shortcut_key, rating_assignment_for_key, route_consumed_keyboard_key,
-    single_key_shortcut_allowed, space_release_must_unwind,
+    EscapeAction, EscapeContext, escape_action, is_fullscreen_toggle_key, is_space_key,
+    is_trash_shortcut_key, rating_assignment_for_key, rating_keys_apply,
+    route_consumed_keyboard_key, single_key_shortcut_allowed, space_press_starts_hold,
+    space_release_must_unwind, space_tap_fits,
 };
 use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
 use crate::prefetch::{
@@ -70,7 +72,7 @@ use crate::prefetch::{
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
     decode_failure_toast, durable_presentation_error, external_edit_pending_after_frame_transition,
-    image_open_in_progress, navigation_image_plan, preview_job_matches,
+    image_open_in_progress, navigation_image_plan, preview_job_matches, user_facing_decode_error,
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
@@ -180,6 +182,7 @@ fn run_internal(
         transform: Transform::default(),
         custom_crop_ratio: (3, 5),
         heal: HealTool::default(),
+        tools_before_heal: None,
         is_fullscreen: false,
         last_trashed: Vec::new(),
         last_trashed_scope: None,
@@ -823,6 +826,8 @@ struct App {
     /// Last custom crop ratio entered during this process session.
     custom_crop_ratio: (u16, u16),
     heal: HealTool,
+    /// Tools visibility captured when Spot Heal opened the dock.
+    tools_before_heal: Option<(bool, bool)>,
     is_fullscreen: bool,
     last_trashed: Vec<TrashedFile>,
     last_trashed_scope: Option<Arc<PlaylistScope>>,
@@ -2325,17 +2330,12 @@ impl App {
         let spawned = std::thread::Builder::new()
             .name("viewr-rating-scan".into())
             .spawn(move || {
-                let mut ratings = Vec::with_capacity(files.len());
-                for (path, provenance) in files {
-                    if worker_cancel.load(Ordering::Acquire) {
-                        return;
-                    }
-                    let rating = crate::ratings::scan_path_rating_while(&path, provenance, || {
-                        !worker_cancel.load(Ordering::Acquire)
-                    });
-                    ratings.push((path, rating));
-                }
-                if !worker_cancel.load(Ordering::Acquire) {
+                let ratings = crate::ratings::scan_folder_ratings_while(
+                    files,
+                    || !worker_cancel.load(Ordering::Acquire),
+                    crate::decode::max_concurrent_file_decodes(),
+                );
+                if let Some(ratings) = ratings {
                     let _ = sender.send(ratings);
                     let _ = event_proxy.send_event(UserEvent::Wake);
                 }
@@ -2846,6 +2846,7 @@ impl App {
             show_image_info: self.show_image_info,
             image_info_side: self.image_info_side,
             heal_active: self.heal.active,
+            immersive: self.is_fullscreen,
         }
     }
 
@@ -2905,19 +2906,19 @@ impl App {
     }
 
     fn toggle_fullscreen(&mut self) {
-        self.is_fullscreen = !self.is_fullscreen;
-        if let Some(renderer) = self.renderer.as_ref() {
-            if self.is_fullscreen {
-                renderer
-                    .window()
-                    .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-            } else {
-                renderer.window().set_fullscreen(None);
-            }
-        } else {
+        let Some(renderer) = self.renderer.as_ref() else {
             return;
+        };
+        self.is_fullscreen = !self.is_fullscreen;
+        if self.is_fullscreen {
+            renderer
+                .window()
+                .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+        } else {
+            renderer.window().set_fullscreen(None);
         }
         self.observe_current_display();
+        self.request_redraw();
     }
 
     fn observe_current_display(&mut self) {
@@ -3041,7 +3042,9 @@ impl App {
 
     fn handle_single_key_shortcut(&mut self, key: &str) {
         if let Some(assignment) = rating_assignment_for_key(key, false) {
-            self.request_rating_assignment(assignment);
+            if rating_keys_apply(self.transform.is_cropping, self.heal.active) {
+                self.request_rating_assignment(assignment);
+            }
             return;
         }
         match key {
@@ -3050,14 +3053,17 @@ impl App {
                 self.show_tools_panel = !self.show_tools_panel;
                 self.request_redraw();
             }
-            "g" | "G"
+            "g" | "G" => {
                 if self
                     .playlist
                     .as_ref()
-                    .is_some_and(|playlist| filmstrip_is_available(playlist.visible_len())) =>
-            {
-                self.show_filmstrip_panel = !self.show_filmstrip_panel;
-                self.request_redraw();
+                    .is_some_and(|playlist| filmstrip_is_available(playlist.visible_len()))
+                {
+                    self.show_filmstrip_panel = !self.show_filmstrip_panel;
+                    self.request_redraw();
+                } else {
+                    self.show_toast("Folder previews need more than one image");
+                }
             }
             "i" | "I" => {
                 self.show_image_info = !self.show_image_info;
@@ -3078,9 +3084,8 @@ impl App {
             "c" | "C" => self.toggle_crop_mode(),
             "j" | "J" => self.toggle_heal_mode(),
             "/" if self.heal.active => self.refresh_heal_source(),
-            "u" | "U" => self.undo_trash(),
+            "u" | "U" if !self.heal.active => self.undo_trash(),
             "x" | "X" if self.transform.is_cropping => self.swap_crop_ratio(),
-            "f" | "F" => self.toggle_fullscreen(),
             "+" | "=" => self.zoom_at_viewport_center(1.15),
             "-" | "_" => self.zoom_at_viewport_center(1.0 / 1.15),
             "[" => self.step_sequence(-1),
@@ -3097,6 +3102,10 @@ impl App {
             self.go_to_index(new_index);
             return;
         }
+        if self.rating_filter_is_empty() {
+            self.set_rating_filter(RatingFilter::All);
+            return;
+        }
         let empty_outside_filter = self
             .playlist
             .as_ref()
@@ -3109,10 +3118,28 @@ impl App {
         }
     }
 
+    fn rating_filter_is_empty(&self) -> bool {
+        self.rating_scan_worker.is_none()
+            && self
+                .playlist
+                .as_ref()
+                .is_some_and(Playlist::empty_filter_can_show_all)
+    }
+
+    fn escape_context(&self) -> EscapeContext {
+        EscapeContext {
+            context_menu_open: self.context_menu_pos.is_some(),
+            is_cropping: self.transform.is_cropping,
+            is_healing: self.heal.active,
+            empty_rating_filter: self.rating_filter_is_empty(),
+            is_fullscreen: self.is_fullscreen,
+        }
+    }
+
     fn go_to_index(&mut self, new_index: usize) {
         #[cfg(target_os = "windows")]
         self.cancel_open_with_check();
-        if self.block_action_while_busy("browsing to another image", true) {
+        if self.block_browse_while_busy() {
             return;
         }
         let Some(playlist) = &self.playlist else {
@@ -3356,15 +3383,15 @@ impl App {
         true
     }
 
-    fn block_action_while_busy(&mut self, action: &str, include_spot_heal: bool) -> bool {
+    fn active_work(&self, include_spot_heal: bool) -> [Option<CurrentWork>; 8] {
         #[cfg(target_os = "windows")]
         let source_verification = self
             .open_with_job
             .is_some()
             .then_some(CurrentWork::SourceVerification);
         #[cfg(not(target_os = "windows"))]
-        let source_verification = None;
-        let blocker = current_work_blocker([
+        let source_verification: Option<CurrentWork> = None;
+        [
             self.curation_worker
                 .as_ref()
                 .map(|worker| curation_work(worker.context.kind())),
@@ -3380,9 +3407,25 @@ impl App {
                 .then_some(CurrentWork::RatingWrite),
             (include_spot_heal && (self.heal.active || self.heal.is_busy() || self.heal.painting))
                 .then_some(CurrentWork::SpotHeal),
-        ]);
-        if let Some(blocker) = blocker {
+        ]
+    }
+
+    fn busy_blocker(&self, include_spot_heal: bool) -> Option<CurrentWork> {
+        current_work_blocker(self.active_work(include_spot_heal))
+    }
+
+    fn block_action_while_busy(&mut self, action: &str, include_spot_heal: bool) -> bool {
+        if let Some(blocker) = self.busy_blocker(include_spot_heal) {
             self.show_toast(blocked_action_message(action, blocker));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn block_browse_while_busy(&mut self) -> bool {
+        if let Some(blocker) = browse_work_blocker(self.active_work(true)) {
+            self.show_toast(blocked_action_message("browsing to another image", blocker));
             true
         } else {
             false
@@ -3511,6 +3554,10 @@ impl App {
         self.heal.stroke.clear();
         self.heal.painting = false;
         self.heal.cancel_worker();
+        if let Some((show, expanded)) = self.tools_before_heal.take() {
+            self.show_tools_panel = show;
+            self.tools_panel_open = expanded;
+        }
         self.pause_animation();
         self.transform.is_cropping = true;
         self.transform.crop_start = None;
@@ -3641,6 +3688,15 @@ impl App {
         if self.block_action_while_curating("changing Spot Heal") {
             return;
         }
+        if !self.heal.active
+            && let Some(message) = spot_heal_source_blocker(
+                self.session.is_loading(),
+                self.session.load_error.is_some(),
+            )
+        {
+            self.show_toast(message);
+            return;
+        }
         if !self.heal.active && self.current_loaded_path().is_none() {
             return;
         }
@@ -3677,6 +3733,10 @@ impl App {
             self.heal.active = false;
             self.heal.stroke.clear();
             self.heal.painting = false;
+            if let Some((show, expanded)) = self.tools_before_heal.take() {
+                self.show_tools_panel = show;
+                self.tools_panel_open = expanded;
+            }
             if self.heal.is_busy() {
                 self.show_toast("Finishing spot heal in memory");
             }
@@ -3686,6 +3746,7 @@ impl App {
             self.heal.stroke.clear();
             self.heal.painting = false;
             self.cancel_crop();
+            self.tools_before_heal = Some((self.show_tools_panel, self.tools_panel_open));
             self.show_tools_panel = true;
             self.tools_panel_open = true;
         }
@@ -5750,7 +5811,11 @@ impl ApplicationHandler<UserEvent> for App {
                 } => true,
                 WindowEvent::CursorMoved { .. } if self.heal.painting => true,
                 WindowEvent::KeyboardInput { event, .. } => {
+                    use winit::keyboard::{Key, NamedKey};
                     space_release_must_unwind(&event.logical_key, event.state, self.space_held)
+                        || (event.state == winit::event::ElementState::Pressed
+                            && matches!(&event.logical_key, Key::Named(NamedKey::Escape))
+                            && escape_action(self.escape_context()) != EscapeAction::None)
                         || (!application_shortcuts_blocked([
                             self.show_about,
                             self.show_update,
@@ -5762,6 +5827,7 @@ impl ApplicationHandler<UserEvent> for App {
                             &event.logical_key,
                             self.transform.is_cropping,
                             self.heal.active,
+                            self.is_fullscreen,
                         ))
                 }
                 _ => false,
@@ -5857,8 +5923,16 @@ impl ApplicationHandler<UserEvent> for App {
                             let dist =
                                 (self.cursor_pos.0 - start.0).hypot(self.cursor_pos.1 - start.1);
                             if dist < 5.0 {
-                                self.context_menu_pos =
-                                    Some([self.cursor_pos.0 as f32, self.cursor_pos.1 as f32]);
+                                let scale = self
+                                    .renderer
+                                    .as_ref()
+                                    .map_or(1.0, |renderer| renderer.window().scale_factor());
+                                if scale.is_finite() && scale > 0.0 {
+                                    self.context_menu_pos = Some([
+                                        (self.cursor_pos.0 / scale) as f32,
+                                        (self.cursor_pos.1 / scale) as f32,
+                                    ]);
+                                }
                                 if let Some(renderer) = self.renderer.as_mut() {
                                     renderer.window().request_redraw();
                                 }
@@ -5905,9 +5979,23 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             self.transform.crop_start = None;
                         }
-                    } else {
+                    } else if self.space_held {
                         self.transform.is_panning = pressed;
+                    } else {
+                        self.transform.is_panning = false;
                     }
+                } else if pressed
+                    && matches!(
+                        button,
+                        winit::event::MouseButton::Back | winit::event::MouseButton::Forward
+                    )
+                {
+                    let delta = if button == winit::event::MouseButton::Back {
+                        -1
+                    } else {
+                        1
+                    };
+                    self.navigate(delta);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -6017,38 +6105,70 @@ impl ApplicationHandler<UserEvent> for App {
                 use winit::keyboard::{Key, NamedKey};
                 let pressed = state == winit::event::ElementState::Pressed;
                 let is_space = is_space_key(&logical_key);
-                if is_space && !pressed {
-                    if self.space_held {
-                        self.space_held = false;
-                        self.update_cursor_icon();
-                        if !self.space_dragged {
-                            self.transform = Transform::default();
-                            if let Some(renderer) = self.renderer.as_mut() {
-                                renderer.window().request_redraw();
-                            }
-                        }
-                        self.space_dragged = false;
-                    }
-                    return;
-                }
-                if application_shortcuts_blocked([
+                let shortcuts_blocked = application_shortcuts_blocked([
                     self.show_about,
                     self.show_update,
                     self.pending_save.is_some(),
                     self.pending_rating_write.is_some(),
                     egui_popup_open,
                     self.context_menu_pos.is_some(),
-                ]) {
+                ]);
+                if is_space && !pressed {
+                    if self.space_held {
+                        self.space_held = false;
+                        self.update_cursor_icon();
+                        if space_tap_fits(self.space_dragged, shortcuts_blocked) {
+                            self.fit_to_view();
+                        }
+                        self.space_dragged = false;
+                    }
                     return;
                 }
-                // Space: hold = temporary hand tool; tap (no drag) = reset view.
-                if is_space {
-                    if self.heal.painting {
-                        self.finish_heal_stroke();
+                if pressed
+                    && matches!(&logical_key, Key::Named(NamedKey::Escape))
+                    && !self.show_about
+                    && !self.show_update
+                    && self.pending_save.is_none()
+                    && self.pending_rating_write.is_none()
+                {
+                    match escape_action(self.escape_context()) {
+                        EscapeAction::CloseContextMenu => {
+                            self.context_menu_pos = None;
+                            self.request_redraw();
+                            return;
+                        }
+                        EscapeAction::CancelCrop => {
+                            self.cancel_crop();
+                            return;
+                        }
+                        EscapeAction::LeaveHeal => {
+                            self.toggle_heal_mode();
+                            return;
+                        }
+                        EscapeAction::ClearRatingFilter => {
+                            self.set_rating_filter(RatingFilter::All);
+                            return;
+                        }
+                        EscapeAction::LeaveFullscreen => {
+                            self.toggle_fullscreen();
+                            return;
+                        }
+                        EscapeAction::None => {}
                     }
-                    self.space_held = true;
-                    self.space_dragged = false;
-                    self.update_cursor_icon();
+                }
+                if shortcuts_blocked {
+                    return;
+                }
+                // Space: hold = temporary hand tool; tap (no drag) = fit.
+                if is_space {
+                    if space_press_starts_hold(self.space_held) {
+                        if self.heal.painting {
+                            self.finish_heal_stroke();
+                        }
+                        self.space_held = true;
+                        self.space_dragged = false;
+                        self.update_cursor_icon();
+                    }
                     return;
                 }
                 if !pressed {
@@ -6056,6 +6176,12 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 if matches!(&logical_key, Key::Character(value) if repeat && rating_assignment_for_key(value.as_str(), false).is_some())
                 {
+                    return;
+                }
+                if is_fullscreen_toggle_key(&logical_key, self.modifiers) {
+                    if !repeat {
+                        self.toggle_fullscreen();
+                    }
                     return;
                 }
                 match logical_key {
@@ -6114,13 +6240,6 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Named(NamedKey::Enter) => {
                         self.apply_crop_rect();
                     }
-                    Key::Named(NamedKey::Escape) => {
-                        if self.transform.is_cropping {
-                            self.cancel_crop();
-                        } else if self.heal.active {
-                            self.toggle_heal_mode();
-                        }
-                    }
                     Key::Named(NamedKey::ArrowRight) if self.transform.is_cropping => {
                         self.adjust_crop_from_keyboard(1.0, 0.0);
                     }
@@ -6149,7 +6268,6 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                     Key::Named(NamedKey::F5) => self.reload_current_image(),
-                    Key::Named(NamedKey::F11) => self.toggle_fullscreen(),
                     _ => {}
                 }
             }
@@ -6291,6 +6409,7 @@ impl ApplicationHandler<UserEvent> for App {
                     noun: cursor.kind().noun(),
                     can_previous: cursor.can_step(-1),
                     can_next: cursor.can_step(1),
+                    visible_label: cursor.visible_copy(),
                     accessibility_label: cursor.accessibility_copy(),
                 });
                 let details = self.image_details.clone();
@@ -6426,6 +6545,7 @@ impl ApplicationHandler<UserEvent> for App {
                     has_undo_trash,
                     restore_recovery_unsettled,
                     is_panning,
+                    space_held: self.space_held,
                     is_loading,
                     is_opening,
                     load_error,
@@ -6649,17 +6769,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.flip_current_vertically();
                         }
                         crate::ui::UiAction::ToggleFullscreen => {
-                            self.is_fullscreen = !self.is_fullscreen;
-                            if let Some(renderer) = self.renderer.as_mut() {
-                                renderer.window().request_redraw();
-                                if self.is_fullscreen {
-                                    renderer.window().set_fullscreen(Some(
-                                        winit::window::Fullscreen::Borderless(None),
-                                    ));
-                                } else {
-                                    renderer.window().set_fullscreen(None);
-                                }
-                            }
+                            self.toggle_fullscreen();
                         }
                         crate::ui::UiAction::FitToView => self.fit_to_view(),
                         crate::ui::UiAction::ActualSize => self.set_actual_size(),
@@ -6775,9 +6885,11 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 Err(e) if is_current => {
                     log::error!("decode failed");
-                    let message = format!("Could not decode: {e}");
+                    let message = user_facing_decode_error(e);
                     self.session.load_error = Some(message.clone());
-                    self.show_toast(decode_failure_toast(&message, self.current_image.is_some()));
+                    if self.current_image.is_some() {
+                        self.show_toast(decode_failure_toast(&message, true));
+                    }
                     if let Some(r) = self.renderer.as_mut() {
                         r.window().request_redraw();
                     }
@@ -7089,6 +7201,7 @@ mod test {
         for key in ["0", "1", "2", "3", "4", "5"] {
             assert!(!route_consumed_keyboard_key(
                 &winit::keyboard::Key::Character(key.into()),
+                false,
                 false,
                 false,
             ));

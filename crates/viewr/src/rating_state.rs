@@ -4,7 +4,7 @@
 //! disclosure, and UI dispatch. This module owns only deterministic transitions
 //! and terminal dispositions derived from immutable facts.
 
-use crate::chrome::RATING_RECOVERY_STATUS;
+use crate::chrome::{RATING_DISCOVERY_WRITE_STATUS, RATING_RECOVERY_STATUS};
 use crate::ratings::{
     RatingFilter, RatingObservation, RatingState, RatingWriteCapability, RatingWriteError,
 };
@@ -63,6 +63,18 @@ pub(crate) const fn rating_recovery_after_presentation(
 pub(crate) const fn rating_recovery_blocker(unsettled: bool) -> Option<&'static str> {
     if unsettled {
         Some(RATING_RECOVERY_STATUS)
+    } else {
+        None
+    }
+}
+
+/// A folder-wide discovery result may contain the previous value for the
+/// current image. Do not let that stale read race a source mutation and replace
+/// the newly committed in-memory value when discovery completes.
+#[must_use]
+pub(crate) const fn rating_write_discovery_blocker(discovery_active: bool) -> Option<&'static str> {
+    if discovery_active {
+        Some(RATING_DISCOVERY_WRITE_STATUS)
     } else {
         None
     }
@@ -229,6 +241,15 @@ mod tests {
         for (current, transition, expected) in cases {
             assert_eq!(next_rating_recovery_state(current, transition), expected);
         }
+    }
+
+    #[test]
+    fn rating_write_waits_for_folder_discovery_to_avoid_stale_replacement() {
+        assert_eq!(
+            rating_write_discovery_blocker(true),
+            Some(RATING_DISCOVERY_WRITE_STATUS)
+        );
+        assert_eq!(rating_write_discovery_blocker(false), None);
     }
 
     #[test]

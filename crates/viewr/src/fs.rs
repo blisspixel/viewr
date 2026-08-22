@@ -893,8 +893,9 @@ impl ImageSource {
     /// Whether `path` currently names the retained filesystem object, ignoring
     /// version fields that can legitimately change when that object is renamed.
     ///
-    /// Rating replacement uses this only for the backup pathname created by
-    /// `ReplaceFileW`; source-path decisions continue to require `matches_path`.
+    /// Rating replacement uses this only for the exact backup pathname created
+    /// by its platform transaction; source-path decisions continue to require
+    /// `matches_path`.
     #[must_use]
     pub(crate) fn same_object_at_path(&self, path: &Path) -> bool {
         if !self.markable {

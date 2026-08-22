@@ -186,8 +186,10 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   in-progress or applied crop, heal, rotate, and flip are idle; otherwise a
   path-free status asks for `F5`. A missing path keeps that last good frame
   with a durable status. A rename follows the same object in the folder list.
-  Cancellation and launch failure are distinct. A session watcher also observes
-  the current file and folder without writing history.
+  Cancellation and launch failure are distinct. Explicit file, folder, and
+  filmstrip browsing cancels pending source verification before changing the
+  selection, so a superseded native chooser cannot appear later. A session
+  watcher also observes the current file and folder without writing history.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the
@@ -197,6 +199,11 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   or `-` zooms around the image-safe viewport center.
 - Pan follows the pointer directly with no inertia or rubber banding. Holding Space
   temporarily selects pan; tapping Space without dragging resets fit.
+- Key auto-repeat is reserved for continuous navigation, Crop nudging, page or
+  frame stepping, and zoom. Dialogs, toggles, transforms, Escape, reload, delete,
+  and undo or redo run once per physical key press. One held Escape therefore
+  cannot dismiss several layers of the documented close order. A widget menu
+  consumes Escape before Crop, Spot Heal, the rating filter, or fullscreen.
 
 ### Ratings and folder filter
 
@@ -214,6 +221,11 @@ and unsupported containers, remain visibly read-only.
   over rating shortcuts.
 - Edit owns rating assignment. View owns the session-only minimum-rating filter.
   The current textual rating and any active filter remain visible outside menus.
+  Rating assignment waits for bounded folder rating discovery to finish. This
+  prevents a scan that observed the previous value from replacing a newly written
+  value in the playlist and status after the source transaction commits. Filter
+  controls remain available during discovery so the user can cancel it by showing
+  all images.
   When no image matches the filter, Escape or folder-navigation keys restore All
   images instead of doing nothing.
 - One canonical natural-order folder catalog owns Trash and Undo positions. A
@@ -281,7 +293,10 @@ and unsupported containers, remain visibly read-only.
 - Crop begins with a usable centered selection, so it never requires a pointer.
   Arrow keys move the selection; Shift plus an arrow resizes it; holding Ctrl uses
   a fine adjustment step; Enter applies; Esc cancels. Locked aspect ratios remain
-  locked during keyboard resizing.
+  locked during keyboard resizing. Rotate and flip remain available until Apply
+  begins; rotation refits the idle selection to its visible output ratio. A live
+  pointer drag remains exclusive, and entering Crop waits for folder scanning,
+  source verification, and unfinished Spot Heal work.
 - Pointer drag on the interior moves the selection, the eight handles resize it,
   and a drag outside redraws it. Exact source origin and output-pixel dimensions
   are visible and published to the accessibility tree. Fixed ratios describe the
@@ -324,7 +339,12 @@ and unsupported containers, remain visibly read-only.
   space. It never floats over the photo.
 - The inspector exposes brush radius, feather, Refresh Source, Undo, Redo, and
   Done. A translucent brush mask and dual-contrast cursor ring are the only
-  elements drawn over the image. `/` advances to the next ranked source.
+  elements drawn over the image. Undo and Redo work while the idle tool remains
+  open. `/` advances to the next ranked source only after the current stroke has
+  finished and only when a distinct alternate patch exists, so a refresh cannot
+  discard collected input or present an enabled no-op. Entering Spot Heal waits
+  for folder scanning and source verification; switching to Crop cannot discard
+  a live stroke.
 - Drag over one small blemish and release to repair it off the UI thread. The
   solver ranks up to eight spatially distinct clean sources using robust boundary
   color, local tone, and edge-gradient agreement. The selected patch receives a

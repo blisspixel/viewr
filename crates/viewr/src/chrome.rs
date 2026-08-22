@@ -18,6 +18,8 @@ pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
 /// Logical width of the Image Information panel.
 pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
 pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
+pub(crate) const RATING_DISCOVERY_WRITE_STATUS: &str =
+    "Wait for folder ratings to finish loading before changing this rating.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 
@@ -354,10 +356,11 @@ pub(crate) struct ChromeInput {
     pub heal_busy: bool,
     pub heal_painting: bool,
     pub curation_busy: bool,
+    pub source_verification_busy: bool,
     pub folder_scan_busy: bool,
     pub is_cropping: bool,
     pub heal_supported: bool,
-    pub has_heal_source: bool,
+    pub has_alternate_heal_source: bool,
     pub has_undo_edit: bool,
     pub has_redo_edit: bool,
     pub has_undo_trash: bool,
@@ -370,6 +373,7 @@ pub(crate) struct ChromeInput {
     pub rating_capability: crate::ratings::RatingWriteCapability,
     pub rating_filter: crate::ratings::RatingFilter,
     pub rating_write_busy: bool,
+    pub rating_discovery_busy: bool,
     pub rating_recovery_unsettled: bool,
     pub rating_folder_count: usize,
 }
@@ -496,55 +500,51 @@ impl ChromeViewModel {
     pub fn is_enabled(self, control: ChromeControl) -> bool {
         let current = self.current_selection_ready();
         match control {
-            ChromeControl::OpenSource | ChromeControl::NavigateFilmstrip => {
-                !self.input.curation_busy
-            }
-            ChromeControl::Reload
-            | ChromeControl::PermanentDelete
-            | ChromeControl::EditTransform => current,
+            ChromeControl::OpenSource => !self.input.curation_busy,
+            ChromeControl::NavigateFilmstrip => self.browse_action_ready(),
+            ChromeControl::Reload => current,
+            ChromeControl::PermanentDelete => self.exclusive_current_action_ready(),
+            ChromeControl::EditTransform => self.transform_action_ready(),
             ChromeControl::OpenWith => {
-                current
+                self.exclusive_current_action_ready()
                     && matches!(
                         crate::file_coherence::open_with_availability(),
                         crate::file_coherence::OpenWithAvailability::NativeChooser
                     )
             }
             ChromeControl::SaveAs => current && !self.input.save_recovery_unsettled,
-            ChromeControl::MoveToTrash => current && !self.input.restore_recovery_unsettled,
+            ChromeControl::MoveToTrash => {
+                self.exclusive_current_action_ready() && !self.input.restore_recovery_unsettled
+            }
             ChromeControl::UndoTrash => {
                 self.input.has_undo_trash
                     && !self.input.heal_painting
                     && self.curation_action_ready()
             }
-            ChromeControl::Crop => {
-                current
-                    && (self.input.is_cropping
-                        || (!self.input.crop_recovery_unsettled
-                            && !self.input.preview_recovery_unsettled))
-            }
-            ChromeControl::ApplyCrop => {
-                self.input.is_cropping
-                    && current
-                    && !self.input.crop_recovery_unsettled
-                    && !self.input.preview_recovery_unsettled
-            }
+            ChromeControl::Crop => self.crop_toggle_ready(),
+            ChromeControl::ApplyCrop => self.crop_apply_ready(),
             ChromeControl::HealToggle => self.heal_toggle_ready(),
             ChromeControl::HealAdjust => {
                 self.input.dock.has_image && !self.input.heal_busy && !self.input.curation_busy
             }
-            ChromeControl::HealRefreshSource => current && self.input.has_heal_source,
+            ChromeControl::HealRefreshSource => {
+                current && self.input.has_alternate_heal_source && !self.input.heal_painting
+            }
             ChromeControl::UndoEdit => self.input.has_undo_edit && self.edit_history_action_ready(),
             ChromeControl::RedoEdit => self.input.has_redo_edit && self.edit_history_action_ready(),
             ChromeControl::RetryLoad => !self.input.preview_retry_blocked,
             ChromeControl::ViewImage => self.input.dock.has_image,
             ChromeControl::RatingMenu => !self.input.rating_write_busy,
             ChromeControl::RatingChoice => {
-                current
+                self.exclusive_current_action_ready()
+                    && !self.input.rating_discovery_busy
                     && !self.input.rating_recovery_unsettled
                     && self.input.rating_capability
                         == crate::ratings::RatingWriteCapability::WritableJpeg
             }
-            ChromeControl::RatingFilterMenu => self.input.rating_folder_count > 0,
+            ChromeControl::RatingFilterMenu => {
+                self.input.rating_folder_count > 0 && self.exclusive_work_clear()
+            }
         }
     }
 
@@ -635,6 +635,9 @@ impl ChromeViewModel {
         if self.input.rating_recovery_unsettled {
             return RATING_RECOVERY_STATUS;
         }
+        if self.input.rating_discovery_busy {
+            return RATING_DISCOVERY_WRITE_STATUS;
+        }
         if !self.input.dock.has_image {
             if self.input.is_opening {
                 return "Wait for the selected image to finish loading.";
@@ -721,11 +724,73 @@ impl ChromeViewModel {
         self.stable_selection_ready() && !self.input.heal_busy
     }
 
+    const fn browse_action_ready(self) -> bool {
+        !self.input.crop_busy
+            && !self.input.save_busy
+            && !self.input.heal_busy
+            && !self.input.heal_painting
+            && !self.input.curation_busy
+            && !self.input.folder_scan_busy
+            && !self.input.is_cropping
+            && !self.input.dock.heal_active
+            && !self.input.rating_write_busy
+    }
+
+    const fn crop_toggle_ready(self) -> bool {
+        self.input.is_cropping
+            || (self.current_selection_ready()
+                && !self.input.crop_recovery_unsettled
+                && !self.input.preview_recovery_unsettled
+                && !self.input.heal_painting
+                && !self.input.source_verification_busy
+                && !self.input.folder_scan_busy)
+    }
+
+    const fn crop_apply_ready(self) -> bool {
+        self.input.is_cropping
+            && self.current_selection_ready()
+            && !self.input.crop_recovery_unsettled
+            && !self.input.preview_recovery_unsettled
+            && !self.input.heal_painting
+            && !self.input.source_verification_busy
+            && !self.input.folder_scan_busy
+    }
+
+    const fn exclusive_current_action_ready(self) -> bool {
+        self.current_selection_ready() && self.exclusive_work_clear()
+    }
+
+    const fn transform_action_ready(self) -> bool {
+        self.current_selection_ready()
+            && !self.input.heal_painting
+            && !self.input.source_verification_busy
+            && !self.input.folder_scan_busy
+            && !self.input.dock.heal_active
+    }
+
+    const fn exclusive_work_clear(self) -> bool {
+        !self.input.is_loading
+            && !self.input.crop_busy
+            && !self.input.save_busy
+            && !self.input.heal_busy
+            && !self.input.heal_painting
+            && !self.input.curation_busy
+            && !self.input.source_verification_busy
+            && !self.input.folder_scan_busy
+            && !self.input.is_cropping
+            && !self.input.dock.heal_active
+            && !self.input.rating_write_busy
+    }
+
     const fn heal_toggle_ready(self) -> bool {
         if self.input.dock.heal_active {
-            !self.input.curation_busy
+            true
         } else {
-            self.stable_selection_ready() && self.input.heal_supported && !self.input.heal_busy
+            self.stable_selection_ready()
+                && self.input.heal_supported
+                && !self.input.heal_busy
+                && !self.input.source_verification_busy
+                && !self.input.folder_scan_busy
         }
     }
 
@@ -748,14 +813,21 @@ impl ChromeViewModel {
             && !self.input.dock.heal_active
             && !self.input.folder_scan_busy
             && !self.input.curation_busy
+            && !self.input.source_verification_busy
+            && !self.input.rating_write_busy
     }
 
     const fn edit_history_action_ready(self) -> bool {
         !self.input.is_loading
             && !self.input.heal_busy
+            && !self.input.heal_painting
             && !self.input.crop_busy
             && !self.input.save_busy
             && !self.input.curation_busy
+            && !self.input.source_verification_busy
+            && !self.input.folder_scan_busy
+            && !self.input.is_cropping
+            && !self.input.rating_write_busy
     }
 }
 
@@ -864,9 +936,9 @@ mod tests {
     use super::{
         ChromeControl, ChromeInput, ChromeLayout, ChromeViewModel, DisclosureDirection, DockInput,
         DockSide, DockState, DockViewModel, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
-        HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, PanelKind, PositionedPanel, TOOLS_PANEL_WIDTH,
-        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, appearance_choices, background_choices,
-        dock_side_choices, viewport_insets,
+        HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, PanelKind, PositionedPanel,
+        RATING_DISCOVERY_WRITE_STATUS, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
+        appearance_choices, background_choices, dock_side_choices, viewport_insets,
     };
 
     fn ready_input() -> ChromeInput {
@@ -892,10 +964,11 @@ mod tests {
             heal_busy: false,
             heal_painting: false,
             curation_busy: false,
+            source_verification_busy: false,
             folder_scan_busy: false,
             is_cropping: false,
             heal_supported: true,
-            has_heal_source: true,
+            has_alternate_heal_source: true,
             has_undo_edit: true,
             has_redo_edit: true,
             has_undo_trash: true,
@@ -908,6 +981,7 @@ mod tests {
             rating_capability: crate::ratings::RatingWriteCapability::WritableJpeg,
             rating_filter: crate::ratings::RatingFilter::All,
             rating_write_busy: false,
+            rating_discovery_busy: false,
             rating_recovery_unsettled: false,
             rating_folder_count: 2,
         }
@@ -960,6 +1034,147 @@ mod tests {
     }
 
     #[test]
+    fn edit_history_stays_available_in_idle_heal_mode_only() {
+        let mut input = ready_input();
+        input.dock.heal_active = true;
+        let model = ChromeViewModel::new(input);
+        assert!(model.is_enabled(ChromeControl::UndoEdit));
+        assert!(model.is_enabled(ChromeControl::RedoEdit));
+
+        for blocker in 0..6 {
+            let mut input = ready_input();
+            input.dock.heal_active = true;
+            match blocker {
+                0 => input.heal_busy = true,
+                1 => input.heal_painting = true,
+                2 => input.folder_scan_busy = true,
+                3 => input.is_cropping = true,
+                4 => input.rating_write_busy = true,
+                5 => input.source_verification_busy = true,
+                _ => unreachable!(),
+            }
+            let model = ChromeViewModel::new(input);
+            assert!(
+                !model.is_enabled(ChromeControl::UndoEdit),
+                "blocker {blocker}"
+            );
+            assert!(
+                !model.is_enabled(ChromeControl::RedoEdit),
+                "blocker {blocker}"
+            );
+        }
+    }
+
+    #[test]
+    fn exclusive_controls_match_every_background_and_edit_owner() {
+        for blocker in 0..4 {
+            let mut input = ready_input();
+            match blocker {
+                0 => input.source_verification_busy = true,
+                1 => input.folder_scan_busy = true,
+                2 => input.is_cropping = true,
+                3 => input.dock.heal_active = true,
+                _ => unreachable!(),
+            }
+            let model = ChromeViewModel::new(input);
+            for control in [
+                ChromeControl::OpenWith,
+                ChromeControl::MoveToTrash,
+                ChromeControl::PermanentDelete,
+                ChromeControl::RatingChoice,
+                ChromeControl::RatingFilterMenu,
+            ] {
+                assert!(!model.is_enabled(control), "blocker {blocker}: {control:?}");
+            }
+            assert_eq!(
+                model.is_enabled(ChromeControl::EditTransform),
+                blocker == 2,
+                "blocker {blocker}: EditTransform"
+            );
+            assert!(model.is_enabled(ChromeControl::Reload));
+            assert!(model.is_enabled(ChromeControl::SaveAs));
+            assert!(model.is_enabled(ChromeControl::ViewImage));
+        }
+    }
+
+    #[test]
+    fn filmstrip_navigation_matches_the_browse_preflight() {
+        for blocker in 0..9 {
+            let mut input = ready_input();
+            match blocker {
+                0 => input.crop_busy = true,
+                1 => input.save_busy = true,
+                2 => input.heal_busy = true,
+                3 => input.heal_painting = true,
+                4 => input.curation_busy = true,
+                5 => input.folder_scan_busy = true,
+                6 => input.is_cropping = true,
+                7 => input.dock.heal_active = true,
+                8 => input.rating_write_busy = true,
+                _ => unreachable!(),
+            }
+            assert!(
+                !ChromeViewModel::new(input).is_enabled(ChromeControl::NavigateFilmstrip),
+                "blocker {blocker}"
+            );
+        }
+
+        let mut input = ready_input();
+        input.is_loading = true;
+        assert!(ChromeViewModel::new(input).is_enabled(ChromeControl::NavigateFilmstrip));
+        input.is_loading = false;
+        input.source_verification_busy = true;
+        assert!(ChromeViewModel::new(input).is_enabled(ChromeControl::NavigateFilmstrip));
+    }
+
+    #[test]
+    fn tool_switches_wait_for_background_owners_but_active_tools_can_exit() {
+        for blocker in 0..3 {
+            let mut input = ready_input();
+            match blocker {
+                0 => input.source_verification_busy = true,
+                1 => input.folder_scan_busy = true,
+                2 => input.heal_painting = true,
+                _ => unreachable!(),
+            }
+            let model = ChromeViewModel::new(input);
+            assert!(!model.is_enabled(ChromeControl::Crop), "blocker {blocker}");
+            if blocker != 2 {
+                assert!(
+                    !model.is_enabled(ChromeControl::HealToggle),
+                    "blocker {blocker}"
+                );
+            }
+        }
+
+        let mut input = ready_input();
+        input.is_cropping = true;
+        input.source_verification_busy = true;
+        assert!(ChromeViewModel::new(input).is_enabled(ChromeControl::Crop));
+
+        input = ready_input();
+        input.dock.heal_active = true;
+        input.source_verification_busy = true;
+        assert!(ChromeViewModel::new(input).is_enabled(ChromeControl::HealToggle));
+        input.curation_busy = true;
+        assert!(ChromeViewModel::new(input).is_enabled(ChromeControl::HealToggle));
+    }
+
+    #[test]
+    fn rating_write_waits_for_discovery_while_filter_controls_remain_available() {
+        let mut input = ready_input();
+        input.rating_discovery_busy = true;
+        let model = ChromeViewModel::new(input);
+        assert!(!model.is_enabled(ChromeControl::RatingChoice));
+        assert!(model.is_enabled(ChromeControl::RatingMenu));
+        assert!(model.is_enabled(ChromeControl::RatingFilterMenu));
+        assert_eq!(
+            model.rating_unavailable_text(),
+            RATING_DISCOVERY_WRITE_STATUS
+        );
+    }
+
+    #[test]
     fn recovery_blocks_only_actions_that_need_the_unsettled_owner() {
         let mut input = ready_input();
         input.save_recovery_unsettled = true;
@@ -998,7 +1213,7 @@ mod tests {
 
     #[test]
     fn curation_and_history_controls_follow_their_exact_conflicts() {
-        for blocker in 0..8 {
+        for blocker in 0..10 {
             let mut input = ready_input();
             match blocker {
                 0 => input.is_loading = true,
@@ -1009,6 +1224,8 @@ mod tests {
                 5 => input.is_cropping = true,
                 6 => input.dock.heal_active = true,
                 7 => input.folder_scan_busy = true,
+                8 => input.source_verification_busy = true,
+                9 => input.rating_write_busy = true,
                 _ => unreachable!(),
             }
             let model = ChromeViewModel::new(input);
@@ -1097,7 +1314,7 @@ mod tests {
         assert!(model.is_enabled(ChromeControl::HealRefreshSource));
 
         let mut input = ready_input();
-        input.has_heal_source = false;
+        input.has_alternate_heal_source = false;
         let model = ChromeViewModel::new(input);
         assert!(model.is_enabled(ChromeControl::HealAdjust));
         assert!(!model.is_enabled(ChromeControl::HealRefreshSource));
@@ -1105,6 +1322,12 @@ mod tests {
         input.heal_busy = true;
         let model = ChromeViewModel::new(input);
         assert!(!model.is_enabled(ChromeControl::HealAdjust));
+        assert!(!model.is_enabled(ChromeControl::HealRefreshSource));
+
+        input = ready_input();
+        input.heal_painting = true;
+        let model = ChromeViewModel::new(input);
+        assert!(model.is_enabled(ChromeControl::HealAdjust));
         assert!(!model.is_enabled(ChromeControl::HealRefreshSource));
     }
 

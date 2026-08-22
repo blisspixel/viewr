@@ -117,10 +117,12 @@ event-loop races.
 
 Current position: v0.5.0 is released and verified, and the earlier v0.4.0
 file-coherence milestone plus v0.3.0, v0.2.0, and the v0.1.1 through v0.1.5
-patches remain published with the first preview's known issues recorded. Commit
-`fdfc94b` now has exact-head CI, CodeQL, fuzz, and a complete non-publishing v0.6
-candidate artifact set. Next is representative-hardware product-quality evidence,
-then v0.7 through v0.9 evidence and trust.
+patches remain published with the first preview's known issues recorded.
+The candidate artifact set from `fdfc94b` was superseded by later product fixes.
+Next is a clean protected-main merge, exact-head CI, CodeQL, and fuzz, followed by
+one replacement non-publishing v0.6 candidate set. Representative-hardware
+product-quality evidence follows only after that reset, then v0.7 through v0.9
+evidence and trust.
 
 The v0.6 execution order is deliberately narrow:
 
@@ -175,7 +177,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Commit `fdfc94b` passed exact-head CI, CodeQL, fuzz, and non-publishing [candidate run 32589977007](https://github.com/blisspixel/viewr/actions/runs/32589977007). That run retains four checksummed application archives plus the deterministic fixture artifact. Next, complete three representative-hardware records, the eight-session report set, and the evidence gate against only this candidate set. v0.5.0 remains the public install target until that evidence passes. |
+| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). The earlier candidate run from `fdfc94b` is superseded by subsequent product fixes. Merge those fixes through protected `main`, repeat exact-head CI, CodeQL, and fuzz, then dispatch one replacement non-publishing candidate run before collecting the three representative-hardware records and eight-session report set. v0.5.0 remains the public install target until that evidence passes. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -538,9 +540,10 @@ broad feature category. They prove and refine the accumulated viewer.
   [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) is the matrix. In-process tests now
   cover Help, first-run drop copy, and bounded empty-state errors. Stable check
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
-  placeholder, mixed-provenance, or failing gate records. Non-publishing
+  placeholder, mixed-provenance, or failing gate records. The non-publishing
   [candidate run 32589977007](https://github.com/blisspixel/viewr/actions/runs/32589977007)
-  retains the exact `fdfc94b` artifact set. Hardware rows are unrecorded.
+  from `fdfc94b` is superseded by later product fixes. A replacement exact-head
+  candidate run is required before the still-unrecorded hardware rows begin.
 - [x] Make About, the empty card, and README essential controls quote one covered
   shortcut catalog. Help lists pages, reload, panels, Space-to-fit, Save As, and
   Undo Trash. The first-run card names drop. Long decoder errors stay one short

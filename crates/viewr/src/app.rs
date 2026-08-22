@@ -46,8 +46,9 @@ use crate::curation_state::{
     restore_result_message, single_trash_result_message,
 };
 use crate::current_work::{
-    CurrentWork, blocked_action_message, browse_work_blocker, crop_work, curation_action_preflight,
-    curation_work, current_work_blocker, image_preparation_work, spot_heal_source_blocker,
+    ActiveModeAllowance, CurrentWork, blocked_action_message, browse_work_blocker, crop_work,
+    curation_action_preflight, curation_work, current_work_blocker, image_preparation_work,
+    spot_heal_source_blocker, spot_heal_work,
 };
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
@@ -60,10 +61,10 @@ use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
 use crate::keyboard_route::{
-    EscapeAction, EscapeContext, escape_action, is_fullscreen_toggle_key, is_space_key,
-    is_trash_shortcut_key, rating_assignment_for_key, rating_keys_apply,
-    route_consumed_keyboard_key, single_key_shortcut_allowed, space_press_starts_hold,
-    space_release_must_unwind, space_tap_fits,
+    EscapeAction, EscapeContext, escape_action, escape_press_reaches_app, is_fullscreen_toggle_key,
+    is_space_key, is_trash_shortcut_key, rating_assignment_for_key, rating_keys_apply,
+    repeated_viewer_action_allowed, route_consumed_keyboard_key, single_key_shortcut_allowed,
+    space_press_starts_hold, space_release_must_unwind, space_tap_fits, widget_popup_owns_event,
 };
 use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
 use crate::prefetch::{
@@ -79,7 +80,8 @@ use crate::rating_state::{
     RatingRecoveryTransition, RatingWriteTerminal, auxiliary_disconnect_message,
     next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
     rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
-    rating_recovery_blocker, rating_write_failure_message, reconcile_rating_write,
+    rating_recovery_blocker, rating_write_discovery_blocker, rating_write_failure_message,
+    reconcile_rating_write,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
@@ -1137,6 +1139,7 @@ impl App {
                 if self.block_action_while_curating("opening another folder") {
                     return;
                 }
+                self.cancel_open_with_check();
                 let directory = crate::fs::canonical_file_path(&path).unwrap_or(path);
                 self.start_folder_scan(directory, ScanPurpose::OpenFolder);
             }
@@ -1179,6 +1182,7 @@ impl App {
         if self.block_action_while_curating("opening another image") {
             return;
         }
+        self.cancel_open_with_check();
         let extensions = crate::fs::supported_extensions().collect::<Vec<_>>();
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Images", &extensions)
@@ -1192,6 +1196,7 @@ impl App {
         if self.block_action_while_curating("opening another folder") {
             return;
         }
+        self.cancel_open_with_check();
         if let Some(directory) = rfd::FileDialog::new().pick_folder() {
             self.start_folder_scan(directory, ScanPurpose::OpenFolder);
         }
@@ -2088,7 +2093,11 @@ impl App {
     }
 
     fn request_rating_assignment(&mut self, assignment: RatingAssignment) {
-        if self.block_action_while_busy("changing the rating", true) {
+        if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
+            self.show_toast(message);
+            return;
+        }
+        if self.block_action_while_busy("changing the rating") {
             return;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
@@ -2156,6 +2165,10 @@ impl App {
     }
 
     fn start_rating_write(&mut self, pending: &PendingRatingWrite) {
+        if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
+            self.show_toast(message);
+            return;
+        }
         if self.save_transaction_active() {
             self.show_toast("Wait for Save As to finish before changing the rating");
             return;
@@ -2277,7 +2290,7 @@ impl App {
     }
 
     fn set_rating_filter(&mut self, filter: RatingFilter) {
-        if self.block_action_while_busy("changing the rating filter", true) {
+        if self.block_action_while_busy("changing the rating filter") {
             return;
         }
         let worker_active = self.rating_scan_worker.is_some();
@@ -2470,6 +2483,10 @@ impl App {
             self.show_toast("Wait for Save As to finish before reloading");
             return;
         }
+        if self.rating_write_worker.is_some() {
+            self.show_toast("Wait for the rating update to finish before reloading");
+            return;
+        }
         if self.session.is_loading() || self.preview_job.is_some() {
             self.show_toast("An image is already loading");
             return;
@@ -2495,11 +2512,7 @@ impl App {
     }
 
     fn open_current_with(&mut self) {
-        if self.block_action_while_busy("opening the source in another app", true) {
-            return;
-        }
-        if self.open_with_job.is_some() {
-            self.show_toast("Source verification for Open With is already running");
+        if self.block_action_while_busy("opening the source in another app") {
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -3000,7 +3013,7 @@ impl App {
     }
 
     fn rotate_current(&mut self, quarter_turns: i32) {
-        if self.block_action_while_busy("rotating the image", true) {
+        if self.block_action_with_mode_allowance("rotating the image", ActiveModeAllowance::Crop) {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -3021,7 +3034,7 @@ impl App {
     }
 
     fn flip_current_horizontally(&mut self) {
-        if self.block_action_while_busy("flipping the image", true) {
+        if self.block_action_with_mode_allowance("flipping the image", ActiveModeAllowance::Crop) {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -3031,7 +3044,7 @@ impl App {
     }
 
     fn flip_current_vertically(&mut self) {
-        if self.block_action_while_busy("flipping the image", true) {
+        if self.block_action_with_mode_allowance("flipping the image", ActiveModeAllowance::Crop) {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -3137,7 +3150,6 @@ impl App {
     }
 
     fn go_to_index(&mut self, new_index: usize) {
-        #[cfg(target_os = "windows")]
         self.cancel_open_with_check();
         if self.block_browse_while_busy() {
             return;
@@ -3319,7 +3331,7 @@ impl App {
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        if self.block_action_while_busy("moving this file to Trash", true) {
+        if self.block_action_while_busy("moving this file to Trash") {
             return;
         }
         if let Some(message) = self.curation_recovery.source_removal_preflight() {
@@ -3383,14 +3395,17 @@ impl App {
         true
     }
 
-    fn active_work(&self, include_spot_heal: bool) -> [Option<CurrentWork>; 8] {
-        #[cfg(target_os = "windows")]
+    fn active_work(&self, allowance: ActiveModeAllowance) -> [Option<CurrentWork>; 8] {
         let source_verification = self
             .open_with_job
             .is_some()
             .then_some(CurrentWork::SourceVerification);
-        #[cfg(not(target_os = "windows"))]
-        let source_verification: Option<CurrentWork> = None;
+        let spot_heal = spot_heal_work(
+            self.heal.active,
+            self.heal.is_busy(),
+            self.heal.painting,
+            allowance,
+        );
         [
             self.curation_worker
                 .as_ref()
@@ -3400,22 +3415,30 @@ impl App {
                 .is_some()
                 .then_some(CurrentWork::FolderScan),
             image_preparation_work(self.session.is_loading(), self.preview_job.is_some()),
-            crop_work(self.transform.is_cropping, self.crop_job.is_some()),
+            crop_work(
+                self.transform.is_cropping,
+                self.transform.crop_start.is_some(),
+                self.crop_job.is_some(),
+                allowance,
+            ),
             self.save_transaction_active().then_some(CurrentWork::Save),
             self.rating_write_worker
                 .is_some()
                 .then_some(CurrentWork::RatingWrite),
-            (include_spot_heal && (self.heal.active || self.heal.is_busy() || self.heal.painting))
-                .then_some(CurrentWork::SpotHeal),
+            spot_heal,
         ]
     }
 
-    fn busy_blocker(&self, include_spot_heal: bool) -> Option<CurrentWork> {
-        current_work_blocker(self.active_work(include_spot_heal))
+    fn busy_blocker(&self, allowance: ActiveModeAllowance) -> Option<CurrentWork> {
+        current_work_blocker(self.active_work(allowance))
     }
 
-    fn block_action_while_busy(&mut self, action: &str, include_spot_heal: bool) -> bool {
-        if let Some(blocker) = self.busy_blocker(include_spot_heal) {
+    fn block_action_with_mode_allowance(
+        &mut self,
+        action: &str,
+        allowance: ActiveModeAllowance,
+    ) -> bool {
+        if let Some(blocker) = self.busy_blocker(allowance) {
             self.show_toast(blocked_action_message(action, blocker));
             true
         } else {
@@ -3423,8 +3446,16 @@ impl App {
         }
     }
 
+    fn block_action_while_busy(&mut self, action: &str) -> bool {
+        self.block_action_with_mode_allowance(action, ActiveModeAllowance::None)
+    }
+
+    fn block_edit_history_while_busy(&mut self, action: &str) -> bool {
+        self.block_action_with_mode_allowance(action, ActiveModeAllowance::SpotHeal)
+    }
+
     fn block_browse_while_busy(&mut self) -> bool {
-        if let Some(blocker) = browse_work_blocker(self.active_work(true)) {
+        if let Some(blocker) = browse_work_blocker(self.active_work(ActiveModeAllowance::None)) {
             self.show_toast(blocked_action_message("browsing to another image", blocker));
             true
         } else {
@@ -3521,32 +3552,16 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_curating("changing Crop") {
-            return;
-        }
         if let Some(message) =
             crop_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
         {
             self.show_toast(message);
             return;
         }
-        if self.preview_job.is_some() {
-            self.show_toast("Wait for the image preview to finish before cropping");
-            return;
-        }
         if self.current_loaded_path().is_none() {
             return;
         }
-        if self.crop_job.is_some() {
-            self.show_toast("A crop is already being applied");
-            return;
-        }
-        if self.save_transaction_active() {
-            self.show_toast("Wait for the current save to finish before cropping");
-            return;
-        }
-        if self.heal.is_busy() {
-            self.show_toast("Spot heal is still finishing");
+        if self.block_action_with_mode_allowance("changing Crop", ActiveModeAllowance::SpotHeal) {
             return;
         }
 
@@ -3685,47 +3700,6 @@ impl App {
     }
 
     fn toggle_heal_mode(&mut self) {
-        if self.block_action_while_curating("changing Spot Heal") {
-            return;
-        }
-        if !self.heal.active
-            && let Some(message) = spot_heal_source_blocker(
-                self.session.is_loading(),
-                self.session.load_error.is_some(),
-            )
-        {
-            self.show_toast(message);
-            return;
-        }
-        if !self.heal.active && self.current_loaded_path().is_none() {
-            return;
-        }
-        if !self.heal.active && self.crop_job.is_some() {
-            self.show_toast("Wait for the crop to finish before using Spot Heal");
-            return;
-        }
-        if !self.heal.active && self.preview_job.is_some() {
-            self.show_toast("Wait for the image preview to finish before using Spot Heal");
-            return;
-        }
-        if !self.heal.active && self.save_transaction_active() {
-            self.show_toast("Wait for the current save to finish before using Spot Heal");
-            return;
-        }
-        if !self.heal.active && self.rating_write_worker.is_some() {
-            self.show_toast("Wait for the rating update to finish before using Spot Heal");
-            return;
-        }
-        if !self.heal.active && self.heal.is_busy() {
-            self.show_toast("Spot heal is still finishing");
-            return;
-        }
-        if !self.heal.active && !self.can_heal_current_image() {
-            self.show_toast(
-                "Spot Heal is unavailable for images larger than the GPU texture limit",
-            );
-            return;
-        }
         if self.heal.active {
             if self.heal.painting {
                 self.finish_heal_stroke();
@@ -3740,16 +3714,35 @@ impl App {
             if self.heal.is_busy() {
                 self.show_toast("Finishing spot heal in memory");
             }
-        } else {
-            self.pause_animation();
-            self.heal.active = true;
-            self.heal.stroke.clear();
-            self.heal.painting = false;
-            self.cancel_crop();
-            self.tools_before_heal = Some((self.show_tools_panel, self.tools_panel_open));
-            self.show_tools_panel = true;
-            self.tools_panel_open = true;
+            self.request_redraw();
+            return;
         }
+        if let Some(message) =
+            spot_heal_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
+        {
+            self.show_toast(message);
+            return;
+        }
+        if self.current_loaded_path().is_none() {
+            return;
+        }
+        if self.block_action_with_mode_allowance("changing Spot Heal", ActiveModeAllowance::Crop) {
+            return;
+        }
+        if !self.can_heal_current_image() {
+            self.show_toast(
+                "Spot Heal is unavailable for images larger than the GPU texture limit",
+            );
+            return;
+        }
+        self.pause_animation();
+        self.heal.active = true;
+        self.heal.stroke.clear();
+        self.heal.painting = false;
+        self.cancel_crop();
+        self.tools_before_heal = Some((self.show_tools_panel, self.tools_panel_open));
+        self.show_tools_panel = true;
+        self.tools_panel_open = true;
         self.request_redraw();
     }
 
@@ -3776,17 +3769,32 @@ impl App {
     }
 
     fn refresh_heal_source(&mut self) {
-        if self.heal.is_busy()
-            || self.crop_job.is_some()
-            || self.save_transaction_active()
-            || self.preview_job.is_some()
-        {
+        if self.heal.painting {
+            self.show_toast("Finish the current spot-heal stroke before refreshing its source");
+            return;
+        }
+        if self.heal.is_busy() {
+            self.show_toast("Wait for Spot Heal to finish before refreshing its source");
+            return;
+        }
+        if self.crop_job.is_some() {
+            self.show_toast("Wait for the crop to finish before refreshing the heal source");
+            return;
+        }
+        if self.save_transaction_active() {
+            self.show_toast("Wait for Save As to finish before refreshing the heal source");
+            return;
+        }
+        if self.preview_job.is_some() {
+            self.show_toast("Wait for the image preview before refreshing the heal source");
             return;
         }
         let Some(refresh) = self.heal.refresh.as_ref() else {
+            self.show_toast("Apply a spot heal before refreshing its source");
             return;
         };
         if refresh.candidate_count < 2 {
+            self.show_toast("No alternate spot-heal source is available");
             return;
         }
         let candidate_index = (refresh.candidate_index + 1) % refresh.candidate_count;
@@ -4039,7 +4047,7 @@ impl App {
         if !self.heal.history.can_undo() {
             return;
         }
-        if self.block_action_while_busy("undoing an edit", true) {
+        if self.block_edit_history_while_busy("undoing an edit") {
             return;
         }
         let result = {
@@ -4075,7 +4083,7 @@ impl App {
         if !self.heal.history.can_redo() {
             return;
         }
-        if self.block_action_while_busy("redoing an edit", true) {
+        if self.block_edit_history_while_busy("redoing an edit") {
             return;
         }
         let result = {
@@ -4504,7 +4512,7 @@ impl App {
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        if self.block_action_while_busy("permanently deleting this file", true) {
+        if self.block_action_while_busy("permanently deleting this file") {
             return;
         }
         if let Some(message) = self.curation_recovery.source_removal_preflight() {
@@ -4727,7 +4735,7 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_busy("restoring files from Trash", true) {
+        if self.block_action_while_busy("restoring files from Trash") {
             return;
         }
 
@@ -5242,9 +5250,6 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_curating("applying the crop") {
-            return;
-        }
         if let Some(message) =
             crop_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
         {
@@ -5254,20 +5259,7 @@ impl App {
         let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        if self.crop_job.is_some() {
-            self.show_toast("A crop is already being applied");
-            return;
-        }
-        if self.preview_job.is_some() {
-            self.show_toast("Wait for the image preview to finish before cropping");
-            return;
-        }
-        if self.save_transaction_active() {
-            self.show_toast("Wait for the current save to finish before cropping");
-            return;
-        }
-        if self.heal.is_busy() {
-            self.show_toast("Wait for spot heal to finish before cropping");
+        if self.block_action_with_mode_allowance("applying the crop", ActiveModeAllowance::Crop) {
             return;
         }
         let Some(rect) = self.transform.crop_rect else {
@@ -5775,6 +5767,7 @@ impl ApplicationHandler<UserEvent> for App {
             let window = renderer.window.clone();
             #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             renderer.process_accessibility_window_event(window.as_ref(), &event);
+            let popup_was_open = egui::Popup::is_any_open(&renderer.egui_ctx);
             let response = renderer.egui_state.on_window_event(window.as_ref(), &event);
             // egui reports that RedrawRequested itself wants repainting. The
             // current event already satisfies that request, so scheduling it
@@ -5784,7 +5777,10 @@ impl ApplicationHandler<UserEvent> for App {
                 window.request_redraw();
             }
             egui_consumed = response.consumed;
-            egui_popup_open = egui::Popup::is_any_open(&renderer.egui_ctx);
+            egui_popup_open = widget_popup_owns_event(
+                popup_was_open,
+                egui::Popup::is_any_open(&renderer.egui_ctx),
+            );
         }
         record_idle_event_attribution(
             self.performance_probe.as_mut(),
@@ -5814,6 +5810,7 @@ impl ApplicationHandler<UserEvent> for App {
                     use winit::keyboard::{Key, NamedKey};
                     space_release_must_unwind(&event.logical_key, event.state, self.space_held)
                         || (event.state == winit::event::ElementState::Pressed
+                            && escape_press_reaches_app(event.repeat, egui_popup_open)
                             && matches!(&event.logical_key, Key::Named(NamedKey::Escape))
                             && escape_action(self.escape_context()) != EscapeAction::None)
                         || (!application_shortcuts_blocked([
@@ -6125,6 +6122,7 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 if pressed
+                    && escape_press_reaches_app(repeat, egui_popup_open)
                     && matches!(&logical_key, Key::Named(NamedKey::Escape))
                     && !self.show_about
                     && !self.show_update
@@ -6174,14 +6172,13 @@ impl ApplicationHandler<UserEvent> for App {
                 if !pressed {
                     return;
                 }
-                if matches!(&logical_key, Key::Character(value) if repeat && rating_assignment_for_key(value.as_str(), false).is_some())
+                if repeat
+                    && !repeated_viewer_action_allowed(&logical_key, self.transform.is_cropping)
                 {
                     return;
                 }
                 if is_fullscreen_toggle_key(&logical_key, self.modifiers) {
-                    if !repeat {
-                        self.toggle_fullscreen();
-                    }
+                    self.toggle_fullscreen();
                     return;
                 }
                 match logical_key {
@@ -6372,6 +6369,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
                 let folder_scan_busy = self.folder_scan_job.is_some();
+                let source_verification_busy = self.open_with_job.is_some();
                 let path_str = self
                     .session
                     .presented_path
@@ -6559,6 +6557,7 @@ impl ApplicationHandler<UserEvent> for App {
                     curation_status,
                     curation_recovery_status,
                     folder_scan_busy,
+                    source_verification_busy,
                     playlist_pos,
                     pixel_scale: pixel_scale.unwrap_or(0.0),
                     toast,

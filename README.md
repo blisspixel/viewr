@@ -35,11 +35,16 @@ history, crash-report uploader, or automatic update check.
 
 ## Interface
 
-![viewr displaying an image in Console appearance with phosphor-green File, Edit, View, Tools, and Help menus](docs/screenshots/viewr-console-example.png)
+### Dark
 
-Console appearance with docked menus and a clean image-first viewport. The
-capture is only the application window, with no private path or unrelated desktop
-content.
+![viewr displaying an alpine lake in Dark appearance with File, Edit, View, Tools, and Help menus](docs/screenshots/viewr-dark-example.png)
+
+### Console
+
+![viewr displaying an alpine lake in Console appearance with phosphor-green File, Edit, View, Tools, and Help menus](docs/screenshots/viewr-console-example.png)
+
+Both captures show the same repository-safe demonstration image. Each PNG is
+only the application window, with no private path or unrelated desktop content.
 
 ## Install
 

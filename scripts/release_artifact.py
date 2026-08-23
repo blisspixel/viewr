@@ -40,7 +40,12 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_BINARY_HEADER_BYTES = 1024 * 1024 + 512
 MAX_README_BYTES = 512 * 1024
 MAX_DOCUMENTATION_ASSET_BYTES = 5 * 1024 * 1024
-BINARY_DOCUMENTATION_PATHS = frozenset({"docs/screenshots/viewr-console-example.png"})
+BINARY_DOCUMENTATION_PATHS = frozenset(
+    {
+        "docs/screenshots/viewr-console-example.png",
+        "docs/screenshots/viewr-dark-example.png",
+    }
+)
 ARCHIVE_DOCUMENTATION_PATHS = (
     "CHANGELOG.md",
     "CONTRIBUTING.md",
@@ -76,6 +81,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-console-example.png",
+    "docs/screenshots/viewr-dark-example.png",
     "docs/STACK.md",
     "docs/STANDARDS.md",
     "docs/VERIFY.md",

@@ -131,6 +131,9 @@ and organized by user-visible concern.
 - The source-install guide now includes the canonical target-specific commands to
   build and independently verify a local release archive, matching the path
   referenced by the verification guide.
+- README now shows current application-window-only captures of both Dark and
+  Console appearances using the same path-safe demonstration image. Both PNGs
+  are validated and included in every release archive.
 
 ### Maintenance
 

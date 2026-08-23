@@ -54,6 +54,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-console-example.png",
+    "docs/screenshots/viewr-dark-example.png",
     "docs/STACK.md",
     "docs/STANDARDS.md",
     "docs/VERIFY.md",

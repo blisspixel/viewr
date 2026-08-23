@@ -204,6 +204,10 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   and undo or redo run once per physical key press. One held Escape therefore
   cannot dismiss several layers of the documented close order. A widget menu
   consumes Escape before Crop, Spot Heal, the rating filter, or fullscreen.
+- A Save As confirmation, first-write rating disclosure, Update dialog, or About
+  dialog owns the complete UI action batch as soon as it opens. Only that modal's
+  confirmation, cancellation, or close action may run from the batch, and normal
+  dispatch remains blocked until the modal closes.
 
 ### Ratings and folder filter
 
@@ -215,6 +219,10 @@ and unsupported containers, remain visibly read-only.
 - The source image is the only durable rating record. viewr writes standard
   embedded 0-to-5 metadata after one explicit disclosure per session and does not
   create a database, sidecar, alternate stream, timestamp, or activity record.
+  A pending first-write assignment is bound to both the selected path and the
+  presented frame. Navigation or source refresh cancels it, confirmation repeats
+  the complete foreground-work and path preflight, and disclosure consent is
+  recorded for the session only after the writer starts.
 - In normal viewing mode, `0` clears a rating and `1` through `5` assign it. Fit
   Image to View and Actual Size move to the primary modifier plus `0` and `1`.
   Numeric input, menus, popups, modals, Crop, Spot Heal, and key repeat always win

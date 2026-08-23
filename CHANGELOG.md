@@ -56,7 +56,10 @@ and organized by user-visible concern.
   reload wait for folder rating discovery as well as an active rating write, so
   an older scan cannot overwrite freshly reloaded metadata. A rating write also
   waits for folder rating discovery, so a stale scan result cannot replace the
-  newly committed in-memory value.
+  newly committed in-memory value. The first-write disclosure remains bound to
+  the selected and presented source: browsing or reloading cancels stale intent,
+  confirmation repeats the complete foreground-work preflight, and every modal
+  that opens during action dispatch owns the rest of that action batch.
   Explicit file, folder, and filmstrip browsing cancel superseded Open With
   verification before a native chooser can appear later.
 - JPEG rating writes work on macOS and Linux as well as Windows. The Unix path

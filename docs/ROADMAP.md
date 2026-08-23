@@ -591,7 +591,9 @@ approved behavior and safety contract is in `docs/RATINGS.md`.
   Unreadable without silently rounding or repairing external metadata.
 - [x] Define first-write disclosure, bare `0` through `5` assignment guards,
   modifier-based Fit and Actual Size, visible current state, minimum filters,
-  no-match recovery, and accessible names and selected state.
+  no-match recovery, and accessible names and selected state. Bind pending
+  first-write intent to the selected and presented source, cancel it on source
+  changes, and repeat the full foreground preflight at confirmation.
 - [x] Replace the advisory-affected XMP path with a bounded parser and writer that
   can consume hostile metadata without an ignored runtime vulnerability.
 - [x] Prove failure-atomic ordinary-JPEG replacement, exact source-version checks,

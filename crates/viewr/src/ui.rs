@@ -488,20 +488,33 @@ pub(crate) const fn save_overwrite_action_allowed(action: &UiAction) -> bool {
     )
 }
 
+#[must_use]
+pub(crate) const fn rating_disclosure_action_allowed(action: &UiAction) -> bool {
+    matches!(
+        action,
+        UiAction::ConfirmRatingDisclosure | UiAction::CancelRatingDisclosure
+    )
+}
+
+#[must_use]
+pub(crate) const fn update_modal_action_allowed(action: &UiAction) -> bool {
+    matches!(action, UiAction::CloseUpdate)
+}
+
+#[must_use]
+pub(crate) const fn about_modal_action_allowed(action: &UiAction) -> bool {
+    matches!(action, UiAction::CloseAbout)
+}
+
 fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> Vec<UiAction> {
     if frame.save_overwrite_pending {
         actions.retain(save_overwrite_action_allowed);
     } else if frame.rating.pending_disclosure.is_some() {
-        actions.retain(|action| {
-            matches!(
-                action,
-                UiAction::ConfirmRatingDisclosure | UiAction::CancelRatingDisclosure
-            )
-        });
+        actions.retain(rating_disclosure_action_allowed);
     } else if frame.show_update {
-        actions.retain(|action| matches!(action, UiAction::CloseUpdate));
+        actions.retain(update_modal_action_allowed);
     } else if frame.show_about {
-        actions.retain(|action| matches!(action, UiAction::CloseAbout));
+        actions.retain(about_modal_action_allowed);
     }
     actions
 }
@@ -5119,6 +5132,28 @@ mod tests {
     }
 
     #[test]
+    fn rating_disclosure_discards_every_background_action() {
+        let mut frame = accessibility_test_frame();
+        frame.rating.pending_disclosure = Some(crate::ratings::RatingAssignment::Set(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        ));
+        let actions = actions_owned_by_modal(
+            vec![
+                UiAction::Open,
+                UiAction::Trash,
+                UiAction::ConfirmRatingDisclosure,
+                UiAction::CancelRatingDisclosure,
+                UiAction::ToggleHeal,
+            ],
+            &frame,
+        );
+
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(actions[0], UiAction::ConfirmRatingDisclosure));
+        assert!(matches!(actions[1], UiAction::CancelRatingDisclosure));
+    }
+
+    #[test]
     fn first_rating_write_discloses_file_metadata_effects_and_actions() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -6179,6 +6214,13 @@ mod tests {
                 "update surface made an unsupported claim: {forbidden}; exposed text: {exposed:?}"
             );
         }
+
+        let filtered = actions_owned_by_modal(
+            vec![UiAction::Open, UiAction::CloseUpdate, UiAction::SaveAs],
+            &frame,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(filtered[0], UiAction::CloseUpdate));
     }
 
     #[test]

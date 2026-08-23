@@ -80,6 +80,16 @@ pub(crate) const fn rating_write_discovery_blocker(discovery_active: bool) -> Op
     }
 }
 
+/// A disclosed write remains valid only while both the requested selection and
+/// the last presented frame still identify its captured path.
+#[must_use]
+pub(crate) const fn rating_write_target_is_current(
+    selected_matches: bool,
+    presented_matches: bool,
+) -> bool {
+    selected_matches && presented_matches
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RatingDiscoveryTransition {
     Apply,
@@ -250,6 +260,23 @@ mod tests {
             Some(RATING_DISCOVERY_WRITE_STATUS)
         );
         assert_eq!(rating_write_discovery_blocker(false), None);
+    }
+
+    #[test]
+    fn rating_write_target_requires_selected_and_presented_path_matches() {
+        let cases = [
+            (false, false, false),
+            (false, true, false),
+            (true, false, false),
+            (true, true, true),
+        ];
+
+        for (selected_matches, presented_matches, expected) in cases {
+            assert_eq!(
+                rating_write_target_is_current(selected_matches, presented_matches),
+                expected
+            );
+        }
     }
 
     #[test]

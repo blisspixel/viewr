@@ -81,7 +81,7 @@ use crate::rating_state::{
     next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
     rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
     rating_recovery_blocker, rating_write_discovery_blocker, rating_write_failure_message,
-    reconcile_rating_write,
+    rating_write_target_is_current, reconcile_rating_write,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
@@ -382,6 +382,12 @@ struct RatingScanWorker {
 struct PendingRatingWrite {
     path: PathBuf,
     assignment: RatingAssignment,
+}
+
+fn cancel_pending_rating_for_source_change(
+    pending_rating_write: &mut Option<PendingRatingWrite>,
+) -> bool {
+    pending_rating_write.take().is_some()
 }
 
 struct RatingWriteWorker {
@@ -965,13 +971,14 @@ fn application_shortcuts_blocked<const N: usize>(owners: [bool; N]) -> bool {
     owners.into_iter().any(|owner| owner)
 }
 
-fn save_overwrite_dispatch_allows(
+fn modal_dispatch_allows(
     owns_dispatch: &mut bool,
-    overwrite_pending: bool,
+    modal_open: bool,
     action: &crate::ui::UiAction,
+    action_allowed: fn(&crate::ui::UiAction) -> bool,
 ) -> bool {
-    *owns_dispatch |= overwrite_pending;
-    !*owns_dispatch || crate::ui::save_overwrite_action_allowed(action)
+    *owns_dispatch |= modal_open;
+    !*owns_dispatch || action_allowed(action)
 }
 
 const fn filmstrip_is_available(projected_count: usize) -> bool {
@@ -1170,6 +1177,7 @@ impl App {
         self.pending_gone_notice = false;
         self.source_gone = false;
         self.cancel_save_overwrite_for_source_change();
+        self.cancel_rating_disclosure_for_source_change();
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
         self.spawn_image_load(path);
@@ -1277,7 +1285,6 @@ impl App {
             worker.cancel.store(true, Ordering::Release);
         }
         self.rating_generation = self.rating_generation.wrapping_add(1);
-        self.pending_rating_write = None;
         self.reset_prefetch_for_playlist_change();
         self.thumbnail_schedule.reset();
         self.thumb_textures.clear();
@@ -1371,6 +1378,7 @@ impl App {
                 if let Some(new_path) = new_path
                     && followed_rename
                 {
+                    self.cancel_rating_disclosure_for_source_change();
                     self.session.selected_path = Some(new_path.clone());
                     if self.session.presented_path.is_some() {
                         self.session.presented_path = Some(new_path);
@@ -1743,6 +1751,7 @@ impl App {
     }
 
     fn invalidate_displayed_image(&mut self) {
+        self.cancel_rating_disclosure_for_source_change();
         self.external_edit_pending = external_edit_pending_after_frame_transition(
             self.external_edit_pending,
             PresentedFrameTransition::Invalidate,
@@ -2144,7 +2153,7 @@ impl App {
         }
         let pending = PendingRatingWrite { path, assignment };
         if self.rating_write_disclosed {
-            self.start_rating_write(&pending);
+            let _ = self.start_rating_write(&pending);
         } else {
             self.pending_rating_write = Some(pending);
             self.request_redraw();
@@ -2155,8 +2164,9 @@ impl App {
         let Some(pending) = self.pending_rating_write.take() else {
             return;
         };
-        self.rating_write_disclosed = true;
-        self.start_rating_write(&pending);
+        if self.start_rating_write(&pending) {
+            self.rating_write_disclosed = true;
+        }
     }
 
     fn cancel_rating_disclosure(&mut self) {
@@ -2164,24 +2174,28 @@ impl App {
         self.request_redraw();
     }
 
-    fn start_rating_write(&mut self, pending: &PendingRatingWrite) {
+    fn start_rating_write(&mut self, pending: &PendingRatingWrite) -> bool {
         if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
             self.show_toast(message);
-            return;
+            return false;
         }
-        if self.save_transaction_active() {
-            self.show_toast("Wait for Save As to finish before changing the rating");
-            return;
+        if self.block_action_while_busy("changing the rating") {
+            return false;
         }
-        if self.rating_write_worker.is_some()
-            || self.session.presented_path.as_ref() != Some(&pending.path)
-        {
+        if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
+            self.show_toast(message);
+            return false;
+        }
+        if !rating_write_target_is_current(
+            self.session.selected_path.as_ref() == Some(&pending.path),
+            self.session.presented_path.as_ref() == Some(&pending.path),
+        ) {
             self.show_toast("The selected image changed before the rating could be saved");
-            return;
+            return false;
         }
         let Some(source) = self.current_source.clone() else {
             self.show_toast("Wait for the selected image to finish loading");
-            return;
+            return false;
         };
         let path = pending.path.clone();
         let assignment = pending.assignment;
@@ -2195,18 +2209,18 @@ impl App {
                 let _ = sender.send(result);
                 let _ = event_proxy.send_event(UserEvent::Wake);
             });
-        match spawned {
-            Ok(join) => {
-                self.rating_write_worker = Some(RatingWriteWorker {
-                    path,
-                    assignment,
-                    result_rx: receiver,
-                    join,
-                });
-                self.show_toast("Saving rating...");
-            }
-            Err(_) => self
-                .show_toast("Could not save the rating safely. The previous rating is unchanged."),
+        if let Ok(join) = spawned {
+            self.rating_write_worker = Some(RatingWriteWorker {
+                path,
+                assignment,
+                result_rx: receiver,
+                join,
+            });
+            self.show_toast("Saving rating...");
+            true
+        } else {
+            self.show_toast("Could not save the rating safely. The previous rating is unchanged.");
+            false
         }
     }
 
@@ -2414,6 +2428,7 @@ impl App {
     fn apply_filter_selection(&mut self, selection: FilterSelection) {
         if filter_selection_changes_source(selection, self.current_image.is_some()) {
             self.cancel_save_overwrite_for_source_change();
+            self.cancel_rating_disclosure_for_source_change();
         }
         self.reset_prefetch_for_playlist_change();
         match selection {
@@ -2762,6 +2777,7 @@ impl App {
                 self.refresh_folder_membership();
             }
             CoherenceAction::CurrentGone => {
+                self.cancel_rating_disclosure_for_source_change();
                 self.external_edit_pending = false;
                 self.source_gone = true;
                 if announce {
@@ -2770,6 +2786,7 @@ impl App {
             }
             CoherenceAction::RescanFolder => self.refresh_folder_membership(),
             CoherenceAction::RemindAndRescan => {
+                self.cancel_rating_disclosure_for_source_change();
                 self.external_edit_pending = true;
                 if announce {
                     self.show_toast(crate::file_coherence::reload_reminder_copy());
@@ -2777,6 +2794,7 @@ impl App {
                 self.refresh_folder_membership();
             }
             CoherenceAction::GoneAndRescan => {
+                self.cancel_rating_disclosure_for_source_change();
                 self.external_edit_pending = false;
                 self.pending_gone_notice = true;
                 self.refresh_folder_membership();
@@ -3181,6 +3199,8 @@ impl App {
         } else {
             None
         };
+
+        self.cancel_rating_disclosure_for_source_change();
 
         let Some(playlist) = self.playlist.as_mut() else {
             return;
@@ -4695,6 +4715,7 @@ impl App {
         }
 
         let next_path = playlist.files[playlist.index].clone();
+        self.cancel_rating_disclosure_for_source_change();
         self.session.selected_path = Some(next_path.clone());
         self.transform = Transform::default();
         self.spawn_image_load(next_path);
@@ -4855,6 +4876,7 @@ impl App {
     }
 
     fn spawn_refreshed_image_load(&mut self, path: PathBuf) {
+        self.cancel_rating_disclosure_for_source_change();
         self.spawn_image_load_with_cached(path, None, true);
     }
 
@@ -4929,6 +4951,14 @@ impl App {
         if cancel_pending_save_for_source_change(&mut self.pending_save) {
             self.show_toast(
                 "Pending Save As overwrite canceled because the active image selection changed.",
+            );
+        }
+    }
+
+    fn cancel_rating_disclosure_for_source_change(&mut self) {
+        if cancel_pending_rating_for_source_change(&mut self.pending_rating_write) {
+            self.show_toast(
+                "Pending rating change canceled because the active image was reopened or changed.",
             );
         }
     }
@@ -6577,11 +6607,39 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 let mut save_overwrite_owns_dispatch = false;
+                let mut rating_disclosure_owns_dispatch = false;
+                let mut update_modal_owns_dispatch = false;
+                let mut about_modal_owns_dispatch = false;
                 for action in ui_actions {
-                    if !save_overwrite_dispatch_allows(
+                    if !modal_dispatch_allows(
                         &mut save_overwrite_owns_dispatch,
                         self.pending_save.is_some(),
                         &action,
+                        crate::ui::save_overwrite_action_allowed,
+                    ) {
+                        continue;
+                    }
+                    if !modal_dispatch_allows(
+                        &mut rating_disclosure_owns_dispatch,
+                        self.pending_rating_write.is_some(),
+                        &action,
+                        crate::ui::rating_disclosure_action_allowed,
+                    ) {
+                        continue;
+                    }
+                    if !modal_dispatch_allows(
+                        &mut update_modal_owns_dispatch,
+                        self.show_update,
+                        &action,
+                        crate::ui::update_modal_action_allowed,
+                    ) {
+                        continue;
+                    }
+                    if !modal_dispatch_allows(
+                        &mut about_modal_owns_dispatch,
+                        self.show_about,
+                        &action,
+                        crate::ui::about_modal_action_allowed,
                     ) {
                         continue;
                     }
@@ -7066,6 +7124,24 @@ mod test {
     }
 
     #[test]
+    fn source_change_cancels_pending_rating_disclosure() {
+        let mut pending_rating_write = Some(PendingRatingWrite {
+            path: PathBuf::from("selected.jpg"),
+            assignment: RatingAssignment::Set(
+                crate::ratings::Rating::new(4).expect("valid test rating"),
+            ),
+        });
+
+        assert!(cancel_pending_rating_for_source_change(
+            &mut pending_rating_write
+        ));
+        assert!(pending_rating_write.is_none());
+        assert!(!cancel_pending_rating_for_source_change(
+            &mut pending_rating_write
+        ));
+    }
+
+    #[test]
     fn every_filter_result_that_can_replace_or_clear_source_revokes_consent() {
         assert!(!filter_selection_changes_source(
             FilterSelection::Stay,
@@ -7089,25 +7165,116 @@ mod test {
     fn overwrite_dispatch_ownership_is_sticky_when_an_action_opens_the_modal() {
         let mut owns_dispatch = false;
 
-        assert!(save_overwrite_dispatch_allows(
+        assert!(modal_dispatch_allows(
             &mut owns_dispatch,
             false,
             &crate::ui::UiAction::SaveAs,
+            crate::ui::save_overwrite_action_allowed,
         ));
-        assert!(!save_overwrite_dispatch_allows(
+        assert!(!modal_dispatch_allows(
             &mut owns_dispatch,
             true,
             &crate::ui::UiAction::Trash,
+            crate::ui::save_overwrite_action_allowed,
         ));
-        assert!(save_overwrite_dispatch_allows(
+        assert!(modal_dispatch_allows(
             &mut owns_dispatch,
             true,
             &crate::ui::UiAction::CancelSaveOverwrite,
+            crate::ui::save_overwrite_action_allowed,
         ));
-        assert!(!save_overwrite_dispatch_allows(
+        assert!(!modal_dispatch_allows(
             &mut owns_dispatch,
             false,
             &crate::ui::UiAction::Open,
+            crate::ui::save_overwrite_action_allowed,
+        ));
+    }
+
+    #[test]
+    fn rating_dispatch_ownership_is_sticky_when_an_action_opens_the_modal() {
+        let mut owns_dispatch = false;
+
+        assert!(modal_dispatch_allows(
+            &mut owns_dispatch,
+            false,
+            &crate::ui::UiAction::AssignRating(RatingAssignment::Set(
+                crate::ratings::Rating::new(4).expect("valid test rating")
+            )),
+            crate::ui::rating_disclosure_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut owns_dispatch,
+            true,
+            &crate::ui::UiAction::Trash,
+            crate::ui::rating_disclosure_action_allowed,
+        ));
+        assert!(modal_dispatch_allows(
+            &mut owns_dispatch,
+            true,
+            &crate::ui::UiAction::CancelRatingDisclosure,
+            crate::ui::rating_disclosure_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut owns_dispatch,
+            false,
+            &crate::ui::UiAction::Open,
+            crate::ui::rating_disclosure_action_allowed,
+        ));
+    }
+
+    #[test]
+    fn informational_modal_dispatch_ownership_is_sticky() {
+        let mut update_owns_dispatch = false;
+        assert!(modal_dispatch_allows(
+            &mut update_owns_dispatch,
+            false,
+            &crate::ui::UiAction::ShowUpdate,
+            crate::ui::update_modal_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut update_owns_dispatch,
+            true,
+            &crate::ui::UiAction::Trash,
+            crate::ui::update_modal_action_allowed,
+        ));
+        assert!(modal_dispatch_allows(
+            &mut update_owns_dispatch,
+            true,
+            &crate::ui::UiAction::CloseUpdate,
+            crate::ui::update_modal_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut update_owns_dispatch,
+            false,
+            &crate::ui::UiAction::Open,
+            crate::ui::update_modal_action_allowed,
+        ));
+
+        let mut about_owns_dispatch = false;
+        assert!(modal_dispatch_allows(
+            &mut about_owns_dispatch,
+            false,
+            &crate::ui::UiAction::ShowAbout,
+            crate::ui::about_modal_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut about_owns_dispatch,
+            true,
+            &crate::ui::UiAction::SaveAs,
+            crate::ui::about_modal_action_allowed,
+        ));
+        assert!(modal_dispatch_allows(
+            &mut about_owns_dispatch,
+            true,
+            &crate::ui::UiAction::CloseAbout,
+            crate::ui::about_modal_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut about_owns_dispatch,
+            false,
+            &crate::ui::UiAction::OpenFolder,
+            crate::ui::about_modal_action_allowed,
         ));
     }
 

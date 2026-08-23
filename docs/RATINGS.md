@@ -31,7 +31,11 @@ reason to introduce background indexing.
   rename, move to Trash, and exact Undo restoration.
 - Before the first rating write in each session, viewr must explain: `Ratings are
   written into this image file and may be visible to other apps.` The intended
-  rating remains pending until the user confirms. Consent is not persisted.
+  rating remains pending until the user confirms. The pending assignment is
+  bound to the selected and presented source. Browsing to another image or
+  reloading the source cancels it, and confirmation repeats the foreground-work
+  and source-path checks before starting the writer. Consent is not persisted or
+  recorded unless that writer starts.
 - Diagnostics use fixed outcome categories only. They do not contain a path,
   filename, rating history, raw metadata, or native error text.
 
@@ -77,6 +81,10 @@ Sources reviewed 2026-07-29.
   `1` through `5` assign that exact rating. Key repeat is ignored.
 - Rating keys work only in normal image-viewing mode when no text or numeric field,
   modal, menu, popup, Crop, Spot Heal, or destructive action owns input.
+- Once the first-write disclosure opens, only its Save rating and Cancel actions
+  may run from that frame's collected controls. An operating-system open, drop,
+  completed folder open, filter replacement, navigation, or source reload cancels
+  a pending assignment before changing the active source.
 - Rating assignment waits while folder rating discovery is reading the bounded
   source headers. Filter choices remain available so selecting All images can
   cancel discovery. This serialization prevents a scan that observed the old

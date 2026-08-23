@@ -502,7 +502,9 @@ impl ChromeViewModel {
         match control {
             ChromeControl::OpenSource => !self.input.curation_busy,
             ChromeControl::NavigateFilmstrip => self.browse_action_ready(),
-            ChromeControl::Reload => current,
+            ChromeControl::Reload => {
+                current && !self.input.heal_painting && !self.input.rating_discovery_busy
+            }
             ChromeControl::PermanentDelete => self.exclusive_current_action_ready(),
             ChromeControl::EditTransform => self.transform_action_ready(),
             ChromeControl::OpenWith => {
@@ -512,7 +514,12 @@ impl ChromeViewModel {
                         crate::file_coherence::OpenWithAvailability::NativeChooser
                     )
             }
-            ChromeControl::SaveAs => current && !self.input.save_recovery_unsettled,
+            ChromeControl::SaveAs => {
+                current
+                    && !self.input.heal_painting
+                    && !self.input.is_cropping
+                    && !self.input.save_recovery_unsettled
+            }
             ChromeControl::MoveToTrash => {
                 self.exclusive_current_action_ready() && !self.input.restore_recovery_unsettled
             }
@@ -525,10 +532,13 @@ impl ChromeViewModel {
             ChromeControl::ApplyCrop => self.crop_apply_ready(),
             ChromeControl::HealToggle => self.heal_toggle_ready(),
             ChromeControl::HealAdjust => {
-                self.input.dock.has_image && !self.input.heal_busy && !self.input.curation_busy
+                self.input.dock.has_image
+                    && !self.input.heal_busy
+                    && !self.input.heal_painting
+                    && !self.input.curation_busy
             }
             ChromeControl::HealRefreshSource => {
-                current && self.input.has_alternate_heal_source && !self.input.heal_painting
+                current && self.input.has_alternate_heal_source && self.edit_history_action_ready()
             }
             ChromeControl::UndoEdit => self.input.has_undo_edit && self.edit_history_action_ready(),
             ChromeControl::RedoEdit => self.input.has_redo_edit && self.edit_history_action_ready(),
@@ -1092,9 +1102,34 @@ mod tests {
                 "blocker {blocker}: EditTransform"
             );
             assert!(model.is_enabled(ChromeControl::Reload));
-            assert!(model.is_enabled(ChromeControl::SaveAs));
+            assert_eq!(
+                model.is_enabled(ChromeControl::SaveAs),
+                blocker != 2,
+                "blocker {blocker}: SaveAs"
+            );
             assert!(model.is_enabled(ChromeControl::ViewImage));
         }
+    }
+
+    #[test]
+    fn reload_and_save_controls_do_not_offer_rejected_edit_states() {
+        let mut input = ready_input();
+        input.heal_painting = true;
+        let model = ChromeViewModel::new(input);
+        assert!(!model.is_enabled(ChromeControl::Reload));
+        assert!(!model.is_enabled(ChromeControl::SaveAs));
+
+        input = ready_input();
+        input.rating_discovery_busy = true;
+        let model = ChromeViewModel::new(input);
+        assert!(!model.is_enabled(ChromeControl::Reload));
+        assert!(model.is_enabled(ChromeControl::SaveAs));
+
+        input = ready_input();
+        input.is_cropping = true;
+        let model = ChromeViewModel::new(input);
+        assert!(model.is_enabled(ChromeControl::Reload));
+        assert!(!model.is_enabled(ChromeControl::SaveAs));
     }
 
     #[test]
@@ -1327,8 +1362,22 @@ mod tests {
         input = ready_input();
         input.heal_painting = true;
         let model = ChromeViewModel::new(input);
-        assert!(model.is_enabled(ChromeControl::HealAdjust));
+        assert!(!model.is_enabled(ChromeControl::HealAdjust));
         assert!(!model.is_enabled(ChromeControl::HealRefreshSource));
+
+        for blocker in 0..3 {
+            input = ready_input();
+            match blocker {
+                0 => input.folder_scan_busy = true,
+                1 => input.source_verification_busy = true,
+                2 => input.is_cropping = true,
+                _ => unreachable!(),
+            }
+            assert!(
+                !ChromeViewModel::new(input).is_enabled(ChromeControl::HealRefreshSource),
+                "blocker {blocker}"
+            );
+        }
     }
 
     #[test]

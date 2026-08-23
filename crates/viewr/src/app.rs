@@ -2468,27 +2468,26 @@ impl App {
     }
 
     fn reload_current_image(&mut self) {
+        use crate::file_coherence::ReloadStartBlocker;
+
         if self.block_action_while_curating("reloading this file") {
             return;
         }
-        if self.heal.is_busy() || self.heal.painting {
-            self.show_toast("Wait for spot heal to finish before reloading");
-            return;
-        }
-        if self.crop_job.is_some() {
-            self.show_toast("Wait for the crop to finish before reloading");
-            return;
-        }
-        if self.save_transaction_active() {
-            self.show_toast("Wait for Save As to finish before reloading");
-            return;
-        }
-        if self.rating_write_worker.is_some() {
-            self.show_toast("Wait for the rating update to finish before reloading");
-            return;
-        }
-        if self.session.is_loading() || self.preview_job.is_some() {
-            self.show_toast("An image is already loading");
+        if let Some(blocker) = crate::file_coherence::reload_start_blocker([
+            (self.heal.is_busy() || self.heal.painting).then_some(ReloadStartBlocker::SpotHeal),
+            self.crop_job.is_some().then_some(ReloadStartBlocker::Crop),
+            self.save_transaction_active()
+                .then_some(ReloadStartBlocker::Save),
+            self.rating_write_worker
+                .is_some()
+                .then_some(ReloadStartBlocker::RatingWrite),
+            self.rating_scan_worker
+                .is_some()
+                .then_some(ReloadStartBlocker::RatingDiscovery),
+            (self.session.is_loading() || self.preview_job.is_some())
+                .then_some(ReloadStartBlocker::ImagePreparation),
+        ]) {
+            self.show_toast(crate::file_coherence::reload_start_blocker_message(blocker));
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -2734,7 +2733,7 @@ impl App {
                 healing: self.heal.is_busy() || self.heal.painting,
                 cropping: self.crop_job.is_some(),
                 curating: self.curation_worker.is_some(),
-                rating: self.rating_write_worker.is_some(),
+                rating: self.rating_write_worker.is_some() || self.rating_scan_worker.is_some(),
             },
         );
         self.apply_coherence_action(crate::file_coherence::coalesce(
@@ -3769,24 +3768,7 @@ impl App {
     }
 
     fn refresh_heal_source(&mut self) {
-        if self.heal.painting {
-            self.show_toast("Finish the current spot-heal stroke before refreshing its source");
-            return;
-        }
-        if self.heal.is_busy() {
-            self.show_toast("Wait for Spot Heal to finish before refreshing its source");
-            return;
-        }
-        if self.crop_job.is_some() {
-            self.show_toast("Wait for the crop to finish before refreshing the heal source");
-            return;
-        }
-        if self.save_transaction_active() {
-            self.show_toast("Wait for Save As to finish before refreshing the heal source");
-            return;
-        }
-        if self.preview_job.is_some() {
-            self.show_toast("Wait for the image preview before refreshing the heal source");
+        if self.block_edit_history_while_busy("refreshing the heal source") {
             return;
         }
         let Some(refresh) = self.heal.refresh.as_ref() else {
@@ -3862,12 +3844,10 @@ impl App {
     }
 
     fn begin_heal_stroke(&mut self) {
-        if !self.heal.active
-            || self.heal.is_busy()
-            || self.crop_job.is_some()
-            || self.save_transaction_active()
-            || self.preview_job.is_some()
-        {
+        if !self.heal.active {
+            return;
+        }
+        if self.block_edit_history_while_busy("starting a spot-heal stroke") {
             return;
         }
         self.heal.stroke.clear();
@@ -4974,6 +4954,9 @@ impl App {
                 .then_some(SaveStartBlocker::Preview),
             (self.heal.is_busy() || self.heal.painting).then_some(SaveStartBlocker::SpotHeal),
             self.crop_job.is_some().then_some(SaveStartBlocker::Crop),
+            self.transform
+                .is_cropping
+                .then_some(SaveStartBlocker::CropSelection),
             self.save_transaction_active()
                 .then_some(SaveStartBlocker::Save),
         ]) {

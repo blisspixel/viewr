@@ -45,13 +45,18 @@ and organized by user-visible concern.
   under the same folder, source-verification, edit, and worker owners enforced by
   keyboard dispatch. Rotate and flip remain available inside an idle Crop
   selection, where the crop geometry follows the transform, but a live crop drag
-  remains exclusive. Crop and Spot Heal wait for folder scanning and Open With
-  verification before starting, and switching tools cannot discard a live heal
-  stroke. Filmstrip controls now reflect the same browse blockers as keyboard
-  navigation. Refresh Source is disabled when no distinct alternate patch exists.
-  Manual reload waits for an active rating transaction instead of racing the
-  source replacement. A rating write also waits for folder rating discovery, so
-  a stale scan result cannot replace the newly committed in-memory value.
+  remains exclusive. Save As requires that visible Crop selection to be applied
+  or canceled, so export cannot silently omit it. Crop and Spot Heal wait for
+  folder scanning and Open With verification before starting, and switching
+  tools cannot discard a live heal stroke. A Spot Heal stroke and Refresh Source
+  now use the same complete foreground-work preflight as edit history, and radius
+  and feather stay fixed while a stroke is being collected. Filmstrip controls
+  reflect the same browse blockers as keyboard navigation. Refresh Source is
+  disabled when no distinct alternate patch exists. Manual and watcher-driven
+  reload wait for folder rating discovery as well as an active rating write, so
+  an older scan cannot overwrite freshly reloaded metadata. A rating write also
+  waits for folder rating discovery, so a stale scan result cannot replace the
+  newly committed in-memory value.
   Explicit file, folder, and filmstrip browsing cancel superseded Open With
   verification before a native chooser can appear later.
 - JPEG rating writes work on macOS and Linux as well as Windows. The Unix path

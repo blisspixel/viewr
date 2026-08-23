@@ -68,6 +68,7 @@ pub(crate) enum SaveStartBlocker {
     Preview,
     SpotHeal,
     Crop,
+    CropSelection,
     Save,
 }
 
@@ -91,6 +92,7 @@ pub(crate) const fn save_start_blocker_message(blocker: SaveStartBlocker) -> &'s
         SaveStartBlocker::Preview => "Wait for the image preview to finish before saving",
         SaveStartBlocker::SpotHeal => "Wait for spot heal to finish before saving",
         SaveStartBlocker::Crop => "Wait for the crop to finish before saving",
+        SaveStartBlocker::CropSelection => "Apply or cancel the crop before saving a copy",
         SaveStartBlocker::Save => "A copy is already being saved",
     }
 }
@@ -161,7 +163,9 @@ mod tests {
 
     #[test]
     fn save_start_preflight_excludes_source_changes_writes_and_unsettled_recovery() {
-        use SaveStartBlocker::{Crop, FolderOpen, Preview, RatingWrite, Recovery, Save, SpotHeal};
+        use SaveStartBlocker::{
+            Crop, CropSelection, FolderOpen, Preview, RatingWrite, Recovery, Save, SpotHeal,
+        };
 
         let cases = [
             (
@@ -172,16 +176,17 @@ mod tests {
                     Some(Preview),
                     Some(SpotHeal),
                     Some(Crop),
+                    Some(CropSelection),
                     Some(Save),
                 ],
                 Some(Recovery),
             ),
             (
-                [None, Some(FolderOpen), None, None, None, None, None],
+                [None, Some(FolderOpen), None, None, None, None, None, None],
                 Some(FolderOpen),
             ),
             (
-                [None, None, Some(RatingWrite), None, None, None, None],
+                [None, None, Some(RatingWrite), None, None, None, None, None],
                 Some(RatingWrite),
             ),
             (
@@ -192,6 +197,7 @@ mod tests {
                     Some(Preview),
                     Some(SpotHeal),
                     Some(Crop),
+                    Some(CropSelection),
                     Some(Save),
                 ],
                 Some(Preview),
@@ -204,20 +210,53 @@ mod tests {
                     None,
                     Some(SpotHeal),
                     Some(Crop),
+                    Some(CropSelection),
                     Some(Save),
                 ],
                 Some(SpotHeal),
             ),
             (
-                [None, None, None, None, None, Some(Crop), Some(Save)],
+                [
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(Crop),
+                    Some(CropSelection),
+                    Some(Save),
+                ],
                 Some(Crop),
             ),
-            ([None, None, None, None, None, None, Some(Save)], Some(Save)),
-            ([None; 7], None),
+            (
+                [
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(CropSelection),
+                    Some(Save),
+                ],
+                Some(CropSelection),
+            ),
+            (
+                [None, None, None, None, None, None, None, Some(Save)],
+                Some(Save),
+            ),
+            ([None; 8], None),
         ];
         for (blockers, expected) in cases {
             assert_eq!(save_start_blocker(blockers), expected);
         }
+    }
+
+    #[test]
+    fn save_start_blocker_copy_names_the_required_recovery() {
+        use SaveStartBlocker::{
+            Crop, CropSelection, FolderOpen, Preview, RatingWrite, Recovery, Save, SpotHeal,
+        };
 
         assert_eq!(
             save_start_blocker_message(FolderOpen),
@@ -238,6 +277,10 @@ mod tests {
         assert_eq!(
             save_start_blocker_message(Crop),
             "Wait for the crop to finish before saving"
+        );
+        assert_eq!(
+            save_start_blocker_message(CropSelection),
+            "Apply or cancel the crop before saving a copy"
         );
         assert_eq!(
             save_start_blocker_message(Save),

@@ -309,7 +309,9 @@ and unsupported containers, remain visibly read-only.
   change cooperatively cancels obsolete row copying and never restores stale
   state. After a failed image load or Reload, crop entry and Apply stay blocked
   until Retry succeeds, so retained last-good pixels cannot become a new edit
-  source. Esc cancels crop before it can affect fullscreen state.
+  source. Save As stays unavailable until a visible Crop selection is applied or
+  canceled, so the exported pixels cannot silently omit an unapplied selection.
+  Esc cancels crop before it can affect fullscreen state.
 
 ### Source animation
 
@@ -344,7 +346,8 @@ and unsupported containers, remain visibly read-only.
   finished and only when a distinct alternate patch exists, so a refresh cannot
   discard collected input or present an enabled no-op. Entering Spot Heal waits
   for folder scanning and source verification; switching to Crop cannot discard
-  a live stroke.
+  a live stroke. Stroke entry and Refresh Source wait for any other foreground
+  owner, and radius and feather controls stay fixed while a stroke is collected.
 - Drag over one small blemish and release to repair it off the UI thread. The
   solver ranks up to eight spatially distinct clean sources using robust boundary
   color, local tone, and edge-gradient agreement. The selected patch receives a

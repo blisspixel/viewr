@@ -171,8 +171,39 @@ pub(crate) const fn session_is_busy(busy: SessionBusy) -> bool {
     busy.loading || busy.saving || busy.healing || busy.cropping || busy.curating || busy.rating
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ReloadStartBlocker {
+    SpotHeal,
+    Crop,
+    Save,
+    RatingWrite,
+    RatingDiscovery,
+    ImagePreparation,
+}
+
+#[must_use]
+pub(crate) fn reload_start_blocker<const N: usize>(
+    blockers: [Option<ReloadStartBlocker>; N],
+) -> Option<ReloadStartBlocker> {
+    blockers.into_iter().flatten().next()
+}
+
+#[must_use]
+pub(crate) const fn reload_start_blocker_message(blocker: ReloadStartBlocker) -> &'static str {
+    match blocker {
+        ReloadStartBlocker::SpotHeal => "Wait for Spot Heal to finish before reloading",
+        ReloadStartBlocker::Crop => "Wait for the crop to finish before reloading",
+        ReloadStartBlocker::Save => "Wait for Save As to finish before reloading",
+        ReloadStartBlocker::RatingWrite => "Wait for the rating update to finish before reloading",
+        ReloadStartBlocker::RatingDiscovery => {
+            "Wait for folder ratings to finish loading before reloading"
+        }
+        ReloadStartBlocker::ImagePreparation => "An image is already loading",
+    }
+}
+
 /// Decide the visible response. Busy work wins so a watcher cannot fight a
-/// load, save, crop, heal, rating write, or curation already in flight.
+/// load, save, crop, heal, rating operation, or curation already in flight.
 /// Unsaved edits block silent reload. Folder membership changes never blank
 /// the last good frame.
 #[must_use]
@@ -499,6 +530,38 @@ mod tests {
                 idle(),
             )),
             CoherenceAction::RemindReload
+        );
+    }
+
+    #[test]
+    fn explicit_reload_preflight_prioritizes_every_async_owner() {
+        use ReloadStartBlocker::{
+            Crop, ImagePreparation, RatingDiscovery, RatingWrite, Save, SpotHeal,
+        };
+
+        assert_eq!(
+            reload_start_blocker([
+                Some(SpotHeal),
+                Some(Crop),
+                Some(Save),
+                Some(RatingWrite),
+                Some(RatingDiscovery),
+                Some(ImagePreparation),
+            ]),
+            Some(SpotHeal)
+        );
+        assert_eq!(
+            reload_start_blocker([None, None, None, None, Some(RatingDiscovery), None]),
+            Some(RatingDiscovery)
+        );
+        assert_eq!(reload_start_blocker([None; 6]), None);
+        assert_eq!(
+            reload_start_blocker_message(RatingDiscovery),
+            "Wait for folder ratings to finish loading before reloading"
+        );
+        assert_eq!(
+            reload_start_blocker_message(ImagePreparation),
+            "An image is already loading"
         );
     }
 

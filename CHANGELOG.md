@@ -132,6 +132,12 @@ and organized by user-visible concern.
   build and independently verify a local release archive, matching the path
   referenced by the verification guide.
 
+### Maintenance
+
+- GitHub Actions use current immutable revisions. Fuzz corpus caching now runs
+  on the supported Node.js 24 action runtime instead of GitHub's compatibility
+  fallback for the retired Node.js 20 runtime.
+
 ## 0.5.0 - 2026-08-20
 
 ### Formats

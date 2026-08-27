@@ -62,6 +62,16 @@ disappears. This spec is the converged result of two rounds of design critique
   identified. Its chevron collapses it to a 44px bottom rail.
   Thumbnails decode only while the panel is visible and expanded. The strip stays
   bounded to four neighbors on either side.
+- Full-Image Mosaic: View > Full-Image Mosaic or `Shift+G` replaces chrome with
+  an adaptive group of up to eight complete, uncropped photos from the active
+  rating projection. It uses ordinary full decoded images and the native color
+  and mipmapped GPU path. It does not call the thumbnail generator, crop photos
+  to fill cells, show filename cards, or retain album state. Landscape screens
+  normally use four columns and portrait screens two. Arrows select a ready
+  photo, Enter or click opens it in single-photo view, Page Up and Page Down move
+  between eight-photo groups, and Escape returns. When the 256 MiB current plus
+  neighbor decoded-image budget cannot admit the full group, ready complete
+  photos reflow and the status says how many fit safely.
 - Image Information: an optional 304px panel contains file facts and the explicit
   export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
   risk-category presence without displaying raw sensitive values, and states that
@@ -93,8 +103,9 @@ disappears. This spec is the converged result of two rounds of design critique
 - Fullscreen (`F` or `F11`) is immersive: the top bar and docked panels hide, and
   the photo uses the whole window. Stored panel flags are unchanged, so exiting
   restores them. Spot Heal still docks its inspector while it is active. Escape
-  closes a context menu, then cancels crop, then leaves Spot Heal, then exits
-  fullscreen. Chrome does not reappear on a timer or mouse move.
+  closes a context menu, then cancels crop, then leaves Spot Heal, then leaves the
+  full-image mosaic, then exits fullscreen. Chrome does not reappear on a timer
+  or mouse move.
 
 ## Color
 
@@ -190,6 +201,16 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   filmstrip browsing cancels pending source verification before changing the
   selection, so a superseded native chooser cannot appear later. A session
   watcher also observes the current file and folder without writing history.
+- A folder entry can disappear after enumeration but before its first
+  presentation. viewr requires matching absence observations from the decode
+  worker and event loop before removing that unpresented selection, then advances
+  to the entry that filled its natural-order slot. If none remains installed, a
+  fresh bounded parent scan opens the first surviving image. Scan limits and
+  failures stay visible and Retry repeats both operations without discarding the
+  prior absence fact. Empty catalogs expose neither a fictional selection nor an
+  Escape-cleared rating projection. This does not reuse the rule for a presented
+  file: current-file deletion keeps the last good frame and remains owned by the
+  session watcher.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the
@@ -203,7 +224,8 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   frame stepping, and zoom. Dialogs, toggles, transforms, Escape, reload, delete,
   and undo or redo run once per physical key press. One held Escape therefore
   cannot dismiss several layers of the documented close order. A widget menu
-  consumes Escape before Crop, Spot Heal, the rating filter, or fullscreen.
+  consumes Escape before Crop, Spot Heal, the full-image mosaic, the rating
+  filter, or fullscreen.
 - A Save As confirmation, first-write rating disclosure, Update dialog, or About
   dialog owns the complete UI action batch as soon as it opens. Only that modal's
   confirmation, cancellation, or close action may run from the batch, and normal

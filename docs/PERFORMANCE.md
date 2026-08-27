@@ -34,6 +34,19 @@ output, avoiding a second full-resolution RGBA copy. Its linear-light,
 alpha-correct area resampling is generation-cancellable between output rows. The
 window thread never performs the resize.
 
+Full-Image Mosaic uses the same complete decoded RGBA images and color-managed,
+mipmapped texture path. It never calls the Folder Previews thumbnail generator.
+The current decode counts first against the existing 256 MiB decoded-pixel
+budget; only the remaining bytes can admit up to seven neighboring photos on its
+page, or up to eight when the retained current photo is outside that page. The
+current GPU texture is reused when it belongs to the group. Other textures are
+uploaded at most one per redraw, so entering the view does not issue one burst of
+eight event-loop uploads. A completion that cannot fit does not evict an already
+accepted group photo and trigger decode churn. Level-zero mosaic texture bytes
+therefore follow the same aggregate decoded-pixel bound, with the documented mip
+chain overhead, while an inactive current texture remains available for returning
+to single-photo view.
+
 Spot Heal copies at most 4 Mi working pixels and rejects strokes whose raster work
 would exceed 16 Mi pixel visits. Candidate matching retains at most 2,048 boundary
 samples and eight distinct sources. Median tone estimation uses fixed histograms,
@@ -104,6 +117,7 @@ diagnostic but is not compared with the 768 MiB limit, which applies to the
 | 16-to-50,000-file resident growth | 96 MiB |
 | Retained decoded neighbors | 5 |
 | Retained decoded-neighbor pixels | 256 MiB |
+| Full-image mosaic page | 8 complete photos, 256 MiB current plus neighbors |
 | Retained folder-preview textures | 9 |
 | Current base GPU image texture | 64 Mi pixels |
 
@@ -233,5 +247,9 @@ the current image.
 - Process resident set does not reliably report dedicated GPU memory. The exact
   texture-shape contract bounds viewr's allocation, but target-hardware GPU traces
   remain part of release acceptance.
+- The automated GUI timing probe does not enter Full-Image Mosaic. Pure grid,
+  admission, texture-reuse, and accessibility tests enforce its structural
+  bounds; PQ-PW-08 remains the candidate-binary interaction and visual gate on
+  representative hardware.
 - Manual cold-launch and interaction checks on Windows, macOS, and representative
   Linux desktops remain release acceptance work.

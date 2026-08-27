@@ -295,7 +295,10 @@ mod tests {
 
     #[test]
     fn only_an_explicit_open_folder_scan_blocks_save_preflight() {
-        let selected = ScanPurpose::SelectedFile(PathBuf::from("image.png"));
+        let selected = ScanPurpose::SelectedFile {
+            path: PathBuf::from("image.png"),
+            missing_recovery: false,
+        };
         assert!(folder_scan_blocks_save(Some(&ScanPurpose::OpenFolder)));
         assert!(!folder_scan_blocks_save(Some(&selected)));
         assert!(!folder_scan_blocks_save(None));

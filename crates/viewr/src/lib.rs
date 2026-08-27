@@ -36,6 +36,7 @@ pub(crate) mod job;
 mod keyboard_route;
 #[cfg(target_os = "macos")]
 mod macos;
+mod mosaic;
 mod open_with;
 pub(crate) mod pages;
 pub mod performance;

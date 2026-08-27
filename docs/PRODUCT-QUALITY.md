@@ -6,8 +6,9 @@ Representative Windows, macOS, and Linux hardware still have to pass the same ro
 using the checksummed archives and synthetic fixture artifact from one retained
 candidate workflow run.
 
-v0.6 adds no new feature category. Clipboard open/copy and touch gestures stay
-behind this work.
+v0.6 broadens the core viewing surface with a transient full-image mosaic. It
+does not add a library, catalog, thumbnail mode, or durable album state. Clipboard
+open/copy and touch gestures stay behind this work.
 
 ## Source of truth
 
@@ -16,7 +17,8 @@ smoke test, and this matrix quote one covered catalog:
 
 - `crates/viewr/src/shortcuts.rs` owns empty-state copy and About shortcut groups.
 - About lists Open, Browse, View, and Edit keys, including `[` / `]`, `F5`,
-  `T` `G` `I`, Space-to-fit, `F` / `F11`, Escape, Save As, and Undo Trash.
+  `T` `G` `I`, `Shift+G`, Space-to-fit, `F` / `F11`, Escape, Save As, and Undo
+  Trash.
 - The empty card heading distinguishes first-run, opening, and failure. First-run
   copy is:
 
@@ -125,10 +127,13 @@ python -B scripts/product_quality_evidence.py fixture-manifest <new-output-direc
 
 Use `browse/1-red.png`, `browse/2-green.png`, and `browse/10-blue.png` for open,
 drop, folder, and natural-order navigation. Use `sequences/` for page and
-animation checks, `visual/` for fit and scale, and `failure/` for rejected
-input. For reload, deletion, rename, Save As, and Trash checks, first copy
-`editing/` to a disposable working directory. Replace the working source with
-the provided replacement; never mutate the retained artifact.
+animation checks, `mosaic/` for the two-group full-image mosaic, `visual/` for
+fit and scale, and `failure/` for rejected input. Every mosaic photo has four
+distinct corner markers, mixed aspect ratios, and a deterministic natural-order
+name so cropping, order, and page boundaries are visible. For reload, deletion,
+rename, Save As, and Trash checks, first copy `editing/` to a disposable working
+directory. Replace the working source with the provided replacement; never
+mutate the retained artifact.
 
 The display transitions are evidence targets, not arbitrary permutations.
 Microsoft's [desktop high-DPI test guidance](https://learn.microsoft.com/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows#testing-your-changes)
@@ -163,6 +168,7 @@ Run the same workflow on every platform.
 | PQ-PW-05 | Panels | `T`, `G`, and `I` show Tools, Folder Previews, and Image Information. Persistent chrome never covers the photo. |
 | PQ-PW-06 | Replace a disposable copy of `editing/source.png` with `editing/replacement.png` and press F5. Repeat after making an unsaved crop before the external replacement | The clean case reloads without blanking. The unsaved-edit case keeps the last good frame, does not discard the crop, and asks for F5. |
 | PQ-PW-07 | Save As and Trash a disposable `editing/source.png` | `Ctrl/Cmd+Shift+S` exports. Delete moves the visible image to Trash. `U` restores the recoverable receipt when the platform can prove it. |
+| PQ-PW-08 | Open `mosaic/01-wide.png`; enter Full-Image Mosaic with `Shift+G`; wait for the group to settle; traverse it with every arrow; resize between landscape and portrait; toggle fullscreen; use Page Down and Page Up; open one photo with Enter and another with a click; then cite `eight_photos_use_landscape_and_portrait_grids`, `progressive_loading_reserves_stable_slots_then_compacts_once`, `no_eviction_insert_rejects_pressure_without_displacing_existing_images`, and `mosaic_loading_announcement_is_stable_until_the_terminal_count` from the candidate workflow | The first group contains eight full photos and the second contains two in natural order. Every photo preserves all four corner markers and its aspect ratio, with no crop or thumbnail substitution. The eight-photo grid is 4 by 2 in landscape and 2 by 4 in portrait; incomplete terminal groups are centered. Cells do not jump while full photos load. Selection, position-only accessible names, Enter, click, groups, fullscreen, and Escape remain coherent. The cited tests prove stable progressive geometry, bounded no-eviction admission, and one stable loading announcement followed by a terminal count; if a real host reaches a memory or display limit, it shows fewer complete photos with the matching explicit status. |
 
 ### Admin
 

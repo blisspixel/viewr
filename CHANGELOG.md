@@ -9,8 +9,15 @@ and organized by user-visible concern.
 
 - Fullscreen is immersive: persistent chrome hides and the photo uses the whole
   window. `F` and `F11` toggle it. Escape closes a context menu, then cancels
-  crop, then leaves Spot Heal, then exits fullscreen. Spot Heal still docks its
-  inspector while it is active.
+  crop, then leaves Spot Heal, then leaves the full-image mosaic, then exits
+  fullscreen. Spot Heal still docks its inspector while it is active.
+- Added View > Full-Image Mosaic and `Shift+G`, an adaptive view of up to eight
+  complete, uncropped photos from the active rating projection. It uses ordinary
+  full decodes, output color normalization, and native mipmapped GPU textures,
+  not Folder Previews thumbnails or a durable album cache. Arrows select, Enter
+  or click opens, and Page Up or Page Down changes groups. Current plus neighbor
+  decoded pixels stay within 256 MiB; when a group cannot fit, fewer full photos
+  reflow with an explicit status.
 - Space tap fits without clearing rotation, flip, or crop. Pan requires holding
   Space; the resting cursor over the photo is an arrow. Key auto-repeat is
   limited to continuous navigation, Crop nudging, page or frame stepping, and
@@ -20,6 +27,16 @@ and organized by user-visible concern.
   own Escape without also changing the active viewer tool.
 - Folder browsing continues while a replacement decode is in flight. The last
   good frame stays until the newly selected image is ready.
+- If a selected folder sibling disappears before it can be presented, viewr now
+  confirms the absence, removes the stale entry, and advances deterministically.
+  If no installed sibling remains, it rescans the parent and opens the first
+  surviving image while retaining the last good frame. A missing file that is
+  already presented keeps the existing durable file-coherence recovery instead.
+  Empty playlists no longer invent a `1 / 1` catalog position or masquerade as
+  a rating filter that Escape can clear. Missing-file Retry preserves its parent
+  scan recovery until presentation or a concrete non-missing decode error.
+- A lost foreground decode result channel now ends the loading state with a
+  durable, path-free Retry error while retaining any last good frame.
 - Decode failures are one unprefixed sentence. A toast is reserved for the
   last-good-frame case. The first-run card names Open File, Open Folder, and drop
   in one spoken sentence.

@@ -26,6 +26,16 @@ const FIXTURE_PATHS: &[(&str, &str)] = &[
     ("editing/source.png", "PQ-PW-06, PQ-PW-07, and PQ-RC-02"),
     ("failure/malformed.png", "PQ-FT-06 malformed input"),
     ("failure/unsupported.txt", "PQ-FT-06 unsupported input"),
+    ("mosaic/01-wide.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/02-tall.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/03-square.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/04-wide.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/05-tall.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/06-panoramic.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/07-tall.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/08-wide.png", "PQ-PW-08 first full-image group"),
+    ("mosaic/09-square.png", "PQ-PW-08 second full-image group"),
+    ("mosaic/10-wide.png", "PQ-PW-08 second full-image group"),
     ("sequences/two-frame.gif", "PQ-PW-03 animated GIF"),
     ("sequences/two-frame.png", "PQ-PW-03 APNG"),
     ("sequences/two-frame.webp", "PQ-PW-03 animated WebP"),
@@ -53,6 +63,30 @@ fn synthetic(width: u32, height: u32, accent: [u8; 3]) -> RgbaImage {
             255,
         ])
     })
+}
+
+fn mosaic_fixture(width: u32, height: u32, accent: [u8; 3]) -> RgbaImage {
+    let mut image = synthetic(width, height, accent);
+    let marker = (width.min(height) / 8).clamp(8, 28);
+    for y in 0..height {
+        for x in 0..width {
+            let color = if x < marker && y < marker {
+                Some([255, 32, 32, 255])
+            } else if x >= width - marker && y < marker {
+                Some([32, 255, 32, 255])
+            } else if x < marker && y >= height - marker {
+                Some([32, 96, 255, 255])
+            } else if x >= width - marker && y >= height - marker {
+                Some([255, 224, 32, 255])
+            } else {
+                None
+            };
+            if let Some(color) = color {
+                image.put_pixel(x, y, Rgba(color));
+            }
+        }
+    }
+    image
 }
 
 fn save_png(path: &Path, image: &RgbaImage) -> anyhow::Result<()> {
@@ -260,7 +294,14 @@ fn generate(root: &Path) -> anyhow::Result<()> {
             root.display()
         );
     }
-    for directory in ["browse", "editing", "failure", "sequences", "visual"] {
+    for directory in [
+        "browse",
+        "editing",
+        "failure",
+        "mosaic",
+        "sequences",
+        "visual",
+    ] {
         std::fs::create_dir_all(root.join(directory))?;
     }
 
@@ -272,6 +313,23 @@ fn generate(root: &Path) -> anyhow::Result<()> {
     save_png(&root.join("browse/10-blue.png"), &blue)?;
     save_png(&root.join("editing/source.png"), &red)?;
     save_png(&root.join("editing/replacement.png"), &blue)?;
+    for (name, width, height, accent) in [
+        ("01-wide.png", 480, 180, [90, 15, 20]),
+        ("02-tall.png", 180, 480, [15, 80, 20]),
+        ("03-square.png", 300, 300, [15, 35, 100]),
+        ("04-wide.png", 480, 300, [85, 45, 10]),
+        ("05-tall.png", 240, 400, [65, 15, 85]),
+        ("06-panoramic.png", 640, 160, [10, 70, 75]),
+        ("07-tall.png", 160, 640, [75, 70, 10]),
+        ("08-wide.png", 400, 260, [85, 25, 55]),
+        ("09-square.png", 260, 260, [20, 75, 55]),
+        ("10-wide.png", 520, 240, [45, 35, 95]),
+    ] {
+        save_png(
+            &root.join("mosaic").join(name),
+            &mosaic_fixture(width, height, accent),
+        )?;
+    }
     save_png(
         &root.join("visual/small.png"),
         &synthetic(64, 64, [60, 30, 80]),

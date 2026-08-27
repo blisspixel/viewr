@@ -48,17 +48,19 @@ pub(crate) struct EscapeContext {
     pub context_menu_open: bool,
     pub is_cropping: bool,
     pub is_healing: bool,
+    pub is_mosaic: bool,
     pub empty_rating_filter: bool,
     pub is_fullscreen: bool,
 }
 
-/// What Escape should do, in product order: overlay, then edit, then filter, then fullscreen.
+/// What Escape should do, in product order: overlay, edit, mosaic, filter, fullscreen.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EscapeAction {
     None,
     CloseContextMenu,
     CancelCrop,
     LeaveHeal,
+    LeaveMosaic,
     ClearRatingFilter,
     LeaveFullscreen,
 }
@@ -71,6 +73,8 @@ pub(crate) const fn escape_action(context: EscapeContext) -> EscapeAction {
         EscapeAction::CancelCrop
     } else if context.is_healing {
         EscapeAction::LeaveHeal
+    } else if context.is_mosaic {
+        EscapeAction::LeaveMosaic
     } else if context.empty_rating_filter {
         EscapeAction::ClearRatingFilter
     } else if context.is_fullscreen {
@@ -175,6 +179,7 @@ pub(crate) fn route_consumed_keyboard_key(
                 context_menu_open: false,
                 is_cropping,
                 is_healing,
+                is_mosaic: false,
                 empty_rating_filter: false,
                 is_fullscreen,
             }) != EscapeAction::None
@@ -370,6 +375,7 @@ mod tests {
                 context_menu_open: true,
                 is_cropping: true,
                 is_healing: true,
+                is_mosaic: true,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -380,6 +386,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: true,
                 is_healing: true,
+                is_mosaic: true,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -390,6 +397,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: true,
+                is_mosaic: true,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -400,6 +408,18 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: false,
+                is_mosaic: true,
+                empty_rating_filter: true,
+                is_fullscreen: true,
+            }),
+            EscapeAction::LeaveMosaic
+        );
+        assert_eq!(
+            escape_action(EscapeContext {
+                context_menu_open: false,
+                is_cropping: false,
+                is_healing: false,
+                is_mosaic: false,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -410,6 +430,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: false,
+                is_mosaic: false,
                 empty_rating_filter: false,
                 is_fullscreen: true,
             }),
@@ -420,6 +441,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: false,
+                is_mosaic: false,
                 empty_rating_filter: false,
                 is_fullscreen: false,
             }),

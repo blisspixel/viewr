@@ -104,6 +104,9 @@ struct App {
     thumbnail_schedule: ThumbnailSchedule,
     thumb_textures: HashMap<PathBuf, TextureHandle>,
 
+    // Transient full-image mosaic page, GPU-slot identity, and admission facts.
+    mosaic: MosaicView,
+
     // Docked chrome and the session-only export-privacy choice.
     show_tools_panel: bool,
     tools_panel_open: bool,
@@ -121,10 +124,10 @@ struct App {
 
 There is no document database, plugin registry, or scene graph. The state is
 intentionally centralized so the winit event loop has one owner. The `session`,
-`crop`, `playlist`, `performance`, `job`, `prefetch`, `thumbs`, `chrome`, and
-`shortcuts` modules establish smaller state and logic seams without introducing a
-second mutable store. `App` remains a large orchestrator. Narrowing native event
-plumbing is explicit roadmap work.
+`crop`, `playlist`, `performance`, `job`, `prefetch`, `thumbs`, `mosaic`, `chrome`,
+and `shortcuts` modules establish smaller state and logic seams without
+introducing a second mutable store. `App` remains a large orchestrator. Narrowing
+native event plumbing is explicit roadmap work.
 
 ## Modules
 
@@ -427,8 +430,8 @@ Shipped:
   and replaces by rename after a same-directory backup.
 - **`playlist`**: one canonical naturally ordered folder catalog plus rating state
   and a derived minimum-rating projection. Navigation, Home and End, Folder
-  Previews, and prefetch consume projected canonical indices. Trash and Undo retain
-  canonical positions. A just-rated image can remain explicitly outside the
+  Previews, full-image mosaic pages, and prefetch consume projected canonical
+  indices. Trash and Undo retain canonical positions. A just-rated image can remain explicitly outside the
   active filter until the next navigation action without creating a second list.
 - **`prefetch`**: an in-memory LRU bounded to five decoded neighbors and 256 MiB,
   whichever limit is reached first, plus at most four event-loop-owned one-result
@@ -438,7 +441,16 @@ Shipped:
   endpoint failures become terminal for the current playlist without including a
   path in the worker result. Entries use shared immutable decoded ownership plus
   its paired source handle so a nearby just-left pristine frame can enter the
-  cache without copying pixels. Entries and scheduling state are never persisted.
+  cache without copying pixels. Full-image mosaic temporarily raises only the
+  entry cap to eight and lowers the neighbor byte cap by the retained current
+  decode, so current plus neighbor decoded pixels remain within 256 MiB. Mosaic
+  admission does not evict an accepted photo to fit a later completion. Entries
+  and scheduling state are never persisted.
+- **`mosaic`**: pure eight-photo projection paging, keyboard focus movement, and
+  adaptive physical grid geometry. It selects four columns for eight photos on a
+  landscape viewport and two on portrait, centers incomplete rows, and contains
+  no pixels, paths, cache, or persistence. `App` maps its canonical indices to
+  ordinary full decodes and renderer slots.
 - **`thumbs`**: one event-loop-owned schedule capped at nine active folder-preview
   jobs and nine retained GPU textures for the visible filmstrip window. Exact
   generation and visibility gate publication. Workers return only structurally
@@ -527,6 +539,19 @@ treatment.
    failure stays edit-specific, leaves the original presentation unchanged, and
    restores its exact current-source selection. Crop recovery requires matching
    generation, selected and presented paths, and decoded Arc identity.
+   A foreground failure is treated as a vanished selection only when the decode
+   worker observed an absent path, the event loop confirms that absence again,
+   and the selected path is not the path whose pixels are already presented.
+   That recovery removes the stale playlist entry and advances to the image that
+   filled its slot. If the installed list becomes empty, a fresh bounded parent
+   scan chooses the first surviving entry. Scan failure remains visible and
+   Retry repeats both the selected load and folder scan. The confirmed-absence
+   fact survives that retry until a presentation or a concrete non-missing
+   decode failure settles it, so executor or scan failure cannot silently
+   degrade the next retry to decode-only. An empty catalog is not treated as a
+   clearable empty rating projection. This policy is separate from current-file
+   coherence, so deletion of a presented source still retains its last good
+   frame and durable F5 guidance.
 4. **Neighbors are prefetched.** After the current image, `decode` speculatively
    decodes nearby entries in the background and parks a bounded set of RGBA
    results in RAM. Each of at most four accepted jobs owns one result endpoint;
@@ -542,9 +567,14 @@ treatment.
 5. **Caches are bounded.** Full decoded neighbors are capped by both count and
    decoded bytes, speculative neighbor work is capped at four accepted owners,
    thumbnail work and visible GPU textures are each capped at nine, and the
-   renderer owns one current image texture plus its mip levels. Image-cache memory
-   does not grow with folder length; the lightweight playlist path index
-   necessarily does.
+   renderer normally owns one current image texture plus its mip levels. A
+   full-image mosaic page draws at most eight page textures and reuses the current
+   texture when that photo belongs to the page. On a different page, the inactive
+  current texture remains owned while up to eight admitted page textures draw.
+  Current plus neighbor decoded pixels are admitted against the same 256 MiB
+  decoded-byte policy. Mosaic textures retain the normal output transform and mip
+  chain; there is no thumbnail substitution. Image-cache memory does not grow
+  with folder length; the lightweight playlist path index necessarily does.
 6. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are changes to the sampling transform, with mip selection handled by the
    sampler. No re-decode and no CPU resampling occur per frame.

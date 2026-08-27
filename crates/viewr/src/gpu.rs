@@ -42,7 +42,8 @@ pub struct Renderer {
     output_color_transform: OutputColorTransform,
     display_output: DisplayOutputNormalizer,
     image: Option<Image>,
-    placement: wgpu::Buffer,
+    mosaic_images: Vec<Option<Image>>,
+    mosaic_current_slot: Option<usize>,
     /// The egui context for immediate mode UI.
     pub egui_ctx: egui::Context,
     /// The winit state integration for egui.
@@ -60,11 +61,20 @@ pub struct Renderer {
 /// The currently displayed image: its GPU binding and pixel dimensions.
 struct Image {
     texture: wgpu::Texture,
+    placement: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     source_size: (u32, u32),
     texture_size: (u32, u32),
     mip_level_count: u32,
     working_color: WorkingColorEncoding,
+}
+
+/// One full-image mosaic draw using a GPU slot owned by the renderer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MosaicDraw {
+    pub(crate) slot: usize,
+    pub(crate) placement: crate::view::Placement,
+    pub(crate) viewport: crate::view::PhysicalViewport,
 }
 
 fn build_image_sampler(device: &wgpu::Device) -> wgpu::Sampler {
@@ -160,13 +170,6 @@ impl Renderer {
         let (pipeline, bind_layout) = build_pipeline(&device, format);
         let sampler = build_image_sampler(&device);
         let mipmap_blitter = build_mipmap_blitter(&device);
-        let placement = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewr placement uniform"),
-            size: PLACEMENT_BYTES,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
         let egui_state = egui_winit::State::new(
@@ -200,7 +203,8 @@ impl Renderer {
             output_color_transform,
             display_output: DisplayOutputNormalizer::identity(),
             image: None,
-            placement,
+            mosaic_images: Vec::new(),
+            mosaic_current_slot: None,
             egui_ctx,
             egui_state,
             #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
@@ -330,6 +334,104 @@ impl Renderer {
         image: &DecodedImage,
         prepared: Option<&ImagePreview>,
     ) -> Result<bool, Error> {
+        let (uploaded, full_resolution) = self.build_image(image, prepared, "viewr image")?;
+        self.image = Some(uploaded);
+        self.window.request_redraw();
+        Ok(full_resolution)
+    }
+
+    /// Set the number of independently owned full-image mosaic GPU slots.
+    pub(crate) fn set_mosaic_slot_count(&mut self, count: usize) {
+        self.mosaic_images.clear();
+        self.mosaic_images.resize_with(count, || None);
+        self.mosaic_current_slot = None;
+        self.window.request_redraw();
+    }
+
+    /// Reuse the already uploaded current-image texture in one mosaic slot.
+    pub(crate) fn use_current_image_in_mosaic(&mut self, slot: usize) -> Result<(), Error> {
+        if slot >= self.mosaic_images.len() {
+            return Err(Error::Gpu(
+                "mosaic slot is outside the active page".to_owned(),
+            ));
+        }
+        if self.image.is_none() {
+            return Err(Error::Gpu(
+                "current image texture is unavailable".to_owned(),
+            ));
+        }
+        self.mosaic_images[slot] = None;
+        self.mosaic_current_slot = Some(slot);
+        self.window.request_redraw();
+        Ok(())
+    }
+
+    /// Upload one complete decoded photo into a mosaic slot.
+    ///
+    /// The same adapter-specific preview contract as single-photo view applies
+    /// when the full source exceeds a GPU limit.
+    pub(crate) fn set_mosaic_image(
+        &mut self,
+        slot: usize,
+        image: &DecodedImage,
+        prepared: Option<&ImagePreview>,
+    ) -> Result<bool, Error> {
+        if slot >= self.mosaic_images.len() {
+            return Err(Error::Gpu(
+                "mosaic slot is outside the active page".to_owned(),
+            ));
+        }
+        let (uploaded, full_resolution) =
+            self.build_image(image, prepared, "viewr full-image mosaic photo")?;
+        if self.mosaic_current_slot == Some(slot) {
+            self.mosaic_current_slot = None;
+        }
+        self.mosaic_images[slot] = Some(uploaded);
+        self.window.request_redraw();
+        Ok(full_resolution)
+    }
+
+    /// Drop one mosaic texture without affecting the single-photo presentation.
+    pub(crate) fn clear_mosaic_image(&mut self, slot: usize) {
+        if self.mosaic_current_slot == Some(slot) {
+            self.mosaic_current_slot = None;
+            self.window.request_redraw();
+        }
+        if let Some(image) = self.mosaic_images.get_mut(slot) {
+            *image = None;
+            self.window.request_redraw();
+        }
+    }
+
+    /// Drop every transient mosaic texture.
+    pub(crate) fn clear_mosaic_images(&mut self) {
+        if !self.mosaic_images.is_empty() {
+            self.mosaic_images.clear();
+            self.mosaic_current_slot = None;
+            self.window.request_redraw();
+        }
+    }
+
+    /// Source dimensions for an uploaded mosaic slot.
+    #[must_use]
+    pub(crate) fn mosaic_image_size(&self, slot: usize) -> Option<(u32, u32)> {
+        self.mosaic_image(slot).map(|image| image.source_size)
+    }
+
+    fn mosaic_image(&self, slot: usize) -> Option<&Image> {
+        if self.mosaic_current_slot == Some(slot) {
+            self.image.as_ref()
+        } else {
+            self.mosaic_images.get(slot).and_then(Option::as_ref)
+        }
+    }
+
+    fn build_image(
+        &self,
+        image: &DecodedImage,
+        prepared: Option<&ImagePreview>,
+        label: &'static str,
+    ) -> Result<(Image, bool), Error> {
         let upload = select_image_upload(
             image,
             prepared,
@@ -341,7 +443,7 @@ impl Renderer {
         let mip_level_count = mip_level_count((width, height));
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewr image"),
+            label: Some(label),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -372,6 +474,12 @@ impl Renderer {
         );
         self.regenerate_mipmaps(&texture, mip_level_count);
 
+        let placement = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewr image placement uniform"),
+            size: PLACEMENT_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewr image bind group"),
@@ -379,7 +487,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.placement.as_entire_binding(),
+                    resource: placement.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -392,16 +500,18 @@ impl Renderer {
             ],
         });
 
-        self.image = Some(Image {
-            texture,
-            bind_group,
-            source_size: (image.width, image.height),
-            texture_size: (width, height),
-            mip_level_count,
-            working_color: image.working_color,
-        });
-        self.window.request_redraw();
-        Ok(upload.full_resolution)
+        Ok((
+            Image {
+                texture,
+                placement,
+                bind_group,
+                source_size: (image.width, image.height),
+                texture_size: (width, height),
+                mip_level_count,
+                working_color: image.working_color,
+            },
+            upload.full_resolution,
+        ))
     }
 
     /// Upload one tightly packed RGBA8 patch into the current image texture.
@@ -509,10 +619,11 @@ impl Renderer {
     /// Draw one frame: clear to the background and draw the image if present.
     /// Also draws the egui user interface overlay.
     #[allow(clippy::too_many_lines)] // wgpu + egui frame path is one pipeline sequence
-    pub fn render(
+    pub(crate) fn render(
         &mut self,
         placement: Option<crate::view::Placement>,
         image_viewport: Option<crate::view::PhysicalViewport>,
+        mosaic: &[MosaicDraw],
         mut app_ui: impl FnMut(&mut egui::Ui),
     ) -> FrameOutput {
         let (frame, suboptimal) = match self.surface.get_current_texture() {
@@ -528,9 +639,17 @@ impl Renderer {
             }
         };
 
-        if let Some(placement_matrix) = placement {
+        if mosaic.is_empty()
+            && let (Some(image), Some(placement_matrix)) = (&self.image, placement)
+        {
             self.queue
-                .write_buffer(&self.placement, 0, &pack_placement(&placement_matrix));
+                .write_buffer(&image.placement, 0, &pack_placement(&placement_matrix));
+        }
+        for draw in mosaic {
+            if let Some(image) = self.mosaic_image(draw.slot) {
+                self.queue
+                    .write_buffer(&image.placement, 0, &pack_placement(&draw.placement));
+            }
         }
 
         let view = frame
@@ -596,17 +715,34 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            if let (Some(image), Some(viewport), Some(_)) = (
-                &self.image,
-                image_viewport.and_then(|viewport| {
-                    viewport.intersect((self.config.width, self.config.height))
-                }),
-                placement,
-            ) {
-                rpass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
-                rpass.set_pipeline(&self.pipeline);
-                rpass.set_bind_group(0, &image.bind_group, &[]);
-                rpass.draw(0..6, 0..1);
+            rpass.set_pipeline(&self.pipeline);
+            if mosaic.is_empty() {
+                if let (Some(image), Some(viewport), Some(_)) = (
+                    &self.image,
+                    image_viewport.and_then(|viewport| {
+                        viewport.intersect((self.config.width, self.config.height))
+                    }),
+                    placement,
+                ) {
+                    rpass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
+                    rpass.set_bind_group(0, &image.bind_group, &[]);
+                    rpass.draw(0..6, 0..1);
+                }
+            } else {
+                for draw in mosaic {
+                    let Some(image) = self.mosaic_image(draw.slot) else {
+                        continue;
+                    };
+                    let Some(viewport) = draw
+                        .viewport
+                        .intersect((self.config.width, self.config.height))
+                    else {
+                        continue;
+                    };
+                    rpass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
+                    rpass.set_bind_group(0, &image.bind_group, &[]);
+                    rpass.draw(0..6, 0..1);
+                }
             }
         }
 

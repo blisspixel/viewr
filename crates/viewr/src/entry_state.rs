@@ -15,6 +15,14 @@ pub(crate) enum FolderScanDisposition {
     InstallScanAt(usize),
     /// Keep only the selected file as a one-item playlist.
     InstallSelectedOnly,
+    /// Missing selection has surviving siblings; install them and open the first.
+    InstallScanFirstAfterSelectedMissing,
+    /// Missing selection has no surviving supported sibling.
+    SelectedMissing,
+    /// Missing-selection recovery hit a hard folder safety limit.
+    SelectedMissingLimitExceeded,
+    /// Missing-selection recovery could not read the folder.
+    SelectedMissingScanFailed,
     /// Same as selected-only after a hard folder size or path budget limit.
     InstallSelectedOnlyLimitExceeded,
     /// Same as selected-only after a non-cancel scan failure.
@@ -32,8 +40,12 @@ pub(crate) enum FolderScanDisposition {
 /// Successful scan facts already resolved against the active purpose.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FolderScanSuccess {
-    /// Selected-file scan still current; index is `Some` when the path matched.
-    Selected { matched_index: Option<usize> },
+    /// Selected-file scan still current; index is `Some` when the path matched,
+    /// and `count` records the complete bounded scan size.
+    Selected {
+        matched_index: Option<usize>,
+        count: usize,
+    },
     /// Open-folder scan completed with `count` supported images.
     OpenFolder { count: usize },
 }
@@ -116,6 +128,7 @@ pub(crate) const fn folder_scan_failure_class(
 pub(crate) fn folder_scan_disposition(
     open_folder: bool,
     selected_is_current: bool,
+    selected_missing: bool,
     result: Result<FolderScanSuccess, FolderScanFailure>,
 ) -> FolderScanDisposition {
     if !open_folder && !selected_is_current {
@@ -124,9 +137,21 @@ pub(crate) fn folder_scan_disposition(
     match result {
         Ok(FolderScanSuccess::Selected {
             matched_index: Some(index),
+            ..
         }) => FolderScanDisposition::InstallScanAt(index),
         Ok(FolderScanSuccess::Selected {
             matched_index: None,
+            count,
+        }) if selected_missing && count > 0 => {
+            FolderScanDisposition::InstallScanFirstAfterSelectedMissing
+        }
+        Ok(FolderScanSuccess::Selected {
+            matched_index: None,
+            ..
+        }) if selected_missing => FolderScanDisposition::SelectedMissing,
+        Ok(FolderScanSuccess::Selected {
+            matched_index: None,
+            ..
         }) => FolderScanDisposition::InstallSelectedOnly,
         Ok(FolderScanSuccess::OpenFolder { count: 0 }) => FolderScanDisposition::OpenFolderEmpty,
         Ok(FolderScanSuccess::OpenFolder { .. }) => FolderScanDisposition::OpenFolderFirst,
@@ -134,10 +159,16 @@ pub(crate) fn folder_scan_disposition(
         Err(FolderScanFailure::LimitExceeded) if open_folder => {
             FolderScanDisposition::OpenFolderLimitExceeded
         }
+        Err(FolderScanFailure::LimitExceeded) if selected_missing => {
+            FolderScanDisposition::SelectedMissingLimitExceeded
+        }
         Err(FolderScanFailure::LimitExceeded) => {
             FolderScanDisposition::InstallSelectedOnlyLimitExceeded
         }
         Err(FolderScanFailure::Other) if open_folder => FolderScanDisposition::OpenFolderFailed,
+        Err(FolderScanFailure::Other) if selected_missing => {
+            FolderScanDisposition::SelectedMissingScanFailed
+        }
         Err(FolderScanFailure::Other) => FolderScanDisposition::InstallSelectedOnlyScanFailed,
     }
 }
@@ -148,10 +179,22 @@ pub(crate) const fn folder_scan_user_message(
 ) -> Option<&'static str> {
     match disposition {
         FolderScanDisposition::InstallSelectedOnlyLimitExceeded => Some(
-            "Folder is too large for safe automatic browsing. Opened only this file. Use Open Folder to browse the rest.",
+            "Folder is too large for safe automatic browsing. Browsing only this file. Use Open Folder to browse the rest.",
         ),
         FolderScanDisposition::InstallSelectedOnlyScanFailed => Some(
-            "Folder browsing is unavailable. Opened only this file. Use Open Folder to browse the rest.",
+            "Folder browsing is unavailable. Browsing only this file. Use Open Folder to browse the rest.",
+        ),
+        FolderScanDisposition::InstallScanFirstAfterSelectedMissing => Some(
+            "The selected image is no longer available. Opening the first image in the folder.",
+        ),
+        FolderScanDisposition::SelectedMissing => Some(
+            "The selected image is no longer available, and the folder contains no other supported images.",
+        ),
+        FolderScanDisposition::SelectedMissingLimitExceeded => Some(
+            "The selected image is no longer available. The folder is too large to choose another image safely.",
+        ),
+        FolderScanDisposition::SelectedMissingScanFailed => Some(
+            "The selected image is no longer available. Could not read the folder to choose another image.",
         ),
         FolderScanDisposition::OpenFolderEmpty => {
             Some("The selected folder contains no supported images")
@@ -230,8 +273,10 @@ mod tests {
             folder_scan_disposition(
                 false,
                 true,
+                false,
                 Ok(FolderScanSuccess::Selected {
-                    matched_index: Some(1)
+                    matched_index: Some(1),
+                    count: 3,
                 })
             ),
             FolderScanDisposition::InstallScanAt(1)
@@ -240,8 +285,10 @@ mod tests {
             folder_scan_disposition(
                 false,
                 true,
+                false,
                 Ok(FolderScanSuccess::Selected {
-                    matched_index: None
+                    matched_index: None,
+                    count: 3,
                 })
             ),
             FolderScanDisposition::InstallSelectedOnly
@@ -250,46 +297,110 @@ mod tests {
             folder_scan_disposition(
                 false,
                 false,
+                false,
                 Ok(FolderScanSuccess::Selected {
-                    matched_index: Some(0)
+                    matched_index: Some(0),
+                    count: 1,
                 })
             ),
             FolderScanDisposition::Discard
         );
         assert_eq!(
-            folder_scan_disposition(false, true, Err(FolderScanFailure::LimitExceeded)),
+            folder_scan_disposition(false, true, false, Err(FolderScanFailure::LimitExceeded)),
             FolderScanDisposition::InstallSelectedOnlyLimitExceeded
         );
         assert_eq!(
-            folder_scan_disposition(false, true, Err(FolderScanFailure::Cancelled)),
+            folder_scan_disposition(false, true, false, Err(FolderScanFailure::Cancelled)),
             FolderScanDisposition::Discard
         );
         assert_eq!(
-            folder_scan_disposition(false, true, Err(FolderScanFailure::Other)),
+            folder_scan_disposition(false, true, false, Err(FolderScanFailure::Other)),
             FolderScanDisposition::InstallSelectedOnlyScanFailed
+        );
+    }
+
+    #[test]
+    fn missing_selection_scan_recovers_or_preserves_an_actionable_failure() {
+        assert_eq!(
+            folder_scan_disposition(
+                false,
+                true,
+                true,
+                Ok(FolderScanSuccess::Selected {
+                    matched_index: Some(1),
+                    count: 2,
+                })
+            ),
+            FolderScanDisposition::InstallScanAt(1)
+        );
+        assert_eq!(
+            folder_scan_disposition(
+                false,
+                true,
+                true,
+                Ok(FolderScanSuccess::Selected {
+                    matched_index: None,
+                    count: 2,
+                })
+            ),
+            FolderScanDisposition::InstallScanFirstAfterSelectedMissing
+        );
+        assert_eq!(
+            folder_scan_disposition(
+                false,
+                true,
+                true,
+                Ok(FolderScanSuccess::Selected {
+                    matched_index: None,
+                    count: 0,
+                })
+            ),
+            FolderScanDisposition::SelectedMissing
+        );
+        assert_eq!(
+            folder_scan_disposition(false, true, true, Err(FolderScanFailure::LimitExceeded)),
+            FolderScanDisposition::SelectedMissingLimitExceeded
+        );
+        assert_eq!(
+            folder_scan_disposition(false, true, true, Err(FolderScanFailure::Other)),
+            FolderScanDisposition::SelectedMissingScanFailed
+        );
+        assert_eq!(
+            folder_scan_disposition(false, true, true, Err(FolderScanFailure::Cancelled)),
+            FolderScanDisposition::Discard
         );
     }
 
     #[test]
     fn open_folder_scan_outcomes_cover_empty_first_limits_and_failure() {
         assert_eq!(
-            folder_scan_disposition(true, true, Ok(FolderScanSuccess::OpenFolder { count: 0 })),
+            folder_scan_disposition(
+                true,
+                true,
+                false,
+                Ok(FolderScanSuccess::OpenFolder { count: 0 })
+            ),
             FolderScanDisposition::OpenFolderEmpty
         );
         assert_eq!(
-            folder_scan_disposition(true, true, Ok(FolderScanSuccess::OpenFolder { count: 3 })),
+            folder_scan_disposition(
+                true,
+                true,
+                false,
+                Ok(FolderScanSuccess::OpenFolder { count: 3 })
+            ),
             FolderScanDisposition::OpenFolderFirst
         );
         assert_eq!(
-            folder_scan_disposition(true, true, Err(FolderScanFailure::LimitExceeded)),
+            folder_scan_disposition(true, true, false, Err(FolderScanFailure::LimitExceeded)),
             FolderScanDisposition::OpenFolderLimitExceeded
         );
         assert_eq!(
-            folder_scan_disposition(true, true, Err(FolderScanFailure::Cancelled)),
+            folder_scan_disposition(true, true, false, Err(FolderScanFailure::Cancelled)),
             FolderScanDisposition::Discard
         );
         assert_eq!(
-            folder_scan_disposition(true, true, Err(FolderScanFailure::Other)),
+            folder_scan_disposition(true, true, false, Err(FolderScanFailure::Other)),
             FolderScanDisposition::OpenFolderFailed
         );
     }
@@ -319,13 +430,13 @@ mod tests {
         assert_eq!(
             folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyLimitExceeded),
             Some(
-                "Folder is too large for safe automatic browsing. Opened only this file. Use Open Folder to browse the rest.",
+                "Folder is too large for safe automatic browsing. Browsing only this file. Use Open Folder to browse the rest.",
             )
         );
         assert_eq!(
             folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyScanFailed),
             Some(
-                "Folder browsing is unavailable. Opened only this file. Use Open Folder to browse the rest.",
+                "Folder browsing is unavailable. Browsing only this file. Use Open Folder to browse the rest.",
             )
         );
         assert_eq!(
@@ -339,6 +450,12 @@ mod tests {
         assert_eq!(
             folder_scan_user_message(FolderScanDisposition::InstallScanAt(0)),
             None
+        );
+        assert_eq!(
+            folder_scan_user_message(FolderScanDisposition::InstallScanFirstAfterSelectedMissing),
+            Some(
+                "The selected image is no longer available. Opening the first image in the folder."
+            )
         );
         for message in [
             folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyScanFailed),

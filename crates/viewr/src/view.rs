@@ -231,6 +231,35 @@ pub fn fit_to_viewport(
     }
 }
 
+/// Fit an image inside an arbitrary physical-pixel rectangle in the full render
+/// target. This is the native full-image mosaic equivalent of
+/// [`fit_to_viewport`].
+#[must_use]
+pub fn fit_to_physical_viewport(
+    target: (u32, u32),
+    image: (u32, u32),
+    viewport: PhysicalViewport,
+    rotated90: bool,
+) -> Placement {
+    let right = target
+        .0
+        .saturating_sub(viewport.x.saturating_add(viewport.width)) as f32;
+    let bottom = target
+        .1
+        .saturating_sub(viewport.y.saturating_add(viewport.height)) as f32;
+    fit_to_viewport(
+        target,
+        image,
+        rotated90,
+        ViewportInsets {
+            left: viewport.x as f32,
+            right,
+            top: viewport.y as f32,
+            bottom,
+        },
+    )
+}
+
 /// Physical display pixels occupied by one source-image pixel at fit.
 ///
 /// A value of `1.0` is actual size. Rotation swaps the source axes before the
@@ -279,9 +308,9 @@ pub fn cursor_to_ndc(cursor_px: (f64, f64), viewport: (u32, u32)) -> Option<[f32
 #[cfg(test)]
 mod tests {
     use super::{
-        PhysicalViewport, ViewportInsets, cursor_to_ndc, fit_pixel_scale, fit_to_viewport,
-        fit_to_window, pan_after_zoom_at_cursor, physical_rect_to_logical, safe_viewport_rect,
-        uv_transform,
+        PhysicalViewport, ViewportInsets, cursor_to_ndc, fit_pixel_scale, fit_to_physical_viewport,
+        fit_to_viewport, fit_to_window, pan_after_zoom_at_cursor, physical_rect_to_logical,
+        safe_viewport_rect, uv_transform,
     };
 
     fn is_zero(v: [f32; 2]) -> bool {
@@ -355,6 +384,39 @@ mod tests {
         assert!((p.scale[1] - 0.75).abs() < 1e-6);
         assert!((p.offset[0] + 0.1).abs() < 1e-6);
         assert!((p.offset[1] - 0.125).abs() < 1e-6);
+    }
+
+    #[test]
+    fn arbitrary_physical_viewport_centers_the_complete_image_in_its_cell() {
+        let placement = fit_to_physical_viewport(
+            (1000, 800),
+            (800, 400),
+            PhysicalViewport {
+                x: 100,
+                y: 200,
+                width: 400,
+                height: 300,
+            },
+            false,
+        );
+        assert!((placement.scale[0] - 0.4).abs() < 1e-6);
+        assert!((placement.scale[1] - 0.25).abs() < 1e-6);
+        assert!((placement.offset[0] + 0.4).abs() < 1e-6);
+        assert!((placement.offset[1] - 0.125).abs() < 1e-6);
+
+        let rotated = fit_to_physical_viewport(
+            (1000, 800),
+            (800, 400),
+            PhysicalViewport {
+                x: 100,
+                y: 200,
+                width: 400,
+                height: 300,
+            },
+            true,
+        );
+        assert!((rotated.scale[0] - 0.15).abs() < 1e-6);
+        assert!((rotated.scale[1] - 0.375).abs() < 1e-6);
     }
 
     #[test]

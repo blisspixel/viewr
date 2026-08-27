@@ -107,7 +107,8 @@ impl Playlist {
     /// An active filter with no matches can return to All without the Open card.
     #[must_use]
     pub(crate) fn empty_filter_can_show_all(&self) -> bool {
-        !matches!(self.filter, RatingFilter::All)
+        !self.files.is_empty()
+            && !matches!(self.filter, RatingFilter::All)
             && self.visible_indices.is_empty()
             && !self.outside_filter
     }
@@ -117,6 +118,19 @@ impl Playlist {
             .get(self.index)
             .copied()
             .unwrap_or(RatingState::Loading)
+    }
+
+    /// Return the canonical index only when it identifies a catalog entry.
+    #[must_use]
+    pub(crate) fn catalog_index(&self) -> Option<usize> {
+        self.files.get(self.index).map(|_| self.index)
+    }
+
+    /// Return the one-based catalog position only when a catalog entry exists.
+    #[must_use]
+    pub(crate) fn catalog_position(&self) -> Option<(usize, usize)> {
+        self.catalog_index()
+            .map(|index| (index.saturating_add(1), self.files.len()))
     }
 
     pub(crate) fn rating_for_path(&self, path: &std::path::Path) -> RatingState {
@@ -138,6 +152,12 @@ impl Playlist {
 
     pub(crate) fn visible_len(&self) -> usize {
         self.visible_indices.len()
+    }
+
+    /// Canonical catalog indices in the active rating-filter projection.
+    #[must_use]
+    pub(crate) fn visible_projection(&self) -> &[usize] {
+        &self.visible_indices
     }
 
     pub(crate) fn has_loading_ratings(&self) -> bool {
@@ -366,7 +386,10 @@ impl Playlist {
 }
 
 pub(crate) enum ScanPurpose {
-    SelectedFile(PathBuf),
+    SelectedFile {
+        path: PathBuf,
+        missing_recovery: bool,
+    },
     OpenFolder,
 }
 
@@ -624,10 +647,12 @@ mod tests {
         let threshold = RatingFilter::AtLeast(Rating::new(5).unwrap());
 
         assert_eq!(playlist.current_rating(), RatingState::Loading);
+        assert_eq!(playlist.catalog_index(), None);
+        assert_eq!(playlist.catalog_position(), None);
         assert!(!playlist.has_loading_ratings());
         assert_eq!(playlist.visible_position(), None);
         assert_eq!(playlist.set_filter(threshold), FilterSelection::Empty);
-        assert!(playlist.empty_filter_can_show_all());
+        assert!(!playlist.empty_filter_can_show_all());
         assert_eq!(playlist.show_all(), FilterSelection::Empty);
         assert!(!playlist.empty_filter_can_show_all());
         assert_eq!(playlist.navigation_target(1), None);
@@ -637,6 +662,32 @@ mod tests {
         assert!(!playlist.set_rating(PathBuf::from("missing.jpg").as_path(), RatingState::Unrated));
         assert!(playlist.visible_catalog_range().is_empty());
         assert!(playlist.visible_neighbor_paths(4).is_empty());
+    }
+
+    #[test]
+    fn catalog_position_never_invents_an_entry() {
+        assert_eq!(Playlist::new(vec![path(0)], 9).catalog_index(), Some(0));
+        assert_eq!(Playlist::new(Vec::new(), 0).catalog_index(), None);
+        assert_eq!(
+            Playlist::new(vec![path(0)], 9).catalog_position(),
+            Some((1, 1))
+        );
+        assert_eq!(
+            Playlist::new(vec![path(0), path(1), path(2)], 1).catalog_position(),
+            Some((2, 3))
+        );
+        assert_eq!(Playlist::new(Vec::new(), 0).catalog_position(), None);
+    }
+
+    #[test]
+    fn removing_the_last_filtered_match_leaves_an_explicit_empty_projection() {
+        let mut playlist = rated_playlist(4);
+        playlist.set_filter(RatingFilter::AtLeast(Rating::new(5).unwrap()));
+        playlist.remove_paths(&[path(4)], 4);
+
+        assert_eq!(playlist.visible_len(), 0);
+        assert!(playlist.empty_filter_can_show_all());
+        assert!(!playlist.files.contains(&path(4)));
     }
 
     #[test]

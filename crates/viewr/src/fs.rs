@@ -1555,6 +1555,13 @@ pub fn is_core_format(path: &Path) -> bool {
     matches!(extension_kind(path), Some(ExtensionKind::Core))
 }
 
+/// Return whether a pathname is definitely absent without treating other
+/// metadata failures or an unsupported entry kind as deletion.
+#[must_use]
+pub(crate) fn path_is_definitely_missing(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+}
+
 /// Resolve a file path the same way the platform trash integration does.
 ///
 /// Only the parent directory is canonicalized. The final component is kept
@@ -1921,8 +1928,9 @@ mod tests {
     use super::scan_image_entries_with_hook;
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_file_path, is_core_format,
-        is_supported_image, is_worker_format, natural_cmp, scan_image_entries_while, scan_images,
-        scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
+        is_supported_image, is_worker_format, natural_cmp, path_is_definitely_missing,
+        scan_image_entries_while, scan_images, scan_images_while, scan_images_with_limit,
+        sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
@@ -2022,6 +2030,20 @@ mod tests {
                 .join("Cargo.toml")
         );
         assert!(canonical_file_path(Path::new("")).is_err());
+    }
+
+    #[test]
+    fn only_an_absent_path_is_classified_as_definitely_missing() {
+        let workspace = TempWorkspace::new("path_missing_classification").unwrap();
+        let file = workspace.path().join("present.png");
+        fs::write(&file, b"fixture").unwrap();
+
+        assert!(!path_is_definitely_missing(&file));
+        assert!(!path_is_definitely_missing(workspace.path()));
+        fs::remove_file(&file).unwrap();
+        assert!(path_is_definitely_missing(&file));
+        fs::write(&file, b"replacement").unwrap();
+        assert!(!path_is_definitely_missing(&file));
     }
 
     #[cfg(target_os = "windows")]

@@ -1559,7 +1559,12 @@ pub fn is_core_format(path: &Path) -> bool {
 /// metadata failures or an unsupported entry kind as deletion.
 #[must_use]
 pub(crate) fn path_is_definitely_missing(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+    std::fs::symlink_metadata(path)
+        .is_err_and(|error| error_kind_is_definitely_missing(error.kind()))
+}
+
+const fn error_kind_is_definitely_missing(kind: io::ErrorKind) -> bool {
+    matches!(kind, io::ErrorKind::NotFound)
 }
 
 /// Resolve a file path the same way the platform trash integration does.
@@ -1927,15 +1932,15 @@ mod tests {
     #[cfg(unix)]
     use super::scan_image_entries_with_hook;
     use super::{
-        CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_file_path, is_core_format,
-        is_supported_image, is_worker_format, natural_cmp, path_is_definitely_missing,
-        scan_image_entries_while, scan_images, scan_images_while, scan_images_with_limit,
-        sort_while, supported_extensions,
+        CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_file_path,
+        error_kind_is_definitely_missing, is_core_format, is_supported_image, is_worker_format,
+        natural_cmp, scan_image_entries_while, scan_images, scan_images_while,
+        scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
     use std::fs;
-    use std::io::Read;
+    use std::io::{self, Read};
     #[cfg(windows)]
     use std::io::{Seek, SeekFrom, Write};
     use std::path::Path;
@@ -2033,17 +2038,16 @@ mod tests {
     }
 
     #[test]
-    fn only_an_absent_path_is_classified_as_definitely_missing() {
-        let workspace = TempWorkspace::new("path_missing_classification").unwrap();
-        let file = workspace.path().join("present.png");
-        fs::write(&file, b"fixture").unwrap();
-
-        assert!(!path_is_definitely_missing(&file));
-        assert!(!path_is_definitely_missing(workspace.path()));
-        fs::remove_file(&file).unwrap();
-        assert!(path_is_definitely_missing(&file));
-        fs::write(&file, b"replacement").unwrap();
-        assert!(!path_is_definitely_missing(&file));
+    fn only_not_found_is_classified_as_definitely_missing() {
+        assert!(error_kind_is_definitely_missing(io::ErrorKind::NotFound));
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::NotADirectory,
+            io::ErrorKind::Unsupported,
+        ] {
+            assert!(!error_kind_is_definitely_missing(kind));
+        }
     }
 
     #[cfg(target_os = "windows")]

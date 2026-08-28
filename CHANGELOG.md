@@ -157,10 +157,6 @@ and organized by user-visible concern.
 - GitHub Actions use current immutable revisions. Fuzz corpus caching now runs
   on the supported Node.js 24 action runtime instead of GitHub's compatibility
   fallback for the retired Node.js 20 runtime.
-- Ephemeral verification workspaces now reject empty, overlong, non-ASCII, and
-  path-like diagnostic labels before touching the filesystem. Labels never enter
-  the on-disk path, and each unique directory is verified as an immediate child
-  of the process temp root.
 
 ## 0.5.0 - 2026-08-20
 

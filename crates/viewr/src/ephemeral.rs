@@ -19,8 +19,9 @@ impl TempWorkspace {
     ///
     /// # Errors
     /// Returns an I/O error if `label` is not a short ASCII identifier or the
-    /// directory cannot be created. A name collision fails without changing the
-    /// existing path.
+    /// directory cannot be created. Labels are validated for caller diagnostics
+    /// but are not written into the filesystem path. A name collision fails
+    /// without changing the existing path.
     pub fn new(label: &str) -> std::io::Result<Self> {
         if label.is_empty()
             || label.len() > MAX_WORKSPACE_LABEL_BYTES
@@ -39,7 +40,7 @@ impl TempWorkspace {
 
         let root = std::env::temp_dir();
         let path = root.join(format!(
-            "viewr_{label}_{}_{}",
+            "viewr_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -96,6 +97,14 @@ mod tests {
         let root = std::env::temp_dir();
         let workspace = TempWorkspace::new("Az09_-").unwrap();
         assert_eq!(workspace.path().parent(), Some(root.as_path()));
+        assert!(
+            !workspace
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("Az09_-")
+        );
 
         for invalid in [
             "",

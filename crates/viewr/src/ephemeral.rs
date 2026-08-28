@@ -6,8 +6,10 @@
 //! or deleted.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAX_WORKSPACE_LABEL_BYTES: usize = 64;
+static NEXT_WORKSPACE_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// A uniquely created directory under the process temp root.
 pub struct TempWorkspace {
@@ -39,9 +41,11 @@ impl TempWorkspace {
         }
 
         let root = std::env::temp_dir();
+        let workspace_id = NEXT_WORKSPACE_ID.fetch_add(1, Ordering::Relaxed);
         let path = root.join(format!(
-            "viewr_{}_{}",
+            "viewr_{}_{}_{}",
             std::process::id(),
+            workspace_id,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_nanos())
@@ -96,7 +100,10 @@ mod tests {
     fn workspace_label_is_a_bounded_ascii_path_component() {
         let root = std::env::temp_dir();
         let workspace = TempWorkspace::new("Az09_-").unwrap();
+        let second_workspace = TempWorkspace::new("different_label").unwrap();
         assert_eq!(workspace.path().parent(), Some(root.as_path()));
+        assert_eq!(second_workspace.path().parent(), Some(root.as_path()));
+        assert_ne!(workspace.path(), second_workspace.path());
         assert!(
             !workspace
                 .path()
@@ -104,6 +111,14 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .contains("Az09_-")
+        );
+        assert!(
+            !second_workspace
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("different_label")
         );
 
         for invalid in [

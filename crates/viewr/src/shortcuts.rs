@@ -106,8 +106,8 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
                 action: "Fullscreen",
             },
             ShortcutSpec {
-                keys: "Shift+G",
-                action: "Full-image mosaic",
+                keys: "Up / Shift+G",
+                action: "Full-image collage",
             },
             ShortcutSpec {
                 keys: "Esc",
@@ -217,7 +217,7 @@ mod tests {
             "Ctrl+O Open file",
             "Page Up / Page Down Previous / next image or mosaic group",
             "F / F11 Fullscreen",
-            "Shift+G Full-image mosaic",
+            "Up / Shift+G Full-image collage",
             "Esc Leave tool, mosaic, or fullscreen",
             "Ctrl+Shift+S Save As",
             "Delete Move to Trash",

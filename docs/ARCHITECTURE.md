@@ -441,16 +441,17 @@ Shipped:
   endpoint failures become terminal for the current playlist without including a
   path in the worker result. Entries use shared immutable decoded ownership plus
   its paired source handle so a nearby just-left pristine frame can enter the
-  cache without copying pixels. Full-image mosaic temporarily raises only the
-  entry cap to eight and lowers the neighbor byte cap by the retained current
+  cache without copying pixels. Full-image collage temporarily raises only the
+  entry cap to 24 and lowers the neighbor byte cap by the retained current
   decode, so current plus neighbor decoded pixels remain within 256 MiB. Mosaic
   admission does not evict an accepted photo to fit a later completion. Entries
   and scheduling state are never persisted.
-- **`mosaic`**: pure eight-photo projection paging, keyboard focus movement, and
-  adaptive physical grid geometry. It selects four columns for eight photos on a
-  landscape viewport and two on portrait, centers incomplete rows, and contains
-  no pixels, paths, cache, or persistence. `App` maps its canonical indices to
-  ordinary full decodes and renderer slots.
+- **`mosaic`**: pure 24-photo projection paging, ordered keyboard focus, and dense
+  physical collage geometry. Dynamic programming selects justified row breaks
+  from actual image aspect ratios, balances row heights against the viewport, and
+  centers only the unavoidable outer remainder. It contains no pixels, paths,
+  cache, or persistence. `App` maps its canonical indices to ordinary full
+  decodes and renderer slots.
 - **`thumbs`**: one event-loop-owned schedule capped at nine active folder-preview
   jobs and nine retained GPU textures for the visible filmstrip window. Exact
   generation and visibility gate publication. Workers return only structurally
@@ -568,9 +569,9 @@ treatment.
    decoded bytes, speculative neighbor work is capped at four accepted owners,
    thumbnail work and visible GPU textures are each capped at nine, and the
    renderer normally owns one current image texture plus its mip levels. A
-   full-image mosaic page draws at most eight page textures and reuses the current
+   full-image collage group draws at most 24 page textures and reuses the current
    texture when that photo belongs to the page. On a different page, the inactive
-  current texture remains owned while up to eight admitted page textures draw.
+  current texture remains owned while up to 24 admitted page textures draw.
   Current plus neighbor decoded pixels are admitted against the same 256 MiB
   decoded-byte policy. Mosaic textures retain the normal output transform and mip
   chain; there is no thumbnail substitution. Image-cache memory does not grow

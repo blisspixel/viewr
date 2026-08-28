@@ -709,7 +709,7 @@ fn render_mosaic_overlay(
                 .show(ui, |ui| {
                     let response = ui.label(
                         RichText::new(format!(
-                            "{status}  |  Arrows select  |  Enter opens  |  Page Up/Down groups  |  Esc returns"
+                            "{status}  |  Left/Right select  |  Down/Enter opens  |  Page Up/Down groups  |  Esc returns"
                         ))
                             .size(12.5)
                             .color(colors.text),
@@ -725,25 +725,25 @@ fn render_mosaic_overlay(
 fn mosaic_status(mosaic: &MosaicUiState) -> (String, String) {
     let status = match mosaic.state {
         MosaicLoadState::Loading => format!(
-            "Full-image mosaic  {} of {} photos ready",
+            "Full-image collage  {} of {} photos ready",
             mosaic.ready, mosaic.target
         ),
         MosaicLoadState::MemoryLimited => format!(
-            "Full-image mosaic  {} of {} photos fit the 256 MiB memory limit",
+            "Full-image collage  {} of {} photos fit the 256 MiB memory limit",
             mosaic.ready, mosaic.target
         ),
         MosaicLoadState::DisplayLimited => format!(
-            "Full-image mosaic  {} of {} photos meet full-image display limits",
+            "Full-image collage  {} of {} photos meet full-image display limits",
             mosaic.ready, mosaic.target
         ),
         MosaicLoadState::Incomplete => format!(
-            "Full-image mosaic  {} of {} photos available",
+            "Full-image collage  {} of {} photos available",
             mosaic.ready, mosaic.target
         ),
-        MosaicLoadState::Ready => format!("Full-image mosaic  {} photos", mosaic.ready),
+        MosaicLoadState::Ready => format!("Full-image collage  {} photos", mosaic.ready),
     };
     let accessible = if mosaic.state == MosaicLoadState::Loading {
-        "Full-image mosaic loading complete photos".to_owned()
+        "Full-image collage loading complete photos".to_owned()
     } else {
         status.clone()
     };
@@ -1557,7 +1557,7 @@ fn view_menu(
         if ui
             .add_enabled(
                 frame.rating.match_count > 1 && frame.img_size.is_some(),
-                egui::Button::new("Full-Image Mosaic").shortcut_text("Shift+G"),
+                egui::Button::new("Full-Image Collage").shortcut_text("Up / Shift+G"),
             )
             .clicked()
         {
@@ -4823,7 +4823,7 @@ mod tests {
                 && !node.label().unwrap_or_default().contains("current.png")
         }));
         assert!(update.nodes.iter().any(|(_, node)| {
-            node.value() == Some("Full-image mosaic loading complete photos")
+            node.value() == Some("Full-image collage loading complete photos")
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
     }
@@ -4833,11 +4833,11 @@ mod tests {
         let mut mosaic = MosaicUiState {
             cells: Vec::new(),
             ready: 1,
-            target: 8,
+            target: 24,
             state: MosaicLoadState::Loading,
         };
         let (first_visible, first_accessible) = mosaic_status(&mosaic);
-        mosaic.ready = 7;
+        mosaic.ready = 23;
         let (later_visible, later_accessible) = mosaic_status(&mosaic);
         assert_ne!(first_visible, later_visible);
         assert_eq!(first_accessible, later_accessible);
@@ -4846,7 +4846,7 @@ mod tests {
         let (_, terminal_accessible) = mosaic_status(&mosaic);
         assert_eq!(
             terminal_accessible,
-            "Full-image mosaic  7 of 8 photos fit the 256 MiB memory limit"
+            "Full-image collage  23 of 24 photos fit the 256 MiB memory limit"
         );
     }
 

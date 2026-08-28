@@ -190,6 +190,16 @@ pub fn fit_to_viewport(
     rotated90: bool,
     insets: ViewportInsets,
 ) -> Placement {
+    fit_to_viewport_with_limit(viewport, image, rotated90, insets, MAX_FIT_SCALE)
+}
+
+fn fit_to_viewport_with_limit(
+    viewport: (u32, u32),
+    image: (u32, u32),
+    rotated90: bool,
+    insets: ViewportInsets,
+    max_scale: f32,
+) -> Placement {
     let (vw, vh) = (viewport.0 as f32, viewport.1 as f32);
     let (iw, ih) = if rotated90 {
         (image.1 as f32, image.0 as f32)
@@ -220,7 +230,7 @@ pub fn fit_to_viewport(
     }
     let s = (available_width / iw)
         .min(available_height / ih)
-        .min(MAX_FIT_SCALE);
+        .min(max_scale);
     let center_x = (left + right) * 0.5;
     let center_y = (top + bottom) * 0.5;
     Placement {
@@ -231,9 +241,10 @@ pub fn fit_to_viewport(
     }
 }
 
-/// Fit an image inside an arbitrary physical-pixel rectangle in the full render
-/// target. This is the native full-image mosaic equivalent of
-/// [`fit_to_viewport`].
+/// Fit a complete image inside an arbitrary physical-pixel collage tile.
+///
+/// Unlike single-photo Fit, this may enlarge a small source because the tile is
+/// already derived from that photo's aspect ratio. It never crops or distorts.
 #[must_use]
 pub fn fit_to_physical_viewport(
     target: (u32, u32),
@@ -247,7 +258,7 @@ pub fn fit_to_physical_viewport(
     let bottom = target
         .1
         .saturating_sub(viewport.y.saturating_add(viewport.height)) as f32;
-    fit_to_viewport(
+    fit_to_viewport_with_limit(
         target,
         image,
         rotated90,
@@ -257,6 +268,7 @@ pub fn fit_to_physical_viewport(
             top: viewport.y as f32,
             bottom,
         },
+        f32::MAX,
     )
 }
 
@@ -417,6 +429,26 @@ mod tests {
         );
         assert!((rotated.scale[0] - 0.15).abs() < 1e-6);
         assert!((rotated.scale[1] - 0.375).abs() < 1e-6);
+    }
+
+    #[test]
+    fn collage_tile_enlarges_a_complete_small_image_without_changing_its_aspect() {
+        let placement = fit_to_physical_viewport(
+            (1000, 800),
+            (30, 40),
+            PhysicalViewport {
+                x: 100,
+                y: 200,
+                width: 300,
+                height: 400,
+            },
+            false,
+        );
+        assert!((placement.scale[0] - 0.3).abs() < 1e-6);
+        assert!((placement.scale[1] - 0.5).abs() < 1e-6);
+        assert!((placement.offset[0] + 0.5).abs() < 1e-6);
+        assert!(placement.offset[1].abs() < 1e-6);
+        assert!(placement.crop_rect.iter().all(|value| value.abs() < 1e-6));
     }
 
     #[test]

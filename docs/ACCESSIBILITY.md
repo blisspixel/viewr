@@ -24,10 +24,11 @@ The minimum contract is:
   `T`, `G`, and `I` shortcuts are visible in View > Panels and included in the
   accessible menu names. Tools and Folder Previews also expose collapse and expansion
   actions.
-- Full-Image Mosaic exposes every ready complete photo as a position-only button,
+- Full-Image Collage exposes every ready complete photo as a position-only button,
   without putting a filename into the grid. Visual and semantic selected state
-  agree. Arrows move selection, Enter opens, Page Up and Page Down change groups,
-  and Escape returns. Loading and memory-constrained ready counts remain textual.
+  agree. Up enters from single-photo view, Left and Right move selection, Down or
+  Enter opens, Page Up and Page Down change groups, and Escape returns. Loading
+  and memory-constrained ready counts remain textual.
 - Edit > Rating exposes Unrated and ratings 1 through 5 as a selected radio group
   with `0` through `5` shortcut text. View > Rating Filter exposes All images and
   minimum ratings 1 through 5 as a separate selected radio group. Current rating,
@@ -148,10 +149,10 @@ probe. It creates three small disposable images beneath `target/` and verifies:
   with an additional GExiv2 read through a supplied `-GExiv2Python` executable or
   the default GIMP 3 Python when present. The result reports checked or skipped.
 
-In-process semantic regressions separately cover full-image mosaic position-only
+In-process semantic regressions separately cover full-image collage position-only
 photo buttons and selected identity, settled Undo Trash ownership, its path-free
 other-folder guidance, menu bounds, and generic copy while restore ownership is
-active or uncertain. Mosaic keyboard and native dynamic-state behavior plus
+active or uncertain. Collage keyboard and native dynamic-state behavior plus
 announcement timing remain in the manual target-OS matrix.
 
 It closes the exact process it launched and removes its three known fixtures, the
@@ -194,7 +195,7 @@ Run the same workflow on every platform:
 | File gone | Delete the presented file from outside viewr | The last good image stays visible and a polite status says the selected path no longer names that file |
 | Pending sibling gone | Select a sibling and remove it before its first presentation | The stale entry leaves the folder position, the last good frame remains until a surviving image opens, and recovery or Retry is announced once without exposing a path |
 | View | Use Fit, Actual Size, Zoom In, Zoom Out, and Fullscreen | The action and resulting zoom are discoverable; fullscreen does not strand focus |
-| Full-image mosaic | Enter from View or `Shift+G`; traverse every ready photo with arrows and the screen reader; change groups; open one; repeat under a rating filter; cite the bounded-admission and stable-announcement tests named by PQ-PW-08; leave with Escape | Each complete photo is a named position-only button with selected state and visible focus; filenames are absent; one stable loading state and the terminal ready or safely fitted count are announced without flooding; group order follows the active projection; open and leave restore coherent single-photo focus |
+| Full-image collage | Enter with Up, View, or `Shift+G`; traverse every ready photo with Left and Right and the screen reader; open with Down and Enter; change groups; repeat under a rating filter; cite the dense-layout, bounded-admission, and stable-announcement tests named by PQ-PW-08; leave with Escape | Each complete photo is a named position-only button with selected state and visible focus; filenames are absent; actual aspect-ratio tiles form justified rows with narrow gutters; one stable loading state and the terminal ready or safely fitted count are announced without flooding; group order follows the active projection; open and leave restore coherent single-photo focus |
 | Editing | Rotate, flip, and start crop | Each tool has one descriptive name and the visible result matches the invoked action |
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
 | Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, and the pointer-only brush overlay is not the sole source of state |

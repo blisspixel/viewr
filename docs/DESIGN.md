@@ -62,16 +62,20 @@ disappears. This spec is the converged result of two rounds of design critique
   identified. Its chevron collapses it to a 44px bottom rail.
   Thumbnails decode only while the panel is visible and expanded. The strip stays
   bounded to four neighbors on either side.
-- Full-Image Mosaic: View > Full-Image Mosaic or `Shift+G` replaces chrome with
-  an adaptive group of up to eight complete, uncropped photos from the active
-  rating projection. It uses ordinary full decoded images and the native color
-  and mipmapped GPU path. It does not call the thumbnail generator, crop photos
-  to fill cells, show filename cards, or retain album state. Landscape screens
-  normally use four columns and portrait screens two. Arrows select a ready
-  photo, Enter or click opens it in single-photo view, Page Up and Page Down move
-  between eight-photo groups, and Escape returns. When the 256 MiB current plus
-  neighbor decoded-image budget cannot admit the full group, ready complete
-  photos reflow and the status says how many fit safely.
+- Full-Image Collage: View > Full-Image Collage, Up, or `Shift+G` replaces chrome
+  with up to 24 complete, uncropped photos from the active rating projection.
+  Actual photo aspect ratios determine justified row breaks and tile sizes, so a
+  3:4 photo occupies a 3:4 tile and narrow gutters replace equal-cell letterbox
+  space. It uses ordinary full decoded images and the native color and mipmapped
+  GPU path. It does not call the thumbnail generator, crop photos, show filename
+  cards, or retain album state. Left and Right select a ready photo. Down, Enter,
+  or click opens it in single-photo view. Page Up and Page Down move between
+  groups, and Escape returns without changing the single-photo selection. Complete
+  photos reflow as they become ready. Tile-local scaling may enlarge a complete
+  small source to its aspect-ratio tile; the single-photo 100 percent Fit cap is
+  unchanged. When the 256 MiB current plus neighbor
+  decoded-image budget cannot admit the full group, the status says how many fit
+  safely.
 - Image Information: an optional 304px panel contains file facts and the explicit
   export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
   risk-category presence without displaying raw sensitive values, and states that
@@ -104,7 +108,7 @@ disappears. This spec is the converged result of two rounds of design critique
   the photo uses the whole window. Stored panel flags are unchanged, so exiting
   restores them. Spot Heal still docks its inspector while it is active. Escape
   closes a context menu, then cancels crop, then leaves Spot Heal, then leaves the
-  full-image mosaic, then exits fullscreen. Chrome does not reappear on a timer
+  full-image collage, then exits fullscreen. Chrome does not reappear on a timer
   or mouse move.
 
 ## Color
@@ -224,7 +228,7 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   frame stepping, and zoom. Dialogs, toggles, transforms, Escape, reload, delete,
   and undo or redo run once per physical key press. One held Escape therefore
   cannot dismiss several layers of the documented close order. A widget menu
-  consumes Escape before Crop, Spot Heal, the full-image mosaic, the rating
+  consumes Escape before Crop, Spot Heal, the full-image collage, the rating
   filter, or fullscreen.
 - A Save As confirmation, first-write rating disclosure, Update dialog, or About
   dialog owns the complete UI action batch as soon as it opens. Only that modal's

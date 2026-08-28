@@ -9,15 +9,18 @@ and organized by user-visible concern.
 
 - Fullscreen is immersive: persistent chrome hides and the photo uses the whole
   window. `F` and `F11` toggle it. Escape closes a context menu, then cancels
-  crop, then leaves Spot Heal, then leaves the full-image mosaic, then exits
+  crop, then leaves Spot Heal, then leaves the full-image collage, then exits
   fullscreen. Spot Heal still docks its inspector while it is active.
-- Added View > Full-Image Mosaic and `Shift+G`, an adaptive view of up to eight
-  complete, uncropped photos from the active rating projection. It uses ordinary
-  full decodes, output color normalization, and native mipmapped GPU textures,
-  not Folder Previews thumbnails or a durable album cache. Arrows select, Enter
-  or click opens, and Page Up or Page Down changes groups. Current plus neighbor
-  decoded pixels stay within 256 MiB; when a group cannot fit, fewer full photos
-  reflow with an explicit status.
+- Added View > Full-Image Collage, Up, and `Shift+G`, a dense view of up to 24
+  complete, uncropped photos from the active rating projection. Actual photo
+  aspect ratios define justified rows with narrow gutters instead of equal blank
+  cells. It uses ordinary full decodes, output color normalization, and native
+  mipmapped GPU textures, not Folder Previews thumbnails or a durable album cache.
+  A collage tile may enlarge a complete small source to use its assigned space;
+  single-photo Fit remains capped at actual size.
+  Left and Right select; Down, Enter, or click opens; and Page Up or Page Down
+  changes groups. Current plus neighbor decoded pixels stay within 256 MiB; when
+  a group cannot fit, fewer full photos reflow with an explicit status.
 - Space tap fits without clearing rotation, flip, or crop. Pan requires holding
   Space; the resting cursor over the photo is an arrow. Key auto-repeat is
   limited to continuous navigation, Crop nudging, page or frame stepping, and

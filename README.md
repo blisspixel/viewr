@@ -7,7 +7,7 @@
 Tired of photo software that wants to become a cloud library, storefront, and
 subscription? viewr rejects the spyware-and-bloatware pattern of turning a simple
 utility into a data-collection platform. It keeps the photo at the center. Open a
-file or folder, move through photos quickly, see a full-image mosaic of the
+file or folder, move through photos quickly, see a full-image collage of the
 current group, inspect metadata, use ratings to narrow the keepers, crop or
 rotate, repair a small blemish with Spot Heal, save a JPEG, PNG, WebP, or BMP
 copy, and get back to what you were doing.
@@ -99,9 +99,11 @@ build, see [Installing viewr](docs/INSTALL.md).
   bounded Spot Heal, Save As, and format conversion.
 - Assigns embedded 0-to-5 XMP ratings and filters a folder by minimum rating
   without creating a catalog, sidecar, or activity history.
-- Shows up to eight complete, uncropped photos together in an adaptive full-image
-  mosaic. It uses the ordinary full decode and color path, not the Folder Previews
-  thumbnail generator, and keeps no mosaic cache or durable album state.
+- Packs up to 24 complete, uncropped photos into a dense full-image collage. Each
+  tile follows the photo's real aspect ratio, and justified rows use the screen
+  instead of surrounding photos with equal-cell blank space. It uses the ordinary
+  full decode and color path, not the Folder Previews thumbnail generator, and
+  keeps no collage cache or durable album state.
 - Shows a presence-only Source Privacy summary for sensitive EXIF categories.
 - Strips supported metadata from saved copies by default, with a session-only
   option to retain supported EXIF fields.
@@ -143,7 +145,7 @@ automatically.
 | Previous or next page or frame | `[` / `]` |
 | Fit, pan, or actual size | Space tap fits; hold Space to pan; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
 | Fullscreen | `F` or `F11`; Escape leaves after crop and Spot Heal |
-| Full-image mosaic | `Shift+G`; arrows select, Enter opens, Page Up/Page Down changes groups, Escape returns |
+| Full-image collage | Up or `Shift+G` enters; Left/Right selects; Down, Enter, or click opens; Page Up/Page Down changes groups; Escape returns |
 | Zoom | `+`, `-`, wheel or trackpad |
 | Tools, folder previews, image information | `T`, `G`, `I` |
 | Rate or clear rating | `1` through `5`, `0` |

@@ -60,11 +60,14 @@ use crate::entry_state::{
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
+#[cfg(test)]
+use crate::keyboard_route::route_consumed_keyboard_key;
 use crate::keyboard_route::{
     EscapeAction, EscapeContext, escape_action, escape_press_reaches_app, is_fullscreen_toggle_key,
     is_space_key, is_trash_shortcut_key, rating_assignment_for_key, rating_keys_apply,
-    repeated_viewer_action_allowed, route_consumed_keyboard_key, single_key_shortcut_allowed,
-    space_press_starts_hold, space_release_must_unwind, space_tap_fits, widget_popup_owns_event,
+    repeated_viewer_action_allowed, route_consumed_keyboard_key_in_context,
+    single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
+    space_tap_fits, widget_popup_owns_event,
 };
 use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
 use crate::prefetch::{
@@ -417,7 +420,6 @@ struct MosaicView {
     page: Option<crate::mosaic::MosaicPage>,
     uploaded_paths: Vec<Option<PathBuf>>,
     unavailable_paths: HashSet<PathBuf>,
-    columns: usize,
     memory_limited: bool,
     display_limited: bool,
 }
@@ -3047,15 +3049,15 @@ impl App {
             return;
         }
         let Some(playlist) = self.playlist.as_ref() else {
-            self.show_toast("Full-image mosaic needs an open folder");
+            self.show_toast("Full-image collage needs an open folder");
             return;
         };
         if playlist.visible_len() < 2 {
-            self.show_toast("Full-image mosaic needs more than one matching photo");
+            self.show_toast("Full-image collage needs more than one matching photo");
             return;
         }
         let Some(current_index) = playlist.catalog_index() else {
-            self.show_toast("Full-image mosaic needs a selected photo");
+            self.show_toast("Full-image collage needs a selected photo");
             return;
         };
         let Some(page) = crate::mosaic::MosaicPage::containing(
@@ -3096,7 +3098,6 @@ impl App {
         self.mosaic = MosaicView {
             uploaded_paths: vec![None; page.indices.len()],
             page: Some(page),
-            columns: 1,
             memory_limited: current_bytes >= prefetch::DEFAULT_MAX_BYTES,
             display_limited: false,
             unavailable_paths: HashSet::new(),
@@ -3257,7 +3258,7 @@ impl App {
             indices: loaded_slots.clone(),
             focused,
         };
-        navigation.move_focus(direction, self.mosaic.columns);
+        navigation.move_focus(direction);
         page.focused = loaded_slots[navigation.focused];
         self.request_redraw();
     }
@@ -3430,13 +3431,14 @@ impl App {
         ) else {
             return (Vec::new(), None);
         };
-        let loaded_slots: Vec<usize> = self
+        let loaded: Vec<(usize, (u32, u32))> = self
             .mosaic
             .uploaded_paths
             .iter()
             .enumerate()
             .filter_map(|(slot, path)| {
-                (path.is_some() && renderer.mosaic_image_size(slot).is_some()).then_some(slot)
+                path.as_ref()?;
+                Some((slot, renderer.mosaic_image_size(slot)?))
             })
             .collect();
         let upload_ready = self.playlist.as_ref().is_some_and(|playlist| {
@@ -3453,20 +3455,25 @@ impl App {
             })
         });
         let loading = self.prefetch_schedule.in_flight_len() > 0 || upload_ready;
-        let layout_slots = crate::mosaic::layout_slots(&loaded_slots, page.indices.len(), loading);
-        let gap = LogicalSize::new(8_u32, 8_u32)
+        let gap = LogicalSize::new(3_u32, 3_u32)
             .to_physical::<u32>(scale_factor)
             .width
-            .clamp(1, 32);
-        let grid = crate::mosaic::adaptive_grid(viewport, layout_slots.len(), gap);
-        self.mosaic.columns = grid.columns;
+            .clamp(1, 12);
+        let display_sizes = loaded
+            .iter()
+            .map(|(slot, image_size)| {
+                page.indices
+                    .get(*slot)
+                    .map_or(*image_size, |catalog_index| {
+                        self.mosaic_photo_display_size(*image_size, *catalog_index)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let grid = crate::mosaic::dense_collage(viewport, &display_sizes, gap);
         let projection_total = self.playlist.as_ref().map_or(0, Playlist::visible_len);
-        let mut draws = Vec::with_capacity(loaded_slots.len());
-        let mut cells = Vec::with_capacity(loaded_slots.len());
-        for (slot, cell) in layout_slots.into_iter().zip(grid.cells) {
-            let Some(image_size) = renderer.mosaic_image_size(slot) else {
-                continue;
-            };
+        let mut draws = Vec::with_capacity(loaded.len());
+        let mut cells = Vec::with_capacity(loaded.len());
+        for ((slot, image_size), cell) in loaded.into_iter().zip(grid.cells) {
             let Some(catalog_index) = page.indices.get(slot).copied() else {
                 continue;
             };
@@ -3503,6 +3510,23 @@ impl App {
                 state,
             }),
         )
+    }
+
+    fn mosaic_photo_display_size(
+        &self,
+        image_size: (u32, u32),
+        catalog_index: usize,
+    ) -> (u32, u32) {
+        let is_current = self.playlist.as_ref().is_some_and(|playlist| {
+            playlist.index == catalog_index
+                && self.session.presented_path.as_deref()
+                    == playlist.files.get(catalog_index).map(PathBuf::as_path)
+        });
+        if is_current && self.transform.rotation_steps.rem_euclid(2) != 0 {
+            (image_size.1, image_size.0)
+        } else {
+            image_size
+        }
     }
 
     fn mosaic_load_state(
@@ -6539,11 +6563,9 @@ impl ApplicationHandler<UserEvent> for App {
                             self.pending_rating_write.is_some(),
                             egui_popup_open,
                             self.context_menu_pos.is_some(),
-                        ]) && route_consumed_keyboard_key(
+                        ]) && route_consumed_keyboard_key_in_context(
                             &event.logical_key,
-                            self.transform.is_cropping,
-                            self.heal.active,
-                            self.is_fullscreen,
+                            self.escape_context(),
                         ))
                 }
                 _ => false,
@@ -6907,10 +6929,7 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 if repeat
-                    && !repeated_viewer_action_allowed(
-                        &logical_key,
-                        self.transform.is_cropping || self.mosaic.is_active(),
-                    )
+                    && !repeated_viewer_action_allowed(&logical_key, self.transform.is_cropping)
                 {
                     return;
                 }
@@ -6925,18 +6944,14 @@ impl ApplicationHandler<UserEvent> for App {
                         {
                             self.leave_full_image_mosaic();
                         }
-                        Key::Named(NamedKey::Enter) => self.open_focused_mosaic_photo(),
+                        Key::Named(NamedKey::Enter | NamedKey::ArrowDown) => {
+                            self.open_focused_mosaic_photo();
+                        }
                         Key::Named(NamedKey::ArrowRight) => {
                             self.move_mosaic_focus(crate::mosaic::FocusDirection::Next);
                         }
                         Key::Named(NamedKey::ArrowLeft) => {
                             self.move_mosaic_focus(crate::mosaic::FocusDirection::Previous);
-                        }
-                        Key::Named(NamedKey::ArrowUp) => {
-                            self.move_mosaic_focus(crate::mosaic::FocusDirection::Up);
-                        }
-                        Key::Named(NamedKey::ArrowDown) => {
-                            self.move_mosaic_focus(crate::mosaic::FocusDirection::Down);
                         }
                         Key::Named(NamedKey::Home) => {
                             self.move_mosaic_focus(crate::mosaic::FocusDirection::First);
@@ -7018,6 +7033,7 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Named(NamedKey::ArrowUp) if self.transform.is_cropping => {
                         self.adjust_crop_from_keyboard(0.0, -1.0);
                     }
+                    Key::Named(NamedKey::ArrowUp) => self.toggle_full_image_mosaic(),
                     Key::Named(NamedKey::ArrowRight | NamedKey::PageDown) => self.navigate(1),
                     Key::Named(NamedKey::ArrowLeft | NamedKey::PageUp) => self.navigate(-1),
                     Key::Named(NamedKey::Home) => self.navigate(-999_999),

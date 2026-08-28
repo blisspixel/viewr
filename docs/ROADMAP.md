@@ -40,7 +40,8 @@ EXIF orientation, RGB ICC-to-sRGB normalization, trilinear GPU mips, GPU-limited
 previews with full-resolution export, last-good-frame navigation, async crop and
 Save As, image information, Reload (`F5`), Spot Heal, About, and System, Light,
 Dark, and Console appearances. The active v0.6 line also includes a transient
-eight-photo full-image mosaic without a catalog or thumbnail substitution.
+full-image collage of up to 24 aspect-aware tiles without a catalog or thumbnail
+substitution.
 Appearance is the only persistent UI preference and contains no image or activity
 data.
 
@@ -563,11 +564,12 @@ broad feature category. They prove and refine the accumulated viewer.
   the folder-recovery fact until a settled outcome. A disconnected foreground
   decode result channel also leaves loading with a durable Retry error instead
   of waiting forever.
-- [x] Add a transient full-image mosaic for seeing context without turning viewr
-  into a library. It presents up to eight complete, uncropped photos from the
+- [x] Add a transient full-image collage for seeing context without turning viewr
+  into a library. It presents up to 24 complete, uncropped photos from the
   active rating projection through the normal decode, color, and mipmapped GPU
-  path, never the thumbnail generator. Adaptive landscape and portrait grids,
-  group navigation, keyboard and native accessibility selection, exact-current
+  path, never the thumbnail generator. Actual aspect ratios drive dense justified
+  rows with narrow gutters instead of equal blank cells. Group navigation, Up and
+  Down hierarchy, keyboard and native accessibility selection, exact-current
   texture reuse, and a 256 MiB aggregate current plus neighbor decode budget are
   covered. When the full group cannot fit, fewer complete photos reflow and the
   interface states the limit instead of substituting reduced thumbnails.

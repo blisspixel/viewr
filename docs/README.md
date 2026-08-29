@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.5.0
+- [Install and update](INSTALL.md): current source builds, current v0.6.0
   one-command installers, manual downloads, platform integration, and uninstall.
 - [Privacy](PRIVACY.md): the local-only product boundary and metadata behavior.
 - [Ratings](RATINGS.md): embedded ratings, filters, interoperability, and recovery.
@@ -33,10 +33,11 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, ordered quality tracks,
   implemented phases, and explicit non-goals.
-- [v0.5.0 release notes](releases/v0.5.0.md): the current release, the closed
-  format-contract milestone, and clearly stated platform limits.
-- [v0.6.0 candidate release notes](releases/v0.6.0.md): reviewed prospective
-  notes for the open product-quality milestone; not publication evidence.
+- [v0.6.0 release notes](releases/v0.6.0.md): the current release, the
+  integrated product-quality beta, and clearly stated platform limits including
+  the representative-hardware evidence it does not carry.
+- [v0.5.0 release notes](releases/v0.5.0.md): the closed format-contract
+  milestone.
 - [v0.4.0 release notes](releases/v0.4.0.md): the file-coherence milestone.
 - [v0.3.0 release notes](releases/v0.3.0.md): the display-correct SDR
   milestone.
@@ -53,7 +54,7 @@ Start with the document that matches the task.
 - [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
   verification, platform limits, and the known issues that v0.1.1 fixes.
 - [Publishing](PUBLISHING.md): public-repository controls, the repeatable pre-1.0
-  tag procedure (next tag v0.6.0), verification, and the stronger 1.0 trust gate.
+  tag procedure (next tag v0.7.0), verification, and the stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.
 

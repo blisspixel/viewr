@@ -51,11 +51,17 @@ Status last verified on 2026-08-22:
 - [x] Publish and verify annotated tag `v0.5.0`, the format-contract
   milestone, under that same contract. Published; see the GitHub release
   [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0).
+- [x] Publish and verify annotated tag `v0.6.0`, the integrated product-quality
+  beta, under that same contract. Published; see the GitHub release
+  [v0.6.0](https://github.com/blisspixel/viewr/releases/tag/v0.6.0). It was
+  published without step 5 below: no representative-hardware record exists for
+  it, and its release notes state that limit.
 
 ## Pre-1.0 release procedure
 
 This is the procedure used for `v0.1.0` and repeated for each later tag. The
-next allowed tag is `v0.6.0`. An unsigned pre-1.0 release is acceptable only
+next allowed tag is `v0.7.0`, and it is blocked until the v0.6 hardware matrix
+closes. An unsigned pre-1.0 release is acceptable only
 when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
@@ -72,8 +78,11 @@ production environment.
    render and the Flatpak source map matches the lockfile.
 4. Integrate the release change through normal review. Select its exact clean
    `main` commit only after CI and fuzz pass there, and retain both run links.
-5. For v0.6.0, complete the candidate-artifact and three-platform evidence
-   procedure in [Product quality](PRODUCT-QUALITY.md). Every record must identify
+5. Complete the candidate-artifact and three-platform evidence
+   procedure in [Product quality](PRODUCT-QUALITY.md). This step was skipped for
+   v0.6.0 by explicit decision, and that skip is recorded in its release notes,
+   the changelog, and the roadmap rather than being backfilled. It is not
+   precedent for a later tag. Every record must identify
    one candidate workflow run and its exact commit. Any later change to application
    source, dependencies, workflows, packaging, or user-facing behavior instructions
    invalidates those records and requires a new candidate run. Completed evidence,
@@ -96,8 +105,8 @@ production environment.
    annotated tag:
 
    ```text
-   git tag -a v0.6.0 -m "viewr 0.6.0"
-   git push origin v0.6.0
+   git tag -a v0.7.0 -m "viewr 0.7.0"
+   git push origin v0.7.0
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -113,9 +122,9 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.5.0 --repo blisspixel/viewr
-gh release verify v0.5.0 --repo blisspixel/viewr
-gh attestation verify viewr-0.5.0-x86_64-pc-windows-msvc.zip \
+gh release view v0.6.0 --repo blisspixel/viewr
+gh release verify v0.6.0 --repo blisspixel/viewr
+gh attestation verify viewr-0.6.0-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
@@ -260,9 +269,10 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.5.0 is public, immutable, checksummed, and attested, and v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.6.0 is public, immutable, checksummed, and attested, and v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. Their executable archives
+  known-issues note. v0.6.0 additionally carries no representative-hardware
+  acceptance evidence, which its release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.
 - The foreground installer tools contact only the official GitHub repository after

@@ -66,18 +66,16 @@ class DocumentationTests(unittest.TestCase):
 
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
-            ".github/ISSUE_TEMPLATE/bug_report.yml": (
-                "0.5.0, 0.6.0 candidate, or commit SHA",
-            ),
+            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.6.0 or commit SHA",),
             "README.md": (
-                "v0.5.0 is the current public preview",
+                "v0.6.0 is the current public preview",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.5.0 is the current public GitHub Release",
+                "v0.6.0 is the current public GitHub Release",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -85,14 +83,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Current position: v0.5.0 is released and verified",
+                "Current position: v0.6.0 is released as the public install target",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.5.0 is public, immutable, checksummed, and attested",
+                "v0.6.0 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (
@@ -158,11 +156,14 @@ class DocumentationTests(unittest.TestCase):
             ),
             "docs/releases/v0.6.0.md": (
                 "integrated product-quality beta",
-                "Their presence in the source tree",
-                "only after the artifact-bound Windows",
+                "GitHub build-provenance attestation",
+                "not Authenticode-signed",
+                "notarized",
                 "security controls to launch viewr",
+                "product-quality matrix was not completed for",
             ),
             "CHANGELOG.md": (
+                "## 0.6.0 - 2026-08-29",
                 "## 0.5.0 - 2026-08-20",
                 "## 0.4.0 - 2026-08-19",
                 "## 0.3.0 - 2026-08-19",
@@ -347,15 +348,15 @@ class DocumentationTests(unittest.TestCase):
         )
         positions = [roadmap.index(gate) for gate in ordered_gates]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("Immediate focus: v0.6 product quality", roadmap)
+        self.assertIn("Immediate focus: v0.7 accessibility evidence", roadmap)
         self.assertIn("Native platform trust | Deferred to v0.9", roadmap)
         self.assertIn("explicitly unsigned pre-1.0 preview", standards)
         self.assertIn("Publisher authentication remains a v0.9 and 1.0 gate", standards)
         self.assertLess(
             publishing.index("`docs/releases/v<version>.md`"),
-            publishing.index("git tag -a v0.6.0"),
+            publishing.index("git tag -a v0.7.0"),
         )
-        self.assertNotIn("git tag -a v0.5.0", publishing)
+        self.assertNotIn("git tag -a v0.6.0", publishing)
 
     def test_first_run_and_help_copy_stay_one_catalog(self) -> None:
         shortcuts = (REPOSITORY_ROOT / "crates/viewr/src/shortcuts.rs").read_text(
@@ -383,7 +384,7 @@ class DocumentationTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("It does not close v0.6", product_quality)
-        self.assertIn("Do not tag v0.6.0", product_quality)
+        self.assertIn("Do not tag v0.7.0", product_quality)
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         self.assertIn("PRODUCT-QUALITY.md", roadmap)
         release_artifact = (REPOSITORY_ROOT / "scripts/release_artifact.py").read_text(

@@ -18,9 +18,9 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0), the format-contract milestone |
-| Active development line | `main`, working toward **v0.6.0** |
-| Next tag allowed | **v0.6.0** only after its exit criteria below are true. Further v0.5.x patches remain allowed for shipped defects |
+| Published install target | Immutable [v0.6.0](https://github.com/blisspixel/viewr/releases/tag/v0.6.0), the integrated product-quality beta, published without its representative-hardware matrix |
+| Active development line | `main`, working toward **v0.7.0** |
+| Next tag allowed | **v0.7.0** only after its exit criteria below are true, and only once the v0.6 representative-hardware matrix is closed. Further v0.6.x patches remain allowed for shipped defects |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -29,10 +29,10 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.5.0 archives. The v0.4.0, v0.3.0, v0.2.0, and v0.1.x
-archives remain published history. Human assistive-technology evidence, platform
-signing and notarization, representative-hardware acceptance, and display fidelity
-remain open.
+but publisher-unsigned v0.6.0 archives. The v0.5.0, v0.4.0, v0.3.0, v0.2.0, and
+v0.1.x archives remain published history. Human assistive-technology evidence,
+platform signing and notarization, representative-hardware acceptance, and
+display fidelity remain open.
 
 The shipped product already includes bounded GIF/WebP/APNG playback, bounded
 TIFF page and ICO frame navigation, eight-way
@@ -72,10 +72,10 @@ v0.4.0  File-coherence preview  [released]
 v0.5.0  Format-contract preview  [released]
    |
    v
-v0.6.0  Integrated product-quality beta  [next]
+v0.6.0  Integrated product-quality beta  [released, hardware matrix open]
    |
    v
-v0.7.0  Accessibility evidence preview
+v0.7.0  Accessibility evidence preview  [next]
    |
    v
 v0.8.0  Release-readiness beta
@@ -104,8 +104,12 @@ v1.0.0  Broadly recommended release
 
 ### Immediate focus
 
-**Immediate focus: v0.6 product quality, followed by v0.7 accessibility evidence.**
-The v0.5 format-contract milestone is released and closed. Pure-policy seams and the owned-logic
+**Immediate focus: v0.7 accessibility evidence, plus the v0.6 representative-hardware
+matrix that its tag did not close.**
+The v0.6 product-quality scope is released. Its
+artifact-bound Windows, macOS, and Linux acceptance rows and eight performance
+reports were not collected before the tag, so that matrix is carried forward as
+open work rather than treated as satisfied. Pure-policy seams and the owned-logic
 coverage floor are evidenced (90.59 percent lines under the CI llvm-cov
 contract, with the launch-prerequisite `startup` seam at 98.40 percent). The
 residual whole-file exclusions are now exactly five native integration surfaces,
@@ -114,47 +118,42 @@ error set moved into the measured floor. Executor supervision is settled: every
 replace-latest decode queue closes when its last worker stops, so a thread that
 dies produces a named scheduling error rather than an operation that stays busy
 forever. Preserve bounded job, thumbnail, full-image mosaic, prefetch, chrome,
-and GPU contracts, and keep first-run failure observable. Do the v0.6
+and GPU contracts, and keep first-run failure observable. Do the remaining
 product-quality work without reopening unowned event-loop races.
 
-Current position: v0.5.0 is released and verified, and the earlier v0.4.0
-file-coherence milestone plus v0.3.0, v0.2.0, and the v0.1.1 through v0.1.5
-patches remain published with the first preview's known issues recorded.
-Commit `1bdcbd2` passed exact-head CI, CodeQL, and fuzz, followed by a successful
-non-publishing v0.6 candidate run that proved the archive and fixture pipeline.
-Later product-quality review found a stale folder-entry recovery defect and an
-empty catalog-position error, so those artifacts are superseded for acceptance.
-Next is a green exact-head commit containing the corrections, a new
-non-publishing candidate run, and representative-hardware evidence against only
-those replacement bytes. v0.5.0 remains the public install target.
+Current position: v0.6.0 is released as the public install target, and the
+earlier v0.5.0 format-contract milestone plus v0.4.0, v0.3.0, v0.2.0, and the
+v0.1.1 through v0.1.5 patches remain published with the first preview's known
+issues recorded. The v0.6.0 tag was published on the automated gates alone.
+Its representative-hardware acceptance rows and eight performance reports were
+not collected, so `docs/release-evidence/product-quality/v0.6.0` is empty and
+the evidence validator has never accepted a complete set. Anyone reading a
+hardware claim into the v0.6.0 tag would be reading one that was not made.
 
-The v0.6 execution order is deliberately narrow:
+The outstanding v0.6 evidence order is unchanged, and now runs against the
+published tag rather than ahead of it:
 
 1. Keep one clean `main` commit with both CI and fuzz green. Maintenance and
    product-quality polish both reset later artifacts.
-2. Integrate the versioned v0.6 candidate preparation: evidence-backed product
-   corrections, the hardened evidence gate, prospective reviewed release notes,
-   and the final candidate behavior documents. Obtain another green `main`
-   commit while v0.5.0 remains the public install target.
-3. Dispatch the non-publishing `Release artifacts` workflow once for that commit.
+2. Dispatch the non-publishing `Release artifacts` workflow once for that commit.
    Its four checksummed application archives plus deterministic synthetic fixture
    artifact form the candidate set. Do not substitute a developer build or
    combine workflow runs.
-4. Run [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) on representative Windows,
+3. Run [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) on representative Windows,
    macOS, and Linux hardware using that run's fixture artifact. All records share
    the candidate commit and workflow run while retaining their platform-specific
    archive hashes.
-5. Treat a critical or high-severity defect as a candidate reset. Fix it, rerun
-   the automated gates, build a new candidate set, and repeat all affected
-   hardware rows. A lower-severity approved exception remains visible in its
-   GitHub issue and evidence record.
-6. Tag v0.6.0 only after the evidence validator accepts all three complete records
-   and the final release procedure is green. Then begin v0.7 human assistive-
-   technology evidence against the stable product surface.
+4. Treat a critical or high-severity defect as a shipped-defect fix. Correct it,
+   rerun the automated gates, build a new candidate set, repeat all affected
+   hardware rows, and publish the correction as a v0.6.x patch. A lower-severity
+   approved exception remains visible in its GitHub issue and evidence record.
+5. Close the matrix once the evidence validator accepts all three complete
+   records, then begin v0.7 human assistive-technology evidence against the
+   stable product surface. v0.7.0 may not be tagged while this matrix is open.
 
-This order spends scarce hardware time last, after cheap deterministic checks,
-and prevents product changes from invalidating later accessibility and release
-readiness evidence.
+This order still spends scarce hardware time after the cheap deterministic
+checks, and prevents product changes from invalidating later accessibility and
+release readiness evidence.
 
 ### Release rules
 
@@ -181,7 +180,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). [Candidate run 32611729680](https://github.com/blisspixel/viewr/actions/runs/32611729680) proved the archive and deterministic-fixture pipeline, but later product corrections supersede its bytes for acceptance. Next, obtain green exact-head CI and fuzz for the corrections, dispatch a replacement candidate run, and collect the three representative-hardware records and eight-session performance report set against only that new run. v0.5.0 remains the public install target until that evidence passes. |
+| Integrated product quality | Shipped as v0.6.0 with its hardware matrix still open | The v0.6.0 product scope is released, but its acceptance evidence was not collected. Matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). No platform record and no performance report exists under `docs/release-evidence/product-quality/v0.6.0`, and the evidence validator has never accepted a set. The published release notes state this limit. Closing it still requires a dispatched candidate run plus the three representative-hardware records and the eight-session performance report set, and it blocks the v0.7.0 tag. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -226,8 +225,9 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.5.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
-coherence, formats, and integrated product quality are completed first.
+v0.6.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+coherence, and formats are complete. Integrated product quality is released as
+code but still owes its representative-hardware evidence.
 
 - [x] Run the complete hosted Linux, macOS, and Windows workflow for one pinned
   commit and retain the [green CI run](https://github.com/blisspixel/viewr/actions/runs/30642307317)
@@ -245,7 +245,7 @@ coherence, formats, and integrated product quality are completed first.
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
 - [x] Make the release-state and quality-gate contract executable: canonical
-  documentation now agrees on the public unsigned v0.5.0 state, CI runs the exact
+  documentation now agrees on the public unsigned v0.6.0 state, CI runs the exact
   locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
   against an explicit transitive baseline without unexplained warnings.
 - [ ] For v0.9, produce and verify a signed Windows delivery, a Developer ID-signed and
@@ -549,7 +549,9 @@ broad feature category. They prove and refine the accumulated viewer.
   from `1bdcbd2` proved the four-archive and deterministic-fixture contract, but
   later product corrections supersede that candidate for acceptance. The
   hardware rows and eight performance reports remain unrecorded and must use
-  only the replacement exact-head candidate set.
+  only a replacement exact-head candidate set. v0.6.0 was tagged and published
+  before this box could be checked, so the shipped archives carry no
+  representative-hardware evidence and the release notes say so.
 - [x] Make About, the empty card, and README essential controls quote one covered
   shortcut catalog. Help lists pages, reload, panels, Space-to-fit, Save As, and
   Undo Trash. The first-run card names drop. Long decoder errors stay one short

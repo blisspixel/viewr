@@ -331,7 +331,7 @@ MANUAL_OBSERVATION_TERMS = {
         "Escape",
     ),
     "PQ-AD-01": ("doctor", "worker protocol", "windowing", "graphics"),
-    "PQ-AD-02": ("v0.5.0", "immutable", "updater", "security"),
+    "PQ-AD-02": ("v0.6.0", "immutable", "updater", "security"),
     "PQ-AD-03": ("Update modal", "network", "browser"),
     "PQ-AD-04": ("trust warning", "security controls"),
     "PQ-RC-01": ("malformed", "previous image", "Retry"),

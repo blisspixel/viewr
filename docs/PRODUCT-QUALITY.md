@@ -1,10 +1,16 @@
 # Product quality
 
-**Status:** open for v0.6. This matrix is the executable contract for first-time,
-power-user, admin, failure-recovery, and visual-polish paths. It does not close v0.6.
+**Status:** open, and still open after the v0.6.0 tag. This matrix is the
+executable contract for first-time, power-user, admin, failure-recovery, and
+visual-polish paths. It does not close v0.6.
 Representative Windows, macOS, and Linux hardware still have to pass the same rows
 using the checksummed archives and synthetic fixture artifact from one retained
 candidate workflow run.
+
+v0.6.0 was published before any of those rows were recorded. The released
+archives therefore carry no representative-hardware evidence, the release notes
+state that limit, and this matrix is carried forward as open work that blocks
+the v0.7.0 tag.
 
 v0.6 broadens the core viewing surface with a transient full-image collage. It
 does not add a library, catalog, thumbnail mode, or durable album state. Clipboard
@@ -49,8 +55,8 @@ runs.
 
 1. Put the intended v0.6 runtime, package contents, workspace version, compiled
    installer commands, unreleased changelog, and reviewed prospective release
-   notes on `main`. Keep README and INSTALL accurate that v0.5.0 is still the
-   public download until v0.6.0 is tagged. Confirm the normal CI and fuzz
+   notes on `main`. Keep README and INSTALL accurate about which immutable
+   release is the current public download. Confirm the normal CI and fuzz
    workflows are green for that exact commit.
 2. Dispatch `Release artifacts` on `main` once. A branch dispatch repeats CI and
    fuzzing, builds all four target archives, verifies them, generates one
@@ -175,7 +181,7 @@ Run the same workflow on every platform.
 | ID | Action | Required result |
 | --- | --- | --- |
 | PQ-AD-01 | `viewr doctor` | Reports binaries, worker protocol, windowing libraries, and graphics runtimes. A passing last line is not proof that a window opened. |
-| PQ-AD-02 | Inspect the installation contract in the candidate archive | README and INSTALL identify v0.5.0 as the current immutable public download until v0.6.0 is tagged. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, and rollback acceptance remain the v0.8 gate. |
+| PQ-AD-02 | Inspect the installation contract in the candidate archive | README and INSTALL identify v0.6.0 as the current immutable public download. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, and rollback acceptance remain the v0.8 gate. |
 | PQ-AD-03 | Help > Get latest release | The Update modal names the running version, refuses to check a network, and only the explicit button hands the release URL to the browser. |
 | PQ-AD-04 | Unsigned preview | OS trust warnings may appear. Docs do not tell anyone to disable platform security. |
 
@@ -330,5 +336,6 @@ Use only synthetic filenames and fixtures. Do not include a personal image,
 private path, raw metadata, or unrelated screen content. If the tested artifact
 bytes change, the record no longer closes the gate.
 
-Do not tag v0.6.0 while any required platform row is unrecorded or any
-high-severity product-quality issue remains.
+Do not tag v0.7.0 while any required platform row is unrecorded or any
+high-severity product-quality issue remains. v0.6.0 was tagged in exactly that
+state as an explicit, documented exception; do not treat it as precedent.

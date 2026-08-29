@@ -5,6 +5,17 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+## 0.6.0 - 2026-08-29
+
+### Release evidence
+
+- The representative-hardware product-quality matrix defined in
+  `docs/PRODUCT-QUALITY.md` was not completed for this release. No Windows,
+  macOS, or Linux acceptance row and none of the eight performance reports were
+  recorded. The tag was published on the automated gates alone, and the matrix
+  remains open work carried into v0.7.0. The release notes state this limit for
+  anyone installing the archives.
+
 ### Product quality
 
 - Fullscreen is immersive: persistent chrome hides and the photo uses the whole

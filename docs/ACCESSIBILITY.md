@@ -1,6 +1,6 @@
 # Accessibility validation
 
-**Status on 2026-08-02:** native AccessKit delivery is implemented on Windows,
+**Status on 2026-08-27:** native AccessKit delivery is implemented on Windows,
 macOS, and Linux. Semantic unit tests, contrast tests, keyboard tests, cross-target
 builds, and an external Windows UI Automation smoke test pass. Windows CI retries
 transient UI Automation focus rejection without weakening semantic assertions.
@@ -24,6 +24,11 @@ The minimum contract is:
   `T`, `G`, and `I` shortcuts are visible in View > Panels and included in the
   accessible menu names. Tools and Folder Previews also expose collapse and expansion
   actions.
+- Full-Image Collage exposes every ready complete photo as a position-only button,
+  without putting a filename into the grid. Visual and semantic selected state
+  agree. Up enters from single-photo view, Left and Right move selection, Down or
+  Enter opens, Page Up and Page Down change groups, and Escape returns. Loading
+  and memory-constrained ready counts remain textual.
 - Edit > Rating exposes Unrated and ratings 1 through 5 as a selected radio group
   with `0` through `5` shortcut text. View > Rating Filter exposes All images and
   minimum ratings 1 through 5 as a separate selected radio group. Current rating,
@@ -68,8 +73,8 @@ The minimum contract is:
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape. It exposes the
   grouped shortcut catalog, including `[` / `]`, `F5`, `T` `G` `I`, Space-to-fit,
-  `F` / `F11`, Escape, Save As, and Undo Trash. Close stays inside the minimum
-  window.
+  `F` / `F11`, `Shift+G`, Escape, Save As, and Undo Trash. Close stays inside the
+  minimum window.
 - Update viewr is a separate named modal window that blocks background input and
   exposes the running version and one clearly named Get latest release button. It
   closes with an explicit button or Escape. The application performs no automatic
@@ -144,10 +149,11 @@ probe. It creates three small disposable images beneath `target/` and verifies:
   with an additional GExiv2 read through a supplied `-GExiv2Python` executable or
   the default GIMP 3 Python when present. The result reports checked or skipped.
 
-In-process semantic regressions separately cover settled Undo Trash ownership,
-its path-free other-folder guidance, menu bounds, and generic copy while restore
-ownership is active or uncertain. Native dynamic-state and announcement timing
-remain in the manual target-OS matrix.
+In-process semantic regressions separately cover full-image collage position-only
+photo buttons and selected identity, settled Undo Trash ownership, its path-free
+other-folder guidance, menu bounds, and generic copy while restore ownership is
+active or uncertain. Collage keyboard and native dynamic-state behavior plus
+announcement timing remain in the manual target-OS matrix.
 
 It closes the exact process it launched and removes its three known fixtures, the
 isolated `viewr/appearance` preference tree, and the empty unique directory. The
@@ -187,7 +193,9 @@ Run the same workflow on every platform:
 | Reload | Invoke File > Reload File and `F5` on a disposable file changed by another app | Reload is announced, the old frame remains until success, and a failed refresh exposes Retry without losing focus |
 | Open With | Inspect File > Open With and the image right-click action; choose and cancel a disposable editor handoff, then make one external change | Both entry points have one clear name and boundary explanation; cancellation is quiet and safe; the selected app receives the original rather than unsaved viewr edits; a safe external change reloads without blanking; unsaved viewr edits keep the last good frame and ask for F5 |
 | File gone | Delete the presented file from outside viewr | The last good image stays visible and a polite status says the selected path no longer names that file |
+| Pending sibling gone | Select a sibling and remove it before its first presentation | The stale entry leaves the folder position, the last good frame remains until a surviving image opens, and recovery or Retry is announced once without exposing a path |
 | View | Use Fit, Actual Size, Zoom In, Zoom Out, and Fullscreen | The action and resulting zoom are discoverable; fullscreen does not strand focus |
+| Full-image collage | Enter with Up, View, or `Shift+G`; traverse every ready photo with Left and Right and the screen reader; open with Down and Enter; change groups; repeat under a rating filter; cite the dense-layout, bounded-admission, and stable-announcement tests named by PQ-PW-08; leave with Escape | Each complete photo is a named position-only button with selected state and visible focus; filenames are absent; actual aspect-ratio tiles form justified rows with narrow gutters; one stable loading state and the terminal ready or safely fitted count are announced without flooding; group order follows the active projection; open and leave restore coherent single-photo focus |
 | Editing | Rotate, flip, and start crop | Each tool has one descriptive name and the visible result matches the invoked action |
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
 | Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, and the pointer-only brush overlay is not the sole source of state |

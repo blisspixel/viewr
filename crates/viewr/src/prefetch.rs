@@ -403,6 +403,12 @@ impl PrefetchCache {
         self.images.get(path).map(Arc::as_ref)
     }
 
+    /// Clone shared ownership without changing LRU order or copying pixels.
+    #[must_use]
+    pub(crate) fn get_shared(&self, path: &Path) -> Option<Arc<DecodedImage>> {
+        self.images.get(path).map(Arc::clone)
+    }
+
     /// Take shared ownership of a cached image (removes it from the cache).
     pub fn take(&mut self, path: &Path) -> Option<Arc<DecodedImage>> {
         let img = self.images.remove(path)?;
@@ -428,16 +434,56 @@ impl PrefetchCache {
         self.order.push_back(path.clone());
         self.current_bytes = self.current_bytes.saturating_add(image_bytes);
         self.images.insert(path, image);
-        while self.images.len() > self.capacity || self.current_bytes > self.max_bytes {
-            if let Some(old) = self.order.pop_front() {
-                if let Some(evicted) = self.images.remove(&old) {
-                    self.current_bytes = self.current_bytes.saturating_sub(evicted.rgba.len());
-                }
-            } else {
-                break;
-            }
-        }
+        self.enforce_limits();
         self.images.contains_key(&retained_path)
+    }
+
+    /// Insert only when both limits already have room, without evicting another
+    /// full decode. This keeps a mosaic from repeatedly decoding images that
+    /// displace one another at the byte boundary.
+    pub(crate) fn insert_if_fits(
+        &mut self,
+        path: PathBuf,
+        image: impl Into<Arc<DecodedImage>>,
+    ) -> bool {
+        let image = image.into();
+        let replaced_bytes = self.images.get(&path).map_or(0, |old| old.rgba.len());
+        let next_len = self.images.len() + usize::from(!self.images.contains_key(&path));
+        let next_bytes = self
+            .current_bytes
+            .saturating_sub(replaced_bytes)
+            .saturating_add(image.rgba.len());
+        if next_len > self.capacity || next_bytes > self.max_bytes {
+            return false;
+        }
+        if let Some(replaced) = self.images.remove(&path) {
+            self.current_bytes = self.current_bytes.saturating_sub(replaced.rgba.len());
+            self.order.retain(|candidate| candidate != &path);
+        }
+        self.current_bytes = self.current_bytes.saturating_add(image.rgba.len());
+        self.order.push_back(path.clone());
+        self.images.insert(path, image);
+        true
+    }
+
+    /// Change both bounds and immediately evict oldest entries until they hold.
+    pub(crate) fn set_limits(&mut self, capacity: usize, max_bytes: usize) {
+        self.capacity = capacity.max(1);
+        self.max_bytes = max_bytes;
+        self.enforce_limits();
+    }
+
+    /// Retain only paths accepted by `keep`, preserving their relative LRU order.
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&Path) -> bool) {
+        self.images.retain(|path, image| {
+            let retained = keep(path);
+            if !retained {
+                self.current_bytes = self.current_bytes.saturating_sub(image.rgba.len());
+            }
+            retained
+        });
+        let images = &self.images;
+        self.order.retain(|path| images.contains_key(path));
     }
 
     /// True if this path is already fully decoded in the cache.
@@ -451,6 +497,18 @@ impl PrefetchCache {
         self.order.clear();
         self.images.clear();
         self.current_bytes = 0;
+    }
+
+    fn enforce_limits(&mut self) {
+        while self.images.len() > self.capacity || self.current_bytes > self.max_bytes {
+            if let Some(old) = self.order.pop_front() {
+                if let Some(evicted) = self.images.remove(&old) {
+                    self.current_bytes = self.current_bytes.saturating_sub(evicted.rgba.len());
+                }
+            } else {
+                break;
+            }
+        }
     }
 }
 
@@ -933,5 +991,56 @@ mod tests {
         cache.clear();
         assert!(cache.is_empty());
         assert_eq!(cache.bytes(), 0);
+    }
+
+    #[test]
+    fn changing_limits_and_retaining_paths_preserves_exact_accounting() {
+        let mut cache = PrefetchCache::with_limits(4, 40);
+        let shared = Arc::new(bytes(1, 8));
+        cache.insert(PathBuf::from("a"), Arc::clone(&shared));
+        cache.insert(PathBuf::from("b"), bytes(2, 8));
+        cache.insert(PathBuf::from("c"), bytes(3, 8));
+        assert!(Arc::ptr_eq(
+            &cache.get_shared(std::path::Path::new("a")).unwrap(),
+            &shared
+        ));
+
+        cache.retain(|path| path != std::path::Path::new("b"));
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.bytes(), 16);
+        cache.set_limits(1, 8);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.bytes(), 8);
+        assert!(cache.contains(std::path::Path::new("c")));
+        cache.set_limits(4, 0);
+        assert!(cache.is_empty());
+        assert_eq!(cache.bytes(), 0);
+    }
+
+    #[test]
+    fn no_eviction_insert_rejects_pressure_without_displacing_existing_images() {
+        let mut cache = PrefetchCache::with_limits(2, 10);
+        assert!(cache.insert_if_fits(PathBuf::from("a"), bytes(1, 6)));
+        assert!(!cache.insert_if_fits(PathBuf::from("b"), bytes(2, 6)));
+        assert!(cache.contains(std::path::Path::new("a")));
+        assert!(!cache.contains(std::path::Path::new("b")));
+        assert_eq!(cache.bytes(), 6);
+        assert!(cache.insert_if_fits(PathBuf::from("a"), bytes(3, 4)));
+        assert_eq!(cache.peek(std::path::Path::new("a")).unwrap().rgba[0], 3);
+        assert_eq!(cache.bytes(), 4);
+    }
+
+    #[test]
+    fn reserved_mosaic_selection_survives_restoring_normal_limits() {
+        let mut cache = PrefetchCache::with_limits(8, 32);
+        for index in 0_u8..8 {
+            assert!(cache.insert_if_fits(PathBuf::from(format!("{index}.png")), bytes(index, 4)));
+        }
+        let selected_path = std::path::Path::new("0.png");
+        let selected = cache.take(selected_path).unwrap();
+        cache.set_limits(super::DEFAULT_CAPACITY, super::DEFAULT_MAX_BYTES);
+        assert!(cache.insert(selected_path.to_owned(), selected));
+        assert!(cache.contains(selected_path));
+        assert_eq!(cache.peek(selected_path).unwrap().rgba[0], 0);
     }
 }

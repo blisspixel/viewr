@@ -70,7 +70,7 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             },
             ShortcutSpec {
                 keys: "Page Up / Page Down",
-                action: "Previous / next image",
+                action: "Previous / next image or mosaic group",
             },
             ShortcutSpec {
                 keys: "[ / ]",
@@ -106,8 +106,12 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
                 action: "Fullscreen",
             },
             ShortcutSpec {
+                keys: "Up / Shift+G",
+                action: "Full-image collage",
+            },
+            ShortcutSpec {
                 keys: "Esc",
-                action: "Leave tool or fullscreen",
+                action: "Leave tool, mosaic, or fullscreen",
             },
             ShortcutSpec {
                 keys: "T G I",
@@ -211,9 +215,10 @@ mod tests {
             "T G I Panels",
             "Space Fit; hold to pan",
             "Ctrl+O Open file",
-            "Page Up / Page Down Previous / next image",
+            "Page Up / Page Down Previous / next image or mosaic group",
             "F / F11 Fullscreen",
-            "Esc Leave tool or fullscreen",
+            "Up / Shift+G Full-image collage",
+            "Esc Leave tool, mosaic, or fullscreen",
             "Ctrl+Shift+S Save As",
             "Delete Move to Trash",
             "U Undo Trash",

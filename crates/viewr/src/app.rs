@@ -60,11 +60,14 @@ use crate::entry_state::{
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
 use crate::job::{JobPoll, OneShotJob};
+#[cfg(test)]
+use crate::keyboard_route::route_consumed_keyboard_key;
 use crate::keyboard_route::{
     EscapeAction, EscapeContext, escape_action, escape_press_reaches_app, is_fullscreen_toggle_key,
     is_space_key, is_trash_shortcut_key, rating_assignment_for_key, rating_keys_apply,
-    repeated_viewer_action_allowed, route_consumed_keyboard_key, single_key_shortcut_allowed,
-    space_press_starts_hold, space_release_must_unwind, space_tap_fits, widget_popup_owns_event,
+    repeated_viewer_action_allowed, route_consumed_keyboard_key_in_context,
+    single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
+    space_tap_fits, widget_popup_owns_event,
 };
 use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
 use crate::prefetch::{
@@ -87,6 +90,10 @@ use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
     folder_scan_blocks_save, save_close_disposition, save_start_blocker,
     save_start_blocker_message,
+};
+use crate::session::{
+    ForegroundLoadFailure, ForegroundLoadFailureDisposition, ForegroundRetryPlan,
+    foreground_retry_plan, resolve_foreground_load_failure,
 };
 use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
 use crate::thumbs::{self, ThumbnailCompletion};
@@ -186,6 +193,7 @@ fn run_internal(
         heal: HealTool::default(),
         tools_before_heal: None,
         is_fullscreen: false,
+        mosaic: MosaicView::default(),
         last_trashed: Vec::new(),
         last_trashed_scope: None,
         current_image: None,
@@ -367,6 +375,12 @@ struct FolderScanContext {
     cancel: Arc<AtomicBool>,
 }
 
+enum MissingSelectionRemoval {
+    Advance(PathBuf),
+    ScanFolder,
+    FilterEmpty,
+}
+
 impl Drop for FolderScanContext {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
@@ -400,6 +414,21 @@ struct RatingWriteWorker {
 /// Exact identity of one installed playlist. Restores may rejoin only this view.
 #[derive(Debug)]
 struct PlaylistScope;
+
+#[derive(Default)]
+struct MosaicView {
+    page: Option<crate::mosaic::MosaicPage>,
+    uploaded_paths: Vec<Option<PathBuf>>,
+    unavailable_paths: HashSet<PathBuf>,
+    memory_limited: bool,
+    display_limited: bool,
+}
+
+impl MosaicView {
+    fn is_active(&self) -> bool {
+        self.page.is_some()
+    }
+}
 
 struct CropJobContext {
     recovery: CropRecovery,
@@ -837,6 +866,8 @@ struct App {
     /// Tools visibility captured when Spot Heal opened the dock.
     tools_before_heal: Option<(bool, bool)>,
     is_fullscreen: bool,
+    /// Transient, memory-bounded full-image mosaic. Never persisted.
+    mosaic: MosaicView,
     last_trashed: Vec<TrashedFile>,
     last_trashed_scope: Option<Arc<PlaylistScope>>,
     current_image: Option<Arc<DecodedImage>>,
@@ -1159,19 +1190,27 @@ impl App {
             return;
         }
         let path = crate::fs::canonical_file_path(&path).unwrap_or(path);
+        let missing_recovery = self.session.selected_missing
+            && self.session.selected_path.as_deref() == Some(path.as_path());
         self.reset_prefetch_for_playlist_change();
         self.playlist = None;
         self.playlist_scope = None;
-        self.begin_image_load(path.clone());
+        self.begin_image_load(path.clone(), missing_recovery);
         let directory = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."))
             .to_owned();
-        self.start_folder_scan(directory, ScanPurpose::SelectedFile(path));
+        self.start_folder_scan(
+            directory,
+            ScanPurpose::SelectedFile {
+                path,
+                missing_recovery,
+            },
+        );
     }
 
-    fn begin_image_load(&mut self, path: PathBuf) {
+    fn begin_image_load(&mut self, path: PathBuf, preserve_missing_recovery: bool) {
         self.cancel_open_with_check();
         self.stop_coherence_watch();
         self.pending_gone_notice = false;
@@ -1180,7 +1219,7 @@ impl App {
         self.cancel_rating_disclosure_for_source_change();
         self.session.selected_path = Some(path.clone());
         self.transform = Transform::default();
-        self.spawn_image_load(path);
+        self.spawn_image_load_with_recovery(path, preserve_missing_recovery);
         if let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
         }
@@ -1242,7 +1281,13 @@ impl App {
     }
 
     fn reset_prefetch_for_playlist_change(&mut self) {
+        self.mosaic = MosaicView::default();
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.clear_mosaic_images();
+        }
         self.prefetch.clear();
+        self.prefetch
+            .set_limits(prefetch::DEFAULT_CAPACITY, prefetch::DEFAULT_MAX_BYTES);
         self.prefetch_sources.clear();
         self.prefetch_schedule.reset();
     }
@@ -1269,6 +1314,14 @@ impl App {
         let prefetch = &self.prefetch;
         self.prefetch_sources
             .retain(|cached_path, _| prefetch.contains(cached_path));
+        retained
+    }
+
+    fn insert_mosaic_image_if_fits(&mut self, path: PathBuf, loaded: LoadedImage) -> bool {
+        let retained = self.prefetch.insert_if_fits(path.clone(), loaded.image);
+        if retained {
+            self.prefetch_sources.insert(path, loaded.source);
+        }
         retained
     }
 
@@ -1312,24 +1365,34 @@ impl App {
     ) -> bool {
         let open_folder = matches!(purpose, ScanPurpose::OpenFolder);
         let selected_is_current = match &purpose {
-            ScanPurpose::SelectedFile(selected) => {
-                selected_scan_is_current(self.session.selected_path.as_deref(), selected)
+            ScanPurpose::SelectedFile { path, .. } => {
+                selected_scan_is_current(self.session.selected_path.as_deref(), path)
             }
             ScanPurpose::OpenFolder => true,
         };
+        let selected_missing = match &purpose {
+            ScanPurpose::SelectedFile {
+                missing_recovery, ..
+            } => *missing_recovery || self.session.selected_missing,
+            ScanPurpose::OpenFolder => false,
+        };
         let success = files.as_ref().map(|entries| match &purpose {
-            ScanPurpose::SelectedFile(selected) => FolderScanSuccess::Selected {
+            ScanPurpose::SelectedFile { path: selected, .. } => FolderScanSuccess::Selected {
                 matched_index: selected_file_index_by(
                     entries,
                     selected,
                     crate::fs::ScannedImage::path,
                 )
                 .or_else(|| {
+                    if selected_missing {
+                        return None;
+                    }
                     let current = self.current_source.as_ref()?.scan_provenance()?;
                     entries
                         .iter()
                         .position(|entry| current.same_object(entry.provenance()))
                 }),
+                count: entries.len(),
             },
             ScanPurpose::OpenFolder => FolderScanSuccess::OpenFolder {
                 count: entries.len(),
@@ -1346,7 +1409,8 @@ impl App {
                 ),
             )),
         };
-        let disposition = folder_scan_disposition(open_folder, selected_is_current, result);
+        let disposition =
+            folder_scan_disposition(open_folder, selected_is_current, selected_missing, result);
         if matches!(disposition, FolderScanDisposition::Discard) {
             return false;
         }
@@ -1354,6 +1418,7 @@ impl App {
             if matches!(
                 disposition,
                 FolderScanDisposition::InstallSelectedOnlyScanFailed
+                    | FolderScanDisposition::SelectedMissingScanFailed
                     | FolderScanDisposition::OpenFolderFailed
             ) && let Err(error) = &files
             {
@@ -1364,9 +1429,10 @@ impl App {
         match (disposition, purpose, files) {
             (
                 FolderScanDisposition::InstallScanAt(index),
-                ScanPurpose::SelectedFile(selected),
+                ScanPurpose::SelectedFile { path: selected, .. },
                 Ok(entries),
             ) => {
+                let reload_restored_selection = self.session.selected_missing;
                 self.replace_playlist_from_scan(entries, index);
                 let new_path = self
                     .playlist
@@ -1392,13 +1458,16 @@ impl App {
                     .clone()
                     .unwrap_or_else(|| selected.clone());
                 self.preserve_presented_source_provenance(&provenance_path);
+                if reload_restored_selection {
+                    self.spawn_image_load(provenance_path);
+                }
                 self.kick_prefetch();
             }
             (
                 FolderScanDisposition::InstallSelectedOnly
                 | FolderScanDisposition::InstallSelectedOnlyLimitExceeded
                 | FolderScanDisposition::InstallSelectedOnlyScanFailed,
-                ScanPurpose::SelectedFile(selected),
+                ScanPurpose::SelectedFile { path: selected, .. },
                 _,
             ) => {
                 self.replace_playlist(vec![selected.clone()], 0);
@@ -1408,16 +1477,24 @@ impl App {
                     self.kick_prefetch();
                 }
             }
-            (FolderScanDisposition::OpenFolderFirst, ScanPurpose::OpenFolder, Ok(entries)) => {
+            (FolderScanDisposition::OpenFolderFirst, ScanPurpose::OpenFolder, Ok(entries))
+            | (
+                FolderScanDisposition::InstallScanFirstAfterSelectedMissing,
+                ScanPurpose::SelectedFile { .. },
+                Ok(entries),
+            ) => {
                 let first = entries[0].path().to_owned();
                 self.replace_playlist_from_scan(entries, 0);
-                self.begin_image_load(first);
+                self.begin_image_load(first, false);
                 self.kick_prefetch();
             }
             (
                 FolderScanDisposition::OpenFolderEmpty
                 | FolderScanDisposition::OpenFolderLimitExceeded
-                | FolderScanDisposition::OpenFolderFailed,
+                | FolderScanDisposition::OpenFolderFailed
+                | FolderScanDisposition::SelectedMissing
+                | FolderScanDisposition::SelectedMissingLimitExceeded
+                | FolderScanDisposition::SelectedMissingScanFailed,
                 _,
                 _,
             ) => {}
@@ -1499,6 +1576,9 @@ impl App {
         kind: PresentationKind,
         crop_recovery: Option<CropRecovery>,
     ) {
+        if self.mosaic.is_active() {
+            self.leave_full_image_mosaic();
+        }
         if crop_recovery
             .as_ref()
             .is_some_and(|recovery| !self.crop_recovery_is_current(recovery))
@@ -1785,7 +1865,7 @@ impl App {
 
     /// Stop work and edit state tied to the old image while leaving its last
     /// good pixels on screen until a replacement has decoded successfully.
-    fn prepare_for_image_load(&mut self) {
+    fn prepare_for_image_load(&mut self, preserve_missing_recovery: bool) {
         self.external_edit_pending = external_edit_pending_after_frame_transition(
             self.external_edit_pending,
             PresentedFrameTransition::RetainForReplacement,
@@ -1804,7 +1884,7 @@ impl App {
             self.rating_recovery_unsettled,
             RatingRecoveryTransition::Retain,
         );
-        self.session.prepare_for_load();
+        self.session.prepare_for_load(preserve_missing_recovery);
     }
 
     fn start_auxiliary_load(&mut self, path: &Path) {
@@ -2478,7 +2558,10 @@ impl App {
         let Some(path) = self.session.selected_path.clone() else {
             return;
         };
-        self.spawn_image_load(path);
+        match foreground_retry_plan(self.session.selected_missing) {
+            ForegroundRetryPlan::LoadSelected => self.spawn_image_load(path),
+            ForegroundRetryPlan::LoadAndScanFolder => self.load_and_scan(path),
+        }
         self.request_redraw();
     }
 
@@ -2846,7 +2929,13 @@ impl App {
         let Some(directory) = path.parent().map(Path::to_owned) else {
             return;
         };
-        self.start_folder_scan(directory, ScanPurpose::SelectedFile(path));
+        self.start_folder_scan(
+            directory,
+            ScanPurpose::SelectedFile {
+                path,
+                missing_recovery: false,
+            },
+        );
     }
 
     fn current_loaded_path(&self) -> Option<&Path> {
@@ -2876,7 +2965,7 @@ impl App {
             show_image_info: self.show_image_info,
             image_info_side: self.image_info_side,
             heal_active: self.heal.active,
-            immersive: self.is_fullscreen,
+            immersive: self.is_fullscreen || self.mosaic.is_active(),
         }
     }
 
@@ -2951,6 +3040,292 @@ impl App {
         self.request_redraw();
     }
 
+    fn toggle_full_image_mosaic(&mut self) {
+        if self.mosaic.is_active() {
+            self.leave_full_image_mosaic();
+            return;
+        }
+        if self.block_browse_while_busy() {
+            return;
+        }
+        let Some(playlist) = self.playlist.as_ref() else {
+            self.show_toast("Full-image collage needs an open folder");
+            return;
+        };
+        if playlist.visible_len() < 2 {
+            self.show_toast("Full-image collage needs more than one matching photo");
+            return;
+        }
+        let Some(current_index) = playlist.catalog_index() else {
+            self.show_toast("Full-image collage needs a selected photo");
+            return;
+        };
+        let Some(page) = crate::mosaic::MosaicPage::containing(
+            playlist.visible_projection(),
+            current_index,
+            crate::mosaic::MAX_IMAGES,
+        ) else {
+            return;
+        };
+        self.install_mosaic_page(page);
+    }
+
+    fn install_mosaic_page(&mut self, page: crate::mosaic::MosaicPage) {
+        let Some(playlist) = self.playlist.as_ref() else {
+            return;
+        };
+        let retained_paths: HashSet<PathBuf> = page
+            .indices
+            .iter()
+            .filter_map(|index| playlist.files.get(*index).cloned())
+            .collect();
+        let current_bytes = self
+            .current_image
+            .as_ref()
+            .map_or(0, |image| image.rgba.len());
+        let neighbor_budget = prefetch::DEFAULT_MAX_BYTES.saturating_sub(current_bytes);
+
+        self.prefetch_schedule.reset();
+        self.prefetch.retain(|path| retained_paths.contains(path));
+        self.prefetch
+            .set_limits(crate::mosaic::MAX_IMAGES, neighbor_budget);
+        let prefetch = &self.prefetch;
+        self.prefetch_sources
+            .retain(|path, _| prefetch.contains(path));
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_mosaic_slot_count(page.indices.len());
+        }
+        self.mosaic = MosaicView {
+            uploaded_paths: vec![None; page.indices.len()],
+            page: Some(page),
+            memory_limited: current_bytes >= prefetch::DEFAULT_MAX_BYTES,
+            display_limited: false,
+            unavailable_paths: HashSet::new(),
+        };
+        self.sync_mosaic_gpu();
+        self.kick_prefetch();
+        self.request_redraw();
+    }
+
+    fn leave_full_image_mosaic(&mut self) {
+        if !self.mosaic.is_active() {
+            return;
+        }
+        self.clear_full_image_mosaic();
+        self.kick_prefetch();
+    }
+
+    fn clear_full_image_mosaic(&mut self) {
+        self.prefetch_schedule.reset();
+        self.prefetch
+            .set_limits(prefetch::DEFAULT_CAPACITY, prefetch::DEFAULT_MAX_BYTES);
+        self.mosaic = MosaicView::default();
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.clear_mosaic_images();
+        }
+        self.request_redraw();
+    }
+
+    fn sync_mosaic_gpu(&mut self) {
+        let Some(page) = self.mosaic.page.as_ref() else {
+            return;
+        };
+        let Some(playlist) = self.playlist.as_ref() else {
+            return;
+        };
+        let candidates: Vec<(PathBuf, Option<Arc<DecodedImage>>, bool)> = page
+            .indices
+            .iter()
+            .filter_map(|index| {
+                let path = playlist.files.get(*index)?.clone();
+                let is_current = self.session.presented_path.as_deref() == Some(path.as_path());
+                let image = if is_current {
+                    self.current_image.clone()
+                } else {
+                    self.prefetch.get_shared(&path)
+                };
+                Some((path, image, is_current))
+            })
+            .collect();
+        let focused_path = page
+            .indices
+            .get(page.focused)
+            .and_then(|index| playlist.files.get(*index))
+            .cloned();
+        let mut failed = Vec::new();
+        let mut upload_count = 0_usize;
+        let mut upload_pending = false;
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        for (slot, (path, image, is_current)) in candidates.into_iter().enumerate() {
+            let already_uploaded = self
+                .mosaic
+                .uploaded_paths
+                .get(slot)
+                .and_then(Option::as_ref)
+                == Some(&path);
+            if already_uploaded {
+                continue;
+            }
+            let Some(image) = image else {
+                renderer.clear_mosaic_image(slot);
+                if let Some(uploaded) = self.mosaic.uploaded_paths.get_mut(slot) {
+                    *uploaded = None;
+                }
+                continue;
+            };
+            if is_current {
+                match renderer.use_current_image_in_mosaic(slot) {
+                    Ok(()) => {
+                        if let Some(uploaded) = self.mosaic.uploaded_paths.get_mut(slot) {
+                            *uploaded = Some(path);
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("full-image mosaic could not reuse current image: {error}");
+                        failed.push(path);
+                    }
+                }
+                continue;
+            }
+            if upload_count >= 1 {
+                upload_pending = true;
+                continue;
+            }
+            match renderer.set_mosaic_image(slot, &image, None) {
+                Ok(_) => {
+                    upload_count += 1;
+                    if let Some(uploaded) = self.mosaic.uploaded_paths.get_mut(slot) {
+                        *uploaded = Some(path);
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        "full-image mosaic omitted {}: {error}",
+                        prefetch::privacy_safe_file_name(&path)
+                    );
+                    renderer.clear_mosaic_image(slot);
+                    if let Some(uploaded) = self.mosaic.uploaded_paths.get_mut(slot) {
+                        *uploaded = None;
+                    }
+                    failed.push(path);
+                }
+            }
+        }
+        for path in failed {
+            self.mosaic.display_limited = true;
+            self.mosaic.unavailable_paths.insert(path.clone());
+            self.remove_prefetched_image(&path);
+        }
+        self.recover_unavailable_mosaic_focus(focused_path.as_deref());
+        if upload_pending {
+            self.request_redraw();
+        }
+    }
+
+    fn recover_unavailable_mosaic_focus(&mut self, focused_path: Option<&Path>) {
+        let Some(page) = self.mosaic.page.as_mut() else {
+            return;
+        };
+        if focused_path.is_some_and(|path| self.mosaic.unavailable_paths.contains(path))
+            && let Some(first_loaded) = self.mosaic.uploaded_paths.iter().position(Option::is_some)
+        {
+            page.focused = first_loaded;
+        }
+    }
+
+    fn move_mosaic_focus(&mut self, direction: crate::mosaic::FocusDirection) {
+        let Some(page) = self.mosaic.page.as_mut() else {
+            return;
+        };
+        let loaded_slots: Vec<usize> = self
+            .mosaic
+            .uploaded_paths
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, path)| path.as_ref().map(|_| slot))
+            .collect();
+        if loaded_slots.is_empty() {
+            return;
+        }
+        let focused = loaded_slots
+            .iter()
+            .position(|slot| *slot == page.focused)
+            .unwrap_or(0);
+        let mut navigation = crate::mosaic::MosaicPage {
+            start: 0,
+            indices: loaded_slots.clone(),
+            focused,
+        };
+        navigation.move_focus(direction);
+        page.focused = loaded_slots[navigation.focused];
+        self.request_redraw();
+    }
+
+    fn move_mosaic_page(&mut self, delta: isize) {
+        let Some(current) = self.mosaic.page.as_ref() else {
+            return;
+        };
+        let Some(playlist) = self.playlist.as_ref() else {
+            return;
+        };
+        let Some(next) = current.adjacent(playlist.visible_projection(), delta) else {
+            return;
+        };
+        self.install_mosaic_page(next);
+    }
+
+    fn open_focused_mosaic_photo(&mut self) {
+        let Some(page) = self.mosaic.page.as_ref() else {
+            return;
+        };
+        if self
+            .mosaic
+            .uploaded_paths
+            .get(page.focused)
+            .and_then(Option::as_ref)
+            .is_none()
+        {
+            return;
+        }
+        let Some(index) = page.indices.get(page.focused).copied() else {
+            return;
+        };
+        self.open_mosaic_photo(index);
+    }
+
+    fn open_mosaic_photo(&mut self, index: usize) {
+        let Some(path) = self.mosaic.page.as_ref().and_then(|page| {
+            page.indices
+                .iter()
+                .position(|candidate| *candidate == index)
+                .filter(|slot| {
+                    self.mosaic
+                        .uploaded_paths
+                        .get(*slot)
+                        .and_then(Option::as_ref)
+                        .is_some()
+                })
+                .and_then(|_| self.playlist.as_ref()?.files.get(index).cloned())
+        }) else {
+            return;
+        };
+        let reserved = (self.session.presented_path.as_deref() != Some(path.as_path()))
+            .then(|| self.take_prefetched_image(&path))
+            .flatten();
+        self.clear_full_image_mosaic();
+        if let Some(loaded) = reserved
+            && !self.insert_prefetched_image(path.clone(), loaded)
+        {
+            log::warn!(
+                "full-image mosaic selection could not retain {} for navigation",
+                prefetch::privacy_safe_file_name(&path)
+            );
+        }
+        self.go_to_index(index);
+    }
+
     fn observe_current_display(&mut self) {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
@@ -2999,9 +3374,16 @@ impl App {
             .is_some_and(|renderer| renderer.image_size().is_some());
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.set_display_output(output);
+            if self.mosaic.is_active() {
+                renderer.set_mosaic_slot_count(self.mosaic.uploaded_paths.len());
+                self.mosaic.uploaded_paths.fill(None);
+            }
         }
         if had_image {
             self.refresh_presented_display_pixels();
+        }
+        if self.mosaic.is_active() {
+            self.sync_mosaic_gpu();
         }
         self.request_redraw();
     }
@@ -3027,6 +3409,168 @@ impl App {
         if let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
         }
+    }
+
+    fn mosaic_frame_geometry(
+        &mut self,
+        scale_factor: f64,
+    ) -> (
+        Vec<crate::gpu::MosaicDraw>,
+        Option<crate::ui::MosaicUiState>,
+    ) {
+        let Some(page) = self.mosaic.page.clone() else {
+            return (Vec::new(), None);
+        };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return (Vec::new(), None);
+        };
+        let size = renderer.window().inner_size();
+        let Some(viewport) = crate::view::safe_viewport_rect(
+            (size.width, size.height),
+            crate::view::ViewportInsets::default(),
+        ) else {
+            return (Vec::new(), None);
+        };
+        let loaded: Vec<(usize, (u32, u32))> = self
+            .mosaic
+            .uploaded_paths
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, path)| {
+                path.as_ref()?;
+                Some((slot, renderer.mosaic_image_size(slot)?))
+            })
+            .collect();
+        let upload_ready = self.playlist.as_ref().is_some_and(|playlist| {
+            page.indices.iter().enumerate().any(|(slot, index)| {
+                self.mosaic
+                    .uploaded_paths
+                    .get(slot)
+                    .and_then(Option::as_ref)
+                    .is_none()
+                    && playlist.files.get(*index).is_some_and(|path| {
+                        self.session.presented_path.as_deref() == Some(path.as_path())
+                            || self.prefetch.contains(path)
+                    })
+            })
+        });
+        let loading = self.prefetch_schedule.in_flight_len() > 0 || upload_ready;
+        let gap = LogicalSize::new(3_u32, 3_u32)
+            .to_physical::<u32>(scale_factor)
+            .width
+            .clamp(1, 12);
+        let display_sizes = loaded
+            .iter()
+            .map(|(slot, image_size)| {
+                page.indices
+                    .get(*slot)
+                    .map_or(*image_size, |catalog_index| {
+                        self.mosaic_photo_display_size(*image_size, *catalog_index)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let grid = crate::mosaic::dense_collage(viewport, &display_sizes, gap);
+        let projection_total = self.playlist.as_ref().map_or(0, Playlist::visible_len);
+        let mut draws = Vec::with_capacity(loaded.len());
+        let mut cells = Vec::with_capacity(loaded.len());
+        for ((slot, image_size), cell) in loaded.into_iter().zip(grid.cells) {
+            let Some(catalog_index) = page.indices.get(slot).copied() else {
+                continue;
+            };
+            let placement = self.mosaic_photo_placement(
+                (size.width, size.height),
+                image_size,
+                cell,
+                catalog_index,
+            );
+            draws.push(crate::gpu::MosaicDraw {
+                slot,
+                placement,
+                viewport: cell,
+            });
+            if let Some(rect) = cell.logical_bounds(scale_factor) {
+                cells.push(crate::ui::MosaicCell {
+                    catalog_index,
+                    projection_position: page.start.saturating_add(slot).saturating_add(1),
+                    projection_total,
+                    rect,
+                    selected: page.focused == slot,
+                });
+            }
+        }
+        let ready = draws.len();
+        let target = page.indices.len();
+        let state = self.mosaic_load_state(ready, target, loading);
+        (
+            draws,
+            Some(crate::ui::MosaicUiState {
+                cells,
+                ready,
+                target,
+                state,
+            }),
+        )
+    }
+
+    fn mosaic_photo_display_size(
+        &self,
+        image_size: (u32, u32),
+        catalog_index: usize,
+    ) -> (u32, u32) {
+        let is_current = self.playlist.as_ref().is_some_and(|playlist| {
+            playlist.index == catalog_index
+                && self.session.presented_path.as_deref()
+                    == playlist.files.get(catalog_index).map(PathBuf::as_path)
+        });
+        if is_current && self.transform.rotation_steps.rem_euclid(2) != 0 {
+            (image_size.1, image_size.0)
+        } else {
+            image_size
+        }
+    }
+
+    fn mosaic_load_state(
+        &self,
+        ready: usize,
+        target: usize,
+        loading: bool,
+    ) -> crate::ui::MosaicLoadState {
+        if loading {
+            crate::ui::MosaicLoadState::Loading
+        } else if ready == target {
+            crate::ui::MosaicLoadState::Ready
+        } else if self.mosaic.memory_limited {
+            crate::ui::MosaicLoadState::MemoryLimited
+        } else if self.mosaic.display_limited {
+            crate::ui::MosaicLoadState::DisplayLimited
+        } else {
+            crate::ui::MosaicLoadState::Incomplete
+        }
+    }
+
+    fn mosaic_photo_placement(
+        &self,
+        target: (u32, u32),
+        image_size: (u32, u32),
+        cell: crate::view::PhysicalViewport,
+        catalog_index: usize,
+    ) -> crate::view::Placement {
+        let is_current = self.playlist.as_ref().is_some_and(|playlist| {
+            playlist.index == catalog_index
+                && self.session.presented_path.as_deref()
+                    == playlist.files.get(catalog_index).map(PathBuf::as_path)
+        });
+        let rotated90 = is_current && self.transform.rotation_steps.rem_euclid(2) != 0;
+        let mut placement =
+            crate::view::fit_to_physical_viewport(target, image_size, cell, rotated90);
+        if is_current {
+            placement.uv_matrix = crate::view::uv_transform(
+                self.transform.rotation_steps,
+                self.transform.flip_h,
+                self.transform.flip_v,
+            );
+        }
+        placement
     }
 
     fn rotate_current(&mut self, quarter_turns: i32) {
@@ -3083,6 +3627,7 @@ impl App {
                 self.show_tools_panel = !self.show_tools_panel;
                 self.request_redraw();
             }
+            "g" | "G" if self.modifiers.shift_key() => self.toggle_full_image_mosaic(),
             "g" | "G" => {
                 if self
                     .playlist
@@ -3161,6 +3706,7 @@ impl App {
             context_menu_open: self.context_menu_pos.is_some(),
             is_cropping: self.transform.is_cropping,
             is_healing: self.heal.active,
+            is_mosaic: self.mosaic.is_active(),
             empty_rating_filter: self.rating_filter_is_empty(),
             is_fullscreen: self.is_fullscreen,
         }
@@ -3232,7 +3778,7 @@ impl App {
             // trusted pixels retained above.
             self.prefetch_schedule.allow(&path);
         }
-        self.spawn_image_load_with_cached(next_path, cached_target, false);
+        self.spawn_image_load_with_cached(next_path, cached_target, false, false);
         self.kick_prefetch();
     }
 
@@ -3241,10 +3787,19 @@ impl App {
         let Some(playlist) = &self.playlist else {
             return;
         };
-        let targets: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)> = playlist
-            .visible_neighbor_paths(2)
+        let candidate_paths: Vec<PathBuf> = if let Some(page) = self.mosaic.page.as_ref() {
+            page.indices
+                .iter()
+                .filter_map(|index| playlist.files.get(*index).cloned())
+                .filter(|path| self.session.presented_path.as_deref() != Some(path.as_path()))
+                .collect()
+        } else {
+            playlist.visible_neighbor_paths(2)
+        };
+        let targets: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)> = candidate_paths
             .into_iter()
             .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))
+            .filter(|p| !self.mosaic.unavailable_paths.contains(p))
             .map(|path| {
                 let provenance = playlist.scan_provenance(&path);
                 (path, provenance)
@@ -3306,8 +3861,16 @@ impl App {
                         false
                     }
                     PrefetchDestination::CacheNeighbor => {
-                        let retained = self.insert_prefetched_image(path.clone(), image);
+                        let retained = if self.mosaic.is_active() {
+                            self.insert_mosaic_image_if_fits(path.clone(), image)
+                        } else {
+                            self.insert_prefetched_image(path.clone(), image)
+                        };
                         if !retained {
+                            if self.mosaic.is_active() {
+                                self.mosaic.memory_limited = true;
+                                self.mosaic.unavailable_paths.insert(path.clone());
+                            }
                             diagnostic = Some(format!(
                                 "neighbor prefetch skipped for {} because it exceeds the cache budget",
                                 prefetch::privacy_safe_file_name(&path)
@@ -3320,6 +3883,9 @@ impl App {
                 Ok(None) => false,
                 Err(_) if selected_with_foreground => false,
                 Err(failure) => {
+                    if self.mosaic.is_active() {
+                        self.mosaic.unavailable_paths.insert(path.clone());
+                    }
                     diagnostic = Some(format!(
                         "neighbor prefetch failed for {}: {}",
                         prefetch::privacy_safe_file_name(&path),
@@ -3340,6 +3906,9 @@ impl App {
             if self.show_filmstrip_panel && self.filmstrip_panel_open {
                 self.request_thumbs_for_filmstrip();
             }
+        }
+        if self.mosaic.is_active() {
+            self.sync_mosaic_gpu();
         }
         if presented && let Some(renderer) = self.renderer.as_ref() {
             renderer.window().request_redraw();
@@ -4722,6 +5291,79 @@ impl App {
         self.kick_prefetch();
     }
 
+    fn handle_missing_selected_path(&mut self, path: PathBuf) {
+        self.session.set_selected_missing();
+        self.show_toast(crate::session::MISSING_IMAGE_STATUS);
+
+        let old_index = self
+            .playlist
+            .as_ref()
+            .and_then(|playlist| playlist.files.iter().position(|entry| entry == &path));
+        let Some(old_index) = old_index else {
+            self.start_missing_selection_scan(path);
+            self.request_redraw();
+            return;
+        };
+
+        self.remove_prefetched_image(&path);
+        self.thumb_textures.remove(&path);
+        self.prefetch_schedule.allow(&path);
+        let removal = {
+            let playlist = self
+                .playlist
+                .as_mut()
+                .expect("located missing selection belongs to the active playlist");
+            playlist.remove_paths(std::slice::from_ref(&path), old_index);
+            if playlist.files.is_empty() {
+                MissingSelectionRemoval::ScanFolder
+            } else if playlist.visible_len() == 0 {
+                MissingSelectionRemoval::FilterEmpty
+            } else {
+                MissingSelectionRemoval::Advance(playlist.files[playlist.index].clone())
+            }
+        };
+
+        match removal {
+            MissingSelectionRemoval::Advance(next_path) => {
+                self.cancel_rating_disclosure_for_source_change();
+                self.session.selected_path = Some(next_path.clone());
+                self.transform = Transform::default();
+                self.spawn_image_load(next_path);
+                self.kick_prefetch();
+            }
+            MissingSelectionRemoval::ScanFolder => {
+                // The stale selection may have been the only installed entry.
+                // Keep the prior frame while a fresh parent scan looks for a
+                // surviving sibling.
+                self.start_missing_selection_scan(path);
+            }
+            MissingSelectionRemoval::FilterEmpty => {
+                self.cancel_pending_image_load();
+                self.session.selected_path = None;
+                self.invalidate_displayed_image();
+                self.show_toast(
+                    "The selected image is no longer available, and no remaining image matches the rating filter.",
+                );
+            }
+        }
+        self.request_redraw();
+    }
+
+    fn start_missing_selection_scan(&mut self, path: PathBuf) {
+        let directory = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_owned();
+        self.start_folder_scan(
+            directory,
+            ScanPurpose::SelectedFile {
+                path,
+                missing_recovery: true,
+            },
+        );
+    }
+
     fn undo_trash(&mut self) {
         let active = self
             .curation_worker
@@ -4871,13 +5513,17 @@ impl App {
     }
 
     fn spawn_image_load(&mut self, path: PathBuf) {
+        self.spawn_image_load_with_recovery(path, false);
+    }
+
+    fn spawn_image_load_with_recovery(&mut self, path: PathBuf, preserve_missing_recovery: bool) {
         let cached_image = self.take_prefetched_image(&path);
-        self.spawn_image_load_with_cached(path, cached_image, false);
+        self.spawn_image_load_with_cached(path, cached_image, false, preserve_missing_recovery);
     }
 
     fn spawn_refreshed_image_load(&mut self, path: PathBuf) {
         self.cancel_rating_disclosure_for_source_change();
-        self.spawn_image_load_with_cached(path, None, true);
+        self.spawn_image_load_with_cached(path, None, true, false);
     }
 
     fn spawn_image_load_with_cached(
@@ -4885,13 +5531,14 @@ impl App {
         path: PathBuf,
         cached_image: Option<LoadedImage>,
         refresh_scanned: bool,
+        preserve_missing_recovery: bool,
     ) {
         let generation = self
             .session
             .generation
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
-        self.prepare_for_image_load();
+        self.prepare_for_image_load(preserve_missing_recovery);
 
         // Prefer RAM cache even for non-navigate loads (undo, filmstrip jump).
         if let Some(image) = cached_image {
@@ -4929,7 +5576,14 @@ impl App {
             let res = match loaded {
                 Ok(Some(image)) => Ok(image),
                 Ok(None) => return,
-                Err(error) => Err(error.to_string()),
+                Err(error) => {
+                    let error = error.to_string();
+                    if crate::fs::path_is_definitely_missing(&path) {
+                        Err(ForegroundLoadFailure::MissingCandidate(error))
+                    } else {
+                        Err(ForegroundLoadFailure::Other(error))
+                    }
+                }
             };
             let _ = tx.send((path, res));
             let _ = event_proxy.send_event(UserEvent::Wake);
@@ -4940,6 +5594,62 @@ impl App {
             let message = format!("Could not start image decode: {error}");
             self.session.load_error = Some(message.clone());
             self.show_toast(message);
+        }
+    }
+
+    fn poll_foreground_image_load(&mut self) {
+        let Some(polled) = self.session.receiver.as_ref().map(poll_worker) else {
+            return;
+        };
+        let (path, result) = match polled {
+            WorkerPoll::Pending => return,
+            WorkerPoll::Ready(completion) => completion,
+            WorkerPoll::Disconnected => {
+                self.session.receiver = None;
+                let message = crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS.to_owned();
+                self.session.load_error = Some(message.clone());
+                log::error!("foreground image result channel disconnected");
+                if self.current_image.is_some() {
+                    self.show_toast(decode_failure_toast(&message, true));
+                }
+                self.request_redraw();
+                return;
+            }
+        };
+
+        self.session.receiver = None;
+        if self.session.selected_path.as_ref() != Some(&path) {
+            return;
+        }
+        match result {
+            Ok(image) => {
+                self.display_loaded_image(&path, image);
+                self.kick_prefetch();
+                self.request_redraw();
+            }
+            Err(failure) => {
+                let disposition = resolve_foreground_load_failure(
+                    failure,
+                    crate::fs::path_is_definitely_missing(&path),
+                    self.session.presented_path.as_ref() == Some(&path),
+                );
+                match disposition {
+                    ForegroundLoadFailureDisposition::MissingSelection => {
+                        log::info!("selected image disappeared before presentation");
+                        self.handle_missing_selected_path(path);
+                    }
+                    ForegroundLoadFailureDisposition::Other(error) => {
+                        self.session.selected_missing = false;
+                        log::error!("decode failed");
+                        let message = user_facing_decode_error(error);
+                        self.session.load_error = Some(message.clone());
+                        if self.current_image.is_some() {
+                            self.show_toast(decode_failure_toast(&message, true));
+                        }
+                        self.request_redraw();
+                    }
+                }
+            }
         }
     }
 
@@ -5737,7 +6447,11 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(recovery) = self.appearance_recovery.take() {
                     self.show_toast(recovery.notice());
                 }
-                let _ = self.renderer.as_mut().unwrap().render(None, None, |_| {});
+                let _ = self
+                    .renderer
+                    .as_mut()
+                    .unwrap()
+                    .render(None, None, &[], |_| {});
                 {
                     let window = self.renderer.as_ref().unwrap().window();
                     window.set_visible(true);
@@ -5826,6 +6540,22 @@ impl ApplicationHandler<UserEvent> for App {
                             && escape_press_reaches_app(event.repeat, egui_popup_open)
                             && matches!(&event.logical_key, Key::Named(NamedKey::Escape))
                             && escape_action(self.escape_context()) != EscapeAction::None)
+                        || (self.mosaic.is_active()
+                            && event.state == winit::event::ElementState::Pressed
+                            && matches!(
+                                &event.logical_key,
+                                Key::Named(
+                                    NamedKey::Enter
+                                        | NamedKey::ArrowLeft
+                                        | NamedKey::ArrowRight
+                                        | NamedKey::ArrowUp
+                                        | NamedKey::ArrowDown
+                                        | NamedKey::Home
+                                        | NamedKey::End
+                                        | NamedKey::PageUp
+                                        | NamedKey::PageDown
+                                )
+                            ))
                         || (!application_shortcuts_blocked([
                             self.show_about,
                             self.show_update,
@@ -5833,11 +6563,9 @@ impl ApplicationHandler<UserEvent> for App {
                             self.pending_rating_write.is_some(),
                             egui_popup_open,
                             self.context_menu_pos.is_some(),
-                        ]) && route_consumed_keyboard_key(
+                        ]) && route_consumed_keyboard_key_in_context(
                             &event.logical_key,
-                            self.transform.is_cropping,
-                            self.heal.active,
-                            self.is_fullscreen,
+                            self.escape_context(),
                         ))
                 }
                 _ => false,
@@ -5845,6 +6573,17 @@ impl ApplicationHandler<UserEvent> for App {
             if !application_must_handle {
                 return;
             }
+        }
+
+        if self.mosaic.is_active()
+            && matches!(
+                &event,
+                WindowEvent::CursorMoved { .. }
+                    | WindowEvent::MouseInput { .. }
+                    | WindowEvent::MouseWheel { .. }
+            )
+        {
+            return;
         }
 
         match event {
@@ -6156,6 +6895,10 @@ impl ApplicationHandler<UserEvent> for App {
                             self.toggle_heal_mode();
                             return;
                         }
+                        EscapeAction::LeaveMosaic => {
+                            self.leave_full_image_mosaic();
+                            return;
+                        }
                         EscapeAction::ClearRatingFilter => {
                             self.set_rating_filter(RatingFilter::All);
                             return;
@@ -6192,6 +6935,34 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 if is_fullscreen_toggle_key(&logical_key, self.modifiers) {
                     self.toggle_fullscreen();
+                    return;
+                }
+                if self.mosaic.is_active() {
+                    match logical_key {
+                        Key::Character(c)
+                            if c.eq_ignore_ascii_case("g") && self.modifiers.shift_key() =>
+                        {
+                            self.leave_full_image_mosaic();
+                        }
+                        Key::Named(NamedKey::Enter | NamedKey::ArrowDown) => {
+                            self.open_focused_mosaic_photo();
+                        }
+                        Key::Named(NamedKey::ArrowRight) => {
+                            self.move_mosaic_focus(crate::mosaic::FocusDirection::Next);
+                        }
+                        Key::Named(NamedKey::ArrowLeft) => {
+                            self.move_mosaic_focus(crate::mosaic::FocusDirection::Previous);
+                        }
+                        Key::Named(NamedKey::Home) => {
+                            self.move_mosaic_focus(crate::mosaic::FocusDirection::First);
+                        }
+                        Key::Named(NamedKey::End) => {
+                            self.move_mosaic_focus(crate::mosaic::FocusDirection::Last);
+                        }
+                        Key::Named(NamedKey::PageUp) => self.move_mosaic_page(-1),
+                        Key::Named(NamedKey::PageDown) => self.move_mosaic_page(1),
+                        _ => {}
+                    }
                     return;
                 }
                 match logical_key {
@@ -6262,6 +7033,7 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Named(NamedKey::ArrowUp) if self.transform.is_cropping => {
                         self.adjust_crop_from_keyboard(0.0, -1.0);
                     }
+                    Key::Named(NamedKey::ArrowUp) => self.toggle_full_image_mosaic(),
                     Key::Named(NamedKey::ArrowRight | NamedKey::PageDown) => self.navigate(1),
                     Key::Named(NamedKey::ArrowLeft | NamedKey::PageUp) => self.navigate(-1),
                     Key::Named(NamedKey::Home) => self.navigate(-999_999),
@@ -6320,10 +7092,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let crop_screen = self
                     .crop_screen_rect()
                     .and_then(|rect| crate::view::physical_rect_to_logical(rect, scale_factor));
-                let playlist_pos = self
-                    .playlist
-                    .as_ref()
-                    .map(|p| (p.index.saturating_add(1), p.files.len().max(1)));
+                let playlist_pos = self.playlist.as_ref().and_then(Playlist::catalog_position);
                 let rating = self.playlist.as_ref().map_or_else(
                     || crate::ui::RatingUiState {
                         state: self.presented_rating,
@@ -6349,7 +7118,7 @@ impl ApplicationHandler<UserEvent> for App {
                             .visible_position()
                             .map(|position| (position.saturating_add(1), playlist.visible_len())),
                         match_count: playlist.visible_len(),
-                        current_catalog_index: Some(playlist.index),
+                        current_catalog_index: playlist.catalog_index(),
                         folder_count: playlist.files.len(),
                         pending_disclosure: self
                             .pending_rating_write
@@ -6479,6 +7248,10 @@ impl ApplicationHandler<UserEvent> for App {
                 let logical_image_viewport =
                     image_viewport.and_then(|viewport| viewport.logical_bounds(scale_factor));
                 let performance_image_path = self.session.presented_path.clone();
+                if self.mosaic.is_active() {
+                    self.sync_mosaic_gpu();
+                }
+                let (mosaic_draws, mosaic_ui) = self.mosaic_frame_geometry(scale_factor);
 
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
@@ -6490,7 +7263,9 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.set_mode(theme_mode);
                 }
 
-                let placement = if let Some(size) = renderer.image_size() {
+                let placement = if mosaic_ui.is_none()
+                    && let Some(size) = renderer.image_size()
+                {
                     let win_size = renderer.window().inner_size();
                     let rotated90 = rot_steps.rem_euclid(2) != 0;
                     let mut p = crate::view::fit_to_viewport(
@@ -6574,6 +7349,7 @@ impl ApplicationHandler<UserEvent> for App {
                     playlist_pos,
                     pixel_scale: pixel_scale.unwrap_or(0.0),
                     toast,
+                    mosaic: mosaic_ui,
                     filmstrip,
                     crop_screen,
                     crop_uv: crop_rect,
@@ -6585,10 +7361,11 @@ impl ApplicationHandler<UserEvent> for App {
                     context_menu_pos: self.context_menu_pos,
                 };
 
-                let presents_image = placement.is_some();
-                let frame_output = renderer.render(placement, image_viewport, |ui| {
-                    ui_actions = crate::ui::render(ui, &frame);
-                });
+                let presents_image = placement.is_some() || !mosaic_draws.is_empty();
+                let frame_output =
+                    renderer.render(placement, image_viewport, &mosaic_draws, |ui| {
+                        ui_actions = crate::ui::render(ui, &frame);
+                    });
                 match frame_output.result {
                     FrameResult::Presented | FrameResult::Skipped => {}
                     FrameResult::NeedsReconfigure => renderer.reconfigure(),
@@ -6811,6 +7588,12 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::ToggleFullscreen => {
                             self.toggle_fullscreen();
                         }
+                        crate::ui::UiAction::ToggleMosaic => {
+                            self.toggle_full_image_mosaic();
+                        }
+                        crate::ui::UiAction::OpenMosaicPhoto(index) => {
+                            self.open_mosaic_photo(index);
+                        }
                         crate::ui::UiAction::FitToView => self.fit_to_view(),
                         crate::ui::UiAction::ActualSize => self.set_actual_size(),
                         crate::ui::UiAction::ZoomIn => self.zoom_at_viewport_center(1.15),
@@ -6910,33 +7693,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.poll_auxiliary_load();
         self.poll_crop_result();
         self.poll_save_result(event_loop);
-        if let Some(rx) = &self.session.receiver
-            && let Ok((path, result)) = rx.try_recv()
-        {
-            self.session.receiver = None;
-            let is_current = self.session.selected_path.as_ref() == Some(&path);
-            match result {
-                Ok(image) if is_current => {
-                    self.display_loaded_image(&path, image);
-                    self.kick_prefetch();
-                    if let Some(r) = self.renderer.as_mut() {
-                        r.window().request_redraw();
-                    }
-                }
-                Err(e) if is_current => {
-                    log::error!("decode failed");
-                    let message = user_facing_decode_error(e);
-                    self.session.load_error = Some(message.clone());
-                    if self.current_image.is_some() {
-                        self.show_toast(decode_failure_toast(&message, true));
-                    }
-                    if let Some(r) = self.renderer.as_mut() {
-                        r.window().request_redraw();
-                    }
-                }
-                Ok(_) | Err(_) => {}
-            }
-        }
+        self.poll_foreground_image_load();
 
         if self.poll_folder_scan()
             && let Some(renderer) = self.renderer.as_ref()

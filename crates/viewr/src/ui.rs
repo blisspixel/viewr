@@ -167,6 +167,10 @@ pub enum UiAction {
     FlipV,
     /// Toggle fullscreen mode.
     ToggleFullscreen,
+    /// Enter or leave the transient full-image mosaic.
+    ToggleMosaic,
+    /// Open one fully loaded mosaic photo by canonical playlist index.
+    OpenMosaicPhoto(usize),
     /// Reset the image to fit inside the available viewport.
     FitToView,
     /// Display one image pixel per physical screen pixel.
@@ -326,6 +330,8 @@ pub(crate) struct UiFrameOwned {
     pub pixel_scale: f32,
     /// Transient toast message (trash undo hint, etc.).
     pub toast: Option<String>,
+    /// Transient full-image mosaic geometry and status.
+    pub mosaic: Option<MosaicUiState>,
     /// Neighbor filmstrip entries.
     pub filmstrip: Vec<FilmstripItem>,
     /// Crop rectangle in screen pixels `[x0, y0, x1, y1]` when previewing.
@@ -344,6 +350,35 @@ pub(crate) struct UiFrameOwned {
     pub heal_brush_screen_radius: f32,
     /// Screen position of the right-click context menu, if open.
     pub context_menu_pos: Option<[f32; 2]>,
+}
+
+/// One complete photo currently presented by the native mosaic renderer.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MosaicCell {
+    pub(crate) catalog_index: usize,
+    pub(crate) projection_position: usize,
+    pub(crate) projection_total: usize,
+    pub(crate) rect: [f32; 4],
+    pub(crate) selected: bool,
+}
+
+/// Accessible overlay state for the native full-image mosaic.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MosaicUiState {
+    pub(crate) cells: Vec<MosaicCell>,
+    pub(crate) ready: usize,
+    pub(crate) target: usize,
+    pub(crate) state: MosaicLoadState,
+}
+
+/// Why a mosaic has its current ready-photo count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MosaicLoadState {
+    Loading,
+    Ready,
+    MemoryLimited,
+    DisplayLimited,
+    Incomplete,
 }
 
 /// Immutable rating and folder-filter state for one rendered frame.
@@ -562,6 +597,13 @@ fn render_background(
     chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
+    if let Some(mosaic) = frame.mosaic.as_ref() {
+        render_mosaic_overlay(ui, actions, mosaic, colors);
+        if let Some(msg) = &frame.toast {
+            render_toast(ui, msg, frame);
+        }
+        return;
+    }
     if !frame.dock.immersive {
         render_top_menu(ui, actions, frame, chrome);
     }
@@ -610,6 +652,102 @@ fn render_background(
     }
 
     apply_cursor(ui, frame);
+}
+
+fn render_mosaic_overlay(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    mosaic: &MosaicUiState,
+    colors: ChromeColors,
+) {
+    let painter = ui.painter();
+    for cell in &mosaic.cells {
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(cell.rect[0], cell.rect[1]),
+            egui::pos2(cell.rect[2], cell.rect[3]),
+        );
+        let response = ui.interact(
+            rect,
+            egui::Id::new(("full_image_mosaic", cell.catalog_index)),
+            egui::Sense::click(),
+        );
+        let mut label = format!(
+            "Photo {} of {} in the active folder view",
+            cell.projection_position, cell.projection_total
+        );
+        if cell.selected {
+            label.push_str(", selected");
+        }
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::Button, true, cell.selected, label.clone())
+        });
+        if response.clicked() {
+            actions.push(UiAction::OpenMosaicPhoto(cell.catalog_index));
+        }
+        let stroke = if cell.selected {
+            egui::Stroke::new(3.0, colors.accent)
+        } else if response.hovered() {
+            egui::Stroke::new(2.0, colors.text)
+        } else {
+            egui::Stroke::NONE
+        };
+        if stroke != egui::Stroke::NONE {
+            painter.rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
+        }
+    }
+
+    let (status, accessible_status) = mosaic_status(mosaic);
+    egui::Area::new("full_image_mosaic_status".into())
+        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -14.0])
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(colors.panel)
+                .stroke(egui::Stroke::new(1.0, colors.border))
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::symmetric(12, 7))
+                .show(ui, |ui| {
+                    let response = ui.label(
+                        RichText::new(format!(
+                            "{status}  |  Left/Right select  |  Down/Enter opens  |  Page Up/Down groups  |  Esc returns"
+                        ))
+                            .size(12.5)
+                            .color(colors.text),
+                    );
+                    response.ctx.accesskit_node_builder(response.id, |node| {
+                        node.set_value(accessible_status);
+                        node.set_live(egui::accesskit::Live::Polite);
+                    });
+                });
+        });
+}
+
+fn mosaic_status(mosaic: &MosaicUiState) -> (String, String) {
+    let status = match mosaic.state {
+        MosaicLoadState::Loading => format!(
+            "Full-image collage  {} of {} photos ready",
+            mosaic.ready, mosaic.target
+        ),
+        MosaicLoadState::MemoryLimited => format!(
+            "Full-image collage  {} of {} photos fit the 256 MiB memory limit",
+            mosaic.ready, mosaic.target
+        ),
+        MosaicLoadState::DisplayLimited => format!(
+            "Full-image collage  {} of {} photos meet full-image display limits",
+            mosaic.ready, mosaic.target
+        ),
+        MosaicLoadState::Incomplete => format!(
+            "Full-image collage  {} of {} photos available",
+            mosaic.ready, mosaic.target
+        ),
+        MosaicLoadState::Ready => format!("Full-image collage  {} photos", mosaic.ready),
+    };
+    let accessible = if mosaic.state == MosaicLoadState::Loading {
+        "Full-image collage loading complete photos".to_owned()
+    } else {
+        status.clone()
+    };
+    (status, accessible)
 }
 
 fn render_context_menu(
@@ -1415,6 +1553,17 @@ fn view_menu(
         ui.set_min_width(228.0);
         view_zoom_menu(ui, actions, chrome);
         view_sequence_menu(ui, actions, frame);
+        ui.separator();
+        if ui
+            .add_enabled(
+                frame.rating.match_count > 1 && frame.img_size.is_some(),
+                egui::Button::new("Full-Image Collage").shortcut_text("Up / Shift+G"),
+            )
+            .clicked()
+        {
+            actions.push(UiAction::ToggleMosaic);
+            ui.close();
+        }
         ui.separator();
         let rating_filter_label = chrome.rating_filter_menu_label();
         ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
@@ -3842,11 +3991,12 @@ mod tests {
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
         EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
-        OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
-        TOP_STATUS_COMPACT_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
-        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
-        crop_pixel_bounds, image_open_status, menu_tool_button, panels_menu, rating_filter_menu,
-        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
+        MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS,
+        PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction,
+        UiFrameOwned, actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
+        chrome_colors_for, context_tool_button, crop_pixel_bounds, image_open_status,
+        menu_tool_button, mosaic_status, panels_menu, rating_filter_menu, rating_menu,
+        rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -3951,6 +4101,7 @@ mod tests {
             playlist_pos: Some((1, 2)),
             pixel_scale: 1.0,
             toast: None,
+            mosaic: None,
             filmstrip: vec![
                 FilmstripItem {
                     index: 0,
@@ -4510,6 +4661,8 @@ mod tests {
         let _ = UiAction::ToggleToolsPanelExpansion;
         let _ = UiAction::ToggleFilmstripPanelVisibility;
         let _ = UiAction::ToggleFilmstripPanelExpansion;
+        let _ = UiAction::ToggleMosaic;
+        let _ = UiAction::OpenMosaicPhoto(0);
         let _ = UiAction::SetToolsPanelSide(DockSide::Right);
         let _ = UiAction::SetImageInfoSide(DockSide::Left);
         let _ = UiAction::FitToView;
@@ -4611,6 +4764,90 @@ mod tests {
         }));
         assert!(values.contains(&"presented.png"));
         assert!(!values.contains(&"Opening..."));
+    }
+
+    #[test]
+    fn full_image_mosaic_exposes_photos_as_selected_buttons_without_filenames() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.dock.immersive = true;
+        frame.mosaic = Some(MosaicUiState {
+            cells: vec![
+                MosaicCell {
+                    catalog_index: 4,
+                    projection_position: 5,
+                    projection_total: 20,
+                    rect: [10.0, 10.0, 300.0, 220.0],
+                    selected: true,
+                },
+                MosaicCell {
+                    catalog_index: 5,
+                    projection_position: 6,
+                    projection_total: 20,
+                    rect: [310.0, 10.0, 600.0, 220.0],
+                    selected: false,
+                },
+            ],
+            ready: 2,
+            target: 8,
+            state: MosaicLoadState::Loading,
+        });
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let photo_nodes = update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| {
+                node.label()
+                    .filter(|label| label.starts_with("Photo "))
+                    .map(|_| node)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(photo_nodes.len(), 2);
+        assert_eq!(
+            photo_nodes[0].label(),
+            Some("Photo 5 of 20 in the active folder view, selected")
+        );
+        assert_eq!(
+            photo_nodes[0].toggled(),
+            Some(egui::accesskit::Toggled::True)
+        );
+        assert!(photo_nodes.iter().all(|node| {
+            node.role() == egui::accesskit::Role::Button
+                && !node.label().unwrap_or_default().contains("current.png")
+        }));
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Full-image collage loading complete photos")
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
+    fn mosaic_loading_announcement_is_stable_until_the_terminal_count() {
+        let mut mosaic = MosaicUiState {
+            cells: Vec::new(),
+            ready: 1,
+            target: 24,
+            state: MosaicLoadState::Loading,
+        };
+        let (first_visible, first_accessible) = mosaic_status(&mosaic);
+        mosaic.ready = 23;
+        let (later_visible, later_accessible) = mosaic_status(&mosaic);
+        assert_ne!(first_visible, later_visible);
+        assert_eq!(first_accessible, later_accessible);
+
+        mosaic.state = MosaicLoadState::MemoryLimited;
+        let (_, terminal_accessible) = mosaic_status(&mosaic);
+        assert_eq!(
+            terminal_accessible,
+            "Full-image collage  23 of 24 photos fit the 256 MiB memory limit"
+        );
     }
 
     #[test]

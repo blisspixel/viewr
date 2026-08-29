@@ -39,8 +39,11 @@ TIFF page and ICO frame navigation, eight-way
 EXIF orientation, RGB ICC-to-sRGB normalization, trilinear GPU mips, GPU-limited
 previews with full-resolution export, last-good-frame navigation, async crop and
 Save As, image information, Reload (`F5`), Spot Heal, About, and System, Light,
-Dark, and Console appearances. Appearance is the only persistent UI preference
-and contains no image or activity data.
+Dark, and Console appearances. The active v0.6 line also includes a transient
+full-image collage of up to 24 aspect-aware tiles without a catalog or thumbnail
+substitution.
+Appearance is the only persistent UI preference and contains no image or activity
+data.
 
 ## Order of operations to 1.0
 
@@ -110,19 +113,20 @@ each named with the reason it cannot run honestly under coverage, and the typed
 error set moved into the measured floor. Executor supervision is settled: every
 replace-latest decode queue closes when its last worker stops, so a thread that
 dies produces a named scheduling error rather than an operation that stays busy
-forever. Preserve bounded job,
-thumbnail, prefetch, chrome, and GPU contracts, and keep first-run failure
-observable. Do the v0.6 product-quality work without reopening unowned
-event-loop races.
+forever. Preserve bounded job, thumbnail, full-image mosaic, prefetch, chrome,
+and GPU contracts, and keep first-run failure observable. Do the v0.6
+product-quality work without reopening unowned event-loop races.
 
 Current position: v0.5.0 is released and verified, and the earlier v0.4.0
 file-coherence milestone plus v0.3.0, v0.2.0, and the v0.1.1 through v0.1.5
 patches remain published with the first preview's known issues recorded.
-Commit `1bdcbd2` passed exact-head CI, CodeQL, and fuzz, followed by one successful
-non-publishing v0.6 candidate run that retained four verified platform archives
-and the checksummed synthetic fixture set. Next is representative-hardware
-product-quality evidence against only that candidate, then v0.7 through v0.9
-evidence and trust. v0.5.0 remains the public install target.
+Commit `1bdcbd2` passed exact-head CI, CodeQL, and fuzz, followed by a successful
+non-publishing v0.6 candidate run that proved the archive and fixture pipeline.
+Later product-quality review found a stale folder-entry recovery defect and an
+empty catalog-position error, so those artifacts are superseded for acceptance.
+Next is a green exact-head commit containing the corrections, a new
+non-publishing candidate run, and representative-hardware evidence against only
+those replacement bytes. v0.5.0 remains the public install target.
 
 The v0.6 execution order is deliberately narrow:
 
@@ -177,7 +181,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Exact-head [candidate run 32611729680](https://github.com/blisspixel/viewr/actions/runs/32611729680) retains four verified platform archives plus the deterministic fixture artifact from `1bdcbd2`. Next, collect the three representative-hardware records and eight-session performance report set against only those bytes. v0.5.0 remains the public install target until that evidence passes. |
+| Integrated product quality | Open for v0.6 | Matrix and candidate-artifact contract in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). [Candidate run 32611729680](https://github.com/blisspixel/viewr/actions/runs/32611729680) proved the archive and deterministic-fixture pipeline, but later product corrections supersede its bytes for acceptance. Next, obtain green exact-head CI and fuzz for the corrections, dispatch a replacement candidate run, and collect the three representative-hardware records and eight-session performance report set against only that new run. v0.5.0 remains the public install target until that evidence passes. |
 | Human accessibility evidence | Open for v0.7 | Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -542,13 +546,33 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. Exact-head
   [candidate run 32611729680](https://github.com/blisspixel/viewr/actions/runs/32611729680)
-  from `1bdcbd2` retains the four verified platform archives and deterministic
-  fixture artifact. The hardware rows and eight performance reports remain
-  unrecorded and must use only this candidate set.
+  from `1bdcbd2` proved the four-archive and deterministic-fixture contract, but
+  later product corrections supersede that candidate for acceptance. The
+  hardware rows and eight performance reports remain unrecorded and must use
+  only the replacement exact-head candidate set.
 - [x] Make About, the empty card, and README essential controls quote one covered
   shortcut catalog. Help lists pages, reload, panels, Space-to-fit, Save As, and
   Undo Trash. The first-run card names drop. Long decoder errors stay one short
   line. `A` / `D` are not claimed as navigation keys.
+- [x] Recover when an enumerated sibling disappears before first presentation.
+  The worker and event loop must both observe absence before removing an
+  unpresented selection. Recovery advances by canonical folder position or
+  performs a fresh bounded parent scan, retains the last good frame, keeps scan
+  failures actionable, and never takes ownership from the presented-file
+  watcher. Empty playlists publish no invented catalog selection and do not
+  masquerade as a clearable rating-filter result. Missing-file Retry preserves
+  the folder-recovery fact until a settled outcome. A disconnected foreground
+  decode result channel also leaves loading with a durable Retry error instead
+  of waiting forever.
+- [x] Add a transient full-image collage for seeing context without turning viewr
+  into a library. It presents up to 24 complete, uncropped photos from the
+  active rating projection through the normal decode, color, and mipmapped GPU
+  path, never the thumbnail generator. Actual aspect ratios drive dense justified
+  rows with narrow gutters instead of equal blank cells. Group navigation, Up and
+  Down hierarchy, keyboard and native accessibility selection, exact-current
+  texture reuse, and a 256 MiB aggregate current plus neighbor decode budget are
+  covered. When the full group cannot fit, fewer complete photos reflow and the
+  interface states the limit instead of substituting reduced thumbnails.
 - [ ] Close remaining evidence-backed layout, spacing, copy, loading, empty, error,
   recovery, and diagnostic issues without adding decorative controls or unrelated
   features.

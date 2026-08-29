@@ -48,17 +48,19 @@ pub(crate) struct EscapeContext {
     pub context_menu_open: bool,
     pub is_cropping: bool,
     pub is_healing: bool,
+    pub is_mosaic: bool,
     pub empty_rating_filter: bool,
     pub is_fullscreen: bool,
 }
 
-/// What Escape should do, in product order: overlay, then edit, then filter, then fullscreen.
+/// What Escape should do, in product order: overlay, edit, mosaic, filter, fullscreen.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EscapeAction {
     None,
     CloseContextMenu,
     CancelCrop,
     LeaveHeal,
+    LeaveMosaic,
     ClearRatingFilter,
     LeaveFullscreen,
 }
@@ -71,6 +73,8 @@ pub(crate) const fn escape_action(context: EscapeContext) -> EscapeAction {
         EscapeAction::CancelCrop
     } else if context.is_healing {
         EscapeAction::LeaveHeal
+    } else if context.is_mosaic {
+        EscapeAction::LeaveMosaic
     } else if context.empty_rating_filter {
         EscapeAction::ClearRatingFilter
     } else if context.is_fullscreen {
@@ -141,6 +145,7 @@ pub(crate) fn repeated_viewer_action_allowed(key: &Key, is_cropping: bool) -> bo
     }
 }
 
+#[cfg(test)]
 #[must_use]
 pub(crate) fn route_consumed_keyboard_key(
     key: &Key,
@@ -148,6 +153,21 @@ pub(crate) fn route_consumed_keyboard_key(
     is_healing: bool,
     is_fullscreen: bool,
 ) -> bool {
+    route_consumed_keyboard_key_in_context(
+        key,
+        EscapeContext {
+            context_menu_open: false,
+            is_cropping,
+            is_healing,
+            is_mosaic: false,
+            empty_rating_filter: false,
+            is_fullscreen,
+        },
+    )
+}
+
+#[must_use]
+pub(crate) fn route_consumed_keyboard_key_in_context(key: &Key, context: EscapeContext) -> bool {
     match key {
         Key::Character(character) => {
             let character = character.as_str();
@@ -157,7 +177,7 @@ pub(crate) fn route_consumed_keyboard_key(
                 ]
                 .iter()
                 .any(|shortcut| character.eq_ignore_ascii_case(shortcut))
-                || (is_cropping && character.eq_ignore_ascii_case("x"))
+                || (context.is_cropping && character.eq_ignore_ascii_case("x"))
         }
         Key::Named(
             NamedKey::ArrowRight
@@ -169,16 +189,9 @@ pub(crate) fn route_consumed_keyboard_key(
             | NamedKey::F5
             | NamedKey::F11,
         ) => true,
-        Key::Named(NamedKey::ArrowDown | NamedKey::ArrowUp) => is_cropping,
-        Key::Named(NamedKey::Escape) => {
-            escape_action(EscapeContext {
-                context_menu_open: false,
-                is_cropping,
-                is_healing,
-                empty_rating_filter: false,
-                is_fullscreen,
-            }) != EscapeAction::None
-        }
+        Key::Named(NamedKey::ArrowUp) => context.is_cropping || !context.is_mosaic,
+        Key::Named(NamedKey::ArrowDown) => context.is_cropping || context.is_mosaic,
+        Key::Named(NamedKey::Escape) => escape_action(context) != EscapeAction::None,
         _ => false,
     }
 }
@@ -361,6 +374,32 @@ mod tests {
     }
 
     #[test]
+    fn collage_vertical_keys_follow_single_to_group_to_single_hierarchy() {
+        assert!(route_consumed_keyboard_key(
+            &Key::Named(NamedKey::ArrowUp),
+            false,
+            false,
+            false,
+        ));
+        let collage = EscapeContext {
+            context_menu_open: false,
+            is_cropping: false,
+            is_healing: false,
+            is_mosaic: true,
+            empty_rating_filter: false,
+            is_fullscreen: false,
+        };
+        assert!(route_consumed_keyboard_key_in_context(
+            &Key::Named(NamedKey::ArrowDown),
+            collage,
+        ));
+        assert!(!route_consumed_keyboard_key_in_context(
+            &Key::Named(NamedKey::ArrowUp),
+            collage,
+        ));
+    }
+
+    #[test]
     fn escape_and_rating_keys_follow_edit_then_fullscreen_order() {
         assert!(rating_keys_apply(false, false));
         assert!(!rating_keys_apply(true, false));
@@ -370,6 +409,7 @@ mod tests {
                 context_menu_open: true,
                 is_cropping: true,
                 is_healing: true,
+                is_mosaic: true,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -380,6 +420,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: true,
                 is_healing: true,
+                is_mosaic: true,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -390,6 +431,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: true,
+                is_mosaic: true,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -400,6 +442,18 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: false,
+                is_mosaic: true,
+                empty_rating_filter: true,
+                is_fullscreen: true,
+            }),
+            EscapeAction::LeaveMosaic
+        );
+        assert_eq!(
+            escape_action(EscapeContext {
+                context_menu_open: false,
+                is_cropping: false,
+                is_healing: false,
+                is_mosaic: false,
                 empty_rating_filter: true,
                 is_fullscreen: true,
             }),
@@ -410,6 +464,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: false,
+                is_mosaic: false,
                 empty_rating_filter: false,
                 is_fullscreen: true,
             }),
@@ -420,6 +475,7 @@ mod tests {
                 context_menu_open: false,
                 is_cropping: false,
                 is_healing: false,
+                is_mosaic: false,
                 empty_rating_filter: false,
                 is_fullscreen: false,
             }),

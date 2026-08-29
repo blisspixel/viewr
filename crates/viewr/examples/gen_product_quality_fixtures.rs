@@ -26,6 +26,50 @@ const FIXTURE_PATHS: &[(&str, &str)] = &[
     ("editing/source.png", "PQ-PW-06, PQ-PW-07, and PQ-RC-02"),
     ("failure/malformed.png", "PQ-FT-06 malformed input"),
     ("failure/unsupported.txt", "PQ-FT-06 unsupported input"),
+    ("mosaic/01-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/02-tall.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/03-square.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/04-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/05-tall.png", "PQ-PW-08 first full-image collage"),
+    (
+        "mosaic/06-panoramic.png",
+        "PQ-PW-08 first full-image collage",
+    ),
+    ("mosaic/07-tall.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/08-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/09-square.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/10-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/11-tall.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/12-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/13-square.png", "PQ-PW-08 first full-image collage"),
+    (
+        "mosaic/14-portrait.png",
+        "PQ-PW-08 first full-image collage",
+    ),
+    (
+        "mosaic/15-landscape.png",
+        "PQ-PW-08 first full-image collage",
+    ),
+    (
+        "mosaic/16-panoramic.png",
+        "PQ-PW-08 first full-image collage",
+    ),
+    ("mosaic/17-tall.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/18-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/19-square.png", "PQ-PW-08 first full-image collage"),
+    (
+        "mosaic/20-portrait.png",
+        "PQ-PW-08 first full-image collage",
+    ),
+    (
+        "mosaic/21-landscape.png",
+        "PQ-PW-08 first full-image collage",
+    ),
+    ("mosaic/22-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/23-tall.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/24-wide.png", "PQ-PW-08 first full-image collage"),
+    ("mosaic/25-square.png", "PQ-PW-08 second full-image collage"),
+    ("mosaic/26-tall.png", "PQ-PW-08 second full-image collage"),
     ("sequences/two-frame.gif", "PQ-PW-03 animated GIF"),
     ("sequences/two-frame.png", "PQ-PW-03 APNG"),
     ("sequences/two-frame.webp", "PQ-PW-03 animated WebP"),
@@ -53,6 +97,30 @@ fn synthetic(width: u32, height: u32, accent: [u8; 3]) -> RgbaImage {
             255,
         ])
     })
+}
+
+fn mosaic_fixture(width: u32, height: u32, accent: [u8; 3]) -> RgbaImage {
+    let mut image = synthetic(width, height, accent);
+    let marker = (width.min(height) / 8).clamp(8, 28);
+    for y in 0..height {
+        for x in 0..width {
+            let color = if x < marker && y < marker {
+                Some([255, 32, 32, 255])
+            } else if x >= width - marker && y < marker {
+                Some([32, 255, 32, 255])
+            } else if x < marker && y >= height - marker {
+                Some([32, 96, 255, 255])
+            } else if x >= width - marker && y >= height - marker {
+                Some([255, 224, 32, 255])
+            } else {
+                None
+            };
+            if let Some(color) = color {
+                image.put_pixel(x, y, Rgba(color));
+            }
+        }
+    }
+    image
 }
 
 fn save_png(path: &Path, image: &RgbaImage) -> anyhow::Result<()> {
@@ -260,7 +328,14 @@ fn generate(root: &Path) -> anyhow::Result<()> {
             root.display()
         );
     }
-    for directory in ["browse", "editing", "failure", "sequences", "visual"] {
+    for directory in [
+        "browse",
+        "editing",
+        "failure",
+        "mosaic",
+        "sequences",
+        "visual",
+    ] {
         std::fs::create_dir_all(root.join(directory))?;
     }
 
@@ -272,6 +347,39 @@ fn generate(root: &Path) -> anyhow::Result<()> {
     save_png(&root.join("browse/10-blue.png"), &blue)?;
     save_png(&root.join("editing/source.png"), &red)?;
     save_png(&root.join("editing/replacement.png"), &blue)?;
+    for (name, width, height, accent) in [
+        ("01-wide.png", 480, 180, [90, 15, 20]),
+        ("02-tall.png", 180, 480, [15, 80, 20]),
+        ("03-square.png", 300, 300, [15, 35, 100]),
+        ("04-wide.png", 480, 300, [85, 45, 10]),
+        ("05-tall.png", 240, 400, [65, 15, 85]),
+        ("06-panoramic.png", 640, 160, [10, 70, 75]),
+        ("07-tall.png", 160, 640, [75, 70, 10]),
+        ("08-wide.png", 400, 260, [85, 25, 55]),
+        ("09-square.png", 260, 260, [20, 75, 55]),
+        ("10-wide.png", 520, 240, [45, 35, 95]),
+        ("11-tall.png", 220, 420, [90, 35, 20]),
+        ("12-wide.png", 480, 280, [25, 85, 40]),
+        ("13-square.png", 300, 300, [70, 25, 80]),
+        ("14-portrait.png", 300, 450, [20, 65, 90]),
+        ("15-landscape.png", 450, 300, [90, 60, 20]),
+        ("16-panoramic.png", 600, 200, [35, 80, 65]),
+        ("17-tall.png", 200, 500, [80, 25, 45]),
+        ("18-wide.png", 500, 220, [20, 55, 90]),
+        ("19-square.png", 280, 280, [85, 45, 25]),
+        ("20-portrait.png", 260, 390, [35, 85, 35]),
+        ("21-landscape.png", 390, 260, [75, 25, 85]),
+        ("22-wide.png", 560, 300, [20, 75, 80]),
+        ("23-tall.png", 240, 480, [90, 50, 25]),
+        ("24-wide.png", 480, 240, [45, 85, 25]),
+        ("25-square.png", 320, 320, [80, 30, 70]),
+        ("26-tall.png", 240, 440, [25, 70, 90]),
+    ] {
+        save_png(
+            &root.join("mosaic").join(name),
+            &mosaic_fixture(width, height, accent),
+        )?;
+    }
     save_png(
         &root.join("visual/small.png"),
         &synthetic(64, 64, [60, 30, 80]),

@@ -7,9 +7,10 @@
 Tired of photo software that wants to become a cloud library, storefront, and
 subscription? viewr rejects the spyware-and-bloatware pattern of turning a simple
 utility into a data-collection platform. It keeps the photo at the center. Open a
-file or folder, move through photos quickly, inspect metadata, use ratings to
-narrow the keepers, crop or rotate, repair a small blemish with Spot Heal, save a
-JPEG, PNG, WebP, or BMP copy, and get back to what you were doing.
+file or folder, move through photos quickly, see a full-image collage of the
+current group, inspect metadata, use ratings to narrow the keepers, crop or
+rotate, repair a small blemish with Spot Heal, save a JPEG, PNG, WebP, or BMP
+copy, and get back to what you were doing.
 
 viewr is a focused desktop image viewer for Windows, macOS, and Linux. Focused
 does not mean bare. Its small editing tools are deliberate parts of the viewing
@@ -86,9 +87,11 @@ build, see [Installing viewr](docs/INSTALL.md).
   multi-size ICO step with `[` and `]` and never auto-play. Camera RAW remains
   a documented error and is deferred from 1.0.
 - Navigates naturally sorted folders without blanking the last good frame during
-  a cache miss or failed replacement. A session watcher reloads a changed file
-  when in-memory edits are safe, asks for F5 when they are not, and follows a
-  rename in the current folder.
+  a cache miss or failed replacement. If a selected sibling disappears before
+  presentation, viewr removes the stale entry and advances to a surviving image.
+  A presented file that disappears keeps its last good frame. The session watcher
+  reloads a changed file when in-memory edits are safe, asks for F5 when they are
+  not, and follows a rename in the current folder.
 - Opens the current file in another app through a native chooser on Windows,
   macOS, and Linux. viewr never builds a shell command or launches a default
   application on its own.
@@ -96,6 +99,11 @@ build, see [Installing viewr](docs/INSTALL.md).
   bounded Spot Heal, Save As, and format conversion.
 - Assigns embedded 0-to-5 XMP ratings and filters a folder by minimum rating
   without creating a catalog, sidecar, or activity history.
+- Packs up to 24 complete, uncropped photos into a dense full-image collage. Each
+  tile follows the photo's real aspect ratio, and justified rows use the screen
+  instead of surrounding photos with equal-cell blank space. It uses the ordinary
+  full decode and color path, not the Folder Previews thumbnail generator, and
+  keeps no collage cache or durable album state.
 - Shows a presence-only Source Privacy summary for sensitive EXIF categories.
 - Strips supported metadata from saved copies by default, with a session-only
   option to retain supported EXIF fields.
@@ -137,6 +145,7 @@ automatically.
 | Previous or next page or frame | `[` / `]` |
 | Fit, pan, or actual size | Space tap fits; hold Space to pan; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
 | Fullscreen | `F` or `F11`; Escape leaves after crop and Spot Heal |
+| Full-image collage | Up or `Shift+G` enters; Left/Right selects; Down, Enter, or click opens; Page Up/Page Down changes groups; Escape returns |
 | Zoom | `+`, `-`, wheel or trackpad |
 | Tools, folder previews, image information | `T`, `G`, `I` |
 | Rate or clear rating | `1` through `5`, `0` |

@@ -459,7 +459,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         return {"total_count": len(artifacts), "artifacts": artifacts}
 
     def test_matrix_has_stable_unique_identifiers(self) -> None:
-        self.assertEqual(len(self.identifiers), 26)
+        self.assertEqual(len(self.identifiers), 27)
         self.assertEqual(self.identifiers[0], "PQ-FT-01")
         self.assertEqual(self.identifiers[-1], "PQ-VS-04")
 
@@ -488,7 +488,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         fixture_block = generator.split("const FIXTURE_PATHS", 1)[1].split("];", 1)[0]
         generated_paths = set(
             re.findall(
-                r'"((?:browse|editing|failure|sequences|visual)/[^"]+)"',
+                r'"((?:browse|editing|failure|mosaic|sequences|visual)/[^"]+)"',
                 fixture_block,
             )
         )

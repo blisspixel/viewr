@@ -84,38 +84,29 @@ build, see [Installing viewr](docs/INSTALL.md).
 
 ## What it does
 
-- Opens a broad pure-Rust core format set, including JPEG, PNG, GIF, WebP, TIFF,
-  SVG, JPEG XL, OpenEXR, and common bitmap formats. Multi-page TIFF and
-  multi-size ICO step with `[` and `]` and never auto-play. Camera RAW remains
-  a documented error and is deferred from 1.0.
-- Navigates naturally sorted folders without blanking the last good frame during
-  a cache miss or failed replacement. If a selected sibling disappears before
-  presentation, viewr removes the stale entry and advances to a surviving image.
-  A presented file that disappears keeps its last good frame. The session watcher
-  reloads a changed file when in-memory edits are safe, asks for F5 when they are
-  not, and follows a rename in the current folder.
-- Opens the current file in another app through a native chooser on Windows,
-  macOS, and Linux. viewr never builds a shell command or launches a default
-  application on its own.
-- Provides GPU pan, zoom, fit, animation, page navigation, rotation, crop,
-  bounded Spot Heal, Save As, and format conversion.
-- Assigns embedded 0-to-5 XMP ratings and filters a folder by minimum rating
-  without creating a catalog, sidecar, or activity history.
-- Packs up to 24 complete, uncropped photos into a dense full-image collage. Each
-  tile follows the photo's real aspect ratio, and justified rows use the screen
-  instead of surrounding photos with equal-cell blank space. It uses the ordinary
-  full decode and color path, not the Folder Previews thumbnail generator, and
-  keeps no collage cache or durable album state.
-- Shows a presence-only Source Privacy summary for sensitive EXIF categories.
-- Strips supported metadata from saved copies by default, with a session-only
-  option to retain supported EXIF fields.
-- Moves only the visible image to system Trash with exact-receipt Undo when the
-  platform can prove it. Permanent delete is separate and confirmed.
+- Opens JPEG, PNG, GIF, WebP, TIFF, SVG, JPEG XL, OpenEXR, and common bitmap
+  formats, including bounded animation and multi-page image navigation.
+- Browses folders Latest First by default or in saved natural filename order,
+  while keeping the selected image and last good frame stable.
+- Provides GPU pan, zoom, fit, rotation, crop, bounded Spot Heal, Save As, and
+  conversion. Edits stay in memory until Save As writes a copy; the original is
+  left untouched.
+- Stores standard 0-to-5 XMP ratings in supported JPEG files and filters the
+  current folder without creating a catalog or sidecar.
+- Shows up to 12 complete photos in a dense, aspect-aware full-image collage.
+- Shows a presence-only Source Privacy summary and strips supported metadata from
+  saved copies by default.
+- Uses native Open With, system Trash with receipt-bound Undo, and explicit
+  confirmation for permanent deletion.
+- Keeps file associations opt in. File > Default Image Viewer explains how to
+  choose viewr per format on Windows, macOS, and Linux.
 - Offers native dialogs, keyboard-first controls, AccessKit semantics, four chrome
   appearances, and independent image-inspection backgrounds.
 
-The exact format table and current limits are in [Formats](docs/FORMATS.md).
-Implemented behavior and remaining work are in [Roadmap](docs/ROADMAP.md).
+See [Design](docs/DESIGN.md) for interaction details,
+[Formats](docs/FORMATS.md) for the exact format table,
+[Ratings](docs/RATINGS.md) for the write-safety contract, and
+[Roadmap](docs/ROADMAP.md) for implemented behavior and remaining work.
 
 ## Privacy and security
 
@@ -127,11 +118,10 @@ that receives encoded bytes rather than a filesystem path, and platform packages
 add network-denied sandbox profiles.
 
 Opening an image still means parsing untrusted data. The codebase uses bounded
-decoding, dimension and allocation limits, source-identity checks around
-destructive operations, fail-closed metadata writes, dependency policy, fuzzing,
-and native platform tests. See [Privacy](docs/PRIVACY.md),
-[Architecture](docs/ARCHITECTURE.md), and [Security Policy](SECURITY.md) for the
-precise boundaries.
+decoding, allocation limits, source-identity checks around destructive operations,
+fail-closed metadata writes, dependency policy, fuzzing, and native platform
+tests. The precise boundaries are in [Privacy](docs/PRIVACY.md),
+[Architecture](docs/ARCHITECTURE.md), and the [Security Policy](SECURITY.md).
 
 Installer scripts are separate foreground tools. They contact only the official
 GitHub repository after the user runs them. viewr itself never checks for updates
@@ -144,6 +134,7 @@ automatically.
 | Open file | `O`, `Ctrl/Cmd+O`, or drop a file |
 | Open folder | `Ctrl/Cmd+Shift+O`, or drop a folder |
 | Previous or next image | Left/Right, Home/End, Page Up/Page Down |
+| Folder order | File > Preferences or View > Folder Sort; Latest First is the initial default |
 | Previous or next page or frame | `[` / `]` |
 | Fit, pan, or actual size | Space tap fits; hold Space to pan; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
 | Fullscreen | `F` or `F11`; Escape leaves after crop and Spot Heal |

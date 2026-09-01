@@ -167,6 +167,14 @@ fn run_internal(
             recovery.diagnostic_name()
         );
     }
+    let folder_sort = crate::folder_sort_preference::load();
+    let folder_sort_recovery = folder_sort.recovery();
+    if let Some(recovery) = folder_sort_recovery {
+        log::warn!(
+            "folder sort preference fallback: {}",
+            recovery.diagnostic_name()
+        );
+    }
     let mut app = App {
         session: crate::session::Session {
             selected_path: image_path,
@@ -178,6 +186,7 @@ fn run_internal(
         display_profile_usable: false,
         playlist: None,
         playlist_scope: None,
+        folder_sort: folder_sort.sort(),
         folder_scan_job: None,
         rating_scan_worker: None,
         rating_generation: 0,
@@ -232,9 +241,14 @@ fn run_internal(
         retain_exif: false,
         bg_override: None,
         theme_preference: appearance.preference(),
-        appearance_recovery,
+        preference_recovery_notice: startup_preference_recovery_notice(
+            appearance_recovery,
+            folder_sort_recovery,
+        ),
         show_about: false,
         show_update: false,
+        show_preferences: false,
+        show_file_associations: false,
         external_edit_pending: false,
         source_gone: false,
         modifiers: ModifiersState::default(),
@@ -756,15 +770,54 @@ fn commit_presented_heal<E>(
             candidate_count: result.candidate_count,
         })
     });
-    Ok(if replacing_latest {
-        format!(
-            "Heal source {} of {}",
-            result.candidate_index + 1,
-            result.candidate_count
-        )
+    Ok(heal_success_message(
+        replacing_latest,
+        result.candidate_index,
+        result.candidate_count,
+    ))
+}
+
+fn heal_success_message(
+    replacing_latest: bool,
+    candidate_index: usize,
+    candidate_count: usize,
+) -> String {
+    if replacing_latest {
+        format!("Heal source {} of {}", candidate_index + 1, candidate_count)
     } else {
-        "Spot healed. Undo is available.".to_owned()
-    })
+        "Spot healed in memory. Use Save As to keep it; Undo is available.".to_owned()
+    }
+}
+
+fn save_success_message(
+    metadata: crate::edit::MetadataDisposition,
+    includes_pixel_edits: bool,
+) -> String {
+    let copy = if includes_pixel_edits {
+        "Saved edited copy"
+    } else {
+        "Saved copy"
+    };
+    let metadata = match metadata {
+        crate::edit::MetadataDisposition::Retained => "EXIF retained",
+        crate::edit::MetadataDisposition::NotPresent => "no EXIF found",
+        crate::edit::MetadataDisposition::Stripped => "metadata stripped",
+    };
+    format!("{copy} · {metadata}")
+}
+
+fn startup_preference_recovery_notice(
+    appearance: Option<PreferenceRecovery>,
+    folder_sort: Option<crate::folder_sort_preference::Recovery>,
+) -> Option<&'static str> {
+    match (appearance, folder_sort) {
+        (Some(_), Some(_)) => Some(
+            "Could not restore saved appearance or folder sort. Using System and Latest First.",
+        ),
+        (Some(recovery), None) => Some(recovery.notice()),
+        (None, Some(recovery)) => Some(recovery.notice()),
+        (None, None) => None,
+    }
 }
 
 fn append_heal_stroke_point(
@@ -835,6 +888,8 @@ struct App {
     session: crate::session::Session,
     playlist: Option<Playlist>,
     playlist_scope: Option<Arc<PlaylistScope>>,
+    /// Persisted default folder order used by the current playlist.
+    folder_sort: crate::fs::FolderSort,
     folder_scan_job: Option<
         OneShotJob<
             FolderScanContext,
@@ -934,19 +989,23 @@ struct App {
     bg_override: Option<[f64; 4]>,
     /// Persisted application-chrome and default-canvas appearance.
     theme_preference: Preference,
-    /// Abnormal startup fallback to announce once the first window is ready.
-    appearance_recovery: Option<PreferenceRecovery>,
+    /// Abnormal preference fallback to announce once the first window is ready.
+    preference_recovery_notice: Option<&'static str>,
     /// Whether the accessible About window is open.
     show_about: bool,
     /// Whether the accessible local update-instructions window is open.
     show_update: bool,
+    /// Whether the accessible persistent-preferences window is open.
+    show_preferences: bool,
+    /// Whether the accessible opt-in file-association guide is open.
+    show_file_associations: bool,
     /// Whether another app may have changed the source since the last accepted decode.
     external_edit_pending: bool,
     /// Whether the selected path no longer names the presented file.
     source_gone: bool,
     /// Latest keyboard modifiers (for Shift+Delete, etc.).
     modifiers: ModifiersState,
-    /// Bottom toast message.
+    /// Transient outcome message shown in chrome when chrome is visible.
     toast: Option<String>,
     /// When the toast should disappear.
     toast_until: Option<Instant>,
@@ -1254,6 +1313,7 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
         let event_proxy = self.event_proxy.clone();
+        let folder_sort = self.folder_sort;
         let (completion, job) = OneShotJob::new(
             FolderScanContext {
                 purpose: Some(purpose),
@@ -1266,9 +1326,10 @@ impl App {
         let spawn_result = std::thread::Builder::new()
             .name("viewr-folder-scan".into())
             .spawn(move || {
-                let files = crate::fs::scan_image_entries_while(&directory, || {
-                    !worker_cancel.load(Ordering::Acquire)
-                });
+                let files =
+                    crate::fs::scan_image_entries_sorted_while(&directory, folder_sort, || {
+                        !worker_cancel.load(Ordering::Acquire)
+                    });
                 let _ = completion.complete(files);
             });
         match spawn_result {
@@ -1290,6 +1351,30 @@ impl App {
             .set_limits(prefetch::DEFAULT_CAPACITY, prefetch::DEFAULT_MAX_BYTES);
         self.prefetch_sources.clear();
         self.prefetch_schedule.reset();
+    }
+
+    fn set_folder_sort(&mut self, sort: crate::fs::FolderSort) {
+        if self.folder_sort != sort {
+            self.folder_sort = sort;
+            if let Some(playlist) = self.playlist.as_mut() {
+                playlist.sort(sort);
+                self.reset_prefetch_for_playlist_change();
+                self.thumbnail_schedule.reset();
+                self.thumb_textures.clear();
+                self.kick_prefetch();
+            }
+        }
+        match crate::folder_sort_preference::save(sort) {
+            Ok(()) => self.show_toast(format!("Default folder sort: {}", sort.label())),
+            Err(error) => {
+                log::error!(
+                    "failed to save folder sort preference: {}",
+                    error.diagnostic_name()
+                );
+                self.show_toast(crate::folder_sort_preference::save_failure_message());
+            }
+        }
+        self.request_redraw();
     }
 
     fn take_prefetched_image(&mut self, path: &Path) -> Option<LoadedImage> {
@@ -5831,17 +5916,10 @@ impl App {
             .expect("save job exists after polling it")
             .into_context();
         let close_requested = std::mem::take(&mut self.close_after_save);
+        let includes_pixel_edits = self.unsaved_crop || self.heal.history.can_undo();
         let terminal = match polled {
-            JobPoll::Ready(Ok(crate::edit::MetadataDisposition::Retained)) => {
-                self.show_toast("Saved copy · EXIF retained");
-                SaveTerminalState::Succeeded
-            }
-            JobPoll::Ready(Ok(crate::edit::MetadataDisposition::NotPresent)) => {
-                self.show_toast("Saved copy · no EXIF found");
-                SaveTerminalState::Succeeded
-            }
-            JobPoll::Ready(Ok(crate::edit::MetadataDisposition::Stripped)) => {
-                self.show_toast("Saved copy · metadata stripped");
+            JobPoll::Ready(Ok(metadata)) => {
+                self.show_toast(save_success_message(metadata, includes_pixel_edits));
                 SaveTerminalState::Succeeded
             }
             JobPoll::Ready(Err(error)) => {
@@ -6444,8 +6522,8 @@ impl ApplicationHandler<UserEvent> for App {
                         log::error!("failed to upload initial image: {error}");
                     }
                 }
-                if let Some(recovery) = self.appearance_recovery.take() {
-                    self.show_toast(recovery.notice());
+                if let Some(notice) = self.preference_recovery_notice.take() {
+                    self.show_toast(notice);
                 }
                 let _ = self
                     .renderer
@@ -6559,6 +6637,8 @@ impl ApplicationHandler<UserEvent> for App {
                         || (!application_shortcuts_blocked([
                             self.show_about,
                             self.show_update,
+                            self.show_preferences,
+                            self.show_file_associations,
                             self.pending_save.is_some(),
                             self.pending_rating_write.is_some(),
                             egui_popup_open,
@@ -6857,6 +6937,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let shortcuts_blocked = application_shortcuts_blocked([
                     self.show_about,
                     self.show_update,
+                    self.show_preferences,
+                    self.show_file_associations,
                     self.pending_save.is_some(),
                     self.pending_rating_write.is_some(),
                     egui_popup_open,
@@ -6878,6 +6960,8 @@ impl ApplicationHandler<UserEvent> for App {
                     && matches!(&logical_key, Key::Named(NamedKey::Escape))
                     && !self.show_about
                     && !self.show_update
+                    && !self.show_preferences
+                    && !self.show_file_associations
                     && self.pending_save.is_none()
                     && self.pending_rating_write.is_none()
                 {
@@ -7167,6 +7251,9 @@ impl ApplicationHandler<UserEvent> for App {
                 let theme_preference = self.theme_preference;
                 let show_about = self.show_about;
                 let show_update = self.show_update;
+                let show_preferences = self.show_preferences;
+                let show_file_associations = self.show_file_associations;
+                let folder_sort = self.folder_sort;
                 let external_edit_pending = self.external_edit_pending;
                 let source_gone = self.source_gone;
                 let source_image_size = self
@@ -7208,6 +7295,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let has_undo_edit = self.heal.history.can_undo();
                 let has_redo_edit = self.heal.history.can_redo();
                 let has_undo_trash = !self.last_trashed.is_empty();
+                let has_unsaved_pixel_edits = self.unsaved_crop || has_undo_edit;
                 let heal_painting = self.heal.painting;
                 let is_panning =
                     self.transform.is_panning || (self.space_held && self.mouse_left_down);
@@ -7302,6 +7390,9 @@ impl ApplicationHandler<UserEvent> for App {
                     theme_mode,
                     show_about,
                     show_update,
+                    show_preferences,
+                    show_file_associations,
+                    folder_sort,
                     rating,
                     external_edit_pending,
                     source_gone,
@@ -7329,6 +7420,7 @@ impl ApplicationHandler<UserEvent> for App {
                     has_undo_edit,
                     has_redo_edit,
                     has_undo_trash,
+                    has_unsaved_pixel_edits,
                     restore_recovery_unsettled,
                     is_panning,
                     space_held: self.space_held,
@@ -7387,6 +7479,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let mut rating_disclosure_owns_dispatch = false;
                 let mut update_modal_owns_dispatch = false;
                 let mut about_modal_owns_dispatch = false;
+                let mut preferences_modal_owns_dispatch = false;
+                let mut file_associations_modal_owns_dispatch = false;
                 for action in ui_actions {
                     if !modal_dispatch_allows(
                         &mut save_overwrite_owns_dispatch,
@@ -7417,6 +7511,22 @@ impl ApplicationHandler<UserEvent> for App {
                         self.show_about,
                         &action,
                         crate::ui::about_modal_action_allowed,
+                    ) {
+                        continue;
+                    }
+                    if !modal_dispatch_allows(
+                        &mut preferences_modal_owns_dispatch,
+                        self.show_preferences,
+                        &action,
+                        crate::ui::preferences_modal_action_allowed,
+                    ) {
+                        continue;
+                    }
+                    if !modal_dispatch_allows(
+                        &mut file_associations_modal_owns_dispatch,
+                        self.show_file_associations,
+                        &action,
+                        crate::ui::file_associations_modal_action_allowed,
                     ) {
                         continue;
                     }
@@ -7475,9 +7585,14 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.show_toast(appearance_save_failure_message());
                             }
                         }
+                        crate::ui::UiAction::SetFolderSort(sort) => {
+                            self.set_folder_sort(sort);
+                        }
                         crate::ui::UiAction::ShowAbout => {
                             self.show_about = true;
                             self.show_update = false;
+                            self.show_preferences = false;
+                            self.show_file_associations = false;
                             self.request_redraw();
                         }
                         crate::ui::UiAction::CloseAbout => {
@@ -7487,10 +7602,34 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::ShowUpdate => {
                             self.show_update = true;
                             self.show_about = false;
+                            self.show_preferences = false;
+                            self.show_file_associations = false;
                             self.request_redraw();
                         }
                         crate::ui::UiAction::CloseUpdate => {
                             self.show_update = false;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::ShowPreferences => {
+                            self.show_preferences = true;
+                            self.show_about = false;
+                            self.show_update = false;
+                            self.show_file_associations = false;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::ClosePreferences => {
+                            self.show_preferences = false;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::ShowFileAssociations => {
+                            self.show_file_associations = true;
+                            self.show_about = false;
+                            self.show_update = false;
+                            self.show_preferences = false;
+                            self.request_redraw();
+                        }
+                        crate::ui::UiAction::CloseFileAssociations => {
+                            self.show_file_associations = false;
                             self.request_redraw();
                         }
                         crate::ui::UiAction::AssignRating(assignment) => {
@@ -7600,7 +7739,6 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::ZoomOut => {
                             self.zoom_at_viewport_center(1.0 / 1.15);
                         }
-                        crate::ui::UiAction::Navigate(d) => self.navigate(d),
                         crate::ui::UiAction::NavigateTo(i) => self.navigate_to(i),
                         crate::ui::UiAction::ToggleCrop => {
                             self.toggle_crop_mode();
@@ -8033,6 +8171,52 @@ mod test {
             &crate::ui::UiAction::OpenFolder,
             crate::ui::about_modal_action_allowed,
         ));
+
+        let mut preferences_owns_dispatch = false;
+        assert!(modal_dispatch_allows(
+            &mut preferences_owns_dispatch,
+            false,
+            &crate::ui::UiAction::ShowPreferences,
+            crate::ui::preferences_modal_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut preferences_owns_dispatch,
+            true,
+            &crate::ui::UiAction::Trash,
+            crate::ui::preferences_modal_action_allowed,
+        ));
+        assert!(modal_dispatch_allows(
+            &mut preferences_owns_dispatch,
+            true,
+            &crate::ui::UiAction::SetFolderSort(crate::fs::FolderSort::Name),
+            crate::ui::preferences_modal_action_allowed,
+        ));
+        assert!(modal_dispatch_allows(
+            &mut preferences_owns_dispatch,
+            true,
+            &crate::ui::UiAction::ClosePreferences,
+            crate::ui::preferences_modal_action_allowed,
+        ));
+
+        let mut associations_owns_dispatch = false;
+        assert!(modal_dispatch_allows(
+            &mut associations_owns_dispatch,
+            false,
+            &crate::ui::UiAction::ShowFileAssociations,
+            crate::ui::file_associations_modal_action_allowed,
+        ));
+        assert!(!modal_dispatch_allows(
+            &mut associations_owns_dispatch,
+            true,
+            &crate::ui::UiAction::Trash,
+            crate::ui::file_associations_modal_action_allowed,
+        ));
+        assert!(modal_dispatch_allows(
+            &mut associations_owns_dispatch,
+            true,
+            &crate::ui::UiAction::CloseFileAssociations,
+            crate::ui::file_associations_modal_action_allowed,
+        ));
     }
 
     fn assert_selected_replacement_stays_bound_to_accepted_source(
@@ -8116,9 +8300,9 @@ mod test {
 
     #[test]
     fn menus_modals_and_popups_own_keyboard_shortcuts() {
-        assert!(!application_shortcuts_blocked([false; 6]));
-        for owner in 0..6 {
-            let mut owners = [false; 6];
+        assert!(!application_shortcuts_blocked([false; 7]));
+        for owner in 0..7 {
+            let mut owners = [false; 7];
             owners[owner] = true;
             assert!(application_shortcuts_blocked(owners));
         }
@@ -8324,6 +8508,52 @@ mod test {
         assert!(!message.contains("private"));
         assert!(!message.contains('\n'));
         assert!(!message.contains('\u{202e}'));
+    }
+
+    #[test]
+    fn spot_heal_success_copy_names_memory_and_save_as_boundaries() {
+        let applied = heal_success_message(false, 0, 4);
+        assert!(applied.contains("in memory"));
+        assert!(applied.contains("Save As"));
+        assert!(applied.contains("Undo"));
+        assert_eq!(heal_success_message(true, 2, 4), "Heal source 3 of 4");
+    }
+
+    #[test]
+    fn save_success_copy_confirms_when_edited_pixels_were_exported() {
+        assert_eq!(
+            save_success_message(crate::edit::MetadataDisposition::Stripped, true),
+            "Saved edited copy · metadata stripped"
+        );
+        assert_eq!(
+            save_success_message(crate::edit::MetadataDisposition::Retained, false),
+            "Saved copy · EXIF retained"
+        );
+    }
+
+    #[test]
+    fn preference_recovery_notice_combines_independent_fallbacks() {
+        assert_eq!(startup_preference_recovery_notice(None, None), None);
+        assert_eq!(
+            startup_preference_recovery_notice(Some(PreferenceRecovery::Invalid), None),
+            Some("Could not restore saved appearance. Using System.")
+        );
+        assert_eq!(
+            startup_preference_recovery_notice(
+                None,
+                Some(crate::folder_sort_preference::Recovery::Oversized)
+            ),
+            Some("Could not restore saved folder sort. Using Latest First.")
+        );
+        assert_eq!(
+            startup_preference_recovery_notice(
+                Some(PreferenceRecovery::Unreadable),
+                Some(crate::folder_sort_preference::Recovery::Invalid)
+            ),
+            Some(
+                "Could not restore saved appearance or folder sort. Using System and Latest First."
+            )
+        );
     }
 
     #[test]

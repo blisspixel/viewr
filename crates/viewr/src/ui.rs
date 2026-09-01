@@ -94,7 +94,7 @@ const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initi
 const SAVE_OVERWRITE_FOCUS_STATE: &str = "save_overwrite_focus_initialized";
 
 /// Actions dispatched from the UI to be handled by the main application logic.
-pub enum UiAction {
+pub(crate) enum UiAction {
     /// Open a new image file dialog.
     Open,
     /// Open a folder with explicit user consent for sibling navigation.
@@ -117,6 +117,16 @@ pub enum UiAction {
     SetBackground(Option<[f64; 4]>),
     /// Set the application appearance preference.
     SetTheme(crate::theme::Preference),
+    /// Change and persist the default order of images in folders.
+    SetFolderSort(crate::fs::FolderSort),
+    /// Open persistent application preferences.
+    ShowPreferences,
+    /// Close persistent application preferences.
+    ClosePreferences,
+    /// Open the opt-in operating-system file-association guide.
+    ShowFileAssociations,
+    /// Close the opt-in operating-system file-association guide.
+    CloseFileAssociations,
     /// Open the About viewr surface.
     ShowAbout,
     /// Close the About viewr surface.
@@ -179,8 +189,6 @@ pub enum UiAction {
     ZoomIn,
     /// Decrease zoom around the image-safe viewport center.
     ZoomOut,
-    /// Navigate to a relative file index.
-    Navigate(isize),
     /// Jump to an absolute playlist index.
     NavigateTo(usize),
     /// Toggle the crop tool mode.
@@ -244,6 +252,12 @@ pub(crate) struct UiFrameOwned {
     pub show_about: bool,
     /// Whether the local update-instructions surface is open.
     pub show_update: bool,
+    /// Whether persistent application preferences are open.
+    pub show_preferences: bool,
+    /// Whether the opt-in file-association guide is open.
+    pub show_file_associations: bool,
+    /// Persisted default folder ordering.
+    pub folder_sort: crate::fs::FolderSort,
     /// Current embedded rating, folder filter, and write state.
     pub rating: RatingUiState,
     /// Whether an external handoff may have made the displayed pixels stale.
@@ -290,6 +304,8 @@ pub(crate) struct UiFrameOwned {
     pub has_redo_edit: bool,
     /// Whether a retained exact Trash receipt exists before UI gating.
     pub has_undo_trash: bool,
+    /// Whether crop or Spot Heal pixels differ from the source on disk.
+    pub has_unsaved_pixel_edits: bool,
     /// Whether a prior Restore must reconcile before Undo ownership can be replaced.
     pub restore_recovery_unsettled: bool,
     /// Hand tool is currently dragging.
@@ -541,6 +557,19 @@ pub(crate) const fn about_modal_action_allowed(action: &UiAction) -> bool {
     matches!(action, UiAction::CloseAbout)
 }
 
+#[must_use]
+pub(crate) const fn file_associations_modal_action_allowed(action: &UiAction) -> bool {
+    matches!(action, UiAction::CloseFileAssociations)
+}
+
+#[must_use]
+pub(crate) const fn preferences_modal_action_allowed(action: &UiAction) -> bool {
+    matches!(
+        action,
+        UiAction::ClosePreferences | UiAction::SetFolderSort(_) | UiAction::ShowFileAssociations
+    )
+}
+
 fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> Vec<UiAction> {
     if frame.save_overwrite_pending {
         actions.retain(save_overwrite_action_allowed);
@@ -550,6 +579,10 @@ fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> V
         actions.retain(update_modal_action_allowed);
     } else if frame.show_about {
         actions.retain(about_modal_action_allowed);
+    } else if frame.show_preferences {
+        actions.retain(preferences_modal_action_allowed);
+    } else if frame.show_file_associations {
+        actions.retain(file_associations_modal_action_allowed);
     }
     actions
 }
@@ -563,7 +596,9 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let modal_active = frame.save_overwrite_pending
         || frame.rating.pending_disclosure.is_some()
         || frame.show_update
-        || frame.show_about;
+        || frame.show_about
+        || frame.show_preferences
+        || frame.show_file_associations;
 
     ui.add_enabled_ui(!modal_active, |ui| {
         render_background(ui, &mut actions, frame, chrome, colors);
@@ -577,6 +612,10 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
         render_update(ui, &mut actions);
     } else if frame.show_about {
         render_about(ui, &mut actions);
+    } else if frame.show_preferences {
+        render_preferences(ui, &mut actions, frame);
+    } else if frame.show_file_associations {
+        render_file_associations(ui, &mut actions);
     }
     ui.ctx().data_mut(|data| {
         if !frame.save_overwrite_pending {
@@ -610,7 +649,9 @@ fn render_background(
 
     if rating_filter_is_empty(frame) {
         render_filtered_empty_state(ui, actions, frame);
-        if let Some(msg) = &frame.toast {
+        if frame.dock.immersive
+            && let Some(msg) = &frame.toast
+        {
             render_toast(ui, msg, frame);
         }
         return;
@@ -618,7 +659,9 @@ fn render_background(
 
     if !frame.dock.has_image {
         render_empty_state(ui, actions, frame, chrome);
-        if let Some(msg) = &frame.toast {
+        if frame.dock.immersive
+            && let Some(msg) = &frame.toast
+        {
             render_toast(ui, msg, frame);
         }
         return;
@@ -643,7 +686,9 @@ fn render_background(
         render_heal_overlay(ui, frame);
     }
 
-    if let Some(msg) = &frame.toast {
+    if frame.dock.immersive
+        && let Some(msg) = &frame.toast
+    {
         render_toast(ui, msg, frame);
     }
 
@@ -1023,10 +1068,15 @@ fn render_top_operation_status(
             add_status(ui, PREVIEW_RECOVERY_STATUS);
         } else if frame.rating.recovery_unsettled {
             add_status(ui, RATING_RECOVERY_STATUS);
-        } else if let Some(status) =
-            image_open_status(false, true, frame.selected_file_name.as_deref())
-        {
-            add_status(ui, &status);
+        } else {
+            if let Some(status) =
+                image_open_status(false, true, frame.selected_file_name.as_deref())
+            {
+                add_status(ui, &status);
+            }
+            if let Some(toast) = frame.toast.as_deref() {
+                add_top_toast(ui, toast, colors);
+            }
         }
     } else if frame.dock.has_image && frame.is_opening {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
@@ -1065,6 +1115,14 @@ fn render_top_operation_status(
     } else if frame.folder_scan_busy && frame.dock.has_image {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, "Reading folder...");
+    } else if let Some(toast) = frame.toast.as_deref() {
+        add_top_toast(ui, toast, colors);
+    } else if frame.has_unsaved_pixel_edits {
+        add_top_toast(
+            ui,
+            "Edited pixels are in memory. Save As writes a copy.",
+            colors,
+        );
     }
 }
 
@@ -1261,6 +1319,19 @@ fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewM
             .clicked()
         {
             actions.push(UiAction::SaveAs);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Preferences...").clicked() {
+            actions.push(UiAction::ShowPreferences);
+            ui.close();
+        }
+        if ui
+            .button("Default Image Viewer...")
+            .on_hover_text("Choose whether PNG, JPEG, or other image types open with viewr.")
+            .clicked()
+        {
+            actions.push(UiAction::ShowFileAssociations);
             ui.close();
         }
         ui.separator();
@@ -1473,6 +1544,21 @@ fn add_top_status(ui: &mut egui::Ui, status: &str, colors: ChromeColors) {
     });
 }
 
+fn add_top_toast(ui: &mut egui::Ui, message: &str, colors: ChromeColors) {
+    let max_width = top_status_max_width(ui);
+    ui.scope(|ui| {
+        ui.set_max_width(max_width);
+        let response = ui.add(
+            egui::Label::new(RichText::new(message).size(12.5).color(colors.muted))
+                .truncate()
+                .show_tooltip_when_elided(true),
+        );
+        if rating_toast_is_status(message) {
+            mark_as_polite_status(&response);
+        }
+    });
+}
+
 fn top_status_max_width(ui: &egui::Ui) -> f32 {
     let responsive_limit = if ui.ctx().content_rect().width() < 720.0 {
         TOP_STATUS_COMPACT_MAX_WIDTH
@@ -1571,6 +1657,10 @@ fn view_menu(
                 rating_filter_menu(ui, actions, chrome);
             });
         });
+        ui.menu_button(
+            format!("Folder Sort: {}", frame.folder_sort.label()),
+            |ui| folder_sort_menu(ui, actions, frame),
+        );
         ui.separator();
         view_fullscreen_menu(ui, actions, frame);
         ui.separator();
@@ -1589,6 +1679,46 @@ fn view_menu(
             },
         );
     });
+}
+
+fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    ui.set_min_width(210.0);
+    ui.add_enabled_ui(!frame.folder_scan_busy, |ui| {
+        folder_sort_radios(ui, actions, frame.folder_sort, true);
+    });
+    ui.separator();
+    ui.label(
+        RichText::new(
+            "Latest First uses file modification time. The selection becomes the default for future folders and launches. This viewr build does not receive the file manager's current sort when an image opens.",
+        )
+        .size(11.0)
+        .color(chrome_colors(ui).muted),
+    );
+}
+
+fn folder_sort_radios(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    selected: crate::fs::FolderSort,
+    close_menu: bool,
+) {
+    for sort in [crate::fs::FolderSort::Latest, crate::fs::FolderSort::Name] {
+        let response = ui.radio(selected == sort, sort.label());
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                selected == sort,
+                sort.label(),
+            )
+        });
+        if response.clicked() {
+            actions.push(UiAction::SetFolderSort(sort));
+            if close_menu {
+                ui.close();
+            }
+        }
+    }
 }
 
 fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -2103,6 +2233,233 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
     });
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseUpdate);
+    }
+}
+
+fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let colors = chrome_colors(ui);
+    let mut close_clicked = false;
+    let response = egui::Modal::new(egui::Id::new("preferences"))
+        .backdrop_color(Color32::from_black_alpha(140))
+        .frame(
+            Frame::new()
+                .fill(colors.panel)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20)),
+        )
+        .show(ui.ctx(), |ui| {
+            ui.set_width(500.0);
+            ui.heading(
+                RichText::new("Preferences")
+                    .size(22.0)
+                    .color(colors.text),
+            );
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Default folder sort")
+                    .size(15.0)
+                    .strong()
+                    .color(colors.text),
+            );
+            ui.label(
+                RichText::new(
+                    "Used for future folders, launches, Folder Previews, and full-image collage groups. The file you open stays selected.",
+                )
+                .size(12.5)
+                .color(colors.muted),
+            );
+            ui.add_space(6.0);
+            ui.add_enabled_ui(!frame.folder_scan_busy, |ui| {
+                folder_sort_radios(ui, actions, frame.folder_sort, false);
+            });
+            ui.label(
+                RichText::new(
+                    "Latest First uses file modification time. Name uses natural filename order.",
+                )
+                .size(12.0)
+                .color(colors.muted),
+            );
+            ui.add_space(14.0);
+            ui.separator();
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Default image viewer")
+                    .size(15.0)
+                    .strong()
+                    .color(colors.text),
+            );
+            ui.label(
+                RichText::new(
+                    "File associations remain opt in and are selected per image type.",
+                )
+                .size(12.5)
+                .color(colors.muted),
+            );
+            if ui.button("Open Default Image Viewer Guide...").clicked() {
+                actions.push(UiAction::ShowFileAssociations);
+            }
+            ui.add_space(14.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    close_clicked = true;
+                }
+            });
+        });
+    response.response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Window,
+            true,
+            "Preferences. Default folder sort and opt-in default image viewer settings.",
+        )
+    });
+    if close_clicked || response.should_close() {
+        actions.push(UiAction::ClosePreferences);
+    }
+}
+
+fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+    let colors = chrome_colors(ui);
+    let mut close_clicked = false;
+    let response = egui::Modal::new(egui::Id::new("file_associations"))
+        .backdrop_color(Color32::from_black_alpha(140))
+        .frame(
+            Frame::new()
+                .fill(colors.panel)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20)),
+        )
+        .show(ui.ctx(), |ui| {
+            ui.set_max_width(560.0);
+            ui.vertical(|ui| {
+                let body_height = (ui.ctx().content_rect().height() - 80.0).clamp(180.0, 640.0);
+                ScrollArea::vertical()
+                    .id_salt("file_associations_body")
+                    .max_height(body_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.heading(
+                            RichText::new("Default image viewer")
+                                .size(22.0)
+                                .color(colors.text),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "viewr never changes file associations during installation or startup.",
+                            )
+                            .size(13.0)
+                            .color(colors.text),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "Defaults are selected per file type. Start with PNG and JPEG, then add only the formats you want viewr to open.",
+                            )
+                            .size(13.0)
+                            .color(colors.muted),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "This viewr build receives the selected file, but not the file manager's current folder sort. Use View > Folder Sort for Latest First or Name.",
+                            )
+                            .size(13.0)
+                            .color(colors.muted),
+                        );
+                        ui.add_space(12.0);
+                        render_platform_file_association_steps(ui, colors, &mut close_clicked);
+                    });
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+        });
+    response.response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Window,
+            true,
+            "Default image viewer. File associations change only after an explicit operating-system choice.",
+        )
+    });
+    if close_clicked || response.should_close() {
+        actions.push(UiAction::CloseFileAssociations);
+    }
+}
+
+fn render_platform_file_association_steps(
+    ui: &mut egui::Ui,
+    colors: ChromeColors,
+    _close_clicked: &mut bool,
+) {
+    #[cfg(target_os = "windows")]
+    {
+        ui.label(
+            RichText::new(
+                "In Windows Default Apps, search for .png, .jpg, and .jpeg, then choose viewr for each type. If viewr is not listed, use a file's Open with menu, choose another app, browse to viewr.exe, and select Always.",
+            )
+            .size(13.0)
+            .color(colors.text),
+        );
+        ui.add_space(10.0);
+        if ui
+            .add(
+                egui::Button::new(
+                    RichText::new("Open Windows Default Apps")
+                        .strong()
+                        .color(colors.accent_ink),
+                )
+                .fill(colors.accent)
+                .min_size(Vec2::new(208.0, 36.0)),
+            )
+            .clicked()
+        {
+            ui.ctx()
+                .open_url(egui::OpenUrl::same_tab("ms-settings:defaultapps"));
+            *_close_clicked = true;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        const COMMANDS: &str = "xdg-mime default com.github.blisspixel.viewr.desktop image/png\nxdg-mime default com.github.blisspixel.viewr.desktop image/jpeg";
+        ui.label(
+            RichText::new(
+                "Use your desktop's file properties or Default Applications screen to choose viewr for PNG and JPEG. The viewr installer registers the desktop entry but does not change a default.",
+            )
+            .size(13.0)
+            .color(colors.text),
+        );
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(COMMANDS)
+                .monospace()
+                .size(12.0)
+                .color(colors.muted),
+        );
+        if ui.button("Copy PNG/JPEG commands").clicked() {
+            ui.ctx().copy_text(COMMANDS.to_owned());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        ui.label(
+            RichText::new(
+                "For a viewr app bundle, select a PNG in Finder, choose File > Get Info, choose viewr under Open with, then select Change All. Repeat with a JPEG. Portable command-line builds are not app bundles and cannot appear as a Finder default.",
+            )
+            .size(13.0)
+            .color(colors.text),
+        );
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        ui.label(
+            RichText::new(
+                "Use the operating system's default applications settings to choose viewr for PNG and JPEG.",
+            )
+            .size(13.0)
+            .color(colors.text),
+        );
     }
 }
 
@@ -3994,9 +4351,9 @@ mod tests {
         MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS,
         PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction,
         UiFrameOwned, actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
-        chrome_colors_for, context_tool_button, crop_pixel_bounds, image_open_status,
-        menu_tool_button, mosaic_status, panels_menu, rating_filter_menu, rating_menu,
-        rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
+        chrome_colors_for, context_tool_button, crop_pixel_bounds, folder_sort_menu,
+        image_open_status, menu_tool_button, mosaic_status, panels_menu, rating_filter_menu,
+        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
     };
 
     fn relative_luminance(color: egui::Color32) -> f64 {
@@ -4024,6 +4381,23 @@ mod tests {
         (lighter + 0.05) / (darker + 0.05)
     }
 
+    fn accessibility_test_rating() -> super::RatingUiState {
+        super::RatingUiState {
+            state: crate::ratings::RatingState::Unrated,
+            capability: crate::ratings::RatingWriteCapability::WritableJpeg,
+            filter: crate::ratings::RatingFilter::All,
+            write_busy: false,
+            recovery_unsettled: false,
+            discovery_busy: false,
+            outside_filter: false,
+            visible_position: None,
+            match_count: 2,
+            current_catalog_index: Some(0),
+            folder_count: 2,
+            pending_disclosure: None,
+        }
+    }
+
     fn accessibility_test_frame() -> UiFrameOwned {
         UiFrameOwned {
             dock: DockInput {
@@ -4045,20 +4419,10 @@ mod tests {
             theme_mode: crate::theme::Mode::Dark,
             show_about: false,
             show_update: false,
-            rating: super::RatingUiState {
-                state: crate::ratings::RatingState::Unrated,
-                capability: crate::ratings::RatingWriteCapability::WritableJpeg,
-                filter: crate::ratings::RatingFilter::All,
-                write_busy: false,
-                recovery_unsettled: false,
-                discovery_busy: false,
-                outside_filter: false,
-                visible_position: None,
-                match_count: 2,
-                current_catalog_index: Some(0),
-                folder_count: 2,
-                pending_disclosure: None,
-            },
+            show_preferences: false,
+            show_file_associations: false,
+            folder_sort: crate::fs::FolderSort::Latest,
+            rating: accessibility_test_rating(),
             external_edit_pending: false,
             source_gone: false,
             file_path: Some("C:/photos/current.png".to_owned()),
@@ -4081,6 +4445,7 @@ mod tests {
             has_undo_edit: false,
             has_redo_edit: false,
             has_undo_trash: true,
+            has_unsaved_pixel_edits: false,
             restore_recovery_unsettled: false,
             is_panning: false,
             space_held: false,
@@ -4650,7 +5015,6 @@ mod tests {
         let _ = UiAction::RefreshHealSource;
         let _ = UiAction::UndoEdit;
         let _ = UiAction::RedoEdit;
-        let _ = UiAction::Navigate(1);
         let _ = UiAction::NavigateTo(0);
         let _ = UiAction::PermanentDelete;
         let _ = UiAction::ToggleImageInfo;
@@ -4670,6 +5034,11 @@ mod tests {
         let _ = UiAction::ZoomIn;
         let _ = UiAction::ZoomOut;
         let _ = UiAction::SetTheme(crate::theme::Preference::Console);
+        let _ = UiAction::SetFolderSort(crate::fs::FolderSort::Name);
+        let _ = UiAction::ShowPreferences;
+        let _ = UiAction::ClosePreferences;
+        let _ = UiAction::ShowFileAssociations;
+        let _ = UiAction::CloseFileAssociations;
         let _ = UiAction::ShowAbout;
         let _ = UiAction::CloseAbout;
         let _ = UiAction::ShowUpdate;
@@ -4833,11 +5202,11 @@ mod tests {
         let mut mosaic = MosaicUiState {
             cells: Vec::new(),
             ready: 1,
-            target: 24,
+            target: 12,
             state: MosaicLoadState::Loading,
         };
         let (first_visible, first_accessible) = mosaic_status(&mosaic);
-        mosaic.ready = 23;
+        mosaic.ready = 11;
         let (later_visible, later_accessible) = mosaic_status(&mosaic);
         assert_ne!(first_visible, later_visible);
         assert_eq!(first_accessible, later_accessible);
@@ -4846,7 +5215,7 @@ mod tests {
         let (_, terminal_accessible) = mosaic_status(&mosaic);
         assert_eq!(
             terminal_accessible,
-            "Full-image collage  23 of 24 photos fit the 256 MiB memory limit"
+            "Full-image collage  11 of 12 photos fit the 256 MiB memory limit"
         );
     }
 
@@ -5571,6 +5940,90 @@ mod tests {
         assert!(ordinary_update.nodes.iter().any(|(_, node)| {
             node.value() == Some("Saved copy · EXIF retained")
                 && node.live() != Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
+    fn ordinary_trash_outcome_stays_in_top_chrome() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.toast = Some("Moved to Trash. Undo with U.".to_owned());
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("trash outcome AccessKit update should be generated");
+        let notice = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.value() == Some("Moved to Trash. Undo with U.")
+                    || node.label() == Some("Moved to Trash. Undo with U.")
+            })
+            .expect("trash outcome notice");
+        let bounds = notice.bounds().expect("trash outcome bounds");
+        assert!(bounds.y1 <= f64::from(TOP_BAR_HEIGHT));
+        assert_ne!(notice.live(), Some(egui::accesskit::Live::Polite));
+    }
+
+    #[test]
+    fn edited_pixels_keep_a_non_live_save_as_cue() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.has_unsaved_pixel_edits = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("edited-pixel cue AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            (node.value() == Some("Edited pixels are in memory. Save As writes a copy.")
+                || node.label() == Some("Edited pixels are in memory. Save As writes a copy."))
+                && node.live() != Some(egui::accesskit::Live::Polite)
+        }));
+    }
+
+    #[test]
+    fn folder_sort_menu_has_one_persisted_selection() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = accessibility_test_frame();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            folder_sort_menu(ui, &mut Vec::new(), &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("folder-sort AccessKit update should be generated");
+        let radios = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .filter(|node| node.role() == egui::accesskit::Role::RadioButton)
+            .collect::<Vec<_>>();
+        assert_eq!(radios.len(), 2);
+        assert_eq!(
+            radios
+                .iter()
+                .filter(|node| node.toggled() == Some(egui::accesskit::Toggled::True))
+                .count(),
+            1
+        );
+        assert!(radios.iter().any(|node| {
+            node.label() == Some("Latest First")
+                && node.toggled() == Some(egui::accesskit::Toggled::True)
+        }));
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value().is_some_and(|value| {
+                value.contains("does not receive the file manager's current sort")
+            })
         }));
     }
 
@@ -6491,6 +6944,116 @@ mod tests {
                 && bounds.y1 <= f64::from(screen_rect.bottom()),
             "Update Close escaped the minimum window: {bounds:?}"
         );
+    }
+
+    #[test]
+    fn preferences_surface_exposes_persistent_sort_and_opt_in_associations() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_preferences = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("preferences AccessKit update should be generated");
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Preferences",
+            "Default folder sort",
+            "Latest First",
+            "Name",
+            "future folders",
+            "File associations remain opt in",
+            "Open Default Image Viewer Guide",
+            "Close",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing preferences guidance: {expected}; exposed text: {exposed:?}"
+            );
+        }
+
+        let filtered = actions_owned_by_modal(
+            vec![
+                UiAction::Open,
+                UiAction::SetFolderSort(crate::fs::FolderSort::Name),
+                UiAction::ClosePreferences,
+                UiAction::Trash,
+            ],
+            &frame,
+        );
+        assert_eq!(filtered.len(), 2);
+        assert!(matches!(
+            filtered[0],
+            UiAction::SetFolderSort(crate::fs::FolderSort::Name)
+        ));
+        assert!(matches!(filtered[1], UiAction::ClosePreferences));
+    }
+
+    #[test]
+    fn file_association_surface_is_opt_in_and_platform_specific() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_file_associations = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("file-association AccessKit update should be generated");
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Default image viewer",
+            "never changes file associations",
+            "Start with PNG and JPEG",
+            "not the file manager's current folder sort",
+            "Close",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing file-association guidance: {expected}; exposed text: {exposed:?}"
+            );
+        }
+        #[cfg(target_os = "windows")]
+        assert!(
+            exposed
+                .iter()
+                .any(|text| text.contains("Open Windows Default Apps"))
+        );
+        #[cfg(target_os = "linux")]
+        assert!(
+            exposed
+                .iter()
+                .any(|text| text.contains("Copy PNG/JPEG commands"))
+        );
+        #[cfg(target_os = "macos")]
+        assert!(exposed.iter().any(|text| text.contains("File > Get Info")));
+
+        let filtered = actions_owned_by_modal(
+            vec![
+                UiAction::Open,
+                UiAction::CloseFileAssociations,
+                UiAction::Trash,
+            ],
+            &frame,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(filtered[0], UiAction::CloseFileAssociations));
     }
 
     #[test]

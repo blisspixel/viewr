@@ -416,9 +416,9 @@ Shipped:
   Job Object, process-group, seccomp, package-sandbox, memory, hard-deadline, and
   generation-cancellation controls for helpers.
 - **`fs`**: recognizing regular image files (core and worker extensions), excluding
-  symlinks from automatic scans, natural-sort ordering (`img2` before `img10`),
-  and versioned native file identity used to bind a displayed source to guarded
-  mutation.
+  symlinks from automatic scans, descending modification-time or natural-name
+  ordering with natural ties (`img2` before `img10`), and versioned native file
+  identity used to bind a displayed source to guarded mutation.
 - **`ratings`**: bounded JPEG header, XMP, and existing IFD0 `0x4746` parsing;
   complete rating-state reconciliation; and the narrow JPEG source-write
   transaction. XMP is canonical. An existing valid SimpleRating mirror is updated
@@ -428,9 +428,9 @@ Shipped:
   the retained original or restores it. Windows uses `ReplaceFileW` and copies
   source ACLs onto staging files. Unix preserves mode, refuses extra hard links,
   and replaces by rename after a same-directory backup.
-- **`playlist`**: one canonical naturally ordered folder catalog plus rating state
-  and a derived minimum-rating projection. Navigation, Home and End, Folder
-  Previews, full-image mosaic pages, and prefetch consume projected canonical
+- **`playlist`**: one canonical folder catalog in the selected session order plus
+  rating state and a derived minimum-rating projection. Navigation, Home and End,
+  Folder Previews, full-image mosaic pages, and prefetch consume projected canonical
   indices. Trash and Undo retain canonical positions. A just-rated image can remain explicitly outside the
   active filter until the next navigation action without creating a second list.
 - **`prefetch`**: an in-memory LRU bounded to five decoded neighbors and 256 MiB,
@@ -442,11 +442,11 @@ Shipped:
   path in the worker result. Entries use shared immutable decoded ownership plus
   its paired source handle so a nearby just-left pristine frame can enter the
   cache without copying pixels. Full-image collage temporarily raises only the
-  entry cap to 24 and lowers the neighbor byte cap by the retained current
+  entry cap to 12 and lowers the neighbor byte cap by the retained current
   decode, so current plus neighbor decoded pixels remain within 256 MiB. Mosaic
   admission does not evict an accepted photo to fit a later completion. Entries
   and scheduling state are never persisted.
-- **`mosaic`**: pure 24-photo projection paging, ordered keyboard focus, and dense
+- **`mosaic`**: pure 12-photo projection paging, ordered keyboard focus, and dense
   physical collage geometry. Dynamic programming selects justified row breaks
   from actual image aspect ratios, balances row heights against the viewport, and
   centers only the unavoidable outer remainder. It contains no pixels, paths,
@@ -466,6 +466,10 @@ Shipped:
   decoration and theme signal, supplies complete GPU and chrome color tokens,
   and reads or writes one validated appearance word in the platform configuration
   directory. The bounded read rejects oversized and unknown values.
+- **`folder_sort_preference`**: reads or writes one validated `latest` or `name`
+  word in the same platform configuration directory. Missing state quietly uses
+  Latest First; invalid or unavailable state produces one path-free recovery
+  notice. No folder path, filename, timestamp, or activity state is persisted.
 - **`performance`**: stable, path-free probe output and narrow platform peak-RSS
   readers used only by the explicit developer/CI performance command.
 - **`startup`**: launch prerequisites and first-window geometry. Session
@@ -488,8 +492,8 @@ Shipped:
   Image Information,
   animation controls, crop controls and handles, the temporary docked Spot Heal
   inspector, accessible rating and threshold radio groups, first-write disclosure,
-  filtered-empty recovery, About modal, appearance picker, load/retry state, and
-  transient toasts.
+  filtered-empty recovery, About, Preferences, and file-association modals, appearance and
+  folder-sort pickers, load/retry state, and transient chrome notices.
   Visible chrome never covers the image; its
   exact edge-aware insets feed the same `view` geometry used by hit testing and
   rendering. Keyboard dispatch remains centralized in `app` rather than adding a
@@ -514,7 +518,7 @@ treatment.
    Starting another scan cancels ownership of the previous scan. Enumeration is
    nonrecursive and capped at 100,000 supported regular files plus 64 MiB of
    cumulative encoded path storage. Cancellation is observed during enumeration
-   and natural-sort comparisons. Exceeding either cap is visible and never
+   and sort comparisons. Exceeding either cap is visible and never
    installs a silently truncated playlist.
 2. **Decode is prioritized:** the *current* image is decoded at highest priority.
    Async image decoding runs on background work using `std::sync::mpsc`, so file
@@ -569,13 +573,13 @@ treatment.
    decoded bytes, speculative neighbor work is capped at four accepted owners,
    thumbnail work and visible GPU textures are each capped at nine, and the
    renderer normally owns one current image texture plus its mip levels. A
-   full-image collage group draws at most 24 page textures and reuses the current
+   full-image collage group draws at most 12 page textures and reuses the current
    texture when that photo belongs to the page. On a different page, the inactive
-  current texture remains owned while up to 24 admitted page textures draw.
-  Current plus neighbor decoded pixels are admitted against the same 256 MiB
-  decoded-byte policy. Mosaic textures retain the normal output transform and mip
-  chain; there is no thumbnail substitution. Image-cache memory does not grow
-  with folder length; the lightweight playlist path index necessarily does.
+   current texture remains owned while up to 12 admitted page textures draw.
+   Current plus neighbor decoded pixels are admitted against the same 256 MiB
+   decoded-byte policy. Mosaic textures retain the normal output transform and mip
+   chain; there is no thumbnail substitution. Image-cache memory does not grow
+   with folder length; the lightweight playlist path index necessarily does.
 6. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are changes to the sampling transform, with mip selection handled by the
    sampler. No re-decode and no CPU resampling occur per frame.

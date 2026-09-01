@@ -63,7 +63,7 @@ pub(crate) enum FolderScanFailure {
 pub(crate) enum PathEntry {
     /// Present this file and browse the folder that contains it.
     Image,
-    /// Browse this folder and present its first naturally sorted image.
+    /// Browse this folder and present its first image in the session sort.
     Folder,
 }
 
@@ -71,7 +71,7 @@ pub(crate) enum PathEntry {
 ///
 /// The command line, a desktop Open With, a drop on the window, and the macOS
 /// open-file event all deliver a bare path, and `viewr help` documents that a
-/// folder opens its first naturally sorted image. A directory therefore starts
+/// folder opens its most recently modified image first. A directory therefore starts
 /// the same browse the Open Folder button starts, rather than reaching a
 /// decoder that can only report that the source is not a regular file.
 ///

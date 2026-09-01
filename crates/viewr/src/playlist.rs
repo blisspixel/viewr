@@ -287,6 +287,32 @@ impl Playlist {
         true
     }
 
+    pub(crate) fn sort(&mut self, sort: crate::fs::FolderSort) {
+        let selected = self.files.get(self.index).cloned();
+        let mut entries = self
+            .files
+            .drain(..)
+            .zip(self.provenance.drain(..))
+            .zip(self.ratings.drain(..))
+            .map(|((path, provenance), rating)| (path, provenance, rating))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            crate::fs::folder_entry_cmp(sort, &left.0, left.1, &right.0, right.1)
+        });
+        for (path, provenance, rating) in entries {
+            self.files.push(path);
+            self.provenance.push(provenance);
+            self.ratings.push(rating);
+        }
+        self.index = selected
+            .as_deref()
+            .and_then(|selected| self.files.iter().position(|path| path == selected))
+            .unwrap_or(0);
+        self.empty_anchor = self.index;
+        self.rebuild_visible();
+        self.outside_filter = !self.current_rating().matches(self.filter);
+    }
+
     pub(crate) fn visible_catalog_range(&self) -> Vec<usize> {
         if self.visible_indices.is_empty() {
             return Vec::new();
@@ -639,6 +665,50 @@ mod tests {
         assert!(playlist.set_scan_provenance(&scanned_first, None));
         assert!(playlist.scan_provenance(&scanned_first).is_none());
         assert!(playlist.scan_provenance(&scanned_second).is_some());
+    }
+
+    #[test]
+    fn sorting_preserves_selection_ratings_and_filter_projection() {
+        let workspace = TempWorkspace::new("playlist_sort").unwrap();
+        let older = workspace.path().join("image-2.jpg");
+        let newer = workspace.path().join("image-10.jpg");
+        std::fs::write(&older, b"older").unwrap();
+        std::fs::write(&newer, b"newer").unwrap();
+        let now = std::time::SystemTime::now();
+        std::fs::File::options()
+            .write(true)
+            .open(&older)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new().set_modified(now - std::time::Duration::from_mins(2)),
+            )
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&newer)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(now))
+            .unwrap();
+        let entries = crate::fs::scan_image_entries_while(workspace.path(), || true).unwrap();
+        let mut playlist = Playlist::from_scan(entries, 0);
+        let scanned_older = playlist.files[0].clone();
+        let scanned_newer = playlist.files[1].clone();
+        playlist.set_rating(&scanned_older, RatingState::Unrated);
+        playlist.set_rating(&scanned_newer, RatingState::Rated(Rating::new(5).unwrap()));
+        playlist.set_filter(RatingFilter::AtLeast(Rating::new(5).unwrap()));
+
+        playlist.sort(crate::fs::FolderSort::Latest);
+
+        assert_eq!(
+            playlist.files,
+            [scanned_newer.clone(), scanned_older.clone()]
+        );
+        assert_eq!(playlist.files[playlist.index], scanned_older);
+        assert_eq!(playlist.visible_indices, [0]);
+        assert_eq!(
+            playlist.rating_for_path(&scanned_newer),
+            RatingState::Rated(Rating::new(5).unwrap())
+        );
     }
 
     #[test]

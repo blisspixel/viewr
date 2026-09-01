@@ -87,6 +87,45 @@ impl ScanProvenance {
     pub(crate) fn same_object(self, other: Self) -> bool {
         self.identity == other.identity
     }
+
+    fn modified_cmp(self, other: Self) -> Ordering {
+        modified_time_cmp(self.version, other.version)
+    }
+}
+
+/// Persisted default ordering for images discovered in a folder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FolderSort {
+    /// Show the most recently modified image first.
+    #[default]
+    Latest,
+    /// Use case-insensitive natural filename order.
+    Name,
+}
+
+impl FolderSort {
+    #[must_use]
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Latest => "Latest First",
+            Self::Name => "Name",
+        }
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Latest => "latest",
+            Self::Name => "name",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "latest" => Some(Self::Latest),
+            "name" => Some(Self::Name),
+            _ => None,
+        }
+    }
 }
 
 /// Identity plus version for the folder currently being browsed.
@@ -155,12 +194,23 @@ struct FileVersion {
     changed_nanoseconds: i64,
 }
 
+#[cfg(unix)]
+fn modified_time_cmp(left: FileVersion, right: FileVersion) -> Ordering {
+    (left.modified_seconds, left.modified_nanoseconds)
+        .cmp(&(right.modified_seconds, right.modified_nanoseconds))
+}
+
 #[cfg(target_os = "windows")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileVersion {
     length: u64,
     last_write_time: i64,
     change_time: i64,
+}
+
+#[cfg(target_os = "windows")]
+fn modified_time_cmp(left: FileVersion, right: FileVersion) -> Ordering {
+    left.last_write_time.cmp(&right.last_write_time)
 }
 
 #[cfg(target_os = "windows")]
@@ -1709,14 +1759,24 @@ pub(crate) fn scan_images_while(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn scan_image_entries_while(
     directory: &Path,
+    keep_going: impl FnMut() -> bool,
+) -> Result<Vec<ScannedImage>, ScanImagesError> {
+    scan_image_entries_sorted_while(directory, FolderSort::Name, keep_going)
+}
+
+pub(crate) fn scan_image_entries_sorted_while(
+    directory: &Path,
+    sort: FolderSort,
     keep_going: impl FnMut() -> bool,
 ) -> Result<Vec<ScannedImage>, ScanImagesError> {
     scan_image_entries_with_limit(
         directory,
         MAX_FOLDER_IMAGES,
         MAX_FOLDER_PATH_BYTES,
+        sort,
         keep_going,
     )
 }
@@ -1727,23 +1787,38 @@ fn scan_images_with_limit(
     max_path_bytes: usize,
     keep_going: impl FnMut() -> bool,
 ) -> Result<Vec<PathBuf>, ScanImagesError> {
-    scan_image_entries_with_limit(directory, max_files, max_path_bytes, keep_going)
-        .map(|entries| entries.into_iter().map(|entry| entry.path).collect())
+    scan_image_entries_with_limit(
+        directory,
+        max_files,
+        max_path_bytes,
+        FolderSort::Name,
+        keep_going,
+    )
+    .map(|entries| entries.into_iter().map(|entry| entry.path).collect())
 }
 
 fn scan_image_entries_with_limit(
     directory: &Path,
     max_files: usize,
     max_path_bytes: usize,
+    sort: FolderSort,
     keep_going: impl FnMut() -> bool,
 ) -> Result<Vec<ScannedImage>, ScanImagesError> {
-    scan_image_entries_with_hook(directory, max_files, max_path_bytes, keep_going, || {})
+    scan_image_entries_sorted_with_hook(
+        directory,
+        max_files,
+        max_path_bytes,
+        sort,
+        keep_going,
+        || {},
+    )
 }
 
-fn scan_image_entries_with_hook(
+fn scan_image_entries_sorted_with_hook(
     directory: &Path,
     max_files: usize,
     max_path_bytes: usize,
+    sort: FolderSort,
     mut keep_going: impl FnMut() -> bool,
     after_directory_open: impl FnOnce(),
 ) -> Result<Vec<ScannedImage>, ScanImagesError> {
@@ -1810,22 +1885,47 @@ fn scan_image_entries_with_hook(
         return Err(ScanImagesError::Cancelled);
     }
     let completed_sort = sort_while(&mut files, &mut keep_going, |a, b| {
-        let a_name = a
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        let b_name = b
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        natural_cmp(a_name, b_name)
+        folder_entry_cmp(
+            sort,
+            &a.path,
+            Some(a.provenance),
+            &b.path,
+            Some(b.provenance),
+        )
     });
     if !completed_sort || !keep_going() {
         return Err(ScanImagesError::Cancelled);
     }
     Ok(files)
+}
+
+pub(crate) fn folder_entry_cmp(
+    sort: FolderSort,
+    left_path: &Path,
+    left_provenance: Option<ScanProvenance>,
+    right_path: &Path,
+    right_provenance: Option<ScanProvenance>,
+) -> Ordering {
+    let by_name = || {
+        let left = left_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let right = right_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        natural_cmp(left, right)
+    };
+    match sort {
+        FolderSort::Name => by_name(),
+        FolderSort::Latest => match (left_provenance, right_provenance) {
+            (Some(left), Some(right)) => right.modified_cmp(left).then_with(by_name),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => by_name(),
+        },
+    }
 }
 
 fn sort_while<T>(
@@ -1930,12 +2030,12 @@ mod tests {
     #[cfg(windows)]
     use super::canonical_existing_file_path;
     #[cfg(unix)]
-    use super::scan_image_entries_with_hook;
+    use super::scan_image_entries_sorted_with_hook;
     use super::{
-        CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, canonical_file_path,
+        CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, FolderSort, canonical_file_path,
         error_kind_is_definitely_missing, is_core_format, is_supported_image, is_worker_format,
-        natural_cmp, scan_image_entries_while, scan_images, scan_images_while,
-        scan_images_with_limit, sort_while, supported_extensions,
+        natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while, scan_images,
+        scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
@@ -2089,6 +2189,54 @@ mod tests {
     }
 
     #[test]
+    fn latest_folder_sort_uses_modified_time_then_natural_name() {
+        let workspace = TempWorkspace::new("folder_scan_latest").unwrap();
+        let older = workspace.path().join("image2.png");
+        let newer = workspace.path().join("image10.png");
+        fs::write(&older, b"older").unwrap();
+        fs::write(&newer, b"newer").unwrap();
+        let now = std::time::SystemTime::now();
+        std::fs::File::options()
+            .write(true)
+            .open(&older)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new().set_modified(now - std::time::Duration::from_mins(2)),
+            )
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&newer)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(now))
+            .unwrap();
+
+        let latest = scan_image_entries_sorted_while(workspace.path(), FolderSort::Latest, || true)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(latest, ["image10.png", "image2.png"]);
+
+        let same_time = now - std::time::Duration::from_mins(1);
+        for path in [&older, &newer] {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(same_time))
+                .unwrap();
+        }
+        let tied = scan_image_entries_sorted_while(workspace.path(), FolderSort::Latest, || true)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(tied, ["image2.png", "image10.png"]);
+        assert_eq!(FolderSort::default(), FolderSort::Latest);
+    }
+
+    #[test]
     fn scanned_entry_rejects_an_in_place_rewrite() {
         let workspace = TempWorkspace::new("folder_scan_version").unwrap();
         let path = workspace.path().join("image.png");
@@ -2199,10 +2347,11 @@ mod tests {
         fs::create_dir(&selected).unwrap();
         fs::write(selected.join("image.png"), b"original object").unwrap();
 
-        let error = scan_image_entries_with_hook(
+        let error = scan_image_entries_sorted_with_hook(
             &selected,
             2,
             usize::MAX,
+            FolderSort::Name,
             || true,
             || {
                 fs::rename(&selected, &moved).unwrap();

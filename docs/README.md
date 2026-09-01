@@ -5,7 +5,10 @@ Start with the document that matches the task.
 ## Using viewr
 
 - [Install and update](INSTALL.md): current source builds, current v0.6.0
-  one-command installers, manual downloads, platform integration, and uninstall.
+  one-command installers, manual downloads, default-app setup, platform
+  integration, and uninstall.
+- [Design](DESIGN.md): controls, folder order, full-image collage, editing,
+  Trash and Undo, and other interaction rules.
 - [Privacy](PRIVACY.md): the local-only product boundary and metadata behavior.
 - [Ratings](RATINGS.md): embedded ratings, filters, interoperability, and recovery.
 - [Formats](FORMATS.md): supported formats and current format-specific limits.
@@ -14,13 +17,12 @@ Start with the document that matches the task.
 - [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
   failure-recovery, and visual-polish matrix plus the candidate-artifact and
   evidence-validation contract for v0.6. Representative hardware evidence is
-  still required before that tag.
+  still required before v0.7.0 may be tagged.
 - [Performance](PERFORMANCE.md): measured budgets and current evidence.
 
 ## Understanding and contributing
 
 - [Architecture](ARCHITECTURE.md): process boundaries, data flow, and ownership.
-- [Design](DESIGN.md): visual and interaction rules.
 - [Stack](STACK.md): technology decisions and rejected alternatives.
 - [Engineering standards](STANDARDS.md): code, dependency, privacy, and test rules.
 - [Verification](VERIFY.md): local and CI checks and what each result proves.

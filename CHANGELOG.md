@@ -5,6 +5,28 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Product quality
+
+- Folder browsing defaults to the most recently modified image first. File >
+  Preferences and View > Folder Sort can make natural filename order the saved
+  default while preserving selection, ratings, and the active rating filter. The
+  UI explains that current viewr association launches provide the selected file
+  but not the manager's current folder sort.
+- Reduced full-image collage groups from 24 photos to 12 so each complete image
+  remains useful while reviewing a folder. Page Up and Page Down still traverse
+  every group.
+- Routine outcome notices such as Moved to Trash now use the top status area
+  instead of covering the bottom of the photo. Immersive fullscreen and the
+  full-image collage retain a compact transient overlay because chrome is hidden.
+- Spot Heal success now says that the repaired pixels are in memory and directs
+  the user to Save As. A quiet top-chrome cue preserves that boundary, and a
+  successful export explicitly confirms when the saved copy contains edited
+  pixels.
+- Added File > Default Image Viewer, an opt-in guide for choosing viewr per file
+  type. It opens Windows Default Apps, provides Linux PNG and JPEG commands, and
+  explains the native Finder flow on macOS. Installation and startup still never
+  change file associations.
+
 ## 0.6.0 - 2026-08-29
 
 ### Release evidence

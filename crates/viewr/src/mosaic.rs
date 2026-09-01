@@ -8,7 +8,7 @@
 use crate::view::PhysicalViewport;
 
 /// Maximum number of complete photos admitted to one collage group.
-pub(crate) const MAX_IMAGES: usize = 24;
+pub(crate) const MAX_IMAGES: usize = 12;
 
 /// One page in the active playlist projection.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -368,7 +368,7 @@ mod tests {
         assert_eq!(first.start, 0);
         assert_eq!(first.indices.len(), MAX_IMAGES);
         assert_eq!(first.indices.first(), Some(&0));
-        assert_eq!(first.indices.last(), Some(&46));
+        assert_eq!(first.indices.last(), Some(&22));
         assert_eq!(first.focused, 3);
 
         let last = MosaicPage::containing(&projection(), 58, MAX_IMAGES).unwrap();
@@ -390,7 +390,12 @@ mod tests {
     fn page_navigation_is_bounded_and_focus_follows_collage_order() {
         let first = MosaicPage::containing(&projection(), 0, MAX_IMAGES).unwrap();
         assert!(first.adjacent(&projection(), -1).is_none());
-        let mut last = first.adjacent(&projection(), 1).unwrap();
+        let middle = first.adjacent(&projection(), 1).unwrap();
+        assert_eq!(
+            middle.indices,
+            [24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46]
+        );
+        let mut last = middle.adjacent(&projection(), 1).unwrap();
         assert_eq!(last.indices, [48, 50, 52, 54, 56, 58]);
         assert!(last.adjacent(&projection(), 1).is_none());
         last.move_focus(FocusDirection::Last);
@@ -455,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn collage_accepts_twenty_four_photos_and_tiny_views_stay_safe() {
+    fn collage_accepts_twelve_photos_and_tiny_views_stay_safe() {
         let sizes = vec![(3, 4); MAX_IMAGES + 4];
         let full = dense_collage(
             PhysicalViewport {

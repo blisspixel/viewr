@@ -44,6 +44,10 @@ fn spot_heal_undo_redo_and_export_round_trip() {
         }
     }
     let damaged = image.rgba.clone();
+    let workspace = TempWorkspace::new("spot_heal_flow").expect("temporary workspace");
+    let source = workspace.path().join("source.png");
+    edit::save(&image, &source).expect("source fixture saves");
+    let source_bytes = std::fs::read(&source).expect("source fixture remains readable");
 
     let repair = SpotHealJob::prepare(&image, &[StrokePoint { x: 64.0, y: 64.0 }], 9)
         .expect("valid repair")
@@ -69,10 +73,13 @@ fn spot_heal_undo_redo_and_export_round_trip() {
     assert_eq!(redone.bounds, repair.bounds);
     assert_eq!(image.rgba, repaired);
 
-    let workspace = TempWorkspace::new("spot_heal_flow").expect("temporary workspace");
     let output = workspace.path().join("healed.png");
     edit::save(&image, &output).expect("pixel-only export succeeds");
     let reopened = DecodedImage::load(&output).expect("exported image reopens");
     assert_eq!((reopened.width, reopened.height), (128, 128));
     assert_eq!(reopened.rgba, repaired);
+    assert_eq!(
+        std::fs::read(&source).expect("source remains readable after export"),
+        source_bytes
+    );
 }

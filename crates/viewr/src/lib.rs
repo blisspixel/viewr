@@ -26,6 +26,7 @@ mod entry_state;
 pub mod ephemeral;
 pub mod error;
 mod file_coherence;
+mod folder_sort_preference;
 pub mod fs;
 pub mod gpu;
 mod gpu_image;

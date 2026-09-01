@@ -1037,6 +1037,7 @@ $secondImage = Join-Path $testDirectory "second.png"
 $ratedImage = Join-Path $testDirectory "rated.jpg"
 $appearanceDirectory = Join-Path $testDirectory "viewr"
 $appearanceFile = Join-Path $appearanceDirectory "appearance"
+$folderSortFile = Join-Path $appearanceDirectory "folder-sort"
 $png = [Convert]::FromBase64String(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
@@ -1048,6 +1049,8 @@ try {
     [IO.Directory]::CreateDirectory($testDirectory) | Out-Null
     [IO.File]::WriteAllBytes($firstImage, $png)
     [IO.File]::WriteAllBytes($secondImage, $png)
+    [IO.File]::SetLastWriteTimeUtc($firstImage, [DateTime]::UtcNow.AddMinutes(-2))
+    [IO.File]::SetLastWriteTimeUtc($secondImage, [DateTime]::UtcNow)
 
     Start-TestApplication
 
@@ -1120,7 +1123,7 @@ try {
             -Prefix `
             -ControlType ([System.Windows.Automation.ControlType]::Button) | Out-Null
     }
-    Activate-Element -Element $fileMenu
+    Send-ApplicationKey -VirtualKey 0x1B
     Wait-ForElement -Name "first.png" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
@@ -1138,6 +1141,52 @@ try {
             "$($imageWindowClientSize.Width)x$($imageWindowClientSize.Height)"
         )
     }
+    Wait-ForElement -Name "2 / 2" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
+    $fileMenu = Wait-ForElement -Name "File" -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $fileMenu
+    $preferences = Wait-ForElement -Name "Preferences..." -ControlType (
+        [System.Windows.Automation.ControlType]::Button
+    )
+    Activate-Element -Element $preferences
+    $preferencesModal = Wait-ForElement -Name "Preferences." -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
+    )
+    Wait-ForSelectionState -Name "Latest First" -Selected $true | Out-Null
+    $nameSort = Wait-ForSelectionState -Name "Name" -Selected $false
+    Select-Element -Element $nameSort
+    Wait-ForSelectionState -Name "Name" -Selected $true | Out-Null
+    if (-not [IO.File]::Exists($folderSortFile)) {
+        throw "selecting Name did not persist the isolated folder-sort preference"
+    }
+    $folderSortValue = [IO.File]::ReadAllText($folderSortFile)
+    if (-not [string]::Equals($folderSortValue, "name`n", [StringComparison]::Ordinal)) {
+        throw "folder-sort preference file did not contain the exact validated value"
+    }
+    $associationGuide = Wait-ForElement `
+        -Name "Open Default Image Viewer Guide..." `
+        -Root $preferencesModal `
+        -ControlType ([System.Windows.Automation.ControlType]::Button)
+    Activate-Element -Element $associationGuide
+    $associationModal = Wait-ForElement -Name "Default image viewer." -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
+    )
+    Wait-ForElement `
+        -Name "Open Windows Default Apps" `
+        -Root $associationModal `
+        -ControlType ([System.Windows.Automation.ControlType]::Button) | Out-Null
+    $closeAssociations = Wait-ForElement `
+        -Name "Close" `
+        -Root $associationModal `
+        -ControlType ([System.Windows.Automation.ControlType]::Button)
+    Activate-Element -Element $closeAssociations
+    Wait-ForElementAbsent -Name "Default image viewer." -Prefix -ControlType (
+        [System.Windows.Automation.ControlType]::Window
+    ) | Out-Null
     Wait-ForElement -Name "1 / 2" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
@@ -1630,7 +1679,8 @@ try {
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
         "actions, first-run scope, stable initial window size, conventional Trash " +
-        "controls, explicit update handoff, About, current appearance and restart, " +
+        "controls, folder-sort preference and restart, default-app guide, explicit update handoff, " +
+        "About, current appearance and restart, " +
         "Spot Heal, source privacy, native Open With discovery, panel shortcuts, dock positions, " +
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
@@ -1647,6 +1697,9 @@ finally {
     }
     if ([IO.File]::Exists($appearanceFile)) {
         [IO.File]::Delete($appearanceFile)
+    }
+    if ([IO.File]::Exists($folderSortFile)) {
+        [IO.File]::Delete($folderSortFile)
     }
     if ([IO.Directory]::Exists($appearanceDirectory)) {
         [IO.Directory]::Delete($appearanceDirectory, $false)

@@ -2391,7 +2391,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
 fn render_platform_file_association_steps(
     ui: &mut egui::Ui,
     colors: ChromeColors,
-    close_clicked: &mut bool,
+    _close_clicked: &mut bool,
 ) {
     #[cfg(target_os = "windows")]
     {
@@ -2417,7 +2417,7 @@ fn render_platform_file_association_steps(
         {
             ui.ctx()
                 .open_url(egui::OpenUrl::same_tab("ms-settings:defaultapps"));
-            *close_clicked = true;
+            *_close_clicked = true;
         }
     }
     #[cfg(target_os = "linux")]
@@ -2453,7 +2453,6 @@ fn render_platform_file_association_steps(
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
-        let _ = close_clicked;
         ui.label(
             RichText::new(
                 "Use the operating system's default applications settings to choose viewr for PNG and JPEG.",

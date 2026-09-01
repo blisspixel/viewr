@@ -37,11 +37,11 @@ window thread never performs the resize.
 Full-Image Collage uses the same complete decoded RGBA images and color-managed,
 mipmapped texture path. It never calls the Folder Previews thumbnail generator.
 The current decode counts first against the existing 256 MiB decoded-pixel
-budget; only the remaining bytes can admit up to 23 neighboring photos in its
-group, or up to 24 when the retained current photo is outside that group. The
+budget; only the remaining bytes can admit up to 11 neighboring photos in its
+group, or up to 12 when the retained current photo is outside that group. The
 current GPU texture is reused when it belongs to the group. Other textures are
 uploaded at most one per redraw, so entering the view does not issue one burst of
-24 event-loop uploads. A completion that cannot fit does not evict an already
+12 event-loop uploads. A completion that cannot fit does not evict an already
 accepted group photo and trigger decode churn. Level-zero mosaic texture bytes
 therefore follow the same aggregate decoded-pixel bound, with the documented mip
 chain overhead, while an inactive current texture remains available for returning
@@ -117,7 +117,7 @@ diagnostic but is not compared with the 768 MiB limit, which applies to the
 | 16-to-50,000-file resident growth | 96 MiB |
 | Retained decoded neighbors | 5 |
 | Retained decoded-neighbor pixels | 256 MiB |
-| Full-image collage group | Up to 24 complete photos, 256 MiB current plus neighbors |
+| Full-image collage group | Up to 12 complete photos, 256 MiB current plus neighbors |
 | Retained folder-preview textures | 9 |
 | Current base GPU image texture | 64 Mi pixels |
 

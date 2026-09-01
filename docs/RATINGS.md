@@ -107,14 +107,14 @@ Sources reviewed 2026-07-29.
 
 ## Navigation and state ownership
 
-The folder catalog remains one canonical natural-order list. A rating filter is a
-derived projection of indices, never a second mutable playlist.
+The folder catalog remains one canonical list in the selected folder order. A
+rating filter is a derived projection of indices, never a second mutable playlist.
 
 - Next, Previous, Home, End, Page Up, Page Down, the counter, Folder Previews,
   thumbnail selection, and neighbor prefetch operate on the visible projection.
 - Applying a filter keeps the current image if it matches. Otherwise it selects
-  the next natural-order match, then the previous match. Empty results use the
-  dedicated no-match state.
+  the next match in the selected folder order, then the previous match. Empty
+  results use the dedicated no-match state.
 - A rating write commits before filter membership changes. If the new value falls
   outside the active filter, the image stays visible with `Outside current filter`
   until the next navigation action. This avoids a successful keypress immediately

@@ -339,7 +339,7 @@ Usage:
   viewr open <file or folder>
 
 Identical to `viewr <file or folder>`, and the way to open a path that could be
-read as a command name. A folder opens its first naturally sorted image.
+read as a command name. A folder opens its most recently modified image first.
 
 Examples:
   viewr open {example_image}

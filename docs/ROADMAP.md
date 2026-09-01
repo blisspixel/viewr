@@ -40,10 +40,13 @@ EXIF orientation, RGB ICC-to-sRGB normalization, trilinear GPU mips, GPU-limited
 previews with full-resolution export, last-good-frame navigation, async crop and
 Save As, image information, Reload (`F5`), Spot Heal, About, and System, Light,
 Dark, and Console appearances. The active v0.6 line also includes a transient
-full-image collage of up to 24 aspect-aware tiles without a catalog or thumbnail
-substitution.
-Appearance is the only persistent UI preference and contains no image or activity
-data.
+full-image collage, now capped at 12 aspect-aware tiles without a catalog or
+thumbnail substitution. Current development opens folders newest-modified first,
+retains a saved natural-name alternative, keeps routine Trash outcomes in top chrome,
+makes Spot Heal persistence explicit, and provides an opt-in platform association
+guide for PNG, JPEG, and other selected types.
+Appearance and default folder sort are the only persistent UI preferences. Each
+stores one validated word and contains no image path or activity data.
 
 ## Order of operations to 1.0
 
@@ -567,7 +570,7 @@ broad feature category. They prove and refine the accumulated viewer.
   decode result channel also leaves loading with a durable Retry error instead
   of waiting forever.
 - [x] Add a transient full-image collage for seeing context without turning viewr
-  into a library. It presents up to 24 complete, uncropped photos from the
+  into a library. It presents up to 12 complete, uncropped photos from the
   active rating projection through the normal decode, color, and mipmapped GPU
   path, never the thumbnail generator. Actual aspect ratios drive dense justified
   rows with narrow gutters instead of equal blank cells. Group navigation, Up and
@@ -585,11 +588,22 @@ broad feature category. They prove and refine the accumulated viewer.
   that it is "honest as arithmetic and dishonest as looking", and that a
   thumbnail should not become a mural unless the player asks for zoom. Explicit
   zoom is unchanged, and `0` and `1` keep their meanings.
+- [x] Keep high-frequency review feedback out of the photo. Folder scans default
+  to newest-modified first with a saved natural-name option, 12-photo collage
+  groups keep individual images useful, routine Trash outcomes use top chrome
+  outside immersive surfaces, Spot Heal success and its
+  save boundary remain visible, and File > Default Image Viewer provides explicit
+  per-format Windows, macOS, and Linux guidance without changing a default.
 - [ ] Repeat startup, animation, large-image, 50,000-file, mixed-DPI,
   multi-monitor, and profiled-display acceptance on representative hardware.
 - [ ] Prove clean install, same-version reinstall, update from each supported
   pre-1.0 line, uninstall, file-association opt-in, and injected rollback on the
   signed release candidates.
+- [ ] Evaluate launcher-provided neighboring-file order without inventing a
+  cross-platform promise. A future Windows packaged delivery may consume the
+  documented neighboring-files query. macOS and Linux may preserve an explicit
+  ordered file list only when their launcher supplies one. All other launches
+  retain the visible Latest First or Name fallback and the selected image.
 - [ ] Freeze scope for v0.9 and rerun the complete security, privacy, dependency,
   fuzz, coverage, performance, accessibility, packaging, documentation, and
   release-provenance gates against the exact candidate artifacts.
@@ -685,8 +699,8 @@ scaled correctly on Linux, macOS, and Windows, with tests covering the open path
 
 The core experience, which is flipping through a folder with no perceptible lag.
 
-- Scan the containing folder off-thread, in natural-sort order so img2 comes before
-  img10.
+- Scan the containing folder off-thread. Latest First uses descending modification
+  time with natural filename ties; the saved Name option puts img2 before img10.
 - Left and right arrows, Home and End, navigate the folder.
 - Neighbor prefetch into a bounded decoded-image RAM cache, so the next image is
   usually decoded before it is requested and needs only a GPU upload. Immediate
@@ -928,7 +942,8 @@ without requiring third-party store accounts.
 Polish and **local-first** distribution so switching costs nothing for people who
 install from source or a simple GitHub-style release artifact.
 
-- [x] Local/CI install paths, file associations, documentation, release plumbing.
+- [x] Local/CI install paths, exact opt-in file-association declarations and an
+  in-app platform guide, documentation, release plumbing.
 - [x] Performance budget locked in CI.
 - [x] Public, checksummed, manifest-verified, and attested v0.1.0 artifacts.
 - [ ] Manual screen-reader validation on Windows, macOS, and Linux with artifact-bound records.

@@ -184,17 +184,18 @@ A promise you can verify beats a promise you have to trust.
 
 ## Local data: what viewr does and doesn't write
 
-- viewr writes exactly one optional UI preference: the validated word `system`,
-  `light`, `dark`, or `console` in the platform configuration directory under
-  `viewr/appearance`. It contains no path, timestamp, device identifier, or image
-  data. Windows uses `%APPDATA%`, macOS uses `Library/Application Support`, and
-  Linux uses `XDG_CONFIG_HOME` or `.config`. Deleting that file quietly restores
-  System. Invalid, oversized, unreadable, or unavailable state also uses System
+- viewr writes exactly two optional UI preferences in the platform configuration
+  directory: the validated appearance word `system`, `light`, `dark`, or `console`
+  under `viewr/appearance`, and the validated folder-order word `latest` or `name`
+  under `viewr/folder-sort`. They contain no path, timestamp, device identifier,
+  image data, or activity history. Windows uses `%APPDATA%`, macOS uses
+  `Library/Application Support`, and Linux uses `XDG_CONFIG_HOME` or `.config`.
+  Deleting either file quietly restores its System or Latest First default.
+  Invalid, oversized, unreadable, or unavailable state uses the same safe defaults
   and shows one fixed recovery notice without the path, raw error, or stored
-  content. A failed explicit save keeps the selected appearance for the current
-  session and shows fixed recovery guidance. Explicitly enabled diagnostics
-  receive only a fixed load reason or failed save phase, never a raw error or
-  configuration path.
+  content. A failed explicit save keeps the selected value for the current session
+  and shows fixed recovery guidance. Explicitly enabled diagnostics receive only
+  a fixed load reason or failed save phase, never a raw error or configuration path.
 - viewr **does not** write history, a recently-opened list, thumbnail database,
   photo-library search index, rating/flag/pick database, or general settings
   database. Filmstrip thumbnails, panel visibility/position, and neighbor

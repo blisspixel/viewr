@@ -51,7 +51,10 @@ disappears. This spec is the converged result of two rounds of design critique
   permits, the filename, dimensions, and physical zoom percentage, where 100
   percent means one source pixel per physical display pixel. Filename, dimensions,
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
-  spacing. Long names truncate with the full value available as a tooltip.
+  spacing. Long names truncate with the full value available as a tooltip. Routine
+  three-second outcomes, including Move to Trash, use this status area instead of
+  covering the image. Immersive fullscreen and the full-image collage have no top
+  chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`
   shows a 64px docked panel containing only high-frequency image operations:
   rotate, flip, crop, and Spot Heal. Its vector chevron collapses it to a 44px rail.
@@ -63,7 +66,7 @@ disappears. This spec is the converged result of two rounds of design critique
   Thumbnails decode only while the panel is visible and expanded. The strip stays
   bounded to four neighbors on either side.
 - Full-Image Collage: View > Full-Image Collage, Up, or `Shift+G` replaces chrome
-  with up to 24 complete, uncropped photos from the active rating projection.
+  with up to 12 complete, uncropped photos from the active rating projection.
   Actual photo aspect ratios determine justified row breaks and tile sizes, so a
   3:4 photo occupies a 3:4 tile and narrow gutters replace equal-cell letterbox
   space. It uses ordinary full decoded images and the native color and mipmapped
@@ -167,6 +170,17 @@ The current interface uses immediate state changes. It does not claim transition
 inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Navigation (the most-touched interaction)
+- Folder scans use descending file modification time by default, with natural
+  filename order as the stable tie break. View > Folder Sort can switch the open
+  folder to natural filename order without losing selection, rating state, or the
+  active rating projection. The choice becomes the default for future folders and
+  launches, and File > Preferences exposes the same selected radio group. A current
+  viewr association launch supplies the selected
+  file, so that image remains current, but does not supply one portable
+  Explorer, Finder, or Linux file-manager active-sort value. Windows packaged
+  activation has a separate neighboring-files query contract that current public
+  builds do not consume. The menu states the current boundary instead of claiming
+  to follow unavailable launch state.
 - Default is an instant texture swap, no crossfade. Held arrows during rapid review
   must never fight an animation.
 - Reversing to a pristine frame that is still presented cancels the abandoned
@@ -208,7 +222,7 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 - A folder entry can disappear after enumeration but before its first
   presentation. viewr requires matching absence observations from the decode
   worker and event loop before removing that unpresented selection, then advances
-  to the entry that filled its natural-order slot. If none remains installed, a
+  to the entry that filled its selected-sort slot. If none remains installed, a
   fresh bounded parent scan opens the first surviving image. Scan limits and
   failures stay visible and Retry repeats both operations without discarding the
   prior absence fact. Empty catalogs expose neither a fictional selection nor an
@@ -230,10 +244,10 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   cannot dismiss several layers of the documented close order. A widget menu
   consumes Escape before Crop, Spot Heal, the full-image collage, the rating
   filter, or fullscreen.
-- A Save As confirmation, first-write rating disclosure, Update dialog, or About
-  dialog owns the complete UI action batch as soon as it opens. Only that modal's
-  confirmation, cancellation, or close action may run from the batch, and normal
-  dispatch remains blocked until the modal closes.
+- A Save As confirmation, first-write rating disclosure, Update dialog, About
+  dialog, or Default Image Viewer guide owns the complete UI action batch as soon
+  as it opens. Only that modal's confirmation, cancellation, or close action may
+  run from the batch, and normal dispatch remains blocked until the modal closes.
 
 ### Ratings and folder filter
 
@@ -262,8 +276,9 @@ and unsupported containers, remain visibly read-only.
   all images.
   When no image matches the filter, Escape or folder-navigation keys restore All
   images instead of doing nothing.
-- One canonical natural-order folder catalog owns Trash and Undo positions. A
-  filter derives visible indices for navigation, Folder Previews, and prefetch.
+- One canonical folder catalog in the selected session order owns Trash and Undo
+  positions. A filter derives visible indices for navigation, Folder Previews,
+  and prefetch.
 - Unsupported, malformed, conflicting, read-only, changed, or unsafe sources stay
   untouched and expose fixed recovery copy. No persistence fallback exists.
 
@@ -278,8 +293,9 @@ and unsupported containers, remain visibly read-only.
   pixels.
   A missing, replaced, linked, or unverifiable entry fails closed without changing
   playlist or Undo state. Success advances the playlist deterministically and
-  shows a three-second non-blocking toast. `U` owns the latest safely recoverable
-  Trash action. Windows and Linux identify each move by its
+  shows a three-second non-blocking notice in top chrome instead of over the
+  image. `U` owns the latest safely recoverable Trash action. Windows and Linux
+  identify each move by its
   sole new Trash item identifier only when that item's native identity matches the
   live accepted-source handle; macOS uses the exact resulting URL with the same
   handle. Restore repeats the identity check and never falls back to an older item
@@ -388,7 +404,10 @@ and unsupported containers, remain visibly read-only.
   bounded per-channel tone adjustment before feathered compositing. If no clean
   translated source fits, a distance-ordered directional fill continues local
   gradients instead of repeatedly averaging a flat blur. The source file remains
-  untouched; Save As is the only edit-persistence path.
+  untouched; Save As is the only edit-persistence path. A successful repair says
+  that the change is in memory and names Save As, and the top status keeps a quiet
+  non-live explanation that Save As writes a copy after the three-second success
+  notice expires. A successful export names an edited copy when applicable.
 - Repair, undo, and redo apply decoded pixels and present the same bounded patch
   before committing history or success copy. If patch presentation is
   unavailable, full-texture presentation is attempted. If both fail, exact
@@ -413,6 +432,21 @@ patch approach described by
 the fallback follows the structure-propagation direction of exemplar and fast
 marching inpainting rather than adding a model runtime. Full global PatchMatch,
 generative fill, and an unbounded Poisson solve are outside this focused tool.
+
+### Default image viewer
+
+- File > Default Image Viewer opens an opt-in guide. viewr never changes file
+  associations during installation or startup, and it does not store an
+  association preference that could diverge from operating-system state.
+- The guide starts with PNG and JPEG and makes clear that ownership is selected
+  per file type. On Windows it opens the native Default Apps settings and explains
+  the Open with fallback. On Linux it explains the desktop settings route and
+  offers copyable `xdg-mime` commands for the installed desktop entry. On macOS
+  it explains Finder's Get Info, Open with, and Change All flow, and distinguishes
+  an application bundle from a portable command-line build.
+- The guide is a named modal, blocks background input, and closes with its button,
+  backdrop click, or Escape. Any association change still requires an explicit
+  operating-system choice outside viewr.
 
 ### Help, updates, and product identity
 

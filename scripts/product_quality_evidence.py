@@ -348,7 +348,7 @@ AUTOMATED_ANCHOR_TOKENS = {
     "PQ-PW-08": (
         "twelve_landscape_photos_fill_the_screen_in_justified_rows",
         "source_aspects_define_tiles_without_equal_cell_letterboxing",
-        "collage_accepts_twenty_four_photos_and_tiny_views_stay_safe",
+        "collage_accepts_twelve_photos_and_tiny_views_stay_safe",
         "collage_tile_enlarges_a_complete_small_image_without_changing_its_aspect",
         "no_eviction_insert_rejects_pressure_without_displacing_existing_images",
         "mosaic_loading_announcement_is_stable_until_the_terminal_count",

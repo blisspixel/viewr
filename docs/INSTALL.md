@@ -165,11 +165,27 @@ C-backed formats or RAW support.
 
 ## Platform integration
 
+Current viewr association launches supply the selected file but do not supply one
+portable value for the active Explorer, Finder, or Linux file-manager folder sort.
+viewr keeps the selected image current and uses its saved default folder order;
+File > Preferences or View > Folder Sort switches between Latest First and Name.
+Windows packaged activation defines a separate neighboring-files query contract,
+but the current public desktop installer does not use that activation path.
+
+The folder order is stored as one validated word with no image path or activity
+history: `%APPDATA%\viewr\folder-sort` on Windows,
+`~/Library/Application Support/viewr/folder-sort` on macOS, and
+`${XDG_CONFIG_HOME:-~/.config}/viewr/folder-sort` on Linux. Deleting it restores
+Latest First on the next launch.
+
 ### Windows
 
 The installer creates a Start menu shortcut but does not change file associations.
-Use an image's Open with dialog to select `viewr.exe`, and choose Always only for
-extensions you deliberately want viewr to own.
+After launching viewr, File > Default Image Viewer opens an opt-in guide and a
+button for Windows Default Apps. Choose viewr separately for `.png`, `.jpg`, and
+`.jpeg`, plus only the other extensions you deliberately want it to own. If viewr
+is not listed, use an image's Open with dialog, browse to `viewr.exe`, and choose
+Always for that extension.
 
 The capability-free AppContainer package remains a locally validated profile, not
 a signed public installer. Maintainers can validate it with:
@@ -217,9 +233,11 @@ not running. viewr uses the X server named by `DISPLAY` in that case rather than
 failing, and says so in the doctor report.
 
 The installer registers `com.github.blisspixel.viewr.desktop` as an available image
-viewer. It never changes a default. To opt in for JPEG explicitly:
+viewer. It never changes a default. File > Default Image Viewer repeats this
+boundary and offers copyable PNG and JPEG commands. To opt in explicitly:
 
 ```sh
+xdg-mime default com.github.blisspixel.viewr.desktop image/png
 xdg-mime default com.github.blisspixel.viewr.desktop image/jpeg
 ```
 
@@ -239,6 +257,12 @@ bash scripts/build-macos-sandboxed-app.sh target/release
 
 This local bundle is for validation only. Do not present it as a notarized public
 distribution.
+
+For an application bundle, File > Default Image Viewer explains the native
+Finder flow. Select a PNG, choose File > Get Info, select viewr under Open with,
+and choose Change All. Repeat with a JPEG and any other type you deliberately
+want viewr to own. The portable command is not an application bundle and cannot
+be selected as a Finder default.
 
 ## Uninstall
 

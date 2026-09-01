@@ -34,6 +34,11 @@ The minimum contract is:
   minimum ratings 1 through 5 as a separate selected radio group. Current rating,
   active threshold, filtered position, no-match state, and write outcomes are
   textual. The first-write modal focuses Cancel once and blocks background input.
+- View > Folder Sort exposes Latest First and Name as a selected radio group. The
+  visible help identifies file modification time, the saved-default scope, and
+  the fact that the current viewr association path does not receive the file
+  manager's current folder sort. File > Preferences exposes the same radio group
+  alongside the opt-in default-image-viewer guide.
 - The metadata-retention checkbox is named plainly and starts unchecked.
 - Source Privacy exposes supported EXIF count, privacy-risk presence categories,
   and the limited-scan caveat as text. Sensitive raw metadata is not used as an
@@ -59,9 +64,10 @@ The minimum contract is:
 - Spot Heal exposes brush radius, feather, ranked-source position, Refresh Source,
   Undo, Redo, and Done. `/` refreshes the source without requiring a pointer.
   Edit success is exposed only after decoded pixels, history, and presentation
-  commit together. Busy destructive keyboard actions produce specific visible
-  wait text instead of a silent no-op; transient toast announcement remains part
-  of the manual target-OS matrix.
+  commit together. Success and the continuing non-live cue say that edited pixels
+  are in memory and Save As writes a copy; export success identifies an edited
+  copy when applicable. Busy destructive keyboard actions produce
+  specific visible wait text instead of a silent no-op.
 - Appearance exposes its current preference on the parent View entry, then System,
   Light, Dark, and Console as described radio choices.
   Each semantic name includes its visible outcome, System reports its effective
@@ -80,6 +86,10 @@ The minimum contract is:
   closes with an explicit button or Escape. The application performs no automatic
   check; only activating Get latest release asks the operating system to open the
   official stable release in an external browser.
+- Default Image Viewer is a named modal window that blocks background input,
+  states that association changes are opt in and per file type, and exposes the
+  platform-specific PNG and JPEG route. It closes with an explicit button or
+  Escape. Background controls cannot activate while it is open.
 - Animation exposes current frame, frame count, and pause/resume state.
   Previous frame and Next frame are named buttons with `[` and `]`.
 - Multi-page TIFF and ICO expose current page or icon identity, count, and
@@ -156,7 +166,8 @@ active or uncertain. Collage keyboard and native dynamic-state behavior plus
 announcement timing remain in the manual target-OS matrix.
 
 It closes the exact process it launched and removes its three known fixtures, the
-isolated `viewr/appearance` preference tree, and the empty unique directory. The
+isolated `viewr/appearance` and `viewr/folder-sort` preferences, and the empty
+unique directory. The
 Windows CI job runs the same script against the debug binary. Every wait is bounded
 both per operation and by one absolute five-minute suite deadline, which reports
 the active probe and accessible tree if reached, so successful earlier waits cannot
@@ -189,7 +200,7 @@ Run the same workflow on every platform:
 | Panels | Show and hide Tools, Folder Previews, and Image Information with `T`, `G`, and `I` | State changes are announced, hidden controls leave the tree, and the image refits without being covered |
 | Disclosure | Collapse and expand Tools and Folder Previews | The control name changes between Collapse and Expand, remains actionable, and preserves the panel's visible state |
 | Position | Move Tools and Image Information left and right, including both on one side | Selected radio state is announced and controls remain reachable in a coherent order |
-| Navigation | Use Left, Right, Home, End, Page Up, Page Down, and a preview button | Immediate reuse remains quiet; a genuine miss names the selected target while the visible filename remains tied to presented pixels; stale decode completion never announces the wrong image |
+| Navigation | Use Left, Right, Home, End, Page Up, Page Down, and a preview button; change View > Folder Sort between Latest First and Name | Immediate reuse remains quiet; a genuine miss names the selected target while the visible filename remains tied to presented pixels; stale decode completion never announces the wrong image; exactly one folder order is selected and changing it preserves the current image and rating projection |
 | Reload | Invoke File > Reload File and `F5` on a disposable file changed by another app | Reload is announced, the old frame remains until success, and a failed refresh exposes Retry without losing focus |
 | Open With | Inspect File > Open With and the image right-click action; choose and cancel a disposable editor handoff, then make one external change | Both entry points have one clear name and boundary explanation; cancellation is quiet and safe; the selected app receives the original rather than unsaved viewr edits; a safe external change reloads without blanking; unsaved viewr edits keep the last good frame and ask for F5 |
 | File gone | Delete the presented file from outside viewr | The last good image stays visible and a polite status says the selected path no longer names that file |
@@ -198,16 +209,17 @@ Run the same workflow on every platform:
 | Full-image collage | Enter with Up, View, or `Shift+G`; traverse every ready photo with Left and Right and the screen reader; open with Down and Enter; change groups; repeat under a rating filter; cite the dense-layout, bounded-admission, and stable-announcement tests named by PQ-PW-08; leave with Escape | Each complete photo is a named position-only button with selected state and visible focus; filenames are absent; actual aspect-ratio tiles form justified rows with narrow gutters; one stable loading state and the terminal ready or safely fitted count are announced without flooding; group order follows the active projection; open and leave restore coherent single-photo focus |
 | Editing | Rotate, flip, and start crop | Each tool has one descriptive name and the visible result matches the invoked action |
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
-| Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, and the pointer-only brush overlay is not the sole source of state |
+| Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape; save the result with Save As | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, the in-memory and Save As boundary stays textual, the saved copy contains the repair, and the pointer-only brush overlay is not the sole source of state |
 | Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
 | Ratings | On disposable JPEG copies, use Edit > Rating and `0` through `5`; confirm and cancel the first-write disclosure; apply All, 3+, 4+, and 5+ filters; navigate into and recover from no matches; then restart | Rating and filter radio state, shortcut ownership, current rating, filtered position, outside-filter state, write outcome, and Show all images are announced without color or star-glyph dependence; Cancel initially owns modal focus; unsupported files remain untouched; the embedded rating survives restart |
 | Update | Open Help > Get latest release; read its contents without activating the release action; close with its button and Escape | A modal named Update viewr exposes the running version, no-automatic-check behavior, browser handoff boundary, and one clearly named Get latest release button; background controls cannot activate and focus returns predictably |
+| Default image viewer | Open File > Default Image Viewer; read the PNG and JPEG guidance; close with its button and Escape; repeat the native opt-in flow for one disposable association | A named modal states that install and startup do not change defaults, exposes the correct platform action or commands, blocks background controls, and returns focus predictably; changing one type does not imply ownership of other types |
 | About | Open Help > About viewr; read its contents; close with its button and Escape | A modal named About viewr exposes version, platform, license, the grouped shortcut catalog including pages, reload, panels, and Space-to-fit, and privacy; background controls cannot activate while it is open; Close remains reachable on a short window; focus returns predictably |
 | Animation | Open GIF, WebP, and APNG fixtures and toggle playback from Image Information | Frame position and play/pause state are announced without flooding speech on every timed frame |
 | Pages | Open a multi-page TIFF and a multi-size ICO; use Image Information, View, `[`, and `]` | Page or icon identity, count, and dimensions are announced; documents do not play; crop and heal block a step |
 | Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |
 | Save | Open Save As to a new disposable destination and complete or cancel it; then choose an existing disposable destination, inspect the app-owned overwrite modal, cancel once, and repeat to confirm replacement | The native dialog is usable; the modal has an accurate name and recheck disclosure, initially focuses Cancel, exposes only Cancel and Replace file as enabled actions, changes nothing when canceled, replaces only the confirmed destination when accepted, and returns focus predictably after either outcome |
-| Trash | Use File > Move to Trash and `Delete` on disposable copies; confirm bare `B`, `M`, and normal-mode `X` do nothing; restore with `U`; inspect settled, active, and uncertain Undo ownership; try Delete during active Spot Heal; inspect a control-character filename in permanent-delete confirmation but cancel | Only the visible current image moves, the removed culling keys trigger no destructive or review action, active work has a specific result, confirmation is path-free and visually unambiguous, cancel is safe, unsettled Undo does not claim settled state, cross-folder Undo does not insert into the unrelated view, and restore uses only the exact receipt. Transient result announcement remains a manual target-OS check |
+| Trash | Use File > Move to Trash and `Delete` on disposable copies; confirm bare `B`, `M`, and normal-mode `X` do nothing; restore with `U`; inspect settled, active, and uncertain Undo ownership; try Delete during active Spot Heal; inspect a control-character filename in permanent-delete confirmation but cancel | Only the visible current image moves, the removed culling keys trigger no destructive or review action, active work has a specific result, confirmation is path-free and visually unambiguous, cancel is safe, unsettled Undo does not claim settled state, cross-folder Undo does not insert into the unrelated view, and restore uses only the exact receipt. The transient result stays in top chrome outside immersive surfaces and does not cover the photo |
 | Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading, failure, and Retry name only the selected filename; each transition is announced once; menus and recovery actions remain reachable |
 | Contrast and scale | Repeat key flows at 100%, 150%, and 200% scale in Light, Dark, and Console with white and dark image backgrounds | Focus and text stay visible; no clipping, overlap, or image-covering panel appears |
 

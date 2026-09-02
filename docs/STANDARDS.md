@@ -240,6 +240,10 @@ rules keep it honest.
   drift out of sync with the code.
 - Every non-obvious decision is recorded where it lives: architectural choices in
   ARCHITECTURE.md, technology choices as decision records in STACK.md.
+- Roadmaps state dependency order, version transitions, and evidence-based exit
+  criteria. They do not forecast calendar dates or durations. Actual release
+  dates remain historical records, and volatile candidate run identifiers live
+  in evidence or release records rather than the durable planning summary.
 
 ## Performance is a tested property, not a hope
 

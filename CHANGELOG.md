@@ -7,6 +7,10 @@ and organized by user-visible concern.
 
 ### Product quality
 
+- Moving the displayed image to Trash, or permanently deleting it after
+  confirmation, now begins presenting the surviving neighbor as soon as the
+  background file operation is accepted. Large folders no longer keep the
+  deleted image on screen while the operating system finishes the file action.
 - Folder browsing defaults to the most recently modified image first. File >
   Preferences and View > Folder Sort can make natural filename order the saved
   default while preserving selection, ratings, and the active rating filter. The

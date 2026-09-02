@@ -761,7 +761,9 @@ The feature that makes viewr a daily tool, done carefully.
 
 - [x] Current-image Trash: `Delete` and File > Move to Trash move only the visible
   image through the supported platform Trash API, preserve playlist position, and
-  advance to the image that replaces it rather than jumping to the top.
+  begin presenting the image that replaces it as soon as the background action is
+  accepted rather than waiting for the operating-system move or jumping to the
+  top. Permanent delete uses the same immediate neighbor handoff after confirmation.
 - [x] Conventional destructive input: the former bare `B` mark/review/batch-trash
   workflow was removed after product review. `B` and `M` are unassigned, and `X`
   swaps crop-ratio orientation only while Crop is active. There is no hidden mark

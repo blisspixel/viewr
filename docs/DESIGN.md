@@ -292,10 +292,13 @@ and unsupported containers, remain visibly read-only.
   when the pathname still identifies the retained source that supplied accepted
   pixels.
   A missing, replaced, linked, or unverifiable entry fails closed without changing
-  playlist or Undo state. Success advances the playlist deterministically and
-  shows a three-second non-blocking notice in top chrome instead of over the
-  image. `U` owns the latest safely recoverable Trash action. Windows and Linux
-  identify each move by its
+  playlist or Undo state. Once the background file operation is accepted, the
+  surviving neighbor begins presentation immediately while the operating system
+  finishes the move. Success then reconciles the canonical playlist and shows a
+  three-second non-blocking notice in top chrome instead of over the image. A
+  failure leaves the source in the playlist without pulling the user away from
+  the neighbor already shown. `U` owns the latest safely recoverable Trash
+  action. Windows and Linux identify each move by its
   sole new Trash item identifier only when that item's native identity matches the
   live accepted-source handle; macOS uses the exact resulting URL with the same
   handle. Restore repeats the identity check and never falls back to an older item

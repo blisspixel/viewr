@@ -349,6 +349,34 @@ impl Playlist {
             .collect()
     }
 
+    /// Choose the surviving visible entry that will occupy `removed_index`.
+    ///
+    /// This previews the selection made by [`Self::remove_paths`] without
+    /// mutating the catalog. Curation can therefore start presenting the next
+    /// image while the operating-system file action finishes in the background.
+    #[must_use]
+    pub(crate) fn successor_after_removal(&self, removed_index: usize) -> Option<usize> {
+        if removed_index >= self.files.len() || self.files.len() <= 1 {
+            return None;
+        }
+
+        let post_removal_anchor = removed_index.min(self.files.len().saturating_sub(2));
+        let post_removal_index =
+            |index: usize| index.saturating_sub(usize::from(index > removed_index));
+        self.visible_indices
+            .iter()
+            .copied()
+            .filter(|index| *index != removed_index)
+            .find(|index| post_removal_index(*index) >= post_removal_anchor)
+            .or_else(|| {
+                self.visible_indices
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|index| *index != removed_index)
+            })
+    }
+
     pub(crate) fn remove_paths(&mut self, removed: &[PathBuf], old_index: usize) {
         let mut kept_files = Vec::with_capacity(self.files.len());
         let mut kept_ratings = Vec::with_capacity(self.ratings.len());
@@ -595,6 +623,34 @@ mod tests {
         assert_eq!(playlist.visible_position_for_catalog_index(4), Some(1));
         assert_eq!(playlist.visible_position_for_catalog_index(6), Some(2));
         assert_eq!(playlist.visible_position_for_catalog_index(1), None);
+    }
+
+    #[test]
+    fn removal_successor_previews_the_post_commit_selection() {
+        let playlist = Playlist::new((0..4).map(path).collect(), 0);
+        assert_eq!(playlist.successor_after_removal(0), Some(1));
+        assert_eq!(playlist.successor_after_removal(1), Some(2));
+        assert_eq!(playlist.successor_after_removal(3), Some(2));
+        assert_eq!(playlist.successor_after_removal(4), None);
+        assert_eq!(
+            Playlist::new(vec![path(0)], 0).successor_after_removal(0),
+            None
+        );
+    }
+
+    #[test]
+    fn removal_successor_respects_the_active_rating_projection() {
+        let mut playlist = rated_playlist(2);
+        playlist.set_filter(RatingFilter::AtLeast(Rating::new(3).unwrap()));
+        assert_eq!(playlist.visible_indices, [2, 4, 6]);
+        assert_eq!(playlist.successor_after_removal(1), Some(2));
+        assert_eq!(playlist.successor_after_removal(2), Some(4));
+        assert_eq!(playlist.successor_after_removal(4), Some(6));
+        assert_eq!(playlist.successor_after_removal(6), Some(4));
+
+        playlist.set_filter(RatingFilter::AtLeast(Rating::new(5).unwrap()));
+        assert_eq!(playlist.visible_indices, [4]);
+        assert_eq!(playlist.successor_after_removal(4), None);
     }
 
     #[test]

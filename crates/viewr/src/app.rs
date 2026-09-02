@@ -3802,6 +3802,15 @@ impl App {
         if self.block_browse_while_busy() {
             return;
         }
+        self.go_to_index_ready(new_index);
+    }
+
+    /// Navigate after a caller has completed its own mutation preflight.
+    ///
+    /// A submitted source-removal worker intentionally remains active while the
+    /// surviving neighbor begins presentation, so this path must not repeat the
+    /// ordinary busy check.
+    fn go_to_index_ready(&mut self, new_index: usize) {
         let Some(playlist) = &self.playlist else {
             return;
         };
@@ -3865,6 +3874,17 @@ impl App {
         }
         self.spawn_image_load_with_cached(next_path, cached_target, false, false);
         self.kick_prefetch();
+    }
+
+    fn advance_after_removal_submitted(&mut self, removed_index: usize) {
+        let Some(next_index) = self
+            .playlist
+            .as_ref()
+            .and_then(|playlist| playlist.successor_after_removal(removed_index))
+        else {
+            return;
+        };
+        self.go_to_index_ready(next_index);
     }
 
     /// Decode nearby playlist entries into the in-memory cache (no disk writes).
@@ -4030,7 +4050,7 @@ impl App {
         // Persistent top-bar status owns the in-progress state. Outcome toasts
         // fire only when the worker finishes, so Delete does not flash a second
         // busy message on top of the spinner status.
-        let _started = self.start_curation_worker(
+        let started = self.start_curation_worker(
             "viewr-trash-move",
             context,
             move || CurationCompletion::Trash {
@@ -4038,6 +4058,9 @@ impl App {
             },
             "Could not start the move to Trash. Nothing was moved.",
         );
+        if started {
+            self.advance_after_removal_submitted(playlist_index);
+        }
     }
 
     fn start_curation_worker(
@@ -5222,6 +5245,7 @@ impl App {
             "Could not start permanent delete. Nothing was deleted.",
         );
         if started {
+            self.advance_after_removal_submitted(playlist_index);
             self.show_toast("Permanently deleting file in the background");
         }
     }

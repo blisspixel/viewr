@@ -33,6 +33,10 @@ and organized by user-visible concern.
 
 ### Documentation
 
+- Reworked the roadmap and publishing guide around explicit prerequisite gates,
+  candidate identity, version update points, and ordered v0.7 next steps. Planning
+  now excludes calendar forecasts and duration estimates while retaining actual
+  release dates as history.
 - Replaced the README's Console-theme image with a compact Dark capture of the
   docked Tools panel. Both README images now emphasize the photo and are
   programmatically limited to viewr application content.

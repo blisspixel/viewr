@@ -6,7 +6,8 @@ trust bar required before 1.0.
 
 ## Current repository state
 
-Status last verified on 2026-08-22:
+This checklist describes the current repository controls. Live branch protection,
+workflow results, and release assets remain the source of truth:
 
 - [x] The repository is public with `main` as its only long-lived branch and
   Apache-2.0 detected by GitHub.
@@ -54,8 +55,55 @@ Status last verified on 2026-08-22:
 - [x] Publish and verify annotated tag `v0.6.0`, the integrated product-quality
   beta, under that same contract. Published; see the GitHub release
   [v0.6.0](https://github.com/blisspixel/viewr/releases/tag/v0.6.0). It was
-  published without step 5 below: no representative-hardware record exists for
-  it, and its release notes state that limit.
+  published without its required representative-hardware evidence: no such
+  record exists for it, and its release notes state that limit.
+
+## Version state policy
+
+Four version states must not be conflated:
+
+1. **Public version:** the newest immutable published tag and its assets. It is
+   currently v0.6.0. README and INSTALL call this the install target until a
+   later release actually exists.
+2. **Workspace version:** the semantic version compiled into `viewr`, used in
+   archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
+   `0.6.0` while the carried v0.6 hardware gate remains open.
+3. **Candidate identity:** the full commit SHA plus one non-publishing
+   `Release artifacts` workflow run. A candidate is not a public release, even
+   when its workspace version matches the public version. Never identify it by
+   archive name or version string alone.
+4. **Intended tag:** the next milestone version after every prerequisite gate is
+   closed. The next intended tag is v0.7.0, but it is not yet the workspace or
+   public version.
+
+Advance the workspace version once, before collecting evidence for the intended
+tag. That reviewed release-preparation change updates `Cargo.toml`, `Cargo.lock`,
+compiled version-specific commands, the changelog candidate content,
+`docs/releases/v<version>.md`, and every status document that describes the
+workspace. Do not use a changing `-dev` suffix or bump the version on ordinary
+development commits. For v0.7.0, the update from `0.6.0` happens only after the
+carried v0.6 product-quality matrix closes and before v0.7 accessibility evidence
+begins.
+
+Application source, dependencies, workflows, packaging, or user-facing behavior
+instructions changed after a candidate run invalidate that candidate and all
+evidence affected by it. Evidence records, actual release dates, public
+release-status text, immutable-download links, and tests that pin those public
+strings are status-only changes and may follow without resetting the candidate.
+No other change is a status-only exception.
+
+The final tag-ready change moves the candidate changelog content under the target
+version and the date on which the tag operation is being performed, advances
+README and INSTALL from the prior immutable release to the intended fixed-version
+URLs, and marks the roadmap tag-ready without claiming publication. Require green
+CI and fuzz on that exact commit, then tag that commit. If tagging does not happen
+on the recorded date, correct the changelog and revalidate before tagging. This is
+an execution record, not a forecast.
+
+After publication, the intended tag becomes the public version. Verify the public
+assets, then use a status-only follow-up to record the release link and advance
+the roadmap to the next open gate. Planning documents use dependency order and
+exit evidence, never calendar forecasts or duration estimates.
 
 ## Pre-1.0 release procedure
 
@@ -66,42 +114,42 @@ when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
-1. On a feature branch, update the workspace version, compiled version-specific
-   commands, unreleased CHANGELOG, candidate status, behavior-specific
-   documentation, and `docs/releases/v<version>.md`. Commit and review the
-   prospective release notes before the candidate build because the tag workflow
-   uses that file as its only release body. Generated notes are not accepted.
-   Keep README and INSTALL accurate that the prior immutable release remains the
-   public install target until the new tag exists.
-2. Run the complete local checks in [Verification](VERIFY.md).
-3. Confirm `THIRD_PARTY_LICENSES.txt` matches a fresh offline `cargo-about`
-   render and the Flatpak source map matches the lockfile.
-4. Integrate the release change through normal review. Select its exact clean
-   `main` commit only after CI and fuzz pass there, and retain both run links.
-5. Complete the candidate-artifact and three-platform evidence
-   procedure in [Product quality](PRODUCT-QUALITY.md). This step was skipped for
-   v0.6.0 by explicit decision, and that skip is recorded in its release notes,
-   the changelog, and the roadmap rather than being backfilled. It is not
-   precedent for a later tag. Every record must identify
-   one candidate workflow run and its exact commit. Any later change to application
-   source, dependencies, workflows, packaging, or user-facing behavior instructions
-   invalidates those records and requires a new candidate run. Completed evidence,
-   the release date, public release-status or immutable-download links, and the
-   test assertions that pin those public strings may be committed after the run
-   because they do not alter application behavior. Nothing else is a status-only
-   exception. Validate the complete set with:
+1. Close every prerequisite gate in the roadmap before changing the workspace
+   version. For the next release, validate the carried v0.6 product-quality set
+   before beginning v0.7 work:
 
    ```text
    python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.0
    ```
 
-6. Integrate the evidence and status-only release change through normal review.
-   Date the CHANGELOG entry, advance README and INSTALL to the immutable v0.6.0
-   URLs, and update the roadmap evidence. Then confirm that no application,
-   dependency, workflow, packaging, or behavior-instruction change has invalidated
-   the candidate. Require green CI and fuzz on the intended tag commit. The tag
-   workflow rebuilds and verifies archives containing the final public documents.
-7. Confirm the tag is exactly `v<workspace-version>`, then create and push an
+2. On a feature branch, make the single version transition described in
+   [Version state policy](#version-state-policy). Commit and review
+   `docs/releases/v<version>.md` before building a candidate because the tag
+   workflow uses that file as its only release body. Generated notes are not
+   accepted. Keep README and INSTALL on the prior public release at this stage.
+3. Run the complete local checks in [Verification](VERIFY.md). Confirm
+   `THIRD_PARTY_LICENSES.txt` matches a fresh offline `cargo-about` render and
+   the Flatpak source map matches the lockfile.
+4. Integrate the release-preparation change through normal review. Select its
+   exact clean `main` commit only after CI and fuzz pass there, and retain both
+   run links.
+5. Dispatch one non-publishing `Release artifacts` run for that commit. Complete
+   every evidence set required by the target milestone against that one candidate.
+   For v0.7.0 this is the Narrator, VoiceOver, and Orca matrix in
+   [Accessibility](ACCESSIBILITY.md). For v0.8.0 and later, also complete every
+   product-quality, install, update, rollback, packaging, and platform-trust gate
+   assigned to that milestone by the roadmap.
+6. If a gate fails, correct the defect, repeat the complete automated validation,
+   produce a replacement candidate, and repeat every affected evidence row. If
+   the candidate passes, integrate the evidence and other permitted status-only
+   changes through normal review.
+7. Prepare the final tag commit. Move the changelog candidate content under the
+   target version and current release-operation date, advance README and INSTALL
+   to the intended immutable URLs, mark the roadmap tag-ready, confirm the
+   candidate remains valid, and require green CI and fuzz on the exact commit.
+   The tag workflow rebuilds and verifies archives containing the final public
+   documents.
+8. Confirm the tag is exactly `v<workspace-version>`, then create and push an
    annotated tag:
 
    ```text
@@ -112,10 +160,13 @@ production environment.
    Use `git tag -s` when a configured signing identity is available. Do not weaken
    local Git verification merely to produce a signed tag.
 
-8. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
+9. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
    set, verify every archive and SHA-256 sidecar, add the fixed-version installer
    scripts and their sidecars, attest all 12 assets, and publish only that exact
    set. A manual workflow run is inspection-only and must never publish.
+10. Verify the public release and attestations, then land the status-only roadmap
+    and documentation update that records the immutable release and advances the
+    immediate focus to the next gate.
 
 ## Release verification
 

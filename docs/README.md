@@ -33,8 +33,8 @@ Start with the document that matches the task.
 
 ## Planning and release operations
 
-- [Roadmap](ROADMAP.md): the current release dashboard, ordered quality tracks,
-  implemented phases, and explicit non-goals.
+- [Roadmap](ROADMAP.md): the current release dashboard, version update points,
+  ordered next steps, completed phases, and explicit non-goals.
 - [v0.6.0 release notes](releases/v0.6.0.md): the current release, the
   integrated product-quality beta, and clearly stated platform limits including
   the representative-hardware evidence it does not carry.
@@ -55,8 +55,9 @@ Start with the document that matches the task.
   over the first preview.
 - [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
   verification, platform limits, and the known issues that v0.1.1 fixes.
-- [Publishing](PUBLISHING.md): public-repository controls, the repeatable pre-1.0
-  tag procedure (next tag v0.7.0), verification, and the stronger 1.0 trust gate.
+- [Publishing](PUBLISHING.md): public-repository controls, version state policy,
+  the repeatable pre-1.0 tag procedure (next tag v0.7.0), verification, and the
+  stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.
 

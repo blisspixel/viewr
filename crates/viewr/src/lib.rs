@@ -35,6 +35,7 @@ pub mod heal;
 pub mod image_info;
 pub(crate) mod job;
 mod keyboard_route;
+mod locale;
 #[cfg(target_os = "macos")]
 mod macos;
 mod mosaic;

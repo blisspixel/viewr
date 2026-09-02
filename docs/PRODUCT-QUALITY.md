@@ -1,16 +1,16 @@
 # Product quality
 
-**Status:** open, and still open after the v0.6.0 tag. This matrix is the
+**Status:** open, and still open after the v0.6.1 tag. This matrix is the
 executable contract for first-time, power-user, admin, failure-recovery, and
 visual-polish paths. It does not close v0.6.
 Representative Windows, macOS, and Linux hardware still have to pass the same rows
 using the checksummed archives and synthetic fixture artifact from one retained
 candidate workflow run.
 
-v0.6.0 was published before any of those rows were recorded. The released
-archives therefore carry no representative-hardware evidence, the release notes
-state that limit, and this matrix is carried forward as open work that blocks
-the v0.7.0 tag.
+v0.6.0 and v0.6.1 were published before any of those rows were recorded. The
+released archives therefore carry no representative-hardware evidence, the
+release notes state that limit, and this matrix is carried forward as open work
+that blocks the v0.7.0 tag.
 
 v0.6 broadens the core viewing surface with a transient full-image collage. It
 does not add a library, catalog, thumbnail mode, or durable album state. Clipboard
@@ -162,6 +162,7 @@ Run the same workflow on every platform.
 | PQ-FT-04 | Choose `browse/` with Open Folder, then cite the candidate workflow's `tests/sandbox_profiles.rs` job and `selected_file_scan_outcomes_cover_success_and_limits` in the observation | The portable archive browses the selected folder explicitly. The package-profile checks prove the sandbox grants, while the exact entry-state test proves that a failed sibling scan retains only the selected image until explicit folder consent exists. The portable archive is not misrepresented as a sandbox package. |
 | PQ-FT-05 | Open Help > About viewr | Version, platform, license, privacy, and the grouped shortcut catalog are readable. Background controls cannot activate. Close and Escape dismiss it. On the 640 by 480 minimum window, Close stays reachable. |
 | PQ-FT-06 | Open both files under `failure/` | The card heading names the selected file, the error is one short line, Retry is present, and menus stay usable. |
+| PQ-FT-07 | In File > Preferences select System, English, Spanish, French, and German, restarting after each explicit selection | Exactly one language radio is selected. Primary cataloged menus, actions, headings, and their accessible names change immediately, the explicit choice survives restart, accented glyphs render, and uncataloged advanced copy remains readable through the documented English fallback. |
 
 ### Power-user
 
@@ -175,13 +176,14 @@ Run the same workflow on every platform.
 | PQ-PW-06 | Replace a disposable copy of `editing/source.png` with `editing/replacement.png` and press F5. Repeat after making an unsaved crop before the external replacement | The clean case reloads without blanking. The unsaved-edit case keeps the last good frame, does not discard the crop, and asks for F5. |
 | PQ-PW-07 | Spot Heal a disposable `editing/source.png`, finish the tool, use Save As, then Trash the source | Heal success and the continuing top cue identify the in-memory Save As boundary. `Ctrl/Cmd+Shift+S` exports a copy containing the repaired pixels while the source stays unchanged. Delete moves the visible image to Trash, and its routine result stays in top chrome instead of covering the photo. `U` restores the recoverable receipt when the platform can prove it. |
 | PQ-PW-08 | Open `mosaic/01-wide.png`; press Up to enter Full-Image Collage; wait for the group to settle; traverse it with Left and Right; resize between landscape and portrait; toggle fullscreen; use Page Down and Page Up; open one photo with Down, another with Enter, and another with a click; repeat entry with `Shift+G`; then cite `twelve_landscape_photos_fill_the_screen_in_justified_rows`, `source_aspects_define_tiles_without_equal_cell_letterboxing`, `collage_accepts_twelve_photos_and_tiny_views_stay_safe`, `collage_tile_enlarges_a_complete_small_image_without_changing_its_aspect`, `no_eviction_insert_rejects_pressure_without_displacing_existing_images`, and `mosaic_loading_announcement_is_stable_until_the_terminal_count` from the candidate workflow | The first and second groups contain 12 full photos each and the third contains two in natural order. Every photo preserves all four corner markers and its aspect ratio, with no crop or thumbnail substitution. Actual aspect ratios define dense justified rows with narrow gutters, including 3:4 portrait tiles and panoramic tiles, rather than equal empty cells. Complete small sources enlarge inside their exact tiles while ordinary single-photo Fit remains capped at 100 percent. The collage reflows only when another complete photo becomes ready. Selection, position-only accessible names, Up entry, Down, Enter, click, groups, fullscreen, and Escape remain coherent. The cited tests prove dense aspect-aware geometry, complete tile enlargement, bounded no-eviction admission, and one stable loading announcement followed by a terminal count; if a real host reaches a memory or display limit, it shows fewer complete photos with the matching explicit status. |
+| PQ-PW-09 | Copy at least 20 images to one disposable folder, open it, then press Delete on each fully presented image as quickly as presentation permits while earlier Trash moves remain active. Press Delete once before a deliberately slow image finishes opening | Every fully presented image is accepted without waiting for the prior platform move and the next neighbor begins presentation immediately. The active count remains visible in top chrome without covering the photo. Platform moves drain in order, the loading image is not admitted and gets an explicit wait reason, a failure stops unsubmitted requests with a path-free count, and `U` refers only to the latest safely recoverable completed move. |
 
 ### Admin
 
 | ID | Action | Required result |
 | --- | --- | --- |
 | PQ-AD-01 | `viewr doctor` | Reports binaries, worker protocol, windowing libraries, and graphics runtimes. A passing last line is not proof that a window opened. |
-| PQ-AD-02 | Inspect the installation contract in the candidate archive and open File > Default Image Viewer | README and INSTALL identify v0.6.0 as the current immutable public download. The named modal states that file associations are opt in, provides the platform-specific PNG and JPEG route, and blocks background actions. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, association, and rollback acceptance remain the v0.8 gate. |
+| PQ-AD-02 | Inspect the installation contract in the candidate archive and open File > Default Image Viewer | README and INSTALL identify v0.6.1 as the current immutable public download. The named modal states that file associations are opt in, provides the platform-specific PNG and JPEG route, and blocks background actions. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, association, and rollback acceptance remain the v0.8 gate. |
 | PQ-AD-03 | Help > Get latest release | The Update modal names the running version, refuses to check a network, and only the explicit button hands the release URL to the browser. |
 | PQ-AD-04 | Unsigned preview | OS trust warnings may appear. Docs do not tell anyone to disable platform security. |
 
@@ -235,7 +237,7 @@ and 200% after changing the primary display scale, session label, and filename t
 `windows-150` and `windows-200`:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.6.0/performance/windows-100.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.6.1/performance/windows-100.json
 ```
 
 On macOS, make the built-in Retina display the main display and run once with
@@ -245,7 +247,7 @@ report records a one-way SHA-256 identity, built-in and Retina flags, and measur
 scale for the main display. On Linux, run in the native sessions named below:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.0/performance/<session>.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.1/performance/<session>.json
 ```
 
 Use `linux-wayland` and `linux-x11` in the corresponding native sessions. For the
@@ -256,7 +258,7 @@ required software renderer, use an X11 or Xwayland session with `DISPLAY`, insta
 `glxinfo`, confirm that `glxinfo -B` names Mesa llvmpipe or softpipe, then run:
 
 ```text
-WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.6.0/performance/linux-mesa-software.json
+WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.6.1/performance/linux-mesa-software.json
 ```
 
 The complete committed report set is exactly `windows-100`, `windows-150`,
@@ -305,7 +307,7 @@ Validate each completed record and then the three-platform gate:
 
 ```text
 python -B scripts/product_quality_evidence.py check <platform-record.md>
-python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.0
+python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.1
 ```
 
 The gate rejects missing or duplicate rows, generic observations, invalid archive
@@ -337,5 +339,6 @@ private path, raw metadata, or unrelated screen content. If the tested artifact
 bytes change, the record no longer closes the gate.
 
 Do not tag v0.7.0 while any required platform row is unrecorded or any
-high-severity product-quality issue remains. v0.6.0 was tagged in exactly that
-state as an explicit, documented exception; do not treat it as precedent.
+high-severity product-quality issue remains. v0.6.0 and v0.6.1 were tagged in
+exactly that state as explicit, documented exceptions; do not treat automated
+gates as a substitute for these hardware records.

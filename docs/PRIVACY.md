@@ -184,13 +184,14 @@ A promise you can verify beats a promise you have to trust.
 
 ## Local data: what viewr does and doesn't write
 
-- viewr writes exactly two optional UI preferences in the platform configuration
+- viewr writes exactly three optional UI preferences in the platform configuration
   directory: the validated appearance word `system`, `light`, `dark`, or `console`
   under `viewr/appearance`, and the validated folder-order word `latest` or `name`
-  under `viewr/folder-sort`. They contain no path, timestamp, device identifier,
-  image data, or activity history. Windows uses `%APPDATA%`, macOS uses
+  under `viewr/folder-sort`, plus `system`, `en`, `es`, `fr`, or `de` under
+  `viewr/language`. They contain no path, timestamp, device identifier, image
+  data, locale history, or activity history. Windows uses `%APPDATA%`, macOS uses
   `Library/Application Support`, and Linux uses `XDG_CONFIG_HOME` or `.config`.
-  Deleting either file quietly restores its System or Latest First default.
+  Deleting a file quietly restores its System, Latest First, or System default.
   Invalid, oversized, unreadable, or unavailable state uses the same safe defaults
   and shows one fixed recovery notice without the path, raw error, or stored
   content. A failed explicit save keeps the selected value for the current session
@@ -268,6 +269,12 @@ A promise you can verify beats a promise you have to trust.
   categories before showing or logging them. Identity-rejected and failed platform
   Trash attempts leave the current image and playlist unchanged, while retryable
   restore receipts remain only in session memory for explicit retry.
+  Repeated Delete accepts only fully presented images into a bounded in-memory
+  FIFO containing the exact path, playlist context, and accepted-source handle
+  required for later guarded execution. Platform Trash calls stay serialized.
+  A failed or disconnected move clears every request that never reached the
+  platform and reports only a fixed count. Queue contents are never persisted,
+  displayed as filenames, or logged as paths.
   Windows and Linux receipts contain a new platform Trash item identifier only
   after its native file identity matches the retained accepted-source handle;
   macOS receipts contain the exact resulting URL and the same handle. The handle

@@ -57,7 +57,11 @@ disappears. This spec is the converged result of two rounds of design critique
   chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`
   shows a 64px docked panel containing only high-frequency image operations:
-  rotate, flip, crop, and Spot Heal. Its vector chevron collapses it to a 44px rail.
+  rotate, flip, crop, and Spot Heal. Clockwise and counterclockwise use directional
+  arc arrows; horizontal and vertical flip use mirrored shapes around the changed
+  axis; crop uses intersecting corner marks; Spot Heal uses a bandage and repair
+  spark. Each remains a named accessible button with its shortcut in the tooltip.
+  The vector chevron collapses the panel to a 44px rail.
   View > Panel Position docks it on either the left or right. Save and destructive
   actions remain in File so the tool surface stays calm.
 - Folder Previews: hidden by default. When a folder contains multiple images,
@@ -113,6 +117,20 @@ disappears. This spec is the converged result of two rounds of design critique
   closes a context menu, then cancels crop, then leaves Spot Heal, then leaves the
   full-image collage, then exits fullscreen. Chrome does not reappear on a timer
   or mouse move.
+
+## Language
+
+- File > Preferences follows the operating-system language by default and offers
+  explicit English, Spanish, French, and German choices. The choice applies live
+  and is stored as one validated word through same-directory atomic replacement.
+- Every catalog is compiled into the application. Language selection performs no
+  network access, background update, activity recording, or image inspection.
+- Unsupported system locales and uncataloged copy use the exact English source
+  string. Primary navigation and preference surfaces are cataloged now. Advanced
+  status, recovery, metadata, and editing explanations remain explicit English
+  fallback until the catalog and native accessibility matrix are complete.
+- The platform-specific resolution and contribution contract are in
+  [Localization](LOCALIZATION.md).
 
 ## Color
 
@@ -294,7 +312,12 @@ and unsupported containers, remain visibly read-only.
   A missing, replaced, linked, or unverifiable entry fails closed without changing
   playlist or Undo state. Once the background file operation is accepted, the
   surviving neighbor begins presentation immediately while the operating system
-  finishes the move. Success then reconciles the canonical playlist and shows a
+  finishes the move. If that neighbor becomes fully presented before the first
+  move finishes, another Delete accepts it into a bounded application queue and
+  advances again. Platform Trash calls and receipt capture remain serialized, so
+  exact source and Undo evidence cannot race. A selected image that is still
+  loading is never queued, and the shortcut reports that it must finish opening.
+  Success then reconciles the canonical playlist and shows a
   three-second non-blocking notice in top chrome instead of over the image. A
   failure leaves the source in the playlist without pulling the user away from
   the neighbor already shown. `U` owns the latest safely recoverable Trash
@@ -323,8 +346,10 @@ and unsupported containers, remain visibly read-only.
   recovery disables a new Trash move until `U` produces a typed reconciliation,
   preventing newer receipt ownership from replacing an uncertain action.
 - Foreground reload, preview preparation, crop, Save As, an active Spot Heal
-  stroke, or a heal worker owns current state. Trash, permanent delete, and restore
-  wait instead of racing that work. Keyboard shortcuts give a specific visual wait
+  stroke, or a heal worker owns current state. A running Trash move is the one
+  exception for another fully presented Trash submission. Permanent delete,
+  restore, and every other conflict wait instead of racing that work. Keyboard
+  shortcuts give a specific visual wait
   reason. Restore retains only transient and resolvable receipts for `U`. Missing
   exact items end the in-app retry; ambiguous, unsupported, and invalid receipts
   direct the user to system Trash review without claiming that `U` can help.

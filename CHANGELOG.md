@@ -5,12 +5,24 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+## 0.6.1 - 2026-09-02
+
 ### Product quality
 
 - Moving the displayed image to Trash, or permanently deleting it after
   confirmation, now begins presenting the surviving neighbor as soon as the
   background file operation is accepted. Large folders no longer keep the
   deleted image on screen while the operating system finishes the file action.
+- Repeated Delete presses now accept each fully presented image into a bounded
+  queue and advance immediately while one serialized platform Trash worker
+  drains the requests. A still-loading image is never deleted and now receives
+  an explicit wait reason instead of appearing to ignore the shortcut.
+- Added a persisted System language preference with bundled offline English,
+  Spanish, French, and German catalogs. Primary menus, Preferences, file and
+  folder entry points, crop controls, and main panel headings switch live.
+- Reworked the compact Tools glyphs into directional rotate arcs, mirrored
+  shapes for horizontal and vertical flip, a conventional crop mark, and a
+  bandage-style Spot Heal symbol while preserving exact accessible names.
 - Folder browsing defaults to the most recently modified image first. File >
   Preferences and View > Folder Sort can make natural filename order the saved
   default while preserving selection, ratings, and the active rating filter. The
@@ -37,9 +49,12 @@ and organized by user-visible concern.
   candidate identity, version update points, and ordered v0.7 next steps. Planning
   now excludes calendar forecasts and duration estimates while retaining actual
   release dates as history.
-- Replaced the README's Console-theme image with a compact Dark capture of the
-  docked Tools panel. Both README images now emphasize the photo and are
-  programmatically limited to viewr application content.
+- Reduced the README interface gallery to one compact Dark capture so the photo
+  remains the focus. The PNG is programmatically limited to viewr application
+  content.
+- Added a focused localization guide covering bundled catalogs, platform locale
+  resolution, persistence, English fallback, contribution rules, and remaining
+  review work.
 
 ## 0.6.0 - 2026-08-29
 

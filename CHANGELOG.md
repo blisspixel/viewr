@@ -27,6 +27,12 @@ and organized by user-visible concern.
   explains the native Finder flow on macOS. Installation and startup still never
   change file associations.
 
+### Documentation
+
+- Replaced the README's Console-theme image with a compact Dark capture of the
+  docked Tools panel. Both README images now emphasize the photo and are
+  programmatically limited to viewr application content.
+
 ## 0.6.0 - 2026-08-29
 
 ### Release evidence

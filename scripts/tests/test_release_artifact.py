@@ -53,8 +53,8 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/releases/v0.6.0.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
-    "docs/screenshots/viewr-console-example.png",
     "docs/screenshots/viewr-dark-example.png",
+    "docs/screenshots/viewr-tools-example.png",
     "docs/STACK.md",
     "docs/STANDARDS.md",
     "docs/VERIFY.md",
@@ -288,13 +288,13 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.build()
 
     def test_build_rejects_an_invalid_documentation_asset(self) -> None:
-        screenshot = self.repository / "docs/screenshots/viewr-console-example.png"
+        screenshot = self.repository / "docs/screenshots/viewr-tools-example.png"
         screenshot.write_bytes(b"not a PNG")
         with self.assertRaisesRegex(release_artifact.ReleaseError, "valid PNG"):
             self.build()
 
     def test_build_rejects_a_corrupt_documentation_asset(self) -> None:
-        screenshot = self.repository / "docs/screenshots/viewr-console-example.png"
+        screenshot = self.repository / "docs/screenshots/viewr-tools-example.png"
         corrupt = bytearray(self.png_bytes())
         corrupt[24] ^= 1
         screenshot.write_bytes(corrupt)
@@ -302,7 +302,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             self.build()
 
     def test_build_rejects_an_oversized_documentation_asset(self) -> None:
-        screenshot = self.repository / "docs/screenshots/viewr-console-example.png"
+        screenshot = self.repository / "docs/screenshots/viewr-tools-example.png"
         with screenshot.open("wb") as output:
             output.seek(release_artifact.MAX_DOCUMENTATION_ASSET_BYTES)
             output.write(b"\0")

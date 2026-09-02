@@ -57,17 +57,21 @@ workflow results, and release assets remain the source of truth:
   [v0.6.0](https://github.com/blisspixel/viewr/releases/tag/v0.6.0). It was
   published without its required representative-hardware evidence: no such
   record exists for it, and its release notes state that limit.
+- [x] Publish and verify annotated tag `v0.6.1`, the shipped-feedback patch for
+  rapid Trash curation, folder defaults, editing clarity, initial localization,
+  and interface polish. Its release notes carry the same open representative-
+  hardware evidence limit without claiming that automated gates replace it.
 
 ## Version state policy
 
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.6.0. README and INSTALL call this the install target until a
+   currently v0.6.1. README and INSTALL call this the install target until a
    later release actually exists.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.6.0` while the carried v0.6 hardware gate remains open.
+   `0.6.1` while the carried v0.6 hardware gate remains open.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -81,9 +85,15 @@ tag. That reviewed release-preparation change updates `Cargo.toml`, `Cargo.lock`
 compiled version-specific commands, the changelog candidate content,
 `docs/releases/v<version>.md`, and every status document that describes the
 workspace. Do not use a changing `-dev` suffix or bump the version on ordinary
-development commits. For v0.7.0, the update from `0.6.0` happens only after the
+development commits. For v0.7.0, the update from `0.6.1` happens only after the
 carried v0.6 product-quality matrix closes and before v0.7 accessibility evidence
 begins.
+
+The v0.6.1 patch was a narrow exception for confirmed shipped defects and closely
+related usability fixes. It still required the complete automated release gate,
+reviewed notes, immutable assets, checksums, manifests, and attestations. Its
+notes disclose the uncollected representative-hardware rows. That exception did
+not close the carried v0.6 evidence gate or begin v0.7 accessibility evidence.
 
 Application source, dependencies, workflows, packaging, or user-facing behavior
 instructions changed after a candidate run invalidate that candidate and all
@@ -119,7 +129,7 @@ production environment.
    before beginning v0.7 work:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.0
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.1
    ```
 
 2. On a feature branch, make the single version transition described in
@@ -173,9 +183,9 @@ production environment.
 After publication:
 
 ```text
-gh release view v0.6.0 --repo blisspixel/viewr
-gh release verify v0.6.0 --repo blisspixel/viewr
-gh attestation verify viewr-0.6.0-x86_64-pc-windows-msvc.zip \
+gh release view v0.6.1 --repo blisspixel/viewr
+gh release verify v0.6.1 --repo blisspixel/viewr
+gh attestation verify viewr-0.6.1-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
 ```
 
@@ -320,9 +330,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.6.0 is public, immutable, checksummed, and attested, and v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.6.1 is public, immutable, checksummed, and attested, and v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. v0.6.0 additionally carries no representative-hardware
+  known-issues note. v0.6.1 and v0.6.0 carry no representative-hardware
   acceptance evidence, which its release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.

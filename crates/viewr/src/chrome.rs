@@ -356,6 +356,8 @@ pub(crate) struct ChromeInput {
     pub heal_busy: bool,
     pub heal_painting: bool,
     pub curation_busy: bool,
+    /// The active curation owner is the serialized move-to-Trash queue.
+    pub trash_move_busy: bool,
     pub source_verification_busy: bool,
     pub folder_scan_busy: bool,
     pub is_cropping: bool,
@@ -521,7 +523,7 @@ impl ChromeViewModel {
                     && !self.input.save_recovery_unsettled
             }
             ChromeControl::MoveToTrash => {
-                self.exclusive_current_action_ready() && !self.input.restore_recovery_unsettled
+                self.trash_submission_ready() && !self.input.restore_recovery_unsettled
             }
             ChromeControl::UndoTrash => {
                 self.input.has_undo_trash
@@ -770,6 +772,22 @@ impl ChromeViewModel {
         self.current_selection_ready() && self.exclusive_work_clear()
     }
 
+    const fn trash_submission_ready(self) -> bool {
+        self.input.dock.has_image
+            && !self.input.is_loading
+            && !self.input.load_failed
+            && !self.input.crop_busy
+            && !self.input.save_busy
+            && !self.input.heal_busy
+            && !self.input.heal_painting
+            && (!self.input.curation_busy || self.input.trash_move_busy)
+            && !self.input.source_verification_busy
+            && !self.input.folder_scan_busy
+            && !self.input.is_cropping
+            && !self.input.dock.heal_active
+            && !self.input.rating_write_busy
+    }
+
     const fn transform_action_ready(self) -> bool {
         self.current_selection_ready()
             && !self.input.heal_painting
@@ -974,6 +992,7 @@ mod tests {
             heal_busy: false,
             heal_painting: false,
             curation_busy: false,
+            trash_move_busy: false,
             source_verification_busy: false,
             folder_scan_busy: false,
             is_cropping: false,
@@ -1280,6 +1299,11 @@ mod tests {
         assert!(!model.is_enabled(ChromeControl::HealRefreshSource));
         assert!(!model.is_enabled(ChromeControl::UndoEdit));
         assert!(!model.is_enabled(ChromeControl::UndoTrash));
+
+        input.trash_move_busy = true;
+        let model = ChromeViewModel::new(input);
+        assert!(model.is_enabled(ChromeControl::MoveToTrash));
+        assert!(!model.is_enabled(ChromeControl::PermanentDelete));
 
         input = ready_input();
         input.has_undo_edit = false;

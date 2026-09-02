@@ -71,8 +71,13 @@ therefore fails with a bounded diagnostic instead of stalling CI.
 
 Current-image Trash and Undo use native platform services and are not part of the
 GUI performance probe. Trash, permanent delete after confirmation, and restore run
-through one typed worker. Strong accepted-source comparison and restored rating
-inspection remain off the event loop, allowing it to repaint a fixed operation
+through one typed worker. Repeated Delete submissions for fully presented images
+enter a bounded application queue, advance immediately, and drain serially through
+that worker. This keeps platform Trash receipt capture ordered while removing the
+previous wait between one completed move and acceptance of the next. A selected
+image must finish presentation before it can enter the queue. Strong
+accepted-source comparison and restored rating inspection remain off the event
+loop, allowing it to repaint a fixed operation
 status and non-mutating view controls while conflicting playlist, edit, and
 destructive actions wait. Trash receipt capture lists system Trash once after the
 move and binds by original path plus retained object identity, rather than listing

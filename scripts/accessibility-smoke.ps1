@@ -370,19 +370,27 @@ function Get-Element {
             $currentName -eq $Name
         }
         $typeMatches = $null -eq $ControlType -or $node.Current.ControlType -eq $ControlType
-        $withinScope = if ($null -eq $scopeBounds) {
-            $true
+        if (-not ($nameMatches -and $typeMatches)) {
+            continue
         }
-        else {
-            $nodeBounds = $node.Current.BoundingRectangle
-            $nodeBounds.Width -gt 0 -and
-                $nodeBounds.Height -gt 0 -and
-                $nodeBounds.Left -ge $scopeBounds.Left -and
-                $nodeBounds.Top -ge $scopeBounds.Top -and
-                $nodeBounds.Right -le $scopeBounds.Right -and
-                $nodeBounds.Bottom -le $scopeBounds.Bottom
+        $withinScope = $true
+        if ($null -ne $scopeBounds) {
+            try {
+                $nodeBounds = $node.Current.BoundingRectangle
+                $withinScope =
+                    $nodeBounds -is [System.Windows.Rect] -and
+                    $nodeBounds.Width -gt 0 -and
+                    $nodeBounds.Height -gt 0 -and
+                    $nodeBounds.Left -ge $scopeBounds.Left -and
+                    $nodeBounds.Top -ge $scopeBounds.Top -and
+                    $nodeBounds.Right -le $scopeBounds.Right -and
+                    $nodeBounds.Bottom -le $scopeBounds.Bottom
+            }
+            catch [System.Windows.Automation.ElementNotAvailableException] {
+                $withinScope = $false
+            }
         }
-        if ($nameMatches -and $typeMatches -and $withinScope) {
+        if ($withinScope) {
             return $node
         }
     }

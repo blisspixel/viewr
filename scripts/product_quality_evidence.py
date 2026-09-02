@@ -29,7 +29,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = REPOSITORY_ROOT / "docs" / "PRODUCT-QUALITY.md"
 REPOSITORY = "blisspixel/viewr"
 WORKFLOW_NAME = "Release artifacts"
-EVIDENCE_VERSION = "0.6.0"
+EVIDENCE_VERSION = "0.6.1"
 EVIDENCE_DIRECTORY = f"v{EVIDENCE_VERSION}"
 PLATFORM_TARGETS = {
     "windows": ("x86_64-pc-windows-msvc",),
@@ -314,6 +314,7 @@ MANUAL_OBSERVATION_TERMS = {
     ),
     "PQ-FT-05": ("version", "platform", "license", "privacy", "Escape", "Close"),
     "PQ-FT-06": ("malformed", "unsupported", "Retry", "menus"),
+    "PQ-FT-07": ("language", "Spanish", "French", "German", "restart"),
     "PQ-PW-01": ("keyboard", "Home", "End", "Page Up", "Page Down"),
     "PQ-PW-02": ("TIFF", "ICO", "page", "blocked"),
     "PQ-PW-03": ("GIF", "WebP", "APNG", "paused", "frame"),
@@ -323,15 +324,16 @@ MANUAL_OBSERVATION_TERMS = {
     "PQ-PW-07": ("Save As", "Trash", "Undo"),
     "PQ-PW-08": (
         "full-image",
-        "24",
+        "12",
         "corner markers",
         "justified",
         "aspect ratio",
         "fullscreen",
         "Escape",
     ),
+    "PQ-PW-09": ("Delete", "fully presented", "serialized", "loading", "Undo"),
     "PQ-AD-01": ("doctor", "worker protocol", "windowing", "graphics"),
-    "PQ-AD-02": ("v0.6.0", "immutable", "updater", "security"),
+    "PQ-AD-02": ("v0.6.1", "immutable", "updater", "security"),
     "PQ-AD-03": ("Update modal", "network", "browser"),
     "PQ-AD-04": ("trust warning", "security controls"),
     "PQ-RC-01": ("malformed", "previous image", "Retry"),

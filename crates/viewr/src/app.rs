@@ -48,7 +48,7 @@ use crate::curation_state::{
 use crate::current_work::{
     ActiveModeAllowance, CurrentWork, blocked_action_message, browse_work_blocker, crop_work,
     curation_action_preflight, curation_work, current_work_blocker, image_preparation_work,
-    spot_heal_source_blocker, spot_heal_work,
+    spot_heal_source_blocker, spot_heal_work, trash_submission_work_blocker,
 };
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
@@ -175,6 +175,14 @@ fn run_internal(
             recovery.diagnostic_name()
         );
     }
+    let language = crate::locale::load();
+    let language_recovery = language.recovery();
+    if let Some(recovery) = language_recovery {
+        log::warn!(
+            "language preference fallback: {}",
+            recovery.diagnostic_name()
+        );
+    }
     let mut app = App {
         session: crate::session::Session {
             selected_path: image_path,
@@ -187,6 +195,8 @@ fn run_internal(
         playlist: None,
         playlist_scope: None,
         folder_sort: folder_sort.sort(),
+        language_preference: language.preference(),
+        language: language.preference().resolve(),
         folder_scan_job: None,
         rating_scan_worker: None,
         rating_generation: 0,
@@ -228,6 +238,7 @@ fn run_internal(
         preview_recovery_unsettled: false,
         preview_load_retry_blocked: false,
         curation_worker: None,
+        pending_trash: VecDeque::new(),
         close_after_curation: false,
         curation_recovery: CurationRecovery::default(),
         show_image_info: false,
@@ -244,6 +255,7 @@ fn run_internal(
         preference_recovery_notice: startup_preference_recovery_notice(
             appearance_recovery,
             folder_sort_recovery,
+            language_recovery,
         ),
         show_about: false,
         show_update: false,
@@ -530,8 +542,39 @@ struct CurationWorker {
 }
 
 impl CurationWorker {
-    fn status(&self, closing: bool) -> String {
-        curation_status(self.context.kind(), self.context.submitted(), closing)
+    fn status(&self, closing: bool, pending_trash: usize) -> String {
+        let submitted = if matches!(self.context, CurationContext::Trash(_)) {
+            self.context.submitted().saturating_add(pending_trash)
+        } else {
+            self.context.submitted()
+        };
+        curation_status(self.context.kind(), submitted, closing)
+    }
+}
+
+struct PendingTrash {
+    context: RemovalContext,
+    source: Arc<crate::fs::ImageSource>,
+}
+
+/// Bounds path and source-handle retention while still allowing sustained
+/// keyboard curation well ahead of a slow platform Trash implementation.
+const MAX_PENDING_TRASH: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrashAdmission {
+    Start,
+    Queue,
+    Full,
+    Busy(CurationKind),
+}
+
+const fn trash_admission(active: Option<CurationKind>, pending: usize) -> TrashAdmission {
+    match active {
+        None => TrashAdmission::Start,
+        Some(CurationKind::Trash) if pending < MAX_PENDING_TRASH => TrashAdmission::Queue,
+        Some(CurationKind::Trash) => TrashAdmission::Full,
+        Some(kind) => TrashAdmission::Busy(kind),
     }
 }
 
@@ -809,14 +852,14 @@ fn save_success_message(
 fn startup_preference_recovery_notice(
     appearance: Option<PreferenceRecovery>,
     folder_sort: Option<crate::folder_sort_preference::Recovery>,
+    language: Option<crate::locale::Recovery>,
 ) -> Option<&'static str> {
-    match (appearance, folder_sort) {
-        (Some(_), Some(_)) => Some(
-            "Could not restore saved appearance or folder sort. Using System and Latest First.",
-        ),
-        (Some(recovery), None) => Some(recovery.notice()),
-        (None, Some(recovery)) => Some(recovery.notice()),
-        (None, None) => None,
+    match (appearance, folder_sort, language) {
+        (None, None, None) => None,
+        (Some(recovery), None, None) => Some(recovery.notice()),
+        (None, Some(recovery), None) => Some(recovery.notice()),
+        (None, None, Some(recovery)) => Some(recovery.notice()),
+        _ => Some("Could not restore some saved preferences. Using safe system defaults for them."),
     }
 }
 
@@ -890,6 +933,9 @@ struct App {
     playlist_scope: Option<Arc<PlaylistScope>>,
     /// Persisted default folder order used by the current playlist.
     folder_sort: crate::fs::FolderSort,
+    /// Persisted user-interface language and its resolved bundled catalog.
+    language_preference: crate::locale::Preference,
+    language: crate::locale::Language,
     folder_scan_job: Option<
         OneShotJob<
             FolderScanContext,
@@ -967,6 +1013,8 @@ struct App {
     preview_load_retry_blocked: bool,
     /// At most one source-bound Trash, permanent-delete, or restore operation.
     curation_worker: Option<CurationWorker>,
+    /// Fully presented sources accepted behind the serialized Trash worker.
+    pending_trash: VecDeque<PendingTrash>,
     /// A normal close request waiting for destructive work to reconcile.
     close_after_curation: bool,
     /// Durable, operation-bound guidance after indeterminate worker loss.
@@ -1372,6 +1420,30 @@ impl App {
                     error.diagnostic_name()
                 );
                 self.show_toast(crate::folder_sort_preference::save_failure_message());
+            }
+        }
+        self.request_redraw();
+    }
+
+    fn set_language(&mut self, preference: crate::locale::Preference) {
+        self.language_preference = preference;
+        self.language = preference.resolve();
+        match crate::locale::save(preference) {
+            Ok(()) => {
+                let label = self.language.text("Language");
+                let selected = if matches!(preference, crate::locale::Preference::System) {
+                    self.language.text("System")
+                } else {
+                    preference.native_name()
+                };
+                self.show_toast(format!("{label}: {selected}"));
+            }
+            Err(error) => {
+                log::error!(
+                    "failed to save language preference: {}",
+                    error.diagnostic_name()
+                );
+                self.show_toast(crate::locale::save_failure_message());
             }
         }
         self.request_redraw();
@@ -4022,9 +4094,20 @@ impl App {
 
     fn trash_current(&mut self) {
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+            if self.session.selected_path.is_some() {
+                let message = if self.session.load_error.is_some() {
+                    "Reload or open another image before moving it to Trash"
+                } else {
+                    "Wait for the selected image to finish opening before moving it to Trash"
+                };
+                self.show_toast(message);
+            }
             return;
         };
-        if self.block_action_while_busy("moving this file to Trash") {
+        if let Some(blocker) =
+            trash_submission_work_blocker(self.active_work(ActiveModeAllowance::None))
+        {
+            self.show_toast(blocked_action_message("moving this file to Trash", blocker));
             return;
         }
         if let Some(message) = self.curation_recovery.source_removal_preflight() {
@@ -4042,24 +4125,136 @@ impl App {
             return;
         };
         let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        let context = CurationContext::Trash(RemovalContext {
-            path: path.clone(),
-            playlist_index,
-            scope: self.playlist_scope.clone(),
-        });
-        // Persistent top-bar status owns the in-progress state. Outcome toasts
-        // fire only when the worker finishes, so Delete does not flash a second
-        // busy message on top of the spinner status.
-        let started = self.start_curation_worker(
+        let pending = PendingTrash {
+            context: RemovalContext {
+                path,
+                playlist_index,
+                scope: self.playlist_scope.clone(),
+            },
+            source,
+        };
+        let active = self
+            .curation_worker
+            .as_ref()
+            .map(|worker| worker.context.kind());
+        match trash_admission(active, self.pending_trash.len()) {
+            TrashAdmission::Queue => {
+                self.pending_trash.push_back(pending);
+                self.advance_after_removal_submitted(playlist_index);
+                self.request_redraw();
+            }
+            TrashAdmission::Full => {
+                self.show_toast(
+                    "The Trash queue is full. Wait for the current moves to finish before continuing.",
+                );
+            }
+            TrashAdmission::Busy(kind) => {
+                self.show_toast(blocked_action_message(
+                    "moving this file to Trash",
+                    curation_work(kind),
+                ));
+            }
+            TrashAdmission::Start => {
+                // Persistent top-bar status owns the in-progress state. Outcome
+                // toasts fire only when the worker finishes.
+                if self.start_trash_worker(
+                    pending,
+                    "Could not start the move to Trash. Nothing was moved.",
+                ) {
+                    self.advance_after_removal_submitted(playlist_index);
+                }
+            }
+        }
+    }
+
+    fn start_trash_worker(
+        &mut self,
+        mut pending: PendingTrash,
+        spawn_failure: &'static str,
+    ) -> bool {
+        if restore_targets_active_playlist(
+            self.playlist.as_ref(),
+            self.playlist_scope.as_ref(),
+            pending.context.scope.as_ref(),
+        ) && let Some(index) = self.playlist.as_ref().and_then(|playlist| {
+            playlist
+                .files
+                .iter()
+                .position(|entry| entry == &pending.context.path)
+        }) {
+            pending.context.playlist_index = index;
+        }
+        let path = pending.context.path.clone();
+        let source = pending.source;
+        self.start_curation_worker(
             "viewr-trash-move",
-            context,
+            CurationContext::Trash(pending.context),
             move || CurationCompletion::Trash {
                 result: crate::curate::move_source_to_trash(&path, &source),
             },
-            "Could not start the move to Trash. Nothing was moved.",
+            spawn_failure,
+        )
+    }
+
+    fn start_next_pending_trash(&mut self) -> bool {
+        let Some(pending) = self.pending_trash.pop_front() else {
+            return false;
+        };
+        if self.start_trash_worker(
+            pending,
+            "Could not start the next queued move to Trash. That file was not moved.",
+        ) {
+            return true;
+        }
+        let abandoned = self.pending_trash.len();
+        self.pending_trash.clear();
+        if abandoned > 0 {
+            log::error!(
+                "queued Trash submissions abandoned after worker spawn failure: count={abandoned}"
+            );
+            self.show_toast(format!(
+                "Could not continue moving files to Trash. {abandoned} queued files were not moved."
+            ));
+        }
+        false
+    }
+
+    fn reconcile_pending_trash_after_terminal(&mut self, terminal: CurationTerminalState) -> bool {
+        if matches!(terminal, CurationTerminalState::Succeeded) {
+            return self.start_next_pending_trash();
+        }
+        if self.pending_trash.is_empty() {
+            return false;
+        }
+        let abandoned = self.pending_trash.len();
+        self.pending_trash.clear();
+        log::warn!("queued Trash submissions stopped after failed move: abandoned={abandoned}");
+        let failure = self
+            .toast
+            .as_deref()
+            .unwrap_or("The move to Trash needs attention.");
+        self.show_toast(format!(
+            "{failure} {abandoned} queued files were not sent to Trash."
+        ));
+        false
+    }
+
+    fn finish_disconnected_curation(&mut self, kind: CurationKind, submitted: usize) {
+        self.close_after_curation = false;
+        self.close_after_save = false;
+        let abandoned = self.pending_trash.len();
+        self.pending_trash.clear();
+        log::error!(
+            "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
         );
-        if started {
-            self.advance_after_removal_submitted(playlist_index);
+        let message = curation_recovery_message(kind);
+        self.curation_recovery.record(kind);
+        if abandoned == 0 {
+            self.show_toast(message);
+        } else {
+            self.show_toast(format!(
+                "{message} {abandoned} queued files were not sent to Trash."
+            ));
         }
     }
 
@@ -6026,8 +6221,10 @@ impl App {
                     _ => {
                         self.close_after_curation = false;
                         self.close_after_save = false;
+                        let abandoned = self.pending_trash.len();
+                        self.pending_trash.clear();
                         log::error!(
-                            "curation worker returned a mismatched completion: operation={kind:?}, submitted={submitted}"
+                            "curation worker returned a mismatched completion: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
                         );
                         let message = curation_recovery_message(kind);
                         self.curation_recovery.record(kind);
@@ -6037,6 +6234,11 @@ impl App {
                 };
                 log::info!("curation worker reconciled: operation={kind:?}, submitted={submitted}");
                 self.request_redraw();
+                if matches!(kind, CurationKind::Trash)
+                    && self.reconcile_pending_trash_after_terminal(terminal)
+                {
+                    return;
+                }
                 match curation_close_disposition(
                     std::mem::take(&mut self.close_after_curation),
                     terminal,
@@ -6051,14 +6253,7 @@ impl App {
                 }
             }
             WorkerPoll::Disconnected => {
-                self.close_after_curation = false;
-                self.close_after_save = false;
-                log::error!(
-                    "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}"
-                );
-                let message = curation_recovery_message(kind);
-                self.curation_recovery.record(kind);
-                self.show_toast(message);
+                self.finish_disconnected_curation(kind, submitted);
             }
             WorkerPoll::Pending => unreachable!("pending workers return before being taken"),
         }
@@ -7251,10 +7446,13 @@ impl ApplicationHandler<UserEvent> for App {
                 let crop_recovery_unsettled = self.crop_recovery_unsettled;
                 let preview_recovery_unsettled = self.preview_recovery_unsettled;
                 let preview_load_retry_blocked = self.preview_load_retry_blocked;
-                let curation_status = self
+                let curation_status = self.curation_worker.as_ref().map(|worker| {
+                    worker.status(self.close_after_curation, self.pending_trash.len())
+                });
+                let trash_move_busy = self
                     .curation_worker
                     .as_ref()
-                    .map(|worker| worker.status(self.close_after_curation));
+                    .is_some_and(|worker| matches!(worker.context.kind(), CurationKind::Trash));
                 let curation_recovery_status = self.curation_recovery.status();
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
@@ -7278,6 +7476,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let show_preferences = self.show_preferences;
                 let show_file_associations = self.show_file_associations;
                 let folder_sort = self.folder_sort;
+                let language_preference = self.language_preference;
+                let language = self.language;
                 let external_edit_pending = self.external_edit_pending;
                 let source_gone = self.source_gone;
                 let source_image_size = self
@@ -7417,6 +7617,8 @@ impl ApplicationHandler<UserEvent> for App {
                     show_preferences,
                     show_file_associations,
                     folder_sort,
+                    language_preference,
+                    language,
                     rating,
                     external_edit_pending,
                     source_gone,
@@ -7459,6 +7661,7 @@ impl ApplicationHandler<UserEvent> for App {
                     preview_recovery_unsettled,
                     preview_load_retry_blocked,
                     curation_status,
+                    trash_move_busy,
                     curation_recovery_status,
                     folder_scan_busy,
                     source_verification_busy,
@@ -7608,6 +7811,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 );
                                 self.show_toast(appearance_save_failure_message());
                             }
+                        }
+                        crate::ui::UiAction::SetLanguage(preference) => {
+                            self.set_language(preference);
                         }
                         crate::ui::UiAction::SetFolderSort(sort) => {
                             self.set_folder_sort(sort);
@@ -8394,6 +8600,31 @@ mod test {
     }
 
     #[test]
+    fn repeated_trash_admission_is_bounded_and_excludes_other_curation() {
+        assert_eq!(trash_admission(None, 0), TrashAdmission::Start);
+        assert_eq!(
+            trash_admission(Some(CurationKind::Trash), 0),
+            TrashAdmission::Queue
+        );
+        assert_eq!(
+            trash_admission(Some(CurationKind::Trash), MAX_PENDING_TRASH - 1),
+            TrashAdmission::Queue
+        );
+        assert_eq!(
+            trash_admission(Some(CurationKind::Trash), MAX_PENDING_TRASH),
+            TrashAdmission::Full
+        );
+        assert_eq!(
+            trash_admission(Some(CurationKind::Restore), 0),
+            TrashAdmission::Busy(CurationKind::Restore)
+        );
+        assert_eq!(
+            trash_admission(Some(CurationKind::PermanentDelete), 0),
+            TrashAdmission::Busy(CurationKind::PermanentDelete)
+        );
+    }
+
+    #[test]
     fn curation_worker_panic_disconnects_and_wakes_once() {
         let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
         let (wake_release_sender, wake_release_receiver) = mpsc::sync_channel(1);
@@ -8557,26 +8788,30 @@ mod test {
 
     #[test]
     fn preference_recovery_notice_combines_independent_fallbacks() {
-        assert_eq!(startup_preference_recovery_notice(None, None), None);
+        assert_eq!(startup_preference_recovery_notice(None, None, None), None);
         assert_eq!(
-            startup_preference_recovery_notice(Some(PreferenceRecovery::Invalid), None),
+            startup_preference_recovery_notice(Some(PreferenceRecovery::Invalid), None, None),
             Some("Could not restore saved appearance. Using System.")
         );
         assert_eq!(
             startup_preference_recovery_notice(
                 None,
-                Some(crate::folder_sort_preference::Recovery::Oversized)
+                Some(crate::folder_sort_preference::Recovery::Oversized),
+                None,
             ),
             Some("Could not restore saved folder sort. Using Latest First.")
         );
         assert_eq!(
+            startup_preference_recovery_notice(None, None, Some(crate::locale::Recovery::Invalid),),
+            Some("Could not restore the saved language. Using System.")
+        );
+        assert_eq!(
             startup_preference_recovery_notice(
                 Some(PreferenceRecovery::Unreadable),
-                Some(crate::folder_sort_preference::Recovery::Invalid)
+                Some(crate::folder_sort_preference::Recovery::Invalid),
+                Some(crate::locale::Recovery::Unreadable),
             ),
-            Some(
-                "Could not restore saved appearance or folder sort. Using System and Latest First."
-            )
+            Some("Could not restore some saved preferences. Using safe system defaults for them.")
         );
     }
 

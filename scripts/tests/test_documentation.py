@@ -66,16 +66,16 @@ class DocumentationTests(unittest.TestCase):
 
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
-            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.6.0 or commit SHA",),
+            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.6.1 or commit SHA",),
             "README.md": (
-                "v0.6.0 is the current public preview",
+                "v0.6.1 is the current public preview",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.6.0 is the current public GitHub Release",
+                "v0.6.1 is the current public GitHub Release",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -83,14 +83,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Published install target | Immutable [v0.6.0]",
+                "Published install target | Immutable [v0.6.1]",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.6.0 is public, immutable, checksummed, and attested",
+                "v0.6.1 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (
@@ -162,7 +162,15 @@ class DocumentationTests(unittest.TestCase):
                 "security controls to launch viewr",
                 "product-quality matrix was not completed for",
             ),
+            "docs/releases/v0.6.1.md": (
+                "shipped-feedback patch",
+                "GitHub build-provenance attestation",
+                "not Authenticode-signed",
+                "notarized",
+                "representative-hardware product-quality matrix is still incomplete",
+            ),
             "CHANGELOG.md": (
+                "## 0.6.1 - 2026-09-02",
                 "## 0.6.0 - 2026-08-29",
                 "## 0.5.0 - 2026-08-20",
                 "## 0.4.0 - 2026-08-19",

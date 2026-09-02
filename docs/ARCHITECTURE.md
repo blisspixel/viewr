@@ -470,6 +470,11 @@ Shipped:
   word in the same platform configuration directory. Missing state quietly uses
   Latest First; invalid or unavailable state produces one path-free recovery
   notice. No folder path, filename, timestamp, or activity state is persisted.
+- **`locale`**: resolves System through one bounded native locale query, maps it
+  to a bundled catalog, and reads or writes one validated language word in the
+  same platform configuration directory. Unsupported locales and uncataloged
+  copy fall back to English. Locale values and interface activity are never
+  logged, persisted as history, or sent anywhere.
 - **`performance`**: stable, path-free probe output and narrow platform peak-RSS
   readers used only by the explicit developer/CI performance command.
 - **`startup`**: launch prerequisites and first-window geometry. Session
@@ -661,10 +666,14 @@ Source removal and Trash restore retain an explicit event-loop ownership boundar
 The worker owns strong accepted-source validation, the Trash or permanent-delete
 platform call, cloned exact restore receipts, and restored rating/provenance
 inspection. The event loop owns captured playlist scope, indices, prior Undo
-state, and the only commit. Active or indeterminate curation ownership
-suppresses settled UI claims, so the interface cannot become a second recovery
-state owner. Conflicting mutations wait while zoom, pan, panels, and appearance
-remain responsive. Normal close defers through terminal reconciliation and join.
+state, a bounded FIFO of fully presented Trash submissions, and the only commit.
+Only one platform Trash call and receipt capture run at a time. The active Trash
+owner may accept another fully presented source, advance immediately, and retain
+its exact accepted-source handle until the serialized worker reaches it. Every
+other conflicting mutation still waits while zoom, pan, panels, and appearance
+remain responsive. Active or indeterminate curation ownership suppresses settled
+UI claims, so the interface cannot become a second recovery state owner. Normal
+close defers through every queued request, terminal reconciliation, and join.
 Failure or a partial restore cancels deferred close so visible recovery guidance
 is not lost. The UI exposes an indeterminate worker-loss route instead of
 cancellation or fractional progress. An indeterminate Trash or permanent-delete
@@ -687,6 +696,13 @@ with behavior-preserving tests and no second source of truth.
   place** rather than jumping to the top. Normal Trash has no modal. `U` restores
   the latest safely recoverable action. A receiptless successful move routes
   recovery to system Trash and preserves an older valid `U` action.
+- While that move is active, Delete can accept each next fully presented image
+  into a bounded FIFO and advance again. The FIFO retains only the exact path,
+  playlist scope, position, and accepted-source handle required for guarded
+  execution. Platform operations remain serialized so receipt snapshots and Undo
+  ownership cannot race. A failed or disconnected move stops and clears every
+  request that never reached the platform, then reports the count without paths.
+  A still-loading selection is never admitted and gets an explicit wait reason.
 - There is no bare-letter Trash shortcut and no mark, review, or batch mode. The
   destructive target is always the currently visible image. The accepted-source
   handle supplies a strong identity and content proof on the curation worker

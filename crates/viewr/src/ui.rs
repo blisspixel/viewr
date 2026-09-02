@@ -117,6 +117,8 @@ pub(crate) enum UiAction {
     SetBackground(Option<[f64; 4]>),
     /// Set the application appearance preference.
     SetTheme(crate::theme::Preference),
+    /// Set the persisted user-interface language.
+    SetLanguage(crate::locale::Preference),
     /// Change and persist the default order of images in folders.
     SetFolderSort(crate::fs::FolderSort),
     /// Open persistent application preferences.
@@ -258,6 +260,9 @@ pub(crate) struct UiFrameOwned {
     pub show_file_associations: bool,
     /// Persisted default folder ordering.
     pub folder_sort: crate::fs::FolderSort,
+    /// Persisted choice and resolved bundled language catalog.
+    pub language_preference: crate::locale::Preference,
+    pub language: crate::locale::Language,
     /// Current embedded rating, folder filter, and write state.
     pub rating: RatingUiState,
     /// Whether an external handoff may have made the displayed pixels stale.
@@ -334,6 +339,8 @@ pub(crate) struct UiFrameOwned {
     pub preview_load_retry_blocked: bool,
     /// Fixed, path-private description of active Trash, delete, or restore work.
     pub curation_status: Option<String>,
+    /// Whether the curation owner can accept another displayed image for Trash.
+    pub trash_move_busy: bool,
     /// Durable recovery guidance after an indeterminate curation worker loss.
     pub curation_recovery_status: Option<String>,
     /// A folder scan is still deciding the active playlist scope.
@@ -481,6 +488,10 @@ pub struct PageUiInfo {
 }
 
 impl UiFrameOwned {
+    fn text(&self, english: &'static str) -> &'static str {
+        self.language.text(english)
+    }
+
     fn chrome_view_model(&self) -> ChromeViewModel {
         ChromeViewModel::new(ChromeInput {
             dock: self.dock,
@@ -492,6 +503,7 @@ impl UiFrameOwned {
             heal_busy: self.heal_busy,
             heal_painting: self.heal_painting,
             curation_busy: self.curation_status.is_some(),
+            trash_move_busy: self.trash_move_busy,
             source_verification_busy: self.source_verification_busy,
             folder_scan_busy: self.folder_scan_busy,
             is_cropping: self.is_cropping,
@@ -566,7 +578,10 @@ pub(crate) const fn file_associations_modal_action_allowed(action: &UiAction) ->
 pub(crate) const fn preferences_modal_action_allowed(action: &UiAction) -> bool {
     matches!(
         action,
-        UiAction::ClosePreferences | UiAction::SetFolderSort(_) | UiAction::ShowFileAssociations
+        UiAction::ClosePreferences
+            | UiAction::SetFolderSort(_)
+            | UiAction::SetLanguage(_)
+            | UiAction::ShowFileAssociations
     )
 }
 
@@ -609,13 +624,13 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     } else if frame.rating.pending_disclosure.is_some() {
         render_rating_disclosure(ui, &mut actions, frame);
     } else if frame.show_update {
-        render_update(ui, &mut actions);
+        render_update(ui, &mut actions, frame);
     } else if frame.show_about {
-        render_about(ui, &mut actions);
+        render_about(ui, &mut actions, frame);
     } else if frame.show_preferences {
         render_preferences(ui, &mut actions, frame);
     } else if frame.show_file_associations {
-        render_file_associations(ui, &mut actions);
+        render_file_associations(ui, &mut actions, frame);
     }
     ui.ctx().data_mut(|data| {
         if !frame.save_overwrite_pending {
@@ -1020,11 +1035,11 @@ fn render_top_menu(
             configure_top_menu_widgets(ui, colors);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                file_menu(ui, actions, chrome);
+                file_menu(ui, actions, frame, chrome);
                 edit_menu(ui, actions, frame, chrome);
                 view_menu(ui, actions, frame, chrome);
-                tools_menu(ui, actions, chrome);
-                help_menu(ui, actions);
+                tools_menu(ui, actions, frame, chrome);
+                help_menu(ui, actions, frame);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // The reading strip owns its own separation instead of
                     // inheriting whatever spacing the menu titles need.
@@ -1265,98 +1280,110 @@ fn render_top_image_facts(
     }
 }
 
-fn file_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+fn file_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
-    ui.menu_button(RichText::new("File").size(13.5).color(colors.text), |ui| {
-        ui.set_min_width(238.0);
-        let open_file = ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::OpenSource),
-                egui::Button::new("Open File...").shortcut_text(format!("{PRIMARY_MODIFIER}+O")),
-            )
-            .on_hover_text(OPEN_FILE_SCOPE_HELP);
-        if open_file.clicked() {
-            actions.push(UiAction::Open);
-            ui.close();
-        }
-        let open_folder = ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::OpenSource),
-                egui::Button::new("Open Folder...")
-                    .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+O")),
-            )
-            .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
-        if open_folder.clicked() {
-            actions.push(UiAction::OpenFolder);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::Reload),
-                egui::Button::new("Reload File").shortcut_text("F5"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::Reload);
-            ui.close();
-        }
-        let open_with = ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::OpenWith),
-                egui::Button::new("Open With..."),
-            )
-            .on_hover_text(OPEN_WITH_HELP);
-        if open_with.clicked() {
-            actions.push(UiAction::OpenWith);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::SaveAs),
-                egui::Button::new("Save As...")
-                    .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+S")),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::SaveAs);
-            ui.close();
-        }
-        ui.separator();
-        if ui.button("Preferences...").clicked() {
-            actions.push(UiAction::ShowPreferences);
-            ui.close();
-        }
-        if ui
-            .button("Default Image Viewer...")
-            .on_hover_text("Choose whether PNG, JPEG, or other image types open with viewr.")
-            .clicked()
-        {
-            actions.push(UiAction::ShowFileAssociations);
-            ui.close();
-        }
-        ui.separator();
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::MoveToTrash),
-                egui::Button::new("Move to Trash").shortcut_text("Delete"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::Trash);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::PermanentDelete),
-                egui::Button::new("Permanently Delete...").shortcut_text("Shift+Delete"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::PermanentDelete);
-            ui.close();
-        }
-        undo_trash_menu_item(ui, actions, chrome);
-    });
+    ui.menu_button(
+        RichText::new(frame.text("File"))
+            .size(13.5)
+            .color(colors.text),
+        |ui| {
+            ui.set_min_width(238.0);
+            let open_file = ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::OpenSource),
+                    egui::Button::new(frame.text("Open File..."))
+                        .shortcut_text(format!("{PRIMARY_MODIFIER}+O")),
+                )
+                .on_hover_text(OPEN_FILE_SCOPE_HELP);
+            if open_file.clicked() {
+                actions.push(UiAction::Open);
+                ui.close();
+            }
+            let open_folder = ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::OpenSource),
+                    egui::Button::new(frame.text("Open Folder..."))
+                        .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+O")),
+                )
+                .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+            if open_folder.clicked() {
+                actions.push(UiAction::OpenFolder);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::Reload),
+                    egui::Button::new(frame.text("Reload File")).shortcut_text("F5"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::Reload);
+                ui.close();
+            }
+            let open_with = ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::OpenWith),
+                    egui::Button::new(frame.text("Open With...")),
+                )
+                .on_hover_text(OPEN_WITH_HELP);
+            if open_with.clicked() {
+                actions.push(UiAction::OpenWith);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::SaveAs),
+                    egui::Button::new(frame.text("Save As..."))
+                        .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+S")),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::SaveAs);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(frame.text("Preferences...")).clicked() {
+                actions.push(UiAction::ShowPreferences);
+                ui.close();
+            }
+            if ui
+                .button(frame.text("Default Image Viewer..."))
+                .on_hover_text("Choose whether PNG, JPEG, or other image types open with viewr.")
+                .clicked()
+            {
+                actions.push(UiAction::ShowFileAssociations);
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::MoveToTrash),
+                    egui::Button::new(frame.text("Move to Trash")).shortcut_text("Delete"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::Trash);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::PermanentDelete),
+                    egui::Button::new(frame.text("Permanently Delete..."))
+                        .shortcut_text("Shift+Delete"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::PermanentDelete);
+                ui.close();
+            }
+            undo_trash_menu_item(ui, actions, chrome);
+        },
+    );
 }
 
 fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1381,72 +1408,78 @@ fn edit_menu(
     chrome: ChromeViewModel,
 ) {
     let colors = chrome_colors(ui);
-    ui.menu_button(RichText::new("Edit").size(13.5).color(colors.text), |ui| {
-        ui.set_min_width(210.0);
-        let crop = chrome.crop_control();
-        if menu_tool_button(ui, crop).clicked() {
-            actions.push(UiAction::ToggleCrop);
-            ui.close();
-        }
-        if frame.is_cropping
-            && ui
+    ui.menu_button(
+        RichText::new(frame.text("Edit"))
+            .size(13.5)
+            .color(colors.text),
+        |ui| {
+            ui.set_min_width(210.0);
+            let mut crop = chrome.crop_control();
+            crop.label = frame.text(crop.label);
+            if menu_tool_button(ui, crop).clicked() {
+                actions.push(UiAction::ToggleCrop);
+                ui.close();
+            }
+            if frame.is_cropping
+                && ui
+                    .add_enabled(
+                        chrome.is_enabled(ChromeControl::ApplyCrop),
+                        egui::Button::new(frame.text("Apply Crop")).shortcut_text("Enter"),
+                    )
+                    .clicked()
+            {
+                actions.push(UiAction::ApplyCrop);
+                ui.close();
+            }
+            spot_heal_menu_items(ui, actions, frame, chrome);
+            ui.separator();
+            if ui
                 .add_enabled(
-                    chrome.is_enabled(ChromeControl::ApplyCrop),
-                    egui::Button::new("Apply Crop").shortcut_text("Enter"),
+                    chrome.is_enabled(ChromeControl::EditTransform),
+                    egui::Button::new(frame.text("Rotate Clockwise")).shortcut_text("R"),
                 )
                 .clicked()
-        {
-            actions.push(UiAction::ApplyCrop);
-            ui.close();
-        }
-        spot_heal_menu_items(ui, actions, chrome);
-        ui.separator();
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::EditTransform),
-                egui::Button::new("Rotate Clockwise").shortcut_text("R"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::RotateCw);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::EditTransform),
-                egui::Button::new("Rotate Counterclockwise").shortcut_text("L"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::RotateCcw);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::EditTransform),
-                egui::Button::new("Flip Horizontally").shortcut_text("H"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::FlipH);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                chrome.is_enabled(ChromeControl::EditTransform),
-                egui::Button::new("Flip Vertically").shortcut_text("V"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::FlipV);
-            ui.close();
-        }
-        ui.separator();
-        let label = chrome.rating_menu_label();
-        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingMenu), |ui| {
-            ui.menu_button(label, |ui| rating_menu(ui, actions, chrome));
-        });
-    });
+            {
+                actions.push(UiAction::RotateCw);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::EditTransform),
+                    egui::Button::new(frame.text("Rotate Counterclockwise")).shortcut_text("L"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::RotateCcw);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::EditTransform),
+                    egui::Button::new(frame.text("Flip Horizontally")).shortcut_text("H"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::FlipH);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::EditTransform),
+                    egui::Button::new(frame.text("Flip Vertically")).shortcut_text("V"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::FlipV);
+                ui.close();
+            }
+            ui.separator();
+            let label = chrome.rating_menu_label();
+            ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingMenu), |ui| {
+                ui.menu_button(label, |ui| rating_menu(ui, actions, chrome));
+            });
+        },
+    );
 }
 
 fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1483,26 +1516,44 @@ fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeVie
     }
 }
 
-fn tools_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+fn tools_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
     let colors = chrome_colors(ui);
-    ui.menu_button(RichText::new("Tools").size(13.5).color(colors.text), |ui| {
-        ui.set_min_width(210.0);
-        let crop = chrome.crop_control();
-        if menu_tool_button(ui, crop).clicked() {
-            actions.push(UiAction::ToggleCrop);
-            ui.close();
-        }
+    ui.menu_button(
+        RichText::new(frame.text("Tools"))
+            .size(13.5)
+            .color(colors.text),
+        |ui| {
+            ui.set_min_width(210.0);
+            let mut crop = chrome.crop_control();
+            crop.label = frame.text(crop.label);
+            if menu_tool_button(ui, crop).clicked() {
+                actions.push(UiAction::ToggleCrop);
+                ui.close();
+            }
 
-        let heal = chrome.heal_control();
-        if menu_tool_button(ui, heal).clicked() {
-            actions.push(UiAction::ToggleHeal);
-            ui.close();
-        }
-    });
+            let mut heal = chrome.heal_control();
+            heal.label = frame.text(heal.label);
+            if menu_tool_button(ui, heal).clicked() {
+                actions.push(UiAction::ToggleHeal);
+                ui.close();
+            }
+        },
+    );
 }
 
-fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
-    let heal = chrome.heal_control();
+fn spot_heal_menu_items(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
+    let mut heal = chrome.heal_control();
+    heal.label = frame.text(heal.label);
     if menu_tool_button(ui, heal).clicked() {
         actions.push(UiAction::ToggleHeal);
         ui.close();
@@ -1511,7 +1562,8 @@ fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: 
     if ui
         .add_enabled(
             chrome.is_enabled(ChromeControl::UndoEdit),
-            egui::Button::new("Undo Spot Heal").shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
+            egui::Button::new(frame.text("Undo Spot Heal"))
+                .shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
         )
         .clicked()
     {
@@ -1521,7 +1573,7 @@ fn spot_heal_menu_items(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: 
     if ui
         .add_enabled(
             chrome.is_enabled(ChromeControl::RedoEdit),
-            egui::Button::new("Redo Spot Heal")
+            egui::Button::new(frame.text("Redo Spot Heal"))
                 .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
         )
         .clicked()
@@ -1635,50 +1687,56 @@ fn view_menu(
     chrome: ChromeViewModel,
 ) {
     let colors = chrome_colors(ui);
-    ui.menu_button(RichText::new("View").size(13.5).color(colors.text), |ui| {
-        ui.set_min_width(228.0);
-        view_zoom_menu(ui, actions, chrome);
-        view_sequence_menu(ui, actions, frame);
-        ui.separator();
-        if ui
-            .add_enabled(
-                frame.rating.match_count > 1 && frame.img_size.is_some(),
-                egui::Button::new("Full-Image Collage").shortcut_text("Up / Shift+G"),
-            )
-            .clicked()
-        {
-            actions.push(UiAction::ToggleMosaic);
-            ui.close();
-        }
-        ui.separator();
-        let rating_filter_label = chrome.rating_filter_menu_label();
-        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
-            ui.menu_button(rating_filter_label, |ui| {
-                rating_filter_menu(ui, actions, chrome);
+    ui.menu_button(
+        RichText::new(frame.text("View"))
+            .size(13.5)
+            .color(colors.text),
+        |ui| {
+            ui.set_min_width(228.0);
+            view_zoom_menu(ui, actions, chrome);
+            view_sequence_menu(ui, actions, frame);
+            ui.separator();
+            if ui
+                .add_enabled(
+                    frame.rating.match_count > 1 && frame.img_size.is_some(),
+                    egui::Button::new(frame.text("Full-Image Collage"))
+                        .shortcut_text("Up / Shift+G"),
+                )
+                .clicked()
+            {
+                actions.push(UiAction::ToggleMosaic);
+                ui.close();
+            }
+            ui.separator();
+            let rating_filter_label = chrome.rating_filter_menu_label();
+            ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
+                ui.menu_button(rating_filter_label, |ui| {
+                    rating_filter_menu(ui, actions, chrome);
+                });
             });
-        });
-        ui.menu_button(
-            format!("Folder Sort: {}", frame.folder_sort.label()),
-            |ui| folder_sort_menu(ui, actions, frame),
-        );
-        ui.separator();
-        view_fullscreen_menu(ui, actions, frame);
-        ui.separator();
-        ui.menu_button("Panels", |ui| panels_menu(ui, actions, chrome));
-        ui.menu_button("Panel Position", |ui| {
-            panel_position_menu(ui, actions, chrome);
-        });
-        ui.separator();
-        ui.menu_button("Image Background", |ui| {
-            background_menu(ui, actions, frame.background_override);
-        });
-        ui.menu_button(
-            crate::chrome::appearance_menu_label(frame.theme_preference),
-            |ui| {
-                appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
-            },
-        );
-    });
+            ui.menu_button(
+                format!("Folder Sort: {}", frame.folder_sort.label()),
+                |ui| folder_sort_menu(ui, actions, frame),
+            );
+            ui.separator();
+            view_fullscreen_menu(ui, actions, frame);
+            ui.separator();
+            ui.menu_button(frame.text("Panels"), |ui| panels_menu(ui, actions, chrome));
+            ui.menu_button(frame.text("Panel Position"), |ui| {
+                panel_position_menu(ui, actions, chrome);
+            });
+            ui.separator();
+            ui.menu_button(frame.text("Image Background"), |ui| {
+                background_menu(ui, actions, frame.background_override);
+            });
+            ui.menu_button(
+                crate::chrome::appearance_menu_label(frame.theme_preference),
+                |ui| {
+                    appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
+                },
+            );
+        },
+    );
 }
 
 fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -1983,27 +2041,32 @@ fn appearance_menu(
     }
 }
 
-fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
-    ui.menu_button(RichText::new("Help").size(13.5).color(colors.text), |ui| {
-        ui.set_min_width(180.0);
-        if ui
-            .button("Get latest release...")
-            .on_hover_text("Open the latest official GitHub release. No background check.")
-            .clicked()
-        {
-            actions.push(UiAction::ShowUpdate);
-            ui.close();
-        }
-        ui.separator();
-        if ui.button("About viewr").clicked() {
-            actions.push(UiAction::ShowAbout);
-            ui.close();
-        }
-    });
+    ui.menu_button(
+        RichText::new(frame.text("Help"))
+            .size(13.5)
+            .color(colors.text),
+        |ui| {
+            ui.set_min_width(180.0);
+            if ui
+                .button(frame.text("Get latest release..."))
+                .on_hover_text("Open the latest official GitHub release. No background check.")
+                .clicked()
+            {
+                actions.push(UiAction::ShowUpdate);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(frame.text("About viewr")).clicked() {
+                actions.push(UiAction::ShowAbout);
+                ui.close();
+            }
+        },
+    );
 }
 
-fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let response = egui::Modal::new(egui::Id::new("about_viewr"))
@@ -2024,7 +2087,11 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading(RichText::new("About viewr").size(22.0).color(colors.text));
+                        ui.heading(
+                            RichText::new(frame.text("About viewr"))
+                                .size(22.0)
+                                .color(colors.text),
+                        );
                         ui.label(
                             RichText::new("A private, local-first image viewer")
                                 .size(13.0)
@@ -2078,7 +2145,7 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                 });
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Close").clicked() {
+                if ui.button(frame.text("Close")).clicked() {
                     close_clicked = true;
                 }
             });
@@ -2133,7 +2200,7 @@ fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors) {
         });
 }
 
-fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let response = egui::Modal::new(egui::Id::new("update_viewr"))
@@ -2190,7 +2257,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("Get latest release")
+                                    RichText::new(frame.text("Get latest release"))
                                         .strong()
                                         .color(colors.accent_ink),
                                 )
@@ -2218,7 +2285,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                 }
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").clicked() {
+                    if ui.button(frame.text("Close")).clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2251,13 +2318,17 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
         .show(ui.ctx(), |ui| {
             ui.set_width(500.0);
             ui.heading(
-                RichText::new("Preferences")
+                RichText::new(frame.text("Preferences"))
                     .size(22.0)
                     .color(colors.text),
             );
             ui.add_space(10.0);
+            render_language_preferences(ui, actions, frame, colors);
+            ui.add_space(14.0);
+            ui.separator();
+            ui.add_space(10.0);
             ui.label(
-                RichText::new("Default folder sort")
+                RichText::new(frame.text("Default folder sort"))
                     .size(15.0)
                     .strong()
                     .color(colors.text),
@@ -2284,24 +2355,27 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
             ui.separator();
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Default image viewer")
+                RichText::new(frame.text("Default image viewer"))
                     .size(15.0)
                     .strong()
                     .color(colors.text),
             );
             ui.label(
-                RichText::new(
+                RichText::new(frame.text(
                     "File associations remain opt in and are selected per image type.",
-                )
+                ))
                 .size(12.5)
                 .color(colors.muted),
             );
-            if ui.button("Open Default Image Viewer Guide...").clicked() {
+            if ui
+                .button(frame.text("Open Default Image Viewer Guide..."))
+                .clicked()
+            {
                 actions.push(UiAction::ShowFileAssociations);
             }
             ui.add_space(14.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Close").clicked() {
+                if ui.button(frame.text("Close")).clicked() {
                     close_clicked = true;
                 }
             });
@@ -2318,7 +2392,42 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
     }
 }
 
-fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+fn render_language_preferences(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
+    ui.label(
+        RichText::new(frame.text("Language"))
+            .size(15.0)
+            .strong()
+            .color(colors.text),
+    );
+    ui.label(
+        RichText::new(
+            frame.text("Follow the operating-system language, or choose a language for viewr."),
+        )
+        .size(12.5)
+        .color(colors.muted),
+    );
+    ui.add_space(6.0);
+    for preference in crate::locale::Preference::ALL {
+        let label = if matches!(preference, crate::locale::Preference::System) {
+            frame.text("System")
+        } else {
+            preference.native_name()
+        };
+        if ui
+            .radio(frame.language_preference == preference, label)
+            .clicked()
+        {
+            actions.push(UiAction::SetLanguage(preference));
+        }
+    }
+}
+
+fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let response = egui::Modal::new(egui::Id::new("file_associations"))
@@ -2340,7 +2449,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui.heading(
-                            RichText::new("Default image viewer")
+                            RichText::new(frame.text("Default image viewer"))
                                 .size(22.0)
                                 .color(colors.text),
                         );
@@ -2370,7 +2479,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
                     });
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").clicked() {
+                    if ui.button(frame.text("Close")).clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2753,7 +2862,7 @@ fn render_empty_state(
                             render_empty_state_actions(ui, actions, frame, chrome, colors);
                         }
                         ui.label(
-                            RichText::new(LOCAL_PRIVACY_SUMMARY)
+                            RichText::new(frame.text(LOCAL_PRIVACY_SUMMARY))
                                 .size(12.0)
                                 .color(colors.muted),
                         );
@@ -2788,7 +2897,7 @@ fn render_empty_state_actions(
         let open_file = ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::OpenSource),
-                egui::Button::new("Open File").min_size(Vec2::new(116.0, 36.0)),
+                egui::Button::new(frame.text("Open File")).min_size(Vec2::new(116.0, 36.0)),
             )
             .on_hover_text(OPEN_FILE_SCOPE_HELP);
         if open_file.clicked() {
@@ -2797,7 +2906,7 @@ fn render_empty_state_actions(
         let open_folder = ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::OpenSource),
-                egui::Button::new("Open Folder").min_size(Vec2::new(116.0, 36.0)),
+                egui::Button::new(frame.text("Open Folder")).min_size(Vec2::new(116.0, 36.0)),
             )
             .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
         if open_folder.clicked() {
@@ -2843,7 +2952,7 @@ fn render_image_info_panel(
         .frame(docked_frame(colors).inner_margin(16.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("Image Information").color(colors.text));
+                ui.heading(RichText::new(frame.text("Image Information")).color(colors.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add(egui::Button::new("Close").min_size(Vec2::new(52.0, 36.0)))
@@ -3317,7 +3426,7 @@ fn render_tools_panel(
 
                 if chrome.dock.tools.state == DockState::Expanded {
                     ui.label(
-                        RichText::new("TOOLS")
+                        RichText::new(frame.text("Tools").to_uppercase())
                             .size(10.0)
                             .color(colors.muted)
                             .strong(),
@@ -3330,7 +3439,7 @@ fn render_tools_panel(
                             icon_btn(
                                 ui,
                                 ToolIcon::RotateCcw,
-                                "Rotate counterclockwise (L)",
+                                frame.text("Rotate counterclockwise (L)"),
                                 false,
                                 || {
                                     actions.push(UiAction::RotateCcw);
@@ -3339,28 +3448,40 @@ fn render_tools_panel(
                             icon_btn(
                                 ui,
                                 ToolIcon::RotateCw,
-                                "Rotate clockwise (R)",
+                                frame.text("Rotate clockwise (R)"),
                                 false,
                                 || {
                                     actions.push(UiAction::RotateCw);
                                 },
                             );
-                            icon_btn(ui, ToolIcon::FlipH, "Flip horizontally (H)", false, || {
-                                actions.push(UiAction::FlipH);
-                            });
-                            icon_btn(ui, ToolIcon::FlipV, "Flip vertically (V)", false, || {
-                                actions.push(UiAction::FlipV);
-                            });
+                            icon_btn(
+                                ui,
+                                ToolIcon::FlipH,
+                                frame.text("Flip horizontally (H)"),
+                                false,
+                                || actions.push(UiAction::FlipH),
+                            );
+                            icon_btn(
+                                ui,
+                                ToolIcon::FlipV,
+                                frame.text("Flip vertically (V)"),
+                                false,
+                                || actions.push(UiAction::FlipV),
+                            );
                         });
                         ui.add_space(4.0);
                         let crop = chrome.crop_control();
                         ui.add_enabled_ui(crop.enabled, |ui| {
-                            icon_btn(ui, ToolIcon::Crop, "Crop (C)", crop.selected, || {
-                                actions.push(UiAction::ToggleCrop);
-                            });
+                            icon_btn(
+                                ui,
+                                ToolIcon::Crop,
+                                frame.text("Crop (C)"),
+                                crop.selected,
+                                || actions.push(UiAction::ToggleCrop),
+                            );
                         });
                         let heal_tip = if frame.heal_supported {
-                            "Spot heal (J)"
+                            frame.text("Spot heal (J)")
                         } else {
                             "Spot heal is unavailable for images larger than the GPU texture limit"
                         };
@@ -3422,72 +3543,125 @@ fn icon_btn(ui: &mut egui::Ui, icon: ToolIcon, tip: &str, active: bool, on_click
 #[allow(clippy::too_many_lines)] // one match arm per toolbar glyph
 fn paint_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color32) {
     let c = rect.center();
-    let s = rect.width() * 0.28;
-    let stroke = Stroke::new(1.75, color);
+    let s = rect.width() * 0.27;
+    let stroke = Stroke::new(2.0, color);
     match icon {
         ToolIcon::RotateCw => {
-            painter.circle_stroke(c, s, stroke);
-            painter.arrow(
-                c + Vec2::new(s * 0.7, -s * 0.2),
-                Vec2::new(s * 0.35, s * 0.45),
-                stroke,
-            );
+            let points = (0..=14)
+                .map(|step| {
+                    let angle = std::f32::consts::PI * (0.15 + step as f32 * 1.55 / 14.0);
+                    c + Vec2::angled(angle) * s
+                })
+                .collect::<Vec<_>>();
+            painter.line(points, stroke);
+            let tip = c + Vec2::angled(std::f32::consts::PI * 1.70) * s;
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    tip + Vec2::new(-1.0, 5.5),
+                    tip + Vec2::new(5.5, 1.0),
+                    tip + Vec2::new(0.5, -3.0),
+                ],
+                color,
+                Stroke::NONE,
+            ));
         }
         ToolIcon::RotateCcw => {
-            painter.circle_stroke(c, s, stroke);
-            painter.arrow(
-                c + Vec2::new(-s * 0.7, -s * 0.2),
-                Vec2::new(-s * 0.35, s * 0.45),
-                stroke,
-            );
+            let points = (0..=14)
+                .map(|step| {
+                    let angle = std::f32::consts::PI * (0.85 - step as f32 * 1.55 / 14.0);
+                    c + Vec2::angled(angle) * s
+                })
+                .collect::<Vec<_>>();
+            painter.line(points, stroke);
+            let tip = c + Vec2::angled(-std::f32::consts::PI * 0.70) * s;
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    tip + Vec2::new(1.0, 5.5),
+                    tip + Vec2::new(-5.5, 1.0),
+                    tip + Vec2::new(-0.5, -3.0),
+                ],
+                color,
+                Stroke::NONE,
+            ));
         }
         ToolIcon::FlipH => {
             painter.line_segment([c + Vec2::new(0.0, -s), c + Vec2::new(0.0, s)], stroke);
-            painter.arrow(
-                c + Vec2::new(-s * 0.2, 0.0),
-                Vec2::new(-s * 0.7, 0.0),
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    c + Vec2::new(-2.5, -s * 0.82),
+                    c + Vec2::new(-s, 0.0),
+                    c + Vec2::new(-2.5, s * 0.82),
+                ],
                 stroke,
-            );
-            painter.arrow(c + Vec2::new(s * 0.2, 0.0), Vec2::new(s * 0.7, 0.0), stroke);
+            ));
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    c + Vec2::new(2.5, -s * 0.82),
+                    c + Vec2::new(s, 0.0),
+                    c + Vec2::new(2.5, s * 0.82),
+                ],
+                stroke,
+            ));
         }
         ToolIcon::FlipV => {
             painter.line_segment([c + Vec2::new(-s, 0.0), c + Vec2::new(s, 0.0)], stroke);
-            painter.arrow(
-                c + Vec2::new(0.0, -s * 0.2),
-                Vec2::new(0.0, -s * 0.7),
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    c + Vec2::new(-s * 0.82, -2.5),
+                    c + Vec2::new(0.0, -s),
+                    c + Vec2::new(s * 0.82, -2.5),
+                ],
                 stroke,
-            );
-            painter.arrow(c + Vec2::new(0.0, s * 0.2), Vec2::new(0.0, s * 0.7), stroke);
+            ));
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    c + Vec2::new(-s * 0.82, 2.5),
+                    c + Vec2::new(0.0, s),
+                    c + Vec2::new(s * 0.82, 2.5),
+                ],
+                stroke,
+            ));
         }
         ToolIcon::Crop => {
-            let r = Rect::from_center_size(c, Vec2::splat(s * 1.5));
-            painter.rect_stroke(r, CornerRadius::ZERO, stroke, egui::StrokeKind::Outside);
+            let left = c.x - s * 0.62;
+            let right = c.x + s * 0.62;
+            let top = c.y - s * 0.62;
+            let bottom = c.y + s * 0.62;
+            painter.line_segment([Pos2::new(left - 4.0, top), Pos2::new(right, top)], stroke);
             painter.line_segment(
-                [
-                    r.left_top() + Vec2::new(-3.0, 0.0),
-                    r.left_top() + Vec2::new(6.0, 0.0),
-                ],
+                [Pos2::new(left, top - 4.0), Pos2::new(left, bottom)],
                 stroke,
             );
             painter.line_segment(
-                [
-                    r.left_top() + Vec2::new(0.0, -3.0),
-                    r.left_top() + Vec2::new(0.0, 6.0),
-                ],
+                [Pos2::new(left, bottom), Pos2::new(right + 4.0, bottom)],
+                stroke,
+            );
+            painter.line_segment(
+                [Pos2::new(right, top), Pos2::new(right, bottom + 4.0)],
                 stroke,
             );
         }
         ToolIcon::Heal => {
-            painter.circle_stroke(c, s * 0.72, stroke);
+            let bandage = Rect::from_center_size(c, Vec2::new(s * 1.9, s * 0.82));
+            painter.rect_stroke(
+                bandage,
+                CornerRadius::same(4),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.circle_filled(c + Vec2::new(-s * 0.28, 0.0), 1.4, color);
+            painter.circle_filled(c + Vec2::new(s * 0.28, 0.0), 1.4, color);
             painter.line_segment(
-                [c + Vec2::new(-s * 0.42, 0.0), c + Vec2::new(s * 0.42, 0.0)],
+                [c + Vec2::new(s * 0.72, -s * 0.72), c + Vec2::new(s, -s)],
                 stroke,
             );
             painter.line_segment(
-                [c + Vec2::new(0.0, -s * 0.42), c + Vec2::new(0.0, s * 0.42)],
+                [
+                    c + Vec2::new(s * 0.86, -s * 0.62),
+                    c + Vec2::new(s * 0.86, -s * 1.1),
+                ],
                 stroke,
             );
-            painter.circle_filled(c + Vec2::new(s * 0.82, -s * 0.82), 1.8, color);
         }
     }
 }
@@ -3723,7 +3897,7 @@ fn render_filmstrip(
                                 actions.push(UiAction::ToggleFilmstripPanelExpansion);
                             }
                             ui.label(
-                                RichText::new("FOLDER PREVIEWS")
+                                RichText::new(frame.text("Folder Previews").to_uppercase())
                                     .size(10.0)
                                     .color(colors.muted)
                                     .strong(),
@@ -3935,7 +4109,11 @@ fn render_crop_toolbar(
                     ui.set_width(toolbar_width);
                     ui.vertical(|ui| {
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new("Crop").color(colors.accent).strong());
+                            ui.label(
+                                RichText::new(frame.text("Crop"))
+                                    .color(colors.accent)
+                                    .strong(),
+                            );
                             ui.separator();
                             crop_ratio_picker(ui, frame, actions);
                             if ui
@@ -3953,7 +4131,8 @@ fn render_crop_toolbar(
                                 .add_enabled(
                                     chrome.is_enabled(ChromeControl::ApplyCrop),
                                     egui::Button::new(
-                                        RichText::new("Apply").color(colors.accent_ink),
+                                        RichText::new(frame.text("Apply"))
+                                            .color(colors.accent_ink),
                                     )
                                     .fill(colors.accent),
                                 )
@@ -3961,7 +4140,7 @@ fn render_crop_toolbar(
                             {
                                 actions.push(UiAction::ApplyCrop);
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(frame.text("Cancel")).clicked() {
                                 actions.push(UiAction::CancelCrop);
                             }
                         });
@@ -4422,6 +4601,8 @@ mod tests {
             show_preferences: false,
             show_file_associations: false,
             folder_sort: crate::fs::FolderSort::Latest,
+            language_preference: crate::locale::Preference::System,
+            language: crate::locale::Language::English,
             rating: accessibility_test_rating(),
             external_edit_pending: false,
             source_gone: false,
@@ -4460,6 +4641,7 @@ mod tests {
             preview_recovery_unsettled: false,
             preview_load_retry_blocked: false,
             curation_status: None,
+            trash_move_busy: false,
             curation_recovery_status: None,
             folder_scan_busy: false,
             source_verification_busy: false,
@@ -6967,6 +7149,12 @@ mod tests {
             .collect::<Vec<_>>();
         for expected in [
             "Preferences",
+            "Language",
+            "System",
+            "English",
+            "Español",
+            "Français",
+            "Deutsch",
             "Default folder sort",
             "Latest First",
             "Name",
@@ -6984,18 +7172,59 @@ mod tests {
         let filtered = actions_owned_by_modal(
             vec![
                 UiAction::Open,
+                UiAction::SetLanguage(crate::locale::Preference::French),
                 UiAction::SetFolderSort(crate::fs::FolderSort::Name),
                 UiAction::ClosePreferences,
                 UiAction::Trash,
             ],
             &frame,
         );
-        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered.len(), 3);
         assert!(matches!(
             filtered[0],
+            UiAction::SetLanguage(crate::locale::Preference::French)
+        ));
+        assert!(matches!(
+            filtered[1],
             UiAction::SetFolderSort(crate::fs::FolderSort::Name)
         ));
-        assert!(matches!(filtered[1], UiAction::ClosePreferences));
+        assert!(matches!(filtered[2], UiAction::ClosePreferences));
+    }
+
+    #[test]
+    fn spanish_preferences_publish_translated_visible_and_accessible_names() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_preferences = true;
+        frame.language_preference = crate::locale::Preference::Spanish;
+        frame.language = crate::locale::Language::Spanish;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("preferences AccessKit update should be generated");
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Preferencias",
+            "Idioma",
+            "Sistema",
+            "Orden predeterminado de carpetas",
+            "Visor de imágenes predeterminado",
+            "Cerrar",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing Spanish preferences copy: {expected}; exposed text: {exposed:?}"
+            );
+        }
     }
 
     #[test]

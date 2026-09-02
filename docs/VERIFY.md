@@ -139,7 +139,7 @@ the three-platform gate requires every row to pass or have a reviewed exception:
 
 ```text
 python -B scripts/product_quality_evidence.py check <platform-record.md>
-python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.0
+python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.1
 ```
 
 The gate is deliberately online and byte-bound: GitHub CLI confirms the
@@ -156,7 +156,7 @@ performance harness on each named representative host or session. Retain a new,
 path-free JSON report for every execution:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-candidate-binary> --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.0/performance/<session>.json
+python -B scripts/performance_gate.py --binary <extracted-candidate-binary> --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.1/performance/<session>.json
 ```
 
 The report binds its numeric runs and result to the SHA-256 values of both shipped

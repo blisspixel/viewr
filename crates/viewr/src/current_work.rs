@@ -105,6 +105,18 @@ pub(crate) fn browse_work_blocker<const N: usize>(
     current_work_blocker(work.map(|entry| entry.filter(|active| blocks_browse(*active))))
 }
 
+/// A running move to Trash may accept another fully presented source. The
+/// platform operations remain serialized by the application-owned queue; all
+/// other work retains its normal exclusivity.
+#[must_use]
+pub(crate) fn trash_submission_work_blocker<const N: usize>(
+    work: [Option<CurrentWork>; N],
+) -> Option<CurrentWork> {
+    current_work_blocker(
+        work.map(|entry| entry.filter(|active| !matches!(active, CurrentWork::TrashMove))),
+    )
+}
+
 /// Spot Heal needs a settled selected source even when a last good frame remains visible.
 #[must_use]
 pub(crate) const fn spot_heal_source_blocker(
@@ -275,6 +287,27 @@ mod tests {
             Some("Retry the failed image load before using Spot Heal")
         );
         assert_eq!(spot_heal_source_blocker(false, false), None);
+    }
+
+    #[test]
+    fn repeated_trash_ignores_only_the_serialized_trash_owner() {
+        assert_eq!(
+            trash_submission_work_blocker([Some(CurrentWork::TrashMove), None, None, None,]),
+            None
+        );
+        assert_eq!(
+            trash_submission_work_blocker([
+                Some(CurrentWork::TrashMove),
+                Some(CurrentWork::ImagePreparation),
+                Some(CurrentWork::Save),
+                None,
+            ]),
+            Some(CurrentWork::ImagePreparation)
+        );
+        assert_eq!(
+            trash_submission_work_blocker([Some(CurrentWork::PermanentDelete), None, None, None,]),
+            Some(CurrentWork::PermanentDelete)
+        );
     }
 
     #[test]

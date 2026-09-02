@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.6.0
+- [Install and update](INSTALL.md): current source builds, current v0.6.1
   one-command installers, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
@@ -12,6 +12,8 @@ Start with the document that matches the task.
 - [Privacy](PRIVACY.md): the local-only product boundary and metadata behavior.
 - [Ratings](RATINGS.md): embedded ratings, filters, interoperability, and recovery.
 - [Formats](FORMATS.md): supported formats and current format-specific limits.
+- [Localization](LOCALIZATION.md): bundled languages, system-locale resolution,
+  fallback behavior, and catalog contribution rules.
 - [Accessibility](ACCESSIBILITY.md): keyboard behavior, native semantics, and the
   manual release matrix.
 - [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
@@ -35,9 +37,10 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.6.0 release notes](releases/v0.6.0.md): the current release, the
-  integrated product-quality beta, and clearly stated platform limits including
-  the representative-hardware evidence it does not carry.
+- [v0.6.1 release notes](releases/v0.6.1.md): the current shipped-feedback
+  patch and clearly stated platform limits, including the representative-hardware
+  evidence it does not carry.
+- [v0.6.0 release notes](releases/v0.6.0.md): the integrated product-quality beta.
 - [v0.5.0 release notes](releases/v0.5.0.md): the closed format-contract
   milestone.
 - [v0.4.0 release notes](releases/v0.4.0.md): the file-coherence milestone.
@@ -56,7 +59,7 @@ Start with the document that matches the task.
 - [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
   verification, platform limits, and the known issues that v0.1.1 fixes.
 - [Publishing](PUBLISHING.md): public-repository controls, version state policy,
-  the repeatable pre-1.0 tag procedure (next tag v0.7.0), verification, and the
+  the repeatable pre-1.0 tag procedure (next minor tag v0.7.0), verification, and the
   stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.

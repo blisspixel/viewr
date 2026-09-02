@@ -110,7 +110,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         target = next(
             target
             for target in (*TARGETS.values(), "x86_64-apple-darwin")
-            if path.name == f"viewr-0.6.0-{target}.zip"
+            if path.name == f"viewr-0.6.1-{target}.zip"
         )
         prefix = path.name.removesuffix(".zip")
         binary_name = "viewr.exe" if "windows" in target else "viewr"
@@ -119,7 +119,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             binary = archive.read(f"{prefix}/bin/{binary_name}")
             worker = archive.read(f"{prefix}/bin/{worker_name}")
         return {
-            "version": "0.6.0",
+            "version": "0.6.1",
             "target": target,
             "files": [
                 {
@@ -173,12 +173,12 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         decoder_digest: str = DECODER_SHA256,
     ) -> Path:
         fields = {
-            "Version": "0.6.0",
+            "Version": "0.6.1",
             "Candidate commit": commit,
             "Candidate workflow run": run_url,
             "Fixture artifact": "product-quality-fixtures",
             "Fixture manifest SHA-256": fixture_digest or ("4" * 64),
-            "Artifact filename": f"viewr-0.6.0-{TARGETS[platform]}.zip",
+            "Artifact filename": f"viewr-0.6.1-{TARGETS[platform]}.zip",
             "Artifact SHA-256": digest or DIGESTS[platform],
             "Package type": "portable archive",
             **PLATFORM_METADATA[platform],
@@ -387,7 +387,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             decoder_digest = hashlib.sha256(worker).hexdigest()
             artifact_directory = artifact_root / f"viewr-{target}"
             artifact_directory.mkdir(parents=True, exist_ok=True)
-            name = f"viewr-0.6.0-{target}.zip"
+            name = f"viewr-0.6.1-{target}.zip"
             archive = artifact_directory / name
             prefix = archive.name.removesuffix(".zip")
             binary_name = "viewr.exe" if platform == "windows" else "viewr"
@@ -416,7 +416,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         intel_target = "x86_64-apple-darwin"
         intel_directory = artifact_root / f"viewr-{intel_target}"
         intel_directory.mkdir(parents=True, exist_ok=True)
-        intel_archive = intel_directory / f"viewr-0.6.0-{intel_target}.zip"
+        intel_archive = intel_directory / f"viewr-0.6.1-{intel_target}.zip"
         intel_prefix = intel_archive.name.removesuffix(".zip")
         with zipfile.ZipFile(intel_archive, "w") as package:
             package.writestr(f"{intel_prefix}/bin/viewr", b"synthetic Intel binary")
@@ -459,7 +459,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         return {"total_count": len(artifacts), "artifacts": artifacts}
 
     def test_matrix_has_stable_unique_identifiers(self) -> None:
-        self.assertEqual(len(self.identifiers), 27)
+        self.assertEqual(len(self.identifiers), 29)
         self.assertEqual(self.identifiers[0], "PQ-FT-01")
         self.assertEqual(self.identifiers[-1], "PQ-VS-04")
 
@@ -512,7 +512,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         path = self.write_record("windows")
         original = path.read_text(encoding="utf-8")
         cases = (
-            ("| Version | 0.6.0 |\n", "duplicate metadata field"),
+            ("| Version | 0.6.1 |\n", "duplicate metadata field"),
             ("| Unknown field | value |\n", "unexpected metadata fields"),
             (
                 "| PQ-FT-01 | Pass | Duplicate observation. |\n",
@@ -679,7 +679,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
 
     def test_exact_evidence_version_and_directory_are_required(self) -> None:
         path = self.write_record("windows", field_override=("Version", "0.5.0"))
-        with self.assertRaisesRegex(evidence.EvidenceError, "Version must be 0.6.0"):
+        with self.assertRaisesRegex(evidence.EvidenceError, "Version must be 0.6.1"):
             evidence.parse_record(path)
 
         valid = self.write_record("windows")
@@ -688,12 +688,12 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         misplaced = wrong_directory / valid.name
         misplaced.write_bytes(valid.read_bytes())
         with self.assertRaisesRegex(
-            evidence.EvidenceError, "must be stored under v0.6.0"
+            evidence.EvidenceError, "must be stored under v0.6.1"
         ):
             evidence.parse_record(misplaced)
 
         with self.assertRaisesRegex(
-            evidence.EvidenceError, "evidence directory must be named v0.6.0"
+            evidence.EvidenceError, "evidence directory must be named v0.6.1"
         ):
             evidence.validate_gate(wrong_directory)
 
@@ -1012,7 +1012,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             "macos",
             field_override=(
                 "Artifact filename",
-                "viewr-0.6.0-x86_64-apple-darwin.zip",
+                "viewr-0.6.1-x86_64-apple-darwin.zip",
             ),
         )
         with self.assertRaisesRegex(evidence.EvidenceError, "aarch64-apple-darwin"):
@@ -1020,7 +1020,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
 
     def test_invalid_provenance_is_rejected(self) -> None:
         cases = (
-            ("Version", "v0.6.0", "Version must be 0.6.0"),
+            ("Version", "v0.6.1", "Version must be 0.6.1"),
             ("Candidate commit", "abc123", "full lowercase SHA"),
             ("Candidate workflow run", "https://example.com/1", "canonical run URL"),
             ("Fixture artifact", "fixtures", "Fixture artifact"),
@@ -1149,7 +1149,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
                 artifact_root = self.write_candidate_gate()
                 target = TARGETS["windows"]
                 archive = (
-                    artifact_root / f"viewr-{target}" / f"viewr-0.6.0-{target}.zip"
+                    artifact_root / f"viewr-{target}" / f"viewr-0.6.1-{target}.zip"
                 )
                 original_verify = self.verify_test_archive
 
@@ -1566,7 +1566,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
     def test_candidate_gate_rejects_unbound_artifacts(self) -> None:
         artifact_root = self.write_candidate_gate()
         target = TARGETS["windows"]
-        archive = artifact_root / f"viewr-{target}" / f"viewr-0.6.0-{target}.zip"
+        archive = artifact_root / f"viewr-{target}" / f"viewr-0.6.1-{target}.zip"
         archive.write_bytes(b"different candidate bytes")
         changed_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         archive.with_suffix(".zip.sha256").write_bytes(
@@ -1643,10 +1643,10 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         intel_sidecar = (
             artifact_root
             / f"viewr-{intel_target}"
-            / f"viewr-0.6.0-{intel_target}.zip.sha256"
+            / f"viewr-0.6.1-{intel_target}.zip.sha256"
         )
         intel_sidecar.write_text(
-            f"{'0' * 64}  viewr-0.6.0-{intel_target}.zip\n", encoding="ascii"
+            f"{'0' * 64}  viewr-0.6.1-{intel_target}.zip\n", encoding="ascii"
         )
         with self.assertRaisesRegex(evidence.EvidenceError, "sidecar does not match"):
             evidence.validate_candidate_gate(
@@ -1657,7 +1657,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         intel_sidecar = (
             artifact_root
             / f"viewr-{intel_target}"
-            / f"viewr-0.6.0-{intel_target}.zip.sha256"
+            / f"viewr-0.6.1-{intel_target}.zip.sha256"
         )
         intel_sidecar.unlink()
         with self.assertRaisesRegex(evidence.EvidenceError, "artifact set mismatch"):

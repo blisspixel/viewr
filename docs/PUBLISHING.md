@@ -306,6 +306,21 @@ matching SHA-256 sidecar, a 38-file internal manifest, and one attestation
 bound to `release.yml@refs/tags/v0.5.0` at that commit. The official archive
 verifier accepts that download.
 
+For v0.6.1, [main CI run 33651104608](https://github.com/blisspixel/viewr/actions/runs/33651104608)
+passed all seven jobs, [fuzz run 33651104622](https://github.com/blisspixel/viewr/actions/runs/33651104622)
+passed both targets, and [CodeQL run 33651104042](https://github.com/blisspixel/viewr/actions/runs/33651104042)
+passed on commit `203712a712147df556ac45e8e8a89823af4eeb90`.
+[Candidate run 33652650045](https://github.com/blisspixel/viewr/actions/runs/33652650045)
+completed successfully without publishing. [Release run 33654996620](https://github.com/blisspixel/viewr/actions/runs/33654996620)
+then repeated all nine prerequisite jobs, built all four platform archives, and
+published the immutable 12-asset [v0.6.1 release](https://github.com/blisspixel/viewr/releases/tag/v0.6.1).
+The official Windows archive has SHA-256
+`c961578edd54305fe3a01ae5482178324d08ee87942ff99f6961b030e9a74189` and
+re-verifies from the release page with its matching sidecar, a 43-file internal
+manifest, verified release provenance, and an attestation bound to
+`release.yml@refs/tags/v0.6.1` at that commit. The official archive verifier
+accepts that download.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)

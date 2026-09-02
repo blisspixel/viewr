@@ -40,12 +40,14 @@ history, crash-report uploader, or automatic update check.
 
 ![viewr displaying an alpine lake in Dark appearance with File, Edit, View, Tools, and Help menus](docs/screenshots/viewr-dark-example.png)
 
-### Console
+### Dark with Tools
 
-![viewr displaying an alpine lake in Console appearance with phosphor-green File, Edit, View, Tools, and Help menus](docs/screenshots/viewr-console-example.png)
+![viewr displaying an alpine lake in Dark appearance with the docked rotate, flip, crop, and Spot Heal tools](docs/screenshots/viewr-tools-example.png)
 
-Both captures show the same repository-safe demonstration image. Each PNG is
-only the application window, with no private path or unrelated desktop content.
+Both captures show the same repository-safe demonstration image. Each PNG is a
+programmatic application-only capture, with no private path or unrelated desktop
+content. Appearance and panel behavior are detailed in the
+[interface design guide](docs/DESIGN.md).
 
 ## Install
 

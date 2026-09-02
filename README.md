@@ -179,6 +179,9 @@ evidence through v0.9 publisher authentication, then v1.0.
 The [current release notes](docs/releases/v0.6.0.md) state the exact published
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
+Unpublished candidates are identified by exact commit and workflow run. The
+[publishing guide](docs/PUBLISHING.md#version-state-policy) defines when the
+workspace version, release documents, and public install links advance.
 
 ## Development
 

@@ -83,7 +83,7 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Current position: v0.6.0 is released as the public install target",
+                "Published install target | Immutable [v0.6.0]",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
@@ -349,14 +349,31 @@ class DocumentationTests(unittest.TestCase):
         positions = [roadmap.index(gate) for gate in ordered_gates]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("Immediate focus: v0.7 accessibility evidence", roadmap)
+        self.assertIn("### Next steps to v0.7.0", roadmap)
+        self.assertIn("### Version state and update points", roadmap)
         self.assertIn("Native platform trust | Deferred to v0.9", roadmap)
         self.assertIn("explicitly unsigned pre-1.0 preview", standards)
         self.assertIn("Publisher authentication remains a v0.9 and 1.0 gate", standards)
+        self.assertIn("## Version state policy", publishing)
+        self.assertIn("full commit SHA plus one non-publishing", publishing)
         self.assertLess(
             publishing.index("`docs/releases/v<version>.md`"),
             publishing.index("git tag -a v0.7.0"),
         )
         self.assertNotIn("git tag -a v0.6.0", publishing)
+
+    def test_roadmap_uses_gates_instead_of_schedule_estimates(self) -> None:
+        roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        self.assertIn("There are no calendar promises or duration estimates", roadmap)
+        for estimate in (
+            "will take",
+            "should take",
+            "estimated time",
+            "target date",
+            "eta:",
+        ):
+            with self.subTest(estimate=estimate):
+                self.assertNotIn(estimate, roadmap.casefold())
 
     def test_first_run_and_help_copy_stay_one_catalog(self) -> None:
         shortcuts = (REPOSITORY_ROOT / "crates/viewr/src/shortcuts.rs").read_text(

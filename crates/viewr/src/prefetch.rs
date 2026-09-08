@@ -512,6 +512,29 @@ impl PrefetchCache {
     }
 }
 
+/// Neighbor decode is speculative. It must not take decoder capacity from the
+/// image the user is already waiting to see, except when the collage asked for
+/// a group of complete photos.
+#[must_use]
+pub(crate) const fn neighbor_decode_may_start(
+    selected_is_loading: bool,
+    mosaic_active: bool,
+) -> bool {
+    mosaic_active || !selected_is_loading
+}
+
+/// Drop neighbors that a submitted Trash or permanent-delete already owns.
+#[must_use]
+pub(crate) fn exclude_blocked_neighbors(
+    neighbors: Vec<PathBuf>,
+    blocked: &HashSet<PathBuf>,
+) -> Vec<PathBuf> {
+    neighbors
+        .into_iter()
+        .filter(|path| !blocked.contains(path))
+        .collect()
+}
+
 /// Indices around `current` to prefetch (prev/next, then ±2), clamped to `len`.
 ///
 /// Does not include `current` itself. Stable order: nearer neighbors first.
@@ -537,10 +560,12 @@ pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize>
 mod tests {
     use super::{
         MAX_ACTIVE_JOBS, PrefetchCache, PrefetchDestination, PrefetchFailure, PrefetchSchedule,
-        neighbor_indices, path_free_texture_id, prefetch_destination, privacy_safe_file_name,
+        exclude_blocked_neighbors, neighbor_decode_may_start, neighbor_indices,
+        path_free_texture_id, prefetch_destination, privacy_safe_file_name,
     };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -612,6 +637,30 @@ mod tests {
         assert_eq!(neighbor_indices(4, 5, 2), vec![3, 2]);
         assert_eq!(neighbor_indices(2, 5, 1), vec![1, 3]);
         assert!(neighbor_indices(0, 0, 2).is_empty());
+    }
+
+    #[test]
+    fn speculative_decode_waits_for_the_selected_image() {
+        assert!(!neighbor_decode_may_start(true, false));
+        assert!(neighbor_decode_may_start(false, false));
+        assert!(neighbor_decode_may_start(true, true));
+        assert!(neighbor_decode_may_start(false, true));
+    }
+
+    #[test]
+    fn blocked_neighbors_are_not_speculatively_decoded() {
+        let blocked = HashSet::from([PathBuf::from("trash-me.png")]);
+        assert_eq!(
+            exclude_blocked_neighbors(
+                vec![
+                    PathBuf::from("keep.png"),
+                    PathBuf::from("trash-me.png"),
+                    PathBuf::from("next.png"),
+                ],
+                &blocked,
+            ),
+            vec![PathBuf::from("keep.png"), PathBuf::from("next.png")]
+        );
     }
 
     #[test]

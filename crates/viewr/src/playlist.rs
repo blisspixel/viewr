@@ -2,8 +2,8 @@
 
 use crate::fs::{ScanProvenance, ScannedImage};
 use crate::ratings::{RatingFilter, RatingState};
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 pub(crate) struct Playlist {
     pub(crate) files: Vec<PathBuf>,
@@ -33,6 +33,19 @@ pub(crate) const fn filter_selection_changes_source(
         FilterSelection::Stay => !has_current_image,
         FilterSelection::Select(_) | FilterSelection::Empty => true,
     }
+}
+
+/// Membership update from a later scan of an already-open folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlaylistReconcile {
+    /// Catalog paths that left the folder, excluding a followed rename source.
+    pub removed: Vec<PathBuf>,
+    /// Newly seen paths that were not a followed-rename target.
+    pub added: usize,
+    /// Path now selected after the refresh.
+    pub selected_path: Option<PathBuf>,
+    /// True when the selected object is still present under a new pathname.
+    pub followed_rename: bool,
 }
 
 impl Playlist {
@@ -349,11 +362,162 @@ impl Playlist {
             .collect()
     }
 
+    /// Update catalog membership from a later scan without dropping ratings or filter.
+    ///
+    /// The selected path is preserved when it still exists. A rename is followed
+    /// only when scan provenance names the same filesystem object.
+    #[must_use]
+    pub(crate) fn reconcile_from_scan(
+        &mut self,
+        entries: Vec<ScannedImage>,
+        preferred: Option<&Path>,
+        fallback_index: usize,
+    ) -> PlaylistReconcile {
+        let (files, provenance) = entries
+            .into_iter()
+            .map(ScannedImage::into_parts)
+            .map(|(path, provenance)| (path, Some(provenance)))
+            .unzip();
+        self.reconcile(files, provenance, preferred, fallback_index)
+    }
+
+    /// Replace catalog files with a later scan while preserving session state.
+    #[must_use]
+    pub(crate) fn reconcile(
+        &mut self,
+        files: Vec<PathBuf>,
+        provenance: Vec<Option<ScanProvenance>>,
+        preferred: Option<&Path>,
+        fallback_index: usize,
+    ) -> PlaylistReconcile {
+        debug_assert_eq!(files.len(), provenance.len());
+        if files.is_empty() {
+            let removed = std::mem::take(&mut self.files);
+            self.provenance.clear();
+            self.ratings.clear();
+            self.visible_indices.clear();
+            self.index = 0;
+            self.empty_anchor = 0;
+            self.outside_filter = false;
+            return PlaylistReconcile {
+                removed,
+                added: 0,
+                selected_path: None,
+                followed_rename: false,
+            };
+        }
+
+        let previous_selected = self.files.get(self.index).cloned();
+        let previous_selected_provenance = self.provenance.get(self.index).copied().flatten();
+        let previous_paths: HashSet<PathBuf> = self.files.iter().cloned().collect();
+        let by_path = self
+            .files
+            .iter()
+            .zip(&self.ratings)
+            .map(|(path, rating)| (path.clone(), *rating))
+            .collect::<HashMap<_, _>>();
+
+        let inherited = files
+            .iter()
+            .zip(&provenance)
+            .map(|(path, scanned)| {
+                inherited_catalog_rating(
+                    path,
+                    *scanned,
+                    &self.files,
+                    &self.provenance,
+                    &self.ratings,
+                    &by_path,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut rename_sources = HashSet::new();
+        let mut rename_targets = HashSet::new();
+        let mut ratings = Vec::with_capacity(inherited.len());
+        for (path, (rating, renamed_from)) in files.iter().zip(inherited) {
+            if let Some(old_path) = renamed_from {
+                rename_sources.insert(old_path);
+                rename_targets.insert(path.clone());
+            }
+            ratings.push(rating);
+        }
+
+        let new_paths: HashSet<PathBuf> = files.iter().cloned().collect();
+        let removed = self
+            .files
+            .iter()
+            .filter(|path| !new_paths.contains(*path) && !rename_sources.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let added = files
+            .iter()
+            .filter(|path| !previous_paths.contains(*path) && !rename_targets.contains(*path))
+            .count();
+
+        self.files = files;
+        self.provenance = provenance;
+        self.ratings = ratings;
+        self.index = self.select_reconciled_index(
+            preferred,
+            previous_selected.as_deref(),
+            previous_selected_provenance,
+            fallback_index,
+        );
+        self.empty_anchor = self.index;
+        self.rebuild_visible();
+        self.outside_filter =
+            !self.visible_indices.is_empty() && !self.visible_indices.contains(&self.index);
+
+        let selected_path = self.files.get(self.index).cloned();
+        let followed_rename = previous_selected
+            .as_ref()
+            .is_some_and(|old| rename_sources.contains(old))
+            && selected_path
+                .as_ref()
+                .is_some_and(|path| rename_targets.contains(path));
+        PlaylistReconcile {
+            removed,
+            added,
+            selected_path,
+            followed_rename,
+        }
+    }
+
+    fn select_reconciled_index(
+        &self,
+        preferred: Option<&Path>,
+        previous_selected: Option<&Path>,
+        previous_selected_provenance: Option<ScanProvenance>,
+        fallback_index: usize,
+    ) -> usize {
+        preferred
+            .and_then(|path| self.files.iter().position(|candidate| candidate == path))
+            .or_else(|| {
+                previous_selected_provenance.and_then(|old| {
+                    self.provenance.iter().position(|candidate| {
+                        candidate.is_some_and(|scanned| scanned.same_object(old))
+                    })
+                })
+            })
+            .or_else(|| {
+                previous_selected
+                    .and_then(|path| self.files.iter().position(|candidate| candidate == path))
+            })
+            .or_else(|| {
+                preferred
+                    .is_none()
+                    .then_some(fallback_index)
+                    .filter(|&index| index < self.files.len())
+            })
+            .unwrap_or_else(|| self.index.min(self.files.len().saturating_sub(1)))
+    }
+
     /// Choose the surviving visible entry that will occupy `removed_index`.
     ///
     /// This previews the selection made by [`Self::remove_paths`] without
-    /// mutating the catalog. Curation can therefore start presenting the next
-    /// image while the operating-system file action finishes in the background.
+    /// mutating the catalog.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn successor_after_removal(&self, removed_index: usize) -> Option<usize> {
         if removed_index >= self.files.len() || self.files.len() <= 1 {
@@ -437,6 +601,28 @@ impl Playlist {
                 .filter_map(|(index, state)| state.matches(self.filter).then_some(index)),
         );
     }
+}
+
+fn inherited_catalog_rating(
+    path: &Path,
+    provenance: Option<ScanProvenance>,
+    files: &[PathBuf],
+    provenances: &[Option<ScanProvenance>],
+    ratings: &[RatingState],
+    by_path: &HashMap<PathBuf, RatingState>,
+) -> (RatingState, Option<PathBuf>) {
+    if let Some(rating) = by_path.get(path) {
+        return (*rating, None);
+    }
+    let Some(new_provenance) = provenance else {
+        return (RatingState::Loading, None);
+    };
+    for ((old_path, old_provenance), rating) in files.iter().zip(provenances).zip(ratings) {
+        if old_path != path && old_provenance.is_some_and(|old| old.same_object(new_provenance)) {
+            return (*rating, Some(old_path.clone()));
+        }
+    }
+    (RatingState::Loading, None)
 }
 
 pub(crate) enum ScanPurpose {
@@ -651,6 +837,103 @@ mod tests {
         playlist.set_filter(RatingFilter::AtLeast(Rating::new(5).unwrap()));
         assert_eq!(playlist.visible_indices, [4]);
         assert_eq!(playlist.successor_after_removal(4), None);
+    }
+
+    #[test]
+    fn membership_reconcile_keeps_ratings_filter_and_selection() {
+        let mut playlist = rated_playlist(2);
+        playlist.set_filter(RatingFilter::AtLeast(Rating::new(4).unwrap()));
+        let result = playlist.reconcile(
+            vec![path(0), path(2), path(4), path(5), path(6)],
+            vec![None; 5],
+            Some(&path(2)),
+            0,
+        );
+
+        assert_eq!(
+            playlist.files,
+            vec![path(0), path(2), path(4), path(5), path(6)]
+        );
+        assert_eq!(playlist.index, 1);
+        assert_eq!(
+            playlist.filter(),
+            RatingFilter::AtLeast(Rating::new(4).unwrap())
+        );
+        assert_eq!(
+            playlist.rating_for_path(&path(2)),
+            RatingState::Rated(Rating::new(4).unwrap())
+        );
+        assert_eq!(
+            playlist.rating_for_path(&path(4)),
+            RatingState::Rated(Rating::new(5).unwrap())
+        );
+        assert_eq!(playlist.visible_indices, [1, 2]);
+        assert_eq!(result.removed, vec![path(1), path(3)]);
+        assert_eq!(result.added, 0);
+        assert_eq!(result.selected_path, Some(path(2)));
+        assert!(!result.followed_rename);
+    }
+
+    #[test]
+    fn membership_reconcile_marks_new_files_loading_and_follows_path() {
+        let mut playlist = rated_playlist(4);
+        let result = playlist.reconcile(vec![path(7), path(4), path(0)], vec![None; 3], None, 0);
+
+        assert_eq!(playlist.index, 1);
+        assert_eq!(playlist.rating_for_path(&path(7)), RatingState::Loading);
+        assert_eq!(
+            playlist.rating_for_path(&path(4)),
+            RatingState::Rated(Rating::new(5).unwrap())
+        );
+        assert_eq!(result.added, 1);
+        assert_eq!(
+            result.removed,
+            vec![path(1), path(2), path(3), path(5), path(6)]
+        );
+        assert_eq!(result.selected_path, Some(path(4)));
+        assert!(!result.followed_rename);
+    }
+
+    #[test]
+    fn membership_reconcile_keeps_nearby_selection_when_preferred_left() {
+        let mut playlist = rated_playlist(4);
+        let result = playlist.reconcile(
+            vec![path(0), path(1), path(2), path(3), path(5), path(6)],
+            vec![None; 6],
+            Some(&path(4)),
+            0,
+        );
+        assert_eq!(playlist.files[playlist.index], path(5));
+        assert_eq!(result.removed, vec![path(4)]);
+        assert!(!result.followed_rename);
+        assert_eq!(result.selected_path, Some(path(5)));
+    }
+
+    #[test]
+    fn membership_reconcile_empty_catalog_reports_every_removed_path() {
+        let mut playlist = Playlist::new((0..3).map(path).collect(), 1);
+        let result = playlist.reconcile(Vec::new(), Vec::new(), Some(&path(1)), 0);
+        assert!(playlist.files.is_empty());
+        assert_eq!(result.removed, vec![path(0), path(1), path(2)]);
+        assert_eq!(result.added, 0);
+        assert_eq!(result.selected_path, None);
+    }
+
+    #[test]
+    fn membership_reconcile_fills_an_empty_catalog() {
+        let mut playlist = Playlist::new(Vec::new(), 0);
+        let result = playlist.reconcile(
+            vec![path(0), path(1), path(2)],
+            vec![None; 3],
+            Some(&path(9)),
+            0,
+        );
+        assert_eq!(playlist.files, vec![path(0), path(1), path(2)]);
+        assert_eq!(playlist.index, 0);
+        assert_eq!(result.added, 3);
+        assert_eq!(result.removed, Vec::<PathBuf>::new());
+        assert_eq!(result.selected_path, Some(path(0)));
+        assert!(!result.followed_rename);
     }
 
     #[test]

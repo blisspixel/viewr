@@ -50,6 +50,17 @@ adopt a new ordinary file at the same path, but it still does not follow a newly
 substituted link.
 Results wake the event loop through a typed `UserEvent`, request a redraw, and are
 applied only if they still match the current path or generation.
+A watcher-driven membership refresh updates the existing playlist in place: it
+keeps the playlist scope, ratings, filter, and surviving neighbor decodes, and
+does not install a new catalog. It is not exclusive current work, so Trash and
+navigation stay available while the refresh runs. Only an Open Folder scan or a
+missing-selection recovery scan still take the folder-scan lock. Optimistic
+Trash that empties a one-item catalog does not cancel that sibling scan, and
+the completed scan still installs remaining files after dropping paths already
+accepted for Trash. Speculative
+neighbor and filmstrip work wait while the selected image is still decoding so
+first-pixel and cull presentation are not queued behind a group of full-image
+preloads.
 The initial decode and folder scan start before renderer initialization, so GPU
 setup does not unnecessarily serialize first-pixel work. Native dialogs,
 including permanent-delete confirmation, remain synchronous and user-triggered.

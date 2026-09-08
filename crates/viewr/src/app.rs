@@ -53,9 +53,10 @@ use crate::current_work::{
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
 use crate::entry_state::{
-    FolderScanDisposition, FolderScanSuccess, PathEntry, folder_scan_disposition,
-    folder_scan_failure_class, folder_scan_user_message, path_entry, selected_file_index_by,
-    selected_scan_is_current,
+    FolderScanDisposition, FolderScanSuccess, PathEntry, committed_scan_path_is_admissible,
+    folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
+    folder_scan_user_message, path_entry, selected_file_index_by, selected_scan_is_current,
+    sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
 };
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -69,9 +70,12 @@ use crate::keyboard_route::{
     single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
     space_tap_fits, widget_popup_owns_event,
 };
-use crate::playlist::{FilterSelection, Playlist, ScanPurpose, filter_selection_changes_source};
+use crate::playlist::{
+    FilterSelection, Playlist, PlaylistReconcile, ScanPurpose, filter_selection_changes_source,
+};
 use crate::prefetch::{
-    self, PrefetchCache, PrefetchDestination, path_free_texture_id, prefetch_destination,
+    self, PrefetchCache, PrefetchDestination, exclude_blocked_neighbors, neighbor_decode_may_start,
+    path_free_texture_id, prefetch_destination,
 };
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
@@ -198,6 +202,7 @@ fn run_internal(
         language_preference: language.preference(),
         language: language.preference().resolve(),
         folder_scan_job: None,
+        folder_membership_dirty: false,
         rating_scan_worker: None,
         rating_generation: 0,
         rating_write_disclosed: false,
@@ -481,10 +486,13 @@ enum PreviewJobResult {
     Cancelled,
 }
 
+#[derive(Clone)]
 struct RemovalContext {
     path: PathBuf,
     playlist_index: usize,
     scope: Option<Arc<PlaylistScope>>,
+    rating: RatingState,
+    provenance: Option<crate::fs::ScanProvenance>,
 }
 
 struct RestoreContext {
@@ -511,6 +519,20 @@ impl CurationContext {
         match self {
             Self::Trash(_) | Self::PermanentDelete(_) => 1,
             Self::Restore(context) => context.submitted,
+        }
+    }
+
+    fn removal_path(&self) -> Option<&Path> {
+        match self {
+            Self::Trash(context) | Self::PermanentDelete(context) => Some(&context.path),
+            Self::Restore(_) => None,
+        }
+    }
+
+    fn removal_context(&self) -> Option<&RemovalContext> {
+        match self {
+            Self::Trash(context) | Self::PermanentDelete(context) => Some(context),
+            Self::Restore(_) => None,
         }
     }
 }
@@ -942,6 +964,8 @@ struct App {
             Result<Vec<crate::fs::ScannedImage>, crate::fs::ScanImagesError>,
         >,
     >,
+    /// Watcher asked for another membership pass while a scan was already running.
+    folder_membership_dirty: bool,
     /// Cancellable, generation-tagged in-memory rating discovery for one folder.
     rating_scan_worker: Option<RatingScanWorker>,
     /// Monotonic owner token for folder rating results.
@@ -1300,8 +1324,7 @@ impl App {
         let missing_recovery = self.session.selected_missing
             && self.session.selected_path.as_deref() == Some(path.as_path());
         self.reset_prefetch_for_playlist_change();
-        self.playlist = None;
-        self.playlist_scope = None;
+        self.replace_playlist(vec![path.clone()], 0);
         self.begin_image_load(path.clone(), missing_recovery);
         let directory = path
             .parent()
@@ -1502,6 +1525,185 @@ impl App {
         self.playlist = Some(playlist);
     }
 
+    fn filter_committed_scan_entries(
+        &self,
+        entries: Vec<crate::fs::ScannedImage>,
+    ) -> Vec<crate::fs::ScannedImage> {
+        let in_flight = self.pending_source_removal_paths();
+        let catalog = self
+            .playlist
+            .as_ref()
+            .map(|playlist| playlist.files.iter().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default();
+        let unrestored = self
+            .last_trashed
+            .iter()
+            .map(|trashed| trashed.receipt.original_path().to_owned())
+            .collect::<HashSet<_>>();
+        entries
+            .into_iter()
+            .filter(|entry| {
+                let path = entry.path();
+                committed_scan_path_is_admissible(
+                    in_flight.contains(path),
+                    unrestored.contains(path),
+                    catalog.contains(path),
+                )
+            })
+            .collect()
+    }
+
+    fn adopt_folder_scan_entries(
+        &mut self,
+        entries: Vec<crate::fs::ScannedImage>,
+        selected: &Path,
+        fallback_index: usize,
+    ) -> (Option<PathBuf>, bool) {
+        let entries = self.filter_committed_scan_entries(entries);
+        if self.playlist.is_some() {
+            let reconcile = self
+                .playlist
+                .as_mut()
+                .expect("open folder already has a playlist")
+                .reconcile_from_scan(entries, Some(selected), fallback_index);
+            self.apply_playlist_membership_refresh(&reconcile);
+            (reconcile.selected_path, reconcile.followed_rename)
+        } else {
+            let new_path = entries
+                .get(fallback_index.min(entries.len().saturating_sub(1)))
+                .map(|entry| entry.path().to_owned());
+            self.replace_playlist_from_scan(entries, fallback_index);
+            let followed_rename = new_path
+                .as_deref()
+                .is_some_and(|path| self.session.selected_path.as_deref() != Some(path));
+            (new_path, followed_rename)
+        }
+    }
+
+    fn apply_playlist_membership_refresh(&mut self, reconcile: &PlaylistReconcile) {
+        for path in &reconcile.removed {
+            self.remove_prefetched_image(path);
+            self.thumb_textures.remove(path);
+            self.prefetch_schedule.allow(path);
+        }
+        if let Some(playlist) = self.playlist.as_ref() {
+            let keep = playlist.files.iter().cloned().collect::<HashSet<_>>();
+            self.prefetch.retain(|path| keep.contains(path));
+            let prefetch = &self.prefetch;
+            self.prefetch_sources
+                .retain(|path, _| prefetch.contains(path));
+            self.thumb_textures.retain(|path, _| keep.contains(path));
+        }
+        if self.mosaic.is_active() {
+            self.refresh_mosaic_after_membership_change();
+        }
+        if self
+            .playlist
+            .as_ref()
+            .is_some_and(Playlist::has_loading_ratings)
+        {
+            self.restart_rating_discovery();
+        }
+    }
+
+    fn restart_rating_discovery(&mut self) {
+        if let Some(worker) = self.rating_scan_worker.take() {
+            worker.cancel.store(true, Ordering::Release);
+        }
+        self.rating_generation = self.rating_generation.wrapping_add(1);
+        self.start_rating_discovery();
+    }
+
+    fn refresh_mosaic_after_membership_change(&mut self) {
+        let page = self.playlist.as_ref().and_then(|playlist| {
+            crate::mosaic::MosaicPage::containing(
+                playlist.visible_projection(),
+                playlist.catalog_index()?,
+                crate::mosaic::MAX_IMAGES,
+            )
+        });
+        match page {
+            Some(page) if self.mosaic.page.as_ref() == Some(&page) => {}
+            Some(page) => self.install_mosaic_page(page),
+            None => self.leave_full_image_mosaic(),
+        }
+    }
+
+    fn removal_context_for_path(&self, path: PathBuf) -> RemovalContext {
+        let (playlist_index, rating, provenance) =
+            self.playlist
+                .as_ref()
+                .map_or((0, RatingState::Loading, None), |playlist| {
+                    let index = playlist
+                        .files
+                        .iter()
+                        .position(|entry| entry == &path)
+                        .unwrap_or(playlist.index);
+                    (
+                        index,
+                        playlist.rating_for_path(&path),
+                        playlist.scan_provenance(&path),
+                    )
+                });
+        RemovalContext {
+            path,
+            playlist_index,
+            scope: self.playlist_scope.clone(),
+            rating,
+            provenance,
+        }
+    }
+
+    fn commit_submitted_removal(&mut self, context: &RemovalContext) {
+        self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
+    }
+
+    fn revert_submitted_removal(&mut self, context: &RemovalContext) {
+        let restore_selection = self.session.selected_path.is_none();
+        {
+            let Some(playlist) = self.playlist.as_mut() else {
+                return;
+            };
+            if playlist.files.iter().any(|entry| entry == &context.path) {
+                return;
+            }
+            playlist.insert_path(
+                context.playlist_index,
+                context.path.clone(),
+                context.rating,
+                context.provenance,
+            );
+            if restore_selection {
+                let index = playlist
+                    .files
+                    .iter()
+                    .position(|entry| entry == &context.path)
+                    .unwrap_or(context.playlist_index);
+                playlist.select(index);
+            }
+        }
+        if restore_selection {
+            self.session.selected_path = Some(context.path.clone());
+            self.spawn_image_load(context.path.clone());
+        }
+    }
+
+    fn pending_source_removal_paths(&self) -> HashSet<PathBuf> {
+        let mut paths = self
+            .pending_trash
+            .iter()
+            .map(|pending| pending.context.path.clone())
+            .collect::<HashSet<_>>();
+        if let Some(path) = self
+            .curation_worker
+            .as_ref()
+            .and_then(|worker| worker.context.removal_path())
+        {
+            paths.insert(path.to_owned());
+        }
+        paths
+    }
+
     fn preserve_presented_source_provenance(&mut self, selected: &Path) {
         if self.session.presented_path.as_deref() != Some(selected) {
             return;
@@ -1520,24 +1722,42 @@ impl App {
         purpose: ScanPurpose,
         files: Result<Vec<crate::fs::ScannedImage>, crate::fs::ScanImagesError>,
     ) -> bool {
+        let files = files.map(|entries| self.filter_committed_scan_entries(entries));
         let open_folder = matches!(purpose, ScanPurpose::OpenFolder);
         let selected_is_current = match &purpose {
-            ScanPurpose::SelectedFile { path, .. } => {
-                selected_scan_is_current(self.session.selected_path.as_deref(), path)
+            ScanPurpose::SelectedFile {
+                path,
+                missing_recovery,
+            } => {
+                if *missing_recovery {
+                    selected_scan_is_current(self.session.selected_path.as_deref(), path)
+                } else {
+                    sibling_scan_still_applies(
+                        self.session.selected_path.is_some(),
+                        self.playlist.is_some(),
+                    )
+                }
             }
             ScanPurpose::OpenFolder => true,
         };
         let selected_missing = match &purpose {
             ScanPurpose::SelectedFile {
                 missing_recovery, ..
-            } => *missing_recovery || self.session.selected_missing,
+            } => {
+                *missing_recovery
+                    || self.session.selected_missing
+                    || (self.playlist.is_none() && self.session.selected_path.is_none())
+            }
             ScanPurpose::OpenFolder => false,
         };
         let success = files.as_ref().map(|entries| match &purpose {
             ScanPurpose::SelectedFile { path: selected, .. } => FolderScanSuccess::Selected {
                 matched_index: selected_file_index_by(
                     entries,
-                    selected,
+                    self.session
+                        .selected_path
+                        .as_deref()
+                        .unwrap_or(selected.as_path()),
                     crate::fs::ScannedImage::path,
                 )
                 .or_else(|| {
@@ -1590,25 +1810,31 @@ impl App {
                 Ok(entries),
             ) => {
                 let reload_restored_selection = self.session.selected_missing;
-                self.replace_playlist_from_scan(entries, index);
-                let new_path = self
+                let preferred = self
+                    .session
+                    .selected_path
+                    .clone()
+                    .unwrap_or_else(|| selected.clone());
+                let (new_path, followed_rename) =
+                    self.adopt_folder_scan_entries(entries, &preferred, index);
+                if let Some(new_path) = new_path {
+                    if followed_rename {
+                        self.cancel_rating_disclosure_for_source_change();
+                        self.session.selected_path = Some(new_path.clone());
+                        if self.session.presented_path.is_some() {
+                            self.session.presented_path = Some(new_path);
+                        }
+                        self.start_coherence_watch();
+                    } else if self.session.selected_path.is_none() {
+                        self.session.selected_path = Some(new_path.clone());
+                        self.spawn_image_load(new_path);
+                    }
+                }
+                let found_same = self
                     .playlist
                     .as_ref()
-                    .and_then(|playlist| playlist.files.get(index).cloned());
-                let followed_rename = new_path
-                    .as_deref()
-                    .is_some_and(|path| self.session.selected_path.as_deref() != Some(path));
-                if let Some(new_path) = new_path
-                    && followed_rename
-                {
-                    self.cancel_rating_disclosure_for_source_change();
-                    self.session.selected_path = Some(new_path.clone());
-                    if self.session.presented_path.is_some() {
-                        self.session.presented_path = Some(new_path);
-                    }
-                    self.start_coherence_watch();
-                }
-                self.settle_pending_gone_notice(!followed_rename, followed_rename);
+                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
+                self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session
                     .selected_path
@@ -1621,18 +1847,61 @@ impl App {
                 self.kick_prefetch();
             }
             (
+                FolderScanDisposition::InstallSelectedOnly,
+                ScanPurpose::SelectedFile { path: selected, .. },
+                Ok(entries),
+            ) if unmatched_sibling_scan_adopts_catalog(self.playlist.is_some(), entries.len()) => {
+                let fallback_index = self.playlist.as_ref().map_or(0, |playlist| playlist.index);
+                let preferred = self
+                    .session
+                    .selected_path
+                    .clone()
+                    .unwrap_or_else(|| selected.clone());
+                let (new_path, followed_rename) =
+                    self.adopt_folder_scan_entries(entries, &preferred, fallback_index);
+                if let Some(new_path) = new_path {
+                    if followed_rename {
+                        self.cancel_rating_disclosure_for_source_change();
+                        self.session.selected_path = Some(new_path.clone());
+                        if self.session.presented_path.is_some() {
+                            self.session.presented_path = Some(new_path);
+                        }
+                        self.start_coherence_watch();
+                    } else if self.session.selected_path.is_none() {
+                        self.session.selected_path = Some(new_path.clone());
+                        self.spawn_image_load(new_path);
+                    }
+                }
+                let found_same = self
+                    .playlist
+                    .as_ref()
+                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
+                self.settle_pending_gone_notice(found_same, followed_rename);
+                let provenance_path = self
+                    .session
+                    .selected_path
+                    .clone()
+                    .unwrap_or_else(|| selected.clone());
+                self.preserve_presented_source_provenance(&provenance_path);
+                self.kick_prefetch();
+            }
+            (
                 FolderScanDisposition::InstallSelectedOnly
                 | FolderScanDisposition::InstallSelectedOnlyLimitExceeded
                 | FolderScanDisposition::InstallSelectedOnlyScanFailed,
                 ScanPurpose::SelectedFile { path: selected, .. },
                 _,
             ) => {
-                self.replace_playlist(vec![selected.clone()], 0);
-                self.preserve_presented_source_provenance(&selected);
-                self.settle_pending_gone_notice(false, false);
-                if matches!(disposition, FolderScanDisposition::InstallSelectedOnly) {
-                    self.kick_prefetch();
+                if self.playlist.is_none()
+                    && !self.pending_source_removal_paths().contains(&selected)
+                {
+                    self.replace_playlist(vec![selected.clone()], 0);
+                    self.preserve_presented_source_provenance(&selected);
+                    if matches!(disposition, FolderScanDisposition::InstallSelectedOnly) {
+                        self.kick_prefetch();
+                    }
                 }
+                self.settle_pending_gone_notice(false, false);
             }
             (FolderScanDisposition::OpenFolderFirst, ScanPurpose::OpenFolder, Ok(entries))
             | (
@@ -1640,6 +1909,15 @@ impl App {
                 ScanPurpose::SelectedFile { .. },
                 Ok(entries),
             ) => {
+                let entries = self.filter_committed_scan_entries(entries);
+                if entries.is_empty() {
+                    self.playlist = None;
+                    self.playlist_scope = None;
+                    self.cancel_pending_image_load();
+                    self.session.selected_path = None;
+                    self.invalidate_displayed_image();
+                    return true;
+                }
                 let first = entries[0].path().to_owned();
                 self.replace_playlist_from_scan(entries, 0);
                 self.begin_image_load(first, false);
@@ -1684,7 +1962,9 @@ impl App {
             JobPoll::Disconnected => Err(crate::fs::ScanImagesError::WorkerStopped),
             JobPoll::Pending => unreachable!("pending folder scan returned early"),
         };
-        self.finish_folder_scan(purpose, files)
+        let changed = self.finish_folder_scan(purpose, files);
+        self.restart_dirty_folder_membership();
+        changed
     }
 
     fn display_loaded_image(&mut self, path: &Path, loaded: LoadedImage) {
@@ -2667,7 +2947,6 @@ impl App {
             self.cancel_save_overwrite_for_source_change();
             self.cancel_rating_disclosure_for_source_change();
         }
-        self.reset_prefetch_for_playlist_change();
         match selection {
             FilterSelection::Stay => {
                 if self.current_image.is_none()
@@ -2680,9 +2959,13 @@ impl App {
                     self.session.selected_path = Some(path.clone());
                     self.spawn_image_load(path);
                 }
+                if self.mosaic.is_active() {
+                    self.refresh_mosaic_after_membership_change();
+                }
             }
             FilterSelection::Select(index) => self.go_to_index(index),
             FilterSelection::Empty => {
+                self.reset_prefetch_for_playlist_change();
                 self.cancel_pending_image_load();
                 self.session.selected_path = None;
                 self.invalidate_displayed_image();
@@ -3076,8 +3359,17 @@ impl App {
         }
     }
 
-    fn refresh_folder_membership(&mut self) {
-        if self.folder_scan_job.is_some() {
+    fn exclusive_folder_scan(&self) -> bool {
+        self.folder_scan_job
+            .as_ref()
+            .is_some_and(|job| folder_scan_blocks_interaction(job.context().purpose.as_ref()))
+    }
+
+    fn restart_membership_scan_if_active(&mut self) {
+        let Some(job) = self.folder_scan_job.as_ref() else {
+            return;
+        };
+        if folder_scan_blocks_interaction(job.context().purpose.as_ref()) {
             return;
         }
         let Some(path) = self.session.selected_path.clone() else {
@@ -3095,10 +3387,63 @@ impl App {
         );
     }
 
+    fn refresh_folder_membership(&mut self) {
+        if self.folder_scan_job.is_some() {
+            self.folder_membership_dirty = true;
+            return;
+        }
+        let Some(path) = self.session.selected_path.clone() else {
+            return;
+        };
+        let Some(directory) = path.parent().map(Path::to_owned) else {
+            return;
+        };
+        self.start_folder_scan(
+            directory,
+            ScanPurpose::SelectedFile {
+                path,
+                missing_recovery: false,
+            },
+        );
+    }
+
+    fn restart_dirty_folder_membership(&mut self) {
+        if !self.folder_membership_dirty {
+            return;
+        }
+        self.folder_membership_dirty = false;
+        self.refresh_folder_membership();
+    }
+
     fn current_loaded_path(&self) -> Option<&Path> {
         let path = self.session.selected_path.as_deref()?;
         (self.current_image.is_some() && self.session.presented_path.as_deref() == Some(path))
             .then_some(path)
+    }
+
+    fn mosaic_focused_path(&self) -> Option<PathBuf> {
+        let page = self.mosaic.page.as_ref()?;
+        let playlist = self.playlist.as_ref()?;
+        page.indices
+            .get(page.focused)
+            .and_then(|index| playlist.files.get(*index))
+            .cloned()
+    }
+
+    fn trash_candidate(&self) -> Option<(PathBuf, Arc<crate::fs::ImageSource>)> {
+        if self.mosaic.is_active() {
+            let path = self.mosaic_focused_path()?;
+            let source = if self.session.presented_path.as_deref() == Some(path.as_path()) {
+                self.current_source.as_ref().map(Arc::clone)?
+            } else {
+                self.prefetch_sources.get(&path).cloned()?
+            };
+            Some((path, source))
+        } else {
+            let path = self.current_loaded_path()?.to_owned();
+            let source = self.current_source.as_ref().map(Arc::clone)?;
+            Some((path, source))
+        }
     }
 
     fn dock_input(&self) -> crate::chrome::DockInput {
@@ -3948,19 +4293,12 @@ impl App {
         self.kick_prefetch();
     }
 
-    fn advance_after_removal_submitted(&mut self, removed_index: usize) {
-        let Some(next_index) = self
-            .playlist
-            .as_ref()
-            .and_then(|playlist| playlist.successor_after_removal(removed_index))
-        else {
-            return;
-        };
-        self.go_to_index_ready(next_index);
-    }
-
     /// Decode nearby playlist entries into the in-memory cache (no disk writes).
     fn kick_prefetch(&mut self) {
+        if !neighbor_decode_may_start(self.session.is_loading(), self.mosaic.is_active()) {
+            return;
+        }
+        let blocked = self.pending_source_removal_paths();
         let Some(playlist) = &self.playlist else {
             return;
         };
@@ -3973,6 +4311,7 @@ impl App {
         } else {
             playlist.visible_neighbor_paths(2)
         };
+        let candidate_paths = exclude_blocked_neighbors(candidate_paths, &blocked);
         let targets: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)> = candidate_paths
             .into_iter()
             .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))
@@ -4093,8 +4432,10 @@ impl App {
     }
 
     fn trash_current(&mut self) {
-        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
-            if self.session.selected_path.is_some() {
+        let Some((path, source)) = self.trash_candidate() else {
+            if self.mosaic.is_active() {
+                self.show_toast("Wait for this photo to finish opening before moving it to Trash");
+            } else if self.session.selected_path.is_some() {
                 let message = if self.session.load_error.is_some() {
                     "Reload or open another image before moving it to Trash"
                 } else {
@@ -4114,23 +4455,8 @@ impl App {
             self.show_toast(message);
             return;
         }
-
-        let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
-            let error = GuardedActionError::Unavailable;
-            log_guarded_action_failure(GuardedSourceAction::Trash, &error);
-            self.show_toast(guarded_source_action_failure_message(
-                GuardedSourceAction::Trash,
-                &error,
-            ));
-            return;
-        };
-        let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
         let pending = PendingTrash {
-            context: RemovalContext {
-                path,
-                playlist_index,
-                scope: self.playlist_scope.clone(),
-            },
+            context: self.removal_context_for_path(path),
             source,
         };
         let active = self
@@ -4139,8 +4465,8 @@ impl App {
             .map(|worker| worker.context.kind());
         match trash_admission(active, self.pending_trash.len()) {
             TrashAdmission::Queue => {
+                self.commit_submitted_removal(&pending.context);
                 self.pending_trash.push_back(pending);
-                self.advance_after_removal_submitted(playlist_index);
                 self.request_redraw();
             }
             TrashAdmission::Full => {
@@ -4155,13 +4481,15 @@ impl App {
                 ));
             }
             TrashAdmission::Start => {
-                // Persistent top-bar status owns the in-progress state. Outcome
-                // toasts fire only when the worker finishes.
-                if self.start_trash_worker(
+                // Drop speculative handles and advance the catalog before the
+                // platform move starts, matching the queued-Trash order.
+                let submitted = pending.context.clone();
+                self.commit_submitted_removal(&submitted);
+                if !self.start_trash_worker(
                     pending,
                     "Could not start the move to Trash. Nothing was moved.",
                 ) {
-                    self.advance_after_removal_submitted(playlist_index);
+                    self.revert_submitted_removal(&submitted);
                 }
             }
         }
@@ -4200,14 +4528,19 @@ impl App {
         let Some(pending) = self.pending_trash.pop_front() else {
             return false;
         };
+        let submitted = pending.context.clone();
         if self.start_trash_worker(
             pending,
             "Could not start the next queued move to Trash. That file was not moved.",
         ) {
             return true;
         }
-        let abandoned = self.pending_trash.len();
-        self.pending_trash.clear();
+        self.revert_submitted_removal(&submitted);
+        let abandoned = std::mem::take(&mut self.pending_trash);
+        for queued in &abandoned {
+            self.revert_submitted_removal(&queued.context);
+        }
+        let abandoned = abandoned.len();
         if abandoned > 0 {
             log::error!(
                 "queued Trash submissions abandoned after worker spawn failure: count={abandoned}"
@@ -4219,6 +4552,15 @@ impl App {
         false
     }
 
+    fn revert_abandoned_trash_queue(&mut self) -> usize {
+        let abandoned = std::mem::take(&mut self.pending_trash);
+        let count = abandoned.len();
+        for queued in &abandoned {
+            self.revert_submitted_removal(&queued.context);
+        }
+        count
+    }
+
     fn reconcile_pending_trash_after_terminal(&mut self, terminal: CurationTerminalState) -> bool {
         if matches!(terminal, CurationTerminalState::Succeeded) {
             return self.start_next_pending_trash();
@@ -4226,8 +4568,7 @@ impl App {
         if self.pending_trash.is_empty() {
             return false;
         }
-        let abandoned = self.pending_trash.len();
-        self.pending_trash.clear();
+        let abandoned = self.revert_abandoned_trash_queue();
         log::warn!("queued Trash submissions stopped after failed move: abandoned={abandoned}");
         let failure = self
             .toast
@@ -4239,11 +4580,14 @@ impl App {
         false
     }
 
-    fn finish_disconnected_curation(&mut self, kind: CurationKind, submitted: usize) {
+    fn finish_disconnected_curation(&mut self, context: &CurationContext, submitted: usize) {
+        if let Some(removal) = context.removal_context() {
+            self.revert_submitted_removal(removal);
+        }
         self.close_after_curation = false;
         self.close_after_save = false;
-        let abandoned = self.pending_trash.len();
-        self.pending_trash.clear();
+        let kind = context.kind();
+        let abandoned = self.revert_abandoned_trash_queue();
         log::error!(
             "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
         );
@@ -4302,8 +4646,7 @@ impl App {
                 .as_ref()
                 .map(|worker| curation_work(worker.context.kind())),
             source_verification,
-            self.folder_scan_job
-                .is_some()
+            self.exclusive_folder_scan()
                 .then_some(CurrentWork::FolderScan),
             image_preparation_work(self.session.is_loading(), self.preview_job.is_some()),
             crop_work(
@@ -5245,7 +5588,11 @@ impl App {
     }
 
     fn request_thumbs_for_filmstrip(&mut self) {
-        let paths = self.visible_filmstrip_paths();
+        if self.session.is_loading() {
+            return;
+        }
+        let blocked = self.pending_source_removal_paths();
+        let paths = exclude_blocked_neighbors(self.visible_filmstrip_paths(), &blocked);
         let visible = paths.iter().cloned().collect::<HashSet<_>>();
         self.thumb_textures.retain(|path, _| visible.contains(path));
         self.thumbnail_schedule.retain_visible_failures(&visible);
@@ -5425,12 +5772,8 @@ impl App {
         if !permanent_delete_confirmed(confirmed_label) {
             return;
         }
-        let playlist_index = self.playlist.as_ref().map_or(0, |p| p.index);
-        let context = CurationContext::PermanentDelete(RemovalContext {
-            path: path.clone(),
-            playlist_index,
-            scope: self.playlist_scope.clone(),
-        });
+        let removal = self.removal_context_for_path(path.clone());
+        let context = CurationContext::PermanentDelete(removal.clone());
         let started = self.start_curation_worker(
             "viewr-permanent-delete",
             context,
@@ -5440,7 +5783,7 @@ impl App {
             "Could not start permanent delete. Nothing was deleted.",
         );
         if started {
-            self.advance_after_removal_submitted(playlist_index);
+            self.commit_submitted_removal(&removal);
             self.show_toast("Permanently deleting file in the background");
         }
     }
@@ -5453,6 +5796,7 @@ impl App {
         let receipt = match result {
             Ok(receipt) => receipt,
             Err(error) => {
+                self.revert_submitted_removal(context);
                 log_guarded_action_failure(GuardedSourceAction::Trash, &error);
                 self.show_toast(guarded_source_action_failure_message(
                     GuardedSourceAction::Trash,
@@ -5487,7 +5831,11 @@ impl App {
             self.playlist.as_ref(),
             self.playlist_scope.as_ref(),
             context.scope.as_ref(),
-        ) {
+        ) && self
+            .playlist
+            .as_ref()
+            .is_some_and(|playlist| playlist.files.iter().any(|entry| entry == &context.path))
+        {
             self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
         }
         self.show_toast(single_trash_result_message(
@@ -5503,6 +5851,7 @@ impl App {
         result: Result<(), GuardedActionError>,
     ) -> CurationTerminalState {
         if let Err(error) = result {
+            self.revert_submitted_removal(context);
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
             self.show_toast(guarded_source_action_failure_message(
                 GuardedSourceAction::PermanentDelete,
@@ -5523,7 +5872,11 @@ impl App {
             self.playlist.as_ref(),
             self.playlist_scope.as_ref(),
             context.scope.as_ref(),
-        ) {
+        ) && self
+            .playlist
+            .as_ref()
+            .is_some_and(|playlist| playlist.files.iter().any(|entry| entry == &context.path))
+        {
             self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
         }
         let safe_name = prefetch::privacy_safe_file_name(&context.path).replace('"', "?");
@@ -5546,6 +5899,9 @@ impl App {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
+            if self.mosaic.is_active() {
+                self.leave_full_image_mosaic();
+            }
             return;
         };
 
@@ -5565,12 +5921,19 @@ impl App {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
+            if self.mosaic.is_active() {
+                self.leave_full_image_mosaic();
+            }
             return;
         }
         if playlist.visible_len() == 0 {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
+            if self.mosaic.is_active() {
+                self.leave_full_image_mosaic();
+            }
+            self.restart_membership_scan_if_active();
             return;
         }
 
@@ -5583,6 +5946,10 @@ impl App {
             // bookkeeping and neighbor work.
             self.session.selected_path = Some(path);
             self.kick_prefetch();
+            if self.mosaic.is_active() {
+                self.refresh_mosaic_after_membership_change();
+            }
+            self.restart_membership_scan_if_active();
             self.request_redraw();
             return;
         }
@@ -5593,6 +5960,10 @@ impl App {
         self.transform = Transform::default();
         self.spawn_image_load(next_path);
         self.kick_prefetch();
+        if self.mosaic.is_active() {
+            self.refresh_mosaic_after_membership_change();
+        }
+        self.restart_membership_scan_if_active();
     }
 
     fn handle_missing_selected_path(&mut self, path: PathBuf) {
@@ -5854,6 +6225,7 @@ impl App {
             }
             return;
         }
+        self.prefetch_schedule.allow(&path);
         let (tx, rx) = std::sync::mpsc::channel();
         self.session.receiver = Some(rx);
         let event_proxy = self.event_proxy.clone();
@@ -6195,6 +6567,7 @@ impl App {
 
         match poll {
             WorkerPoll::Ready(completion) => {
+                let queued_removal = worker.context.removal_context().cloned();
                 let terminal = match (worker.context, completion) {
                     (CurationContext::Trash(context), CurationCompletion::Trash { result }) => {
                         self.curation_recovery.clear(CurationKind::Trash);
@@ -6219,10 +6592,12 @@ impl App {
                         self.finish_trash_restore(context, outcome, evidence, elapsed)
                     }
                     _ => {
+                        if let Some(removal) = queued_removal {
+                            self.revert_submitted_removal(&removal);
+                        }
                         self.close_after_curation = false;
                         self.close_after_save = false;
-                        let abandoned = self.pending_trash.len();
-                        self.pending_trash.clear();
+                        let abandoned = self.revert_abandoned_trash_queue();
                         log::error!(
                             "curation worker returned a mismatched completion: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
                         );
@@ -6253,7 +6628,7 @@ impl App {
                 }
             }
             WorkerPoll::Disconnected => {
-                self.finish_disconnected_curation(kind, submitted);
+                self.finish_disconnected_curation(&worker.context, submitted);
             }
             WorkerPoll::Pending => unreachable!("pending workers return before being taken"),
         }
@@ -7264,6 +7639,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         Key::Named(NamedKey::PageUp) => self.move_mosaic_page(-1),
                         Key::Named(NamedKey::PageDown) => self.move_mosaic_page(1),
+                        key if is_trash_shortcut_key(&key) => self.trash_current(),
                         _ => {}
                     }
                     return;
@@ -7456,7 +7832,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let curation_recovery_status = self.curation_recovery.status();
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
-                let folder_scan_busy = self.folder_scan_job.is_some();
+                let folder_scan_busy = self.exclusive_folder_scan();
                 let source_verification_busy = self.open_with_job.is_some();
                 let path_str = self
                     .session
@@ -8597,6 +8973,31 @@ mod test {
             wake_receiver.try_recv(),
             Err(mpsc::TryRecvError::Disconnected)
         ));
+    }
+
+    #[test]
+    fn curation_removal_path_is_only_source_removal() {
+        let trash = CurationContext::Trash(RemovalContext {
+            path: PathBuf::from("queued.png"),
+            playlist_index: 2,
+            scope: None,
+            rating: RatingState::Unrated,
+            provenance: None,
+        });
+        let permanent = CurationContext::PermanentDelete(RemovalContext {
+            path: PathBuf::from("gone.png"),
+            playlist_index: 0,
+            scope: None,
+            rating: RatingState::Unrated,
+            provenance: None,
+        });
+        let restore = CurationContext::Restore(RestoreContext {
+            submitted: 1,
+            scope: None,
+        });
+        assert_eq!(trash.removal_path(), Some(Path::new("queued.png")));
+        assert_eq!(permanent.removal_path(), Some(Path::new("gone.png")));
+        assert_eq!(restore.removal_path(), None);
     }
 
     #[test]

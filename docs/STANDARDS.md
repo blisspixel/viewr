@@ -56,6 +56,10 @@ with intent, not as though it was assembled from plausible fragments.
   opt into the strict set and allow specific lints explicitly in workspace
   configuration with a comment saying why. Turning
   stylistic advice into a build failure is the point.
+- `unused_must_use` is denied, and Clippy also denies `dbg!`, `todo!`, and
+  `unimplemented!`. Discarded `Result` values must be explicit (`let _ =` on a
+  send that cannot usefully be handled, or a typed match). Placeholder panics
+  and leftover debug prints do not merge.
 - No warnings of any kind in a merged build. A warning is a bug that has not
   happened yet.
 - Repository-owned Python release tooling is gated by a version- and wheel-hash-

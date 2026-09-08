@@ -213,6 +213,7 @@ class DocumentationTests(unittest.TestCase):
         contract_surfaces = (
             "README.md",
             "CONTRIBUTING.md",
+            "AGENTS.md",
             "docs/STANDARDS.md",
             "docs/VERIFY.md",
             ".github/workflows/ci.yml",
@@ -298,6 +299,17 @@ class DocumentationTests(unittest.TestCase):
         deny_policy = (REPOSITORY_ROOT / "deny.toml").read_text(encoding="utf-8")
         self.assertIn('multiple-versions = "deny"', deny_policy)
         self.assertNotIn('multiple-versions = "warn"', deny_policy)
+
+    def test_claude_md_imports_canonical_agents_md(self) -> None:
+        claude = (REPOSITORY_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("@AGENTS.md", claude)
+        for command in (
+            "cargo fmt --all -- --check",
+            "cargo clippy --workspace --all-targets --locked -- -D warnings",
+            "cargo test --workspace --all-targets --locked",
+        ):
+            with self.subTest(command=command):
+                self.assertNotIn(command, claude)
 
     def test_linux_runtime_libraries_match_the_launch_check(self) -> None:
         """Every library the launch check probes is named in the install guide."""

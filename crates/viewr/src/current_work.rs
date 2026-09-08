@@ -251,6 +251,10 @@ mod tests {
             None
         );
         assert_eq!(
+            blocked_action_message("moving this file to Trash", CurrentWork::FolderScan),
+            "Wait for the folder scan to finish before moving this file to Trash"
+        );
+        assert_eq!(
             blocked_action_message("moving this file to Trash", CurrentWork::SpotHeal),
             "Wait for Spot Heal to finish before moving this file to Trash"
         );
@@ -291,6 +295,10 @@ mod tests {
 
     #[test]
     fn repeated_trash_ignores_only_the_serialized_trash_owner() {
+        assert_eq!(
+            trash_submission_work_blocker([Some(CurrentWork::FolderScan), None, None, None,]),
+            Some(CurrentWork::FolderScan)
+        );
         assert_eq!(
             trash_submission_work_blocker([Some(CurrentWork::TrashMove), None, None, None,]),
             None

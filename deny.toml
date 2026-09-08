@@ -87,6 +87,7 @@ skip = [
     { crate = "hashbrown@0.16.1", reason = "the locked AccessKit and wgpu lines require hashbrown 0.16" },
     { crate = "jni-sys@0.3.1", reason = "the Android NDK line and jni-sys 0.4 bridge require this ABI line" },
     { crate = "linux-raw-sys@0.4.15", reason = "winit's rustix 0.38 path requires linux-raw-sys 0.4" },
+    { crate = "miniz_oxide@0.8.9", reason = "png 0.18, exr 1.74, and little_exif 0.6 require miniz_oxide 0.8 while flate2 1.1.10 uses 0.9" },
     { crate = "objc2@0.5.2", reason = "winit and AccessKit macOS adapters require objc2 0.5" },
     { crate = "objc2-app-kit@0.2.2", reason = "winit and AccessKit macOS adapters require AppKit 0.2" },
     { crate = "objc2-foundation@0.2.2", reason = "winit and AccessKit macOS adapters require Foundation 0.2" },

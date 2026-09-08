@@ -1825,12 +1825,15 @@ impl App {
                             self.session.presented_path = Some(new_path);
                         }
                         self.start_coherence_watch();
-                    } else if self.session.selected_path.as_deref() != Some(new_path.as_path()) {
+                    } else if self.session.selected_path.is_none() {
                         self.session.selected_path = Some(new_path.clone());
                         self.spawn_image_load(new_path);
                     }
                 }
-                let found_same = self.session.selected_path.as_deref() == Some(preferred.as_path());
+                let found_same = self
+                    .playlist
+                    .as_ref()
+                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
                 self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session
@@ -1864,12 +1867,15 @@ impl App {
                             self.session.presented_path = Some(new_path);
                         }
                         self.start_coherence_watch();
-                    } else if self.session.selected_path.as_deref() != Some(new_path.as_path()) {
+                    } else if self.session.selected_path.is_none() {
                         self.session.selected_path = Some(new_path.clone());
                         self.spawn_image_load(new_path);
                     }
                 }
-                let found_same = self.session.selected_path.as_deref() == Some(preferred.as_path());
+                let found_same = self
+                    .playlist
+                    .as_ref()
+                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
                 self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session

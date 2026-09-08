@@ -21,8 +21,8 @@ and organized by user-visible concern.
   the remaining files instead of leaving an empty window. Collage no longer
   rebuilds unchanged pages after a membership refresh, and Delete in collage
   moves the focused ready photo to Trash. A membership refresh no longer puts a
-  trashed file back, collapses the folder when the refresh fails, or leaves the
-  session on a file already removed outside viewr.
+  trashed file back or collapses the folder when the refresh fails. An external
+  delete still keeps the last good frame on screen.
   Speculative neighbor and filmstrip work wait until the selected image is on
   screen, and files already accepted for Trash are not decoded again behind the
   image the user is looking at.

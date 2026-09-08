@@ -6,6 +6,8 @@
 
 use std::path::Path;
 
+use crate::playlist::ScanPurpose;
+
 /// Outcome of a finished folder scan for one entry request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FolderScanDisposition {
@@ -90,6 +92,63 @@ pub(crate) fn path_entry(path: &Path, is_directory: impl Fn(&Path) -> bool) -> P
 #[must_use]
 pub(crate) fn selected_scan_is_current(current: Option<&Path>, selected: &Path) -> bool {
     current == Some(selected)
+}
+
+/// Exclusive scans install the first catalog. A membership refresh of an
+/// already-open folder must not freeze Trash, navigation, or current-image tools.
+#[must_use]
+pub(crate) const fn folder_scan_blocks_interaction(purpose: Option<&ScanPurpose>) -> bool {
+    matches!(
+        purpose,
+        Some(
+            ScanPurpose::OpenFolder
+                | ScanPurpose::SelectedFile {
+                    missing_recovery: true,
+                    ..
+                }
+        )
+    )
+}
+
+/// A sibling scan still belongs to this browse session.
+///
+/// Optimistic Trash can clear the selection and empty a one-item catalog while
+/// the parent folder is still being enumerated. That scan must still apply.
+#[must_use]
+pub(crate) const fn sibling_scan_still_applies(
+    has_selected_path: bool,
+    has_playlist: bool,
+) -> bool {
+    has_selected_path || has_playlist
+}
+
+/// An unmatched sibling scan should update an existing catalog, including an
+/// empty one left by optimistic Trash, instead of collapsing to one file.
+#[must_use]
+pub(crate) const fn unmatched_sibling_scan_adopts_catalog(
+    has_playlist: bool,
+    remaining_entries: usize,
+) -> bool {
+    has_playlist && remaining_entries > 0
+}
+
+/// Whether a later folder listing may still name this path.
+///
+/// In-flight Trash must not reinstall the file. A completed Trash receipt must
+/// not reinstall it either, unless Undo already put it back in the catalog.
+#[must_use]
+pub(crate) fn committed_scan_path_is_admissible(
+    in_flight_removal: bool,
+    unrestored_trash: bool,
+    still_in_catalog: bool,
+) -> bool {
+    if in_flight_removal {
+        return false;
+    }
+    if unrestored_trash && !still_in_catalog {
+        return false;
+    }
+    true
 }
 
 #[must_use]
@@ -216,6 +275,50 @@ pub(crate) const fn folder_scan_user_message(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn membership_refresh_does_not_lock_an_open_folder() {
+        let selected = ScanPurpose::SelectedFile {
+            path: PathBuf::from("photo.png"),
+            missing_recovery: false,
+        };
+        let missing = ScanPurpose::SelectedFile {
+            path: PathBuf::from("photo.png"),
+            missing_recovery: true,
+        };
+        assert!(folder_scan_blocks_interaction(Some(
+            &ScanPurpose::OpenFolder
+        )));
+        assert!(!folder_scan_blocks_interaction(Some(&selected)));
+        assert!(folder_scan_blocks_interaction(Some(&missing)));
+        assert!(!folder_scan_blocks_interaction(None));
+    }
+
+    #[test]
+    fn sibling_scan_survives_an_empty_catalog_after_trash() {
+        assert!(sibling_scan_still_applies(true, true));
+        assert!(sibling_scan_still_applies(true, false));
+        assert!(sibling_scan_still_applies(false, true));
+        assert!(!sibling_scan_still_applies(false, false));
+    }
+
+    #[test]
+    fn unmatched_sibling_scan_adopts_an_empty_existing_catalog() {
+        assert!(unmatched_sibling_scan_adopts_catalog(true, 3));
+        assert!(unmatched_sibling_scan_adopts_catalog(true, 1));
+        assert!(!unmatched_sibling_scan_adopts_catalog(true, 0));
+        assert!(!unmatched_sibling_scan_adopts_catalog(false, 3));
+    }
+
+    #[test]
+    fn completed_trash_does_not_rejoin_the_catalog_until_undo() {
+        assert!(committed_scan_path_is_admissible(false, false, false));
+        assert!(committed_scan_path_is_admissible(false, false, true));
+        assert!(!committed_scan_path_is_admissible(true, false, false));
+        assert!(!committed_scan_path_is_admissible(true, false, true));
+        assert!(!committed_scan_path_is_admissible(false, true, false));
+        assert!(committed_scan_path_is_admissible(false, true, true));
+    }
 
     #[test]
     fn a_folder_from_outside_the_window_browses_and_everything_else_decodes() {

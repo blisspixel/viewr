@@ -302,7 +302,8 @@ and unsupported containers, remain visibly read-only.
 
 ### Delete and undo
 - `Delete` moves only the currently displayed file to the operating-system Trash.
-  File > Move to Trash exposes the same action. There is no bare-letter shortcut,
+  In the full-image collage, that is the focused ready photo. File > Move to Trash
+  exposes the same action. There is no bare-letter shortcut,
   mark state, review mode, or batch-trash action. Destructive intent therefore
   stays attached to a conventional key and a visible current target.
 - Accepted pixels retain their exact open source handle through foreground,
@@ -312,9 +313,14 @@ and unsupported containers, remain visibly read-only.
   A missing, replaced, linked, or unverifiable entry fails closed without changing
   playlist or Undo state. Once the background file operation is accepted, the
   surviving neighbor begins presentation immediately while the operating system
-  finishes the move. If that neighbor becomes fully presented before the first
-  move finishes, another Delete accepts it into a bounded application queue and
-  advances again. Platform Trash calls and receipt capture remain serialized, so
+  finishes the move. Neighbor decodes already in memory stay there; a later
+  folder membership refresh does not throw them away and does not lock Trash or
+  navigation behind "Wait for the folder scan to finish". The folder counter
+  drops as soon as Delete is accepted. Deleting the opened file before the
+  sibling list arrives still installs the remaining files. Speculative neighbor
+  work waits until the selected image is on screen. If that neighbor becomes fully presented
+  before the first move finishes, another Delete accepts it into a bounded
+  application queue and advances again. Platform Trash calls and receipt capture remain serialized, so
   exact source and Undo evidence cannot race. A selected image that is still
   loading is never queued, and the shortcut reports that it must finish opening.
   Success then reconciles the canonical playlist and shows a

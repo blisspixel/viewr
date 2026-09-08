@@ -5,6 +5,28 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Product quality
+
+- Culling a folder no longer stalls after a few Delete presses. A later folder
+  membership refresh keeps the open catalog, ratings, filter, Undo scope, and
+  already-decoded neighbors instead of treating the folder as a new open. That
+  refresh no longer takes the exclusive folder-scan lock, so Delete and
+  navigation do not freeze behind "Wait for the folder scan to finish". The
+  folder counter drops as soon as Delete is accepted, instead of waiting for
+  the operating-system Trash move. A sibling scan that cannot match the
+  current file no longer collapses a populated folder to a one-item playlist.
+  Opening a file now keeps a one-item catalog while siblings are enumerated, so
+  Delete during that scan cannot blank the window and then reinstall the trashed
+  file. Deleting that opened file before the sibling list arrives still installs
+  the remaining files instead of leaving an empty window. Collage no longer
+  rebuilds unchanged pages after a membership refresh, and Delete in collage
+  moves the focused ready photo to Trash. A membership refresh no longer puts a
+  trashed file back, collapses the folder when the refresh fails, or leaves the
+  session on a file already removed outside viewr.
+  Speculative neighbor and filmstrip work wait until the selected image is on
+  screen, and files already accepted for Trash are not decoded again behind the
+  image the user is looking at.
+
 ## 0.6.1 - 2026-09-02
 
 ### Product quality

@@ -6,7 +6,7 @@ LICENSE.
 
 ## License summary
 
-- Apache-2.0 (Apache License 2.0): 281 packages
+- Apache-2.0 (Apache License 2.0): 282 packages
 - MIT (MIT License): 87 packages
 - Unicode-3.0 (Unicode License v3): 19 packages
 - BSD-3-Clause (BSD 3-Clause "New" or "Revised" License): 9 packages
@@ -4100,7 +4100,7 @@ used_by:
   event-listener-strategy 0.5.4
   event-listener 5.4.2
   fastrand 2.5.0
-  flate2 1.1.9
+  flate2 1.1.10
   form_urlencoded 1.2.2
   futures-lite 2.6.1
   gethostname 1.1.0
@@ -6467,6 +6467,7 @@ used_by:
   linebender_resource_handle 0.1.1
   litrs 1.0.0
   miniz_oxide 0.8.9
+  miniz_oxide 0.9.1
   naga 29.0.4
   objc2-app-kit 0.3.2
   objc2-core-foundation 0.3.2
@@ -7478,7 +7479,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ### MIT
 name: MIT License
 used_by:
-  trash 5.2.6
+  trash 5.2.7
 text:
 <<<
 Copyright 2019 Artúr Barnabás Kovács

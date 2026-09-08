@@ -218,6 +218,49 @@ pub(crate) fn permanent_delete_confirmed(custom_label: Option<&str>) -> bool {
     matches!(custom_label, Some(label) if label == PERMANENT_DELETE_ACTION)
 }
 
+/// Wait copy when Trash or permanent delete has no ready source.
+///
+/// A missing selection with no collage focus is a quiet no-op: there is no
+/// destructive target to name.
+#[must_use]
+pub(crate) fn removal_unready_message(
+    action: GuardedSourceAction,
+    mosaic: bool,
+    has_selection: bool,
+    load_failed: bool,
+) -> Option<&'static str> {
+    if mosaic {
+        return Some(match action {
+            GuardedSourceAction::Trash => {
+                "Wait for this photo to finish opening before moving it to Trash"
+            }
+            GuardedSourceAction::PermanentDelete => {
+                "Wait for this photo to finish opening before permanently deleting it"
+            }
+        });
+    }
+    if !has_selection {
+        return None;
+    }
+    Some(if load_failed {
+        match action {
+            GuardedSourceAction::Trash => "Reload or open another image before moving it to Trash",
+            GuardedSourceAction::PermanentDelete => {
+                "Reload or open another image before permanently deleting it"
+            }
+        }
+    } else {
+        match action {
+            GuardedSourceAction::Trash => {
+                "Wait for the selected image to finish opening before moving it to Trash"
+            }
+            GuardedSourceAction::PermanentDelete => {
+                "Wait for the selected image to finish opening before permanently deleting it"
+            }
+        }
+    })
+}
+
 /// Path-free success copy after permanent delete. `safe_name` must already be
 /// privacy-safe and quote-sanitized by the caller.
 #[must_use]
@@ -634,6 +677,30 @@ mod tests {
         assert!(!permanent_delete_confirmed(Some("Cancel")));
         assert!(!permanent_delete_confirmed(None));
         assert!(!permanent_delete_confirmed(Some("Ok")));
+    }
+
+    #[test]
+    fn removal_unready_copy_names_the_wait_without_a_silent_no_op() {
+        assert_eq!(
+            removal_unready_message(GuardedSourceAction::Trash, true, false, false),
+            Some("Wait for this photo to finish opening before moving it to Trash")
+        );
+        assert_eq!(
+            removal_unready_message(GuardedSourceAction::PermanentDelete, true, true, false),
+            Some("Wait for this photo to finish opening before permanently deleting it")
+        );
+        assert_eq!(
+            removal_unready_message(GuardedSourceAction::Trash, false, true, true),
+            Some("Reload or open another image before moving it to Trash")
+        );
+        assert_eq!(
+            removal_unready_message(GuardedSourceAction::PermanentDelete, false, true, false),
+            Some("Wait for the selected image to finish opening before permanently deleting it")
+        );
+        assert_eq!(
+            removal_unready_message(GuardedSourceAction::PermanentDelete, false, false, false),
+            None
+        );
     }
 
     #[test]

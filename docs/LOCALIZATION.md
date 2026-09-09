@@ -23,9 +23,9 @@ oversized, or unreadable state fails to System with path-free recovery guidance.
 The bundled catalog covers the primary menu bar, file and folder entry points,
 Preferences, file-association entry points, empty-state actions, crop controls,
 the main panel headings, the complete first-run, open-status, and Help shortcut
-surface, and every Trash, permanent-delete, and restore message. Remaining
-advanced status, metadata, and editing explanations still use the explicit
-English fallback. The roadmap keeps complete catalog coverage and native
+surface, every Trash, permanent-delete, and restore message, the concurrent-work
+wait sentences, and rating write failures. Remaining panel, metadata, and
+editing explanations still use the explicit English fallback. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called
 complete. Destructive-action copy tells someone whether their file still
 exists, so it needs native review before the accessibility and language matrix
@@ -74,3 +74,14 @@ every language rather than formatting the same sentence twice.
 Do not translate shortcuts, filenames, metadata values, format identifiers, or
 product names. Do translate action names and the explanatory copy that gives
 those values meaning.
+
+## Sentences assembled from parts
+
+A sentence built from fragments cannot be translated by translating the
+fragments in English word order. Where viewr composes copy, each language owns
+the whole frame and each clause carries its own connective, so it can reorder
+and inflect freely. The concurrent-work wait sentence is the worked example:
+`current_work` holds one template with `{work}` and `{action}` placeholders, a
+cataloged name per running operation, and a cataloged clause per attempted
+action, selected by the typed `BlockedAction`. A caller cannot pass an English
+phrase, because the parameter is an enum rather than a string.

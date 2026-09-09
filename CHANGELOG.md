@@ -17,6 +17,12 @@ and organized by user-visible concern.
   copy, and recovery guidance. Counts and file names are placed by each
   language rather than appended in English word order. A permanent-delete
   confirmation is now recognized in the language it was shown in.
+- The "wait for the folder scan to finish" family of messages is translated.
+  Each language owns the whole sentence rather than receiving English word
+  order, and the attempted action is now a typed value, so an untranslatable
+  English phrase cannot be passed in.
+- Rating write failures and the loss of the details worker are translated, so
+  the message that says whether a file was changed is in the reader's language.
 - Interface copy that is missing from the language catalog now fails the build
   rather than rendering English in every language, and the empty-state card and
   status line share one owner so the same sentence cannot drift apart.

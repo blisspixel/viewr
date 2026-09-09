@@ -47,9 +47,10 @@ use crate::curation_state::{
     single_trash_result_message,
 };
 use crate::current_work::{
-    ActiveModeAllowance, CurrentWork, blocked_action_message, browse_work_blocker, crop_work,
-    curation_action_preflight, curation_work, current_work_blocker, image_preparation_work,
-    spot_heal_source_blocker, spot_heal_work, trash_submission_work_blocker,
+    ActiveModeAllowance, BlockedAction, CurrentWork, blocked_action_message, browse_work_blocker,
+    crop_work, curation_action_preflight, curation_work, current_work_blocker,
+    image_preparation_work, spot_heal_source_blocker, spot_heal_work,
+    trash_submission_work_blocker,
 };
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
@@ -1308,7 +1309,7 @@ impl App {
     fn open_path_request(&mut self, path: PathBuf) {
         match path_entry(&path, Path::is_dir) {
             PathEntry::Folder => {
-                if self.block_action_while_curating("opening another folder") {
+                if self.block_action_while_curating(BlockedAction::OpenAnotherFolder) {
                     return;
                 }
                 self.cancel_open_with_check();
@@ -1320,7 +1321,7 @@ impl App {
     }
 
     fn load_and_scan(&mut self, path: PathBuf) {
-        if self.block_action_while_curating("opening another image") {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherImage) {
             return;
         }
         let path = crate::fs::canonical_file_path(&path).unwrap_or(path);
@@ -1359,7 +1360,7 @@ impl App {
     }
 
     fn open_image_dialog(&mut self) {
-        if self.block_action_while_curating("opening another image") {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherImage) {
             return;
         }
         self.cancel_open_with_check();
@@ -1373,7 +1374,7 @@ impl App {
     }
 
     fn open_folder_dialog(&mut self) {
-        if self.block_action_while_curating("opening another folder") {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherFolder) {
             return;
         }
         self.cancel_open_with_check();
@@ -2446,7 +2447,7 @@ impl App {
                 if let Some(playlist) = self.playlist.as_mut() {
                     playlist.set_rating(&context.path, rating.state);
                 }
-                self.show_toast(auxiliary_disconnect_message());
+                self.show_toast(auxiliary_disconnect_message(self.language));
                 self.request_redraw();
                 return;
             }
@@ -2624,7 +2625,7 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_busy("changing the rating") {
+        if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
@@ -2697,7 +2698,7 @@ impl App {
             self.show_toast(message);
             return false;
         }
-        if self.block_action_while_busy("changing the rating") {
+        if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return false;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
@@ -2811,7 +2812,7 @@ impl App {
                         }
                     }
                 }
-                self.show_toast(rating_write_failure_message(error));
+                self.show_toast(rating_write_failure_message(self.language, error));
             }
         }
         self.kick_prefetch();
@@ -2822,7 +2823,7 @@ impl App {
     }
 
     fn set_rating_filter(&mut self, filter: RatingFilter) {
-        if self.block_action_while_busy("changing the rating filter") {
+        if self.block_action_while_busy(BlockedAction::ChangeRatingFilter) {
             return;
         }
         let worker_active = self.rating_scan_worker.is_some();
@@ -2991,7 +2992,7 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_curating("retrying the image load") {
+        if self.block_action_while_curating(BlockedAction::RetryImageLoad) {
             return;
         }
         let Some(path) = self.session.selected_path.clone() else {
@@ -3007,7 +3008,7 @@ impl App {
     fn reload_current_image(&mut self) {
         use crate::file_coherence::ReloadStartBlocker;
 
-        if self.block_action_while_curating("reloading this file") {
+        if self.block_action_while_curating(BlockedAction::ReloadFile) {
             return;
         }
         if let Some(blocker) = crate::file_coherence::reload_start_blocker([
@@ -3048,7 +3049,7 @@ impl App {
     }
 
     fn open_current_with(&mut self) {
-        if self.block_action_while_busy("opening the source in another app") {
+        if self.block_action_while_busy(BlockedAction::OpenInAnotherApp) {
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -4094,7 +4095,9 @@ impl App {
     }
 
     fn rotate_current(&mut self, quarter_turns: i32) {
-        if self.block_action_with_mode_allowance("rotating the image", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::RotateImage, ActiveModeAllowance::Crop)
+        {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -4115,7 +4118,9 @@ impl App {
     }
 
     fn flip_current_horizontally(&mut self) {
-        if self.block_action_with_mode_allowance("flipping the image", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::FlipImage, ActiveModeAllowance::Crop)
+        {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -4125,7 +4130,9 @@ impl App {
     }
 
     fn flip_current_vertically(&mut self) {
-        if self.block_action_with_mode_allowance("flipping the image", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::FlipImage, ActiveModeAllowance::Crop)
+        {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -4464,7 +4471,11 @@ impl App {
         if let Some(blocker) =
             trash_submission_work_blocker(self.active_work(ActiveModeAllowance::None))
         {
-            self.show_toast(blocked_action_message("moving this file to Trash", blocker));
+            self.show_toast(blocked_action_message(
+                self.language,
+                BlockedAction::Trash,
+                blocker,
+            ));
             return;
         }
         if let Some(message) = self
@@ -4495,7 +4506,8 @@ impl App {
             }
             TrashAdmission::Busy(kind) => {
                 self.show_toast(blocked_action_message(
-                    "moving this file to Trash",
+                    self.language,
+                    BlockedAction::Trash,
                     curation_work(kind),
                 ));
             }
@@ -4688,40 +4700,44 @@ impl App {
 
     fn block_action_with_mode_allowance(
         &mut self,
-        action: &str,
+        action: BlockedAction,
         allowance: ActiveModeAllowance,
     ) -> bool {
         if let Some(blocker) = self.busy_blocker(allowance) {
-            self.show_toast(blocked_action_message(action, blocker));
+            self.show_toast(blocked_action_message(self.language, action, blocker));
             true
         } else {
             false
         }
     }
 
-    fn block_action_while_busy(&mut self, action: &str) -> bool {
+    fn block_action_while_busy(&mut self, action: BlockedAction) -> bool {
         self.block_action_with_mode_allowance(action, ActiveModeAllowance::None)
     }
 
-    fn block_edit_history_while_busy(&mut self, action: &str) -> bool {
+    fn block_edit_history_while_busy(&mut self, action: BlockedAction) -> bool {
         self.block_action_with_mode_allowance(action, ActiveModeAllowance::SpotHeal)
     }
 
     fn block_browse_while_busy(&mut self) -> bool {
         if let Some(blocker) = browse_work_blocker(self.active_work(ActiveModeAllowance::None)) {
-            self.show_toast(blocked_action_message("browsing to another image", blocker));
+            self.show_toast(blocked_action_message(
+                self.language,
+                BlockedAction::Browse,
+                blocker,
+            ));
             true
         } else {
             false
         }
     }
 
-    fn block_action_while_curating(&mut self, action: &str) -> bool {
+    fn block_action_while_curating(&mut self, action: BlockedAction) -> bool {
         let Some(worker) = self.curation_worker.as_ref() else {
             return false;
         };
         let blocker = curation_work(worker.context.kind());
-        self.show_toast(blocked_action_message(action, blocker));
+        self.show_toast(blocked_action_message(self.language, action, blocker));
         true
     }
 
@@ -4814,7 +4830,10 @@ impl App {
         if self.current_loaded_path().is_none() {
             return;
         }
-        if self.block_action_with_mode_allowance("changing Crop", ActiveModeAllowance::SpotHeal) {
+        if self.block_action_with_mode_allowance(
+            BlockedAction::ChangeCrop,
+            ActiveModeAllowance::SpotHeal,
+        ) {
             return;
         }
 
@@ -4970,16 +4989,21 @@ impl App {
             self.request_redraw();
             return;
         }
-        if let Some(message) =
-            spot_heal_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
-        {
+        if let Some(message) = spot_heal_source_blocker(
+            self.language,
+            self.session.is_loading(),
+            self.session.load_error.is_some(),
+        ) {
             self.show_toast(message);
             return;
         }
         if self.current_loaded_path().is_none() {
             return;
         }
-        if self.block_action_with_mode_allowance("changing Spot Heal", ActiveModeAllowance::Crop) {
+        if self.block_action_with_mode_allowance(
+            BlockedAction::ChangeSpotHeal,
+            ActiveModeAllowance::Crop,
+        ) {
             return;
         }
         if !self.can_heal_current_image() {
@@ -5022,7 +5046,7 @@ impl App {
     }
 
     fn refresh_heal_source(&mut self) {
-        if self.block_edit_history_while_busy("refreshing the heal source") {
+        if self.block_edit_history_while_busy(BlockedAction::RefreshHealSource) {
             return;
         }
         let Some(refresh) = self.heal.refresh.as_ref() else {
@@ -5101,7 +5125,7 @@ impl App {
         if !self.heal.active {
             return;
         }
-        if self.block_edit_history_while_busy("starting a spot-heal stroke") {
+        if self.block_edit_history_while_busy(BlockedAction::StartHealStroke) {
             return;
         }
         self.heal.stroke.clear();
@@ -5281,7 +5305,7 @@ impl App {
         if !self.heal.history.can_undo() {
             return;
         }
-        if self.block_edit_history_while_busy("undoing an edit") {
+        if self.block_edit_history_while_busy(BlockedAction::UndoEdit) {
             return;
         }
         let result = {
@@ -5317,7 +5341,7 @@ impl App {
         if !self.heal.history.can_redo() {
             return;
         }
-        if self.block_edit_history_while_busy("redoing an edit") {
+        if self.block_edit_history_while_busy(BlockedAction::RedoEdit) {
             return;
         }
         let result = {
@@ -5758,7 +5782,7 @@ impl App {
             }
             return;
         };
-        if self.block_action_while_busy("permanently deleting this file") {
+        if self.block_action_while_busy(BlockedAction::PermanentlyDelete) {
             return;
         }
         if let Some(message) = self
@@ -6067,15 +6091,16 @@ impl App {
             .as_ref()
             .map(|worker| worker.context.kind());
         if let Some(message) = curation_action_preflight(
+            self.language,
             active,
             !self.last_trashed.is_empty(),
-            "restoring files from Trash",
-            "Nothing to restore from Trash",
+            BlockedAction::RestoreFromTrash,
+            crate::current_work::NOTHING_TO_RESTORE,
         ) {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_busy("restoring files from Trash") {
+        if self.block_action_while_busy(BlockedAction::RestoreFromTrash) {
             return;
         }
 
@@ -6375,7 +6400,7 @@ impl App {
     }
 
     fn save_as(&mut self) {
-        if self.block_action_while_curating("saving a copy") {
+        if self.block_action_while_curating(BlockedAction::SaveCopy) {
             return;
         }
         if let Some(blocker) = save_start_blocker([
@@ -6679,7 +6704,9 @@ impl App {
         let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        if self.block_action_with_mode_allowance("applying the crop", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::ApplyCrop, ActiveModeAllowance::Crop)
+        {
             return;
         }
         let Some(rect) = self.transform.crop_rect else {

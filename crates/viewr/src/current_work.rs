@@ -5,6 +5,80 @@
 //! immutable facts.
 
 use crate::curation_state::CurationKind;
+use crate::locale::Language;
+
+/// Wait sentence. `{work}` is the running work, `{action}` the attempted one.
+const WAIT_TEMPLATE: &str = "Wait for {work} to finish {action}";
+/// Placeholder for the running work.
+const WORK_PLACEHOLDER: &str = "{work}";
+/// Placeholder for the attempted action clause.
+const ACTION_PLACEHOLDER: &str = "{action}";
+/// Spot Heal needs a settled source, not a last good frame.
+const WAIT_FOR_OPEN_BEFORE_HEAL: &str =
+    "Wait for the image to finish opening before using Spot Heal";
+/// Spot Heal after a failed open.
+const RETRY_LOAD_BEFORE_HEAL: &str = "Retry the failed image load before using Spot Heal";
+/// Undo with nothing to restore.
+pub(crate) const NOTHING_TO_RESTORE: &str = "Nothing to restore from Trash";
+
+/// What the user tried to do while other work held the foreground.
+///
+/// A typed action keeps the wait sentence assembled from two cataloged halves.
+/// A free-form English fragment could not be translated, because each language
+/// needs its own connective and verb form.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BlockedAction {
+    ApplyCrop,
+    Browse,
+    ChangeCrop,
+    ChangeRating,
+    ChangeRatingFilter,
+    ChangeSpotHeal,
+    FlipImage,
+    OpenAnotherFolder,
+    OpenAnotherImage,
+    OpenInAnotherApp,
+    PermanentlyDelete,
+    RedoEdit,
+    RefreshHealSource,
+    ReloadFile,
+    RestoreFromTrash,
+    RetryImageLoad,
+    RotateImage,
+    SaveCopy,
+    StartHealStroke,
+    Trash,
+    UndoEdit,
+}
+
+impl BlockedAction {
+    /// Cataloged clause that completes the wait sentence, connective included.
+    const fn source(self) -> &'static str {
+        match self {
+            Self::ApplyCrop => "before applying the crop",
+            Self::Browse => "before browsing to another image",
+            Self::ChangeCrop => "before changing Crop",
+            Self::ChangeRating => "before changing the rating",
+            Self::ChangeRatingFilter => "before changing the rating filter",
+            Self::ChangeSpotHeal => "before changing Spot Heal",
+            Self::FlipImage => "before flipping the image",
+            Self::OpenAnotherFolder => "before opening another folder",
+            Self::OpenAnotherImage => "before opening another image",
+            Self::OpenInAnotherApp => "before opening the source in another app",
+            Self::PermanentlyDelete => "before permanently deleting this file",
+            Self::RedoEdit => "before redoing an edit",
+            Self::RefreshHealSource => "before refreshing the heal source",
+            Self::ReloadFile => "before reloading this file",
+            Self::RestoreFromTrash => "before restoring files from Trash",
+            Self::RetryImageLoad => "before retrying the image load",
+            Self::RotateImage => "before rotating the image",
+            Self::SaveCopy => "before saving a copy",
+            Self::StartHealStroke => "before starting a spot-heal stroke",
+            Self::Trash => "before moving this file to Trash",
+            Self::UndoEdit => "before undoing an edit",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CurrentWork {
@@ -119,22 +193,39 @@ pub(crate) fn trash_submission_work_blocker<const N: usize>(
 
 /// Spot Heal needs a settled selected source even when a last good frame remains visible.
 #[must_use]
-pub(crate) const fn spot_heal_source_blocker(
+pub(crate) fn spot_heal_source_blocker(
+    language: Language,
     image_open_in_progress: bool,
     image_open_failed: bool,
 ) -> Option<&'static str> {
     if image_open_in_progress {
-        Some("Wait for the image to finish opening before using Spot Heal")
+        Some(language.text(WAIT_FOR_OPEN_BEFORE_HEAL))
     } else if image_open_failed {
-        Some("Retry the failed image load before using Spot Heal")
+        Some(language.text(RETRY_LOAD_BEFORE_HEAL))
     } else {
         None
     }
 }
 
+/// Wait sentence assembled from the running work and the attempted action.
+///
+/// Both halves are separate catalog entries and the action clause carries its
+/// own connective, so a language can order and inflect the sentence its own
+/// way instead of receiving English word order with translated words in it.
 #[must_use]
-pub(crate) fn blocked_action_message(action: &str, blocker: CurrentWork) -> String {
-    let work = match blocker {
+pub(crate) fn blocked_action_message(
+    language: Language,
+    action: BlockedAction,
+    blocker: CurrentWork,
+) -> String {
+    language
+        .text(WAIT_TEMPLATE)
+        .replace(WORK_PLACEHOLDER, language.text(work_source(blocker)))
+        .replace(ACTION_PLACEHOLDER, language.text(action.source()))
+}
+
+const fn work_source(blocker: CurrentWork) -> &'static str {
+    match blocker {
         CurrentWork::TrashMove => "the move to Trash",
         CurrentWork::PermanentDelete => "the permanent delete",
         CurrentWork::TrashRestore => "the Trash restore",
@@ -145,29 +236,112 @@ pub(crate) fn blocked_action_message(action: &str, blocker: CurrentWork) -> Stri
         CurrentWork::Save => "Save As",
         CurrentWork::SpotHeal => "Spot Heal",
         CurrentWork::RatingWrite => "the rating update",
-    };
-    format!("Wait for {work} to finish before {action}")
+    }
 }
 
 #[must_use]
 pub(crate) fn curation_action_preflight(
+    language: Language,
     active: Option<CurationKind>,
     has_work: bool,
-    action: &str,
-    empty_message: &str,
+    action: BlockedAction,
+    empty_message: &'static str,
 ) -> Option<String> {
     if let Some(kind) = active {
-        Some(blocked_action_message(action, curation_work(kind)))
+        Some(blocked_action_message(
+            language,
+            action,
+            curation_work(kind),
+        ))
     } else if has_work {
         None
     } else {
-        Some(empty_message.to_owned())
+        Some(language.text(empty_message).to_owned())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::is_cataloged;
+
+    /// Assertions state the English sentence, so the seam is called with it.
+    const EN: Language = Language::English;
+    const TRANSLATED: [Language; 3] = [Language::Spanish, Language::French, Language::German];
+    const ACTIONS: [BlockedAction; 21] = [
+        BlockedAction::ApplyCrop,
+        BlockedAction::Browse,
+        BlockedAction::ChangeCrop,
+        BlockedAction::ChangeRating,
+        BlockedAction::ChangeRatingFilter,
+        BlockedAction::ChangeSpotHeal,
+        BlockedAction::FlipImage,
+        BlockedAction::OpenAnotherFolder,
+        BlockedAction::OpenAnotherImage,
+        BlockedAction::OpenInAnotherApp,
+        BlockedAction::PermanentlyDelete,
+        BlockedAction::RedoEdit,
+        BlockedAction::RefreshHealSource,
+        BlockedAction::ReloadFile,
+        BlockedAction::RestoreFromTrash,
+        BlockedAction::RetryImageLoad,
+        BlockedAction::RotateImage,
+        BlockedAction::SaveCopy,
+        BlockedAction::StartHealStroke,
+        BlockedAction::Trash,
+        BlockedAction::UndoEdit,
+    ];
+    const WORKS: [CurrentWork; 10] = [
+        CurrentWork::TrashMove,
+        CurrentWork::PermanentDelete,
+        CurrentWork::TrashRestore,
+        CurrentWork::SourceVerification,
+        CurrentWork::FolderScan,
+        CurrentWork::ImagePreparation,
+        CurrentWork::Crop,
+        CurrentWork::Save,
+        CurrentWork::SpotHeal,
+        CurrentWork::RatingWrite,
+    ];
+
+    /// Every half of the wait sentence has all four languages.
+    #[test]
+    fn every_wait_string_is_cataloged() {
+        let mut sources = vec![
+            WAIT_TEMPLATE,
+            WAIT_FOR_OPEN_BEFORE_HEAL,
+            RETRY_LOAD_BEFORE_HEAL,
+            NOTHING_TO_RESTORE,
+        ];
+        sources.extend(ACTIONS.map(BlockedAction::source));
+        sources.extend(WORKS.map(work_source));
+        let missing: Vec<_> = sources
+            .into_iter()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(missing.is_empty(), "uncataloged wait copy: {missing:?}");
+    }
+
+    /// Each of the 210 wait sentences is translated and fully substituted.
+    #[test]
+    fn wait_sentences_are_translated_and_fully_substituted() {
+        for action in ACTIONS {
+            for work in WORKS {
+                let english = blocked_action_message(EN, action, work);
+                for language in TRANSLATED {
+                    let translated = blocked_action_message(language, action, work);
+                    assert!(
+                        !translated.contains('{') && !translated.contains('}'),
+                        "unsubstituted placeholder in {language:?}: {translated}"
+                    );
+                    assert_ne!(
+                        english, translated,
+                        "{language:?} fell back to English: {english}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn busy_action_copy_is_specific_and_prioritized() {
@@ -251,15 +425,15 @@ mod tests {
             None
         );
         assert_eq!(
-            blocked_action_message("moving this file to Trash", CurrentWork::FolderScan),
+            blocked_action_message(EN, BlockedAction::Trash, CurrentWork::FolderScan),
             "Wait for the folder scan to finish before moving this file to Trash"
         );
         assert_eq!(
-            blocked_action_message("moving this file to Trash", CurrentWork::SpotHeal),
+            blocked_action_message(EN, BlockedAction::Trash, CurrentWork::SpotHeal),
             "Wait for Spot Heal to finish before moving this file to Trash"
         );
         assert_eq!(
-            blocked_action_message("saving a copy", CurrentWork::SourceVerification),
+            blocked_action_message(EN, BlockedAction::SaveCopy, CurrentWork::SourceVerification),
             "Wait for source verification to finish before saving a copy"
         );
     }
@@ -283,14 +457,14 @@ mod tests {
             None
         );
         assert_eq!(
-            spot_heal_source_blocker(true, true),
+            spot_heal_source_blocker(EN, true, true),
             Some("Wait for the image to finish opening before using Spot Heal")
         );
         assert_eq!(
-            spot_heal_source_blocker(false, true),
+            spot_heal_source_blocker(EN, false, true),
             Some("Retry the failed image load before using Spot Heal")
         );
-        assert_eq!(spot_heal_source_blocker(false, false), None);
+        assert_eq!(spot_heal_source_blocker(EN, false, false), None);
     }
 
     #[test]
@@ -359,10 +533,11 @@ mod tests {
     fn curation_preflight_follows_app_ownership() {
         assert_eq!(
             curation_action_preflight(
+                EN,
                 Some(CurationKind::Restore),
                 false,
-                "restoring files from Trash",
-                "Nothing to restore from Trash",
+                BlockedAction::RestoreFromTrash,
+                NOTHING_TO_RESTORE,
             ),
             Some(
                 "Wait for the Trash restore to finish before restoring files from Trash".to_owned()
@@ -370,15 +545,22 @@ mod tests {
         );
         assert_eq!(
             curation_action_preflight(
+                EN,
                 None,
                 false,
-                "restoring files from Trash",
-                "Nothing to restore from Trash",
+                BlockedAction::RestoreFromTrash,
+                NOTHING_TO_RESTORE,
             ),
             Some("Nothing to restore from Trash".to_owned())
         );
         assert_eq!(
-            curation_action_preflight(None, true, "restoring files from Trash", "unused",),
+            curation_action_preflight(
+                EN,
+                None,
+                true,
+                BlockedAction::RestoreFromTrash,
+                NOTHING_TO_RESTORE
+            ),
             None
         );
     }

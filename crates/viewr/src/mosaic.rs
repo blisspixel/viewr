@@ -5,6 +5,8 @@
 //! decoded-image admission and the GPU owns the corresponding full-image
 //! textures.
 
+use std::path::{Path, PathBuf};
+
 use crate::view::PhysicalViewport;
 
 /// Maximum number of complete photos admitted to one collage group.
@@ -103,6 +105,45 @@ pub(crate) enum FocusDirection {
     Next,
     First,
     Last,
+}
+
+/// Catalog path of the focused collage slot, if that slot still exists.
+#[must_use]
+pub(crate) fn focused_catalog_path<'a>(
+    page: &MosaicPage,
+    files: &'a [PathBuf],
+) -> Option<&'a Path> {
+    page.indices
+        .get(page.focused)
+        .and_then(|index| files.get(*index))
+        .map(PathBuf::as_path)
+}
+
+/// Retained source a collage deletion may use.
+///
+/// The session current handle is valid only when the focused photo is the
+/// presented source. A neighbor must already have a prefetch handle. A
+/// still-loading focused tile is not a candidate.
+#[must_use]
+pub(crate) fn collage_removal_source<'a, T>(
+    focused: Option<&Path>,
+    presented: Option<&Path>,
+    current: Option<&'a T>,
+    prefetch: Option<&'a T>,
+) -> Option<&'a T> {
+    let focused = focused?;
+    if presented == Some(focused) {
+        current
+    } else {
+        prefetch
+    }
+}
+
+/// Collage keeps the group on screen after a removal. Session decode of the
+/// successor waits until the user leaves or opens a photo.
+#[must_use]
+pub(crate) const fn removal_presents_successor(mosaic_active: bool) -> bool {
+    !mosaic_active
 }
 
 /// Dense, aspect-ratio-preserving collage geometry for one frame.
@@ -384,6 +425,47 @@ mod tests {
         assert_eq!(page.indices[page.focused], 8);
         assert!(MosaicPage::containing(&[], 0, MAX_IMAGES).is_none());
         assert!(MosaicPage::containing(&projection(), 0, 0).is_none());
+    }
+
+    #[test]
+    fn collage_removal_uses_the_focused_ready_source() {
+        let files = [PathBuf::from("a.png"), PathBuf::from("b.png")];
+        let page = MosaicPage {
+            start: 0,
+            indices: vec![0, 1],
+            focused: 1,
+        };
+        let focused = focused_catalog_path(&page, &files).unwrap();
+        assert_eq!(focused, Path::new("b.png"));
+        assert_eq!(
+            collage_removal_source(
+                Some(focused),
+                Some(Path::new("a.png")),
+                Some(&"current"),
+                Some(&"prefetch"),
+            ),
+            Some(&"prefetch")
+        );
+        assert_eq!(
+            collage_removal_source(
+                Some(Path::new("a.png")),
+                Some(Path::new("a.png")),
+                Some(&"current"),
+                Some(&"prefetch"),
+            ),
+            Some(&"current")
+        );
+        assert_eq!(
+            collage_removal_source(
+                Some(Path::new("b.png")),
+                Some(Path::new("a.png")),
+                Some(&1),
+                None,
+            ),
+            None
+        );
+        assert!(!removal_presents_successor(true));
+        assert!(removal_presents_successor(false));
     }
 
     #[test]

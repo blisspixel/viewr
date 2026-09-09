@@ -25,7 +25,10 @@ and organized by user-visible concern.
   delete still keeps the last good frame on screen.
   Speculative neighbor and filmstrip work wait until the selected image is on
   screen, and files already accepted for Trash are not decoded again behind the
-  image the user is looking at.
+  image the user is looking at. Collage Delete of the photo you opened stays in
+  the group instead of jumping back to single-photo view. Shift+Delete
+  permanently deletes the focused ready photo after confirmation, and U still
+  restores. A failed move puts that photo back on the current collage page.
 
 ## 0.6.1 - 2026-09-02
 

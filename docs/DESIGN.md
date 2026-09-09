@@ -77,7 +77,9 @@ disappears. This spec is the converged result of two rounds of design critique
   GPU path. It does not call the thumbnail generator, crop photos, show filename
   cards, or retain album state. Left and Right select a ready photo. Down, Enter,
   or click opens it in single-photo view. Page Up and Page Down move between
-  groups, and Escape returns without changing the single-photo selection. Complete
+  groups. Delete stays in the group. Escape returns without changing the
+  single-photo selection unless a removal already selected a surviving photo.
+  Complete
   photos reflow as they become ready. Tile-local scaling may enlarge a complete
   small source to its aspect-ratio tile; the single-photo 100 percent Fit cap is
   unchanged. When the 256 MiB current plus neighbor
@@ -303,7 +305,9 @@ and unsupported containers, remain visibly read-only.
 ### Delete and undo
 - `Delete` moves only the currently displayed file to the operating-system Trash.
   In the full-image collage, that is the focused ready photo. File > Move to Trash
-  exposes the same action. There is no bare-letter shortcut,
+  exposes the same action. `Shift+Delete` permanently deletes that same focused
+  photo after confirmation. Collage stays open after a removal; `U` still
+  restores. There is no bare-letter shortcut,
   mark state, review mode, or batch-trash action. Destructive intent therefore
   stays attached to a conventional key and a visible current target.
 - Accepted pixels retain their exact open source handle through foreground,

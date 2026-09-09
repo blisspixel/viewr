@@ -43,7 +43,7 @@ use crate::curation_state::{
     GuardedSourceAction, PERMANENT_DELETE_ACTION, curation_close_disposition,
     curation_recovery_message, curation_status, guarded_source_action_failure_message,
     permanent_delete_confirmed, permanent_delete_description, permanent_delete_success_message,
-    restore_result_message, single_trash_result_message,
+    removal_unready_message, restore_result_message, single_trash_result_message,
 };
 use crate::current_work::{
     ActiveModeAllowance, CurrentWork, blocked_action_message, browse_work_blocker, crop_work,
@@ -64,8 +64,9 @@ use crate::job::{JobPoll, OneShotJob};
 #[cfg(test)]
 use crate::keyboard_route::route_consumed_keyboard_key;
 use crate::keyboard_route::{
-    EscapeAction, EscapeContext, escape_action, escape_press_reaches_app, is_fullscreen_toggle_key,
-    is_space_key, is_trash_shortcut_key, rating_assignment_for_key, rating_keys_apply,
+    DeletionShortcut, EscapeAction, EscapeContext, deletion_shortcut, escape_action,
+    escape_press_reaches_app, is_fullscreen_toggle_key, is_space_key, is_trash_shortcut_key,
+    mosaic_key_reaches_app, rating_assignment_for_key, rating_keys_apply,
     repeated_viewer_action_allowed, route_consumed_keyboard_key_in_context,
     single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
     space_tap_fits, widget_popup_owns_event,
@@ -1686,6 +1687,7 @@ impl App {
             self.session.selected_path = Some(context.path.clone());
             self.spawn_image_load(context.path.clone());
         }
+        self.sync_collage_after_catalog_change();
     }
 
     fn pending_source_removal_paths(&self) -> HashSet<PathBuf> {
@@ -2013,9 +2015,6 @@ impl App {
         kind: PresentationKind,
         crop_recovery: Option<CropRecovery>,
     ) {
-        if self.mosaic.is_active() {
-            self.leave_full_image_mosaic();
-        }
         if crop_recovery
             .as_ref()
             .is_some_and(|recovery| !self.crop_recovery_is_current(recovery))
@@ -2959,9 +2958,6 @@ impl App {
                     self.session.selected_path = Some(path.clone());
                     self.spawn_image_load(path);
                 }
-                if self.mosaic.is_active() {
-                    self.refresh_mosaic_after_membership_change();
-                }
             }
             FilterSelection::Select(index) => self.go_to_index(index),
             FilterSelection::Empty => {
@@ -2971,6 +2967,7 @@ impl App {
                 self.invalidate_displayed_image();
             }
         }
+        self.sync_collage_after_catalog_change();
         self.kick_prefetch();
         self.request_redraw();
     }
@@ -3421,23 +3418,20 @@ impl App {
             .then_some(path)
     }
 
-    fn mosaic_focused_path(&self) -> Option<PathBuf> {
-        let page = self.mosaic.page.as_ref()?;
-        let playlist = self.playlist.as_ref()?;
-        page.indices
-            .get(page.focused)
-            .and_then(|index| playlist.files.get(*index))
-            .cloned()
-    }
-
-    fn trash_candidate(&self) -> Option<(PathBuf, Arc<crate::fs::ImageSource>)> {
+    fn removal_candidate(&self) -> Option<(PathBuf, Arc<crate::fs::ImageSource>)> {
         if self.mosaic.is_active() {
-            let path = self.mosaic_focused_path()?;
-            let source = if self.session.presented_path.as_deref() == Some(path.as_path()) {
-                self.current_source.as_ref().map(Arc::clone)?
-            } else {
-                self.prefetch_sources.get(&path).cloned()?
-            };
+            let path = crate::mosaic::focused_catalog_path(
+                self.mosaic.page.as_ref()?,
+                self.playlist.as_ref()?.files.as_slice(),
+            )?
+            .to_owned();
+            let source = crate::mosaic::collage_removal_source(
+                Some(path.as_path()),
+                self.session.presented_path.as_deref(),
+                self.current_source.as_ref(),
+                self.prefetch_sources.get(&path),
+            )
+            .map(Arc::clone)?;
             Some((path, source))
         } else {
             let path = self.current_loaded_path()?.to_owned();
@@ -3613,8 +3607,30 @@ impl App {
         if !self.mosaic.is_active() {
             return;
         }
+        let selected = self.session.selected_path.clone();
+        let needs_load = selected
+            .as_deref()
+            .is_some_and(|path| self.session.presented_path.as_deref() != Some(path));
         self.clear_full_image_mosaic();
+        if needs_load && let Some(path) = selected {
+            self.spawn_image_load(path);
+        }
         self.kick_prefetch();
+    }
+
+    fn sync_collage_after_catalog_change(&mut self) {
+        if !self.mosaic.is_active() {
+            return;
+        }
+        if self
+            .playlist
+            .as_ref()
+            .is_some_and(|playlist| playlist.visible_len() > 0)
+        {
+            self.refresh_mosaic_after_membership_change();
+        } else {
+            self.leave_full_image_mosaic();
+        }
     }
 
     fn clear_full_image_mosaic(&mut self) {
@@ -4432,15 +4448,13 @@ impl App {
     }
 
     fn trash_current(&mut self) {
-        let Some((path, source)) = self.trash_candidate() else {
-            if self.mosaic.is_active() {
-                self.show_toast("Wait for this photo to finish opening before moving it to Trash");
-            } else if self.session.selected_path.is_some() {
-                let message = if self.session.load_error.is_some() {
-                    "Reload or open another image before moving it to Trash"
-                } else {
-                    "Wait for the selected image to finish opening before moving it to Trash"
-                };
+        let Some((path, source)) = self.removal_candidate() else {
+            if let Some(message) = removal_unready_message(
+                GuardedSourceAction::Trash,
+                self.mosaic.is_active(),
+                self.session.selected_path.is_some(),
+                self.session.load_error.is_some(),
+            ) {
                 self.show_toast(message);
             }
             return;
@@ -5728,7 +5742,15 @@ impl App {
     }
 
     fn permanent_delete_current(&mut self) {
-        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
+        let Some((path, source)) = self.removal_candidate() else {
+            if let Some(message) = removal_unready_message(
+                GuardedSourceAction::PermanentDelete,
+                self.mosaic.is_active(),
+                self.session.selected_path.is_some(),
+                self.session.load_error.is_some(),
+            ) {
+                self.show_toast(message);
+            }
             return;
         };
         if self.block_action_while_busy("permanently deleting this file") {
@@ -5738,15 +5760,6 @@ impl App {
             self.show_toast(message);
             return;
         }
-        let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
-            let error = GuardedActionError::Unavailable;
-            log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
-            self.show_toast(guarded_source_action_failure_message(
-                GuardedSourceAction::PermanentDelete,
-                &error,
-            ));
-            return;
-        };
         if let Err(error) = crate::curate::verify_accepted_source_native(&path, &source) {
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
             self.show_toast(guarded_source_action_failure_message(
@@ -5899,9 +5912,7 @@ impl App {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
-            if self.mosaic.is_active() {
-                self.leave_full_image_mosaic();
-            }
+            self.sync_collage_after_catalog_change();
             return;
         };
 
@@ -5921,18 +5932,14 @@ impl App {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
-            if self.mosaic.is_active() {
-                self.leave_full_image_mosaic();
-            }
+            self.sync_collage_after_catalog_change();
             return;
         }
         if playlist.visible_len() == 0 {
             self.cancel_pending_image_load();
             self.session.selected_path = None;
             self.invalidate_displayed_image();
-            if self.mosaic.is_active() {
-                self.leave_full_image_mosaic();
-            }
+            self.sync_collage_after_catalog_change();
             self.restart_membership_scan_if_active();
             return;
         }
@@ -5946,9 +5953,7 @@ impl App {
             // bookkeeping and neighbor work.
             self.session.selected_path = Some(path);
             self.kick_prefetch();
-            if self.mosaic.is_active() {
-                self.refresh_mosaic_after_membership_change();
-            }
+            self.sync_collage_after_catalog_change();
             self.restart_membership_scan_if_active();
             self.request_redraw();
             return;
@@ -5958,11 +5963,11 @@ impl App {
         self.cancel_rating_disclosure_for_source_change();
         self.session.selected_path = Some(next_path.clone());
         self.transform = Transform::default();
-        self.spawn_image_load(next_path);
-        self.kick_prefetch();
-        if self.mosaic.is_active() {
-            self.refresh_mosaic_after_membership_change();
+        if crate::mosaic::removal_presents_successor(self.mosaic.is_active()) {
+            self.spawn_image_load(next_path);
         }
+        self.kick_prefetch();
+        self.sync_collage_after_catalog_change();
         self.restart_membership_scan_if_active();
     }
 
@@ -5976,6 +5981,7 @@ impl App {
             .and_then(|playlist| playlist.files.iter().position(|entry| entry == &path));
         let Some(old_index) = old_index else {
             self.start_missing_selection_scan(path);
+            self.sync_collage_after_catalog_change();
             self.request_redraw();
             return;
         };
@@ -6003,7 +6009,9 @@ impl App {
                 self.cancel_rating_disclosure_for_source_change();
                 self.session.selected_path = Some(next_path.clone());
                 self.transform = Transform::default();
-                self.spawn_image_load(next_path);
+                if crate::mosaic::removal_presents_successor(self.mosaic.is_active()) {
+                    self.spawn_image_load(next_path);
+                }
                 self.kick_prefetch();
             }
             MissingSelectionRemoval::ScanFolder => {
@@ -6021,6 +6029,7 @@ impl App {
                 );
             }
         }
+        self.sync_collage_after_catalog_change();
         self.request_redraw();
     }
 
@@ -7214,20 +7223,7 @@ impl ApplicationHandler<UserEvent> for App {
                             && escape_action(self.escape_context()) != EscapeAction::None)
                         || (self.mosaic.is_active()
                             && event.state == winit::event::ElementState::Pressed
-                            && matches!(
-                                &event.logical_key,
-                                Key::Named(
-                                    NamedKey::Enter
-                                        | NamedKey::ArrowLeft
-                                        | NamedKey::ArrowRight
-                                        | NamedKey::ArrowUp
-                                        | NamedKey::ArrowDown
-                                        | NamedKey::Home
-                                        | NamedKey::End
-                                        | NamedKey::PageUp
-                                        | NamedKey::PageDown
-                                )
-                            ))
+                            && mosaic_key_reaches_app(&event.logical_key))
                         || (!application_shortcuts_blocked([
                             self.show_about,
                             self.show_update,
@@ -7622,6 +7618,12 @@ impl ApplicationHandler<UserEvent> for App {
                         {
                             self.leave_full_image_mosaic();
                         }
+                        Key::Character(c)
+                            if c.eq_ignore_ascii_case("u")
+                                && single_key_shortcut_allowed(self.modifiers) =>
+                        {
+                            self.undo_trash();
+                        }
                         Key::Named(NamedKey::Enter | NamedKey::ArrowDown) => {
                             self.open_focused_mosaic_photo();
                         }
@@ -7639,7 +7641,15 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         Key::Named(NamedKey::PageUp) => self.move_mosaic_page(-1),
                         Key::Named(NamedKey::PageDown) => self.move_mosaic_page(1),
-                        key if is_trash_shortcut_key(&key) => self.trash_current(),
+                        key if is_trash_shortcut_key(&key) => {
+                            match deletion_shortcut(self.modifiers.shift_key()) {
+                                DeletionShortcut::PermanentDelete => {
+                                    self.permanent_delete_current();
+                                }
+                                DeletionShortcut::Trash => self.trash_current(),
+                            }
+                            self.request_redraw();
+                        }
                         _ => {}
                     }
                     return;
@@ -7718,15 +7728,11 @@ impl ApplicationHandler<UserEvent> for App {
                     Key::Named(NamedKey::Home) => self.navigate(-999_999),
                     Key::Named(NamedKey::End) => self.navigate(999_999),
                     key if is_trash_shortcut_key(&key) => {
-                        if self.modifiers.shift_key() {
-                            // Only permanent delete asks for confirmation (modal).
-                            self.permanent_delete_current();
-                        } else {
-                            self.trash_current();
+                        match deletion_shortcut(self.modifiers.shift_key()) {
+                            DeletionShortcut::PermanentDelete => self.permanent_delete_current(),
+                            DeletionShortcut::Trash => self.trash_current(),
                         }
-                        if let Some(r) = self.renderer.as_mut() {
-                            r.window().request_redraw();
-                        }
+                        self.request_redraw();
                     }
                     Key::Named(NamedKey::F5) => self.reload_current_image(),
                     _ => {}

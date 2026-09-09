@@ -24,8 +24,10 @@ The bundled catalog covers the primary menu bar, file and folder entry points,
 Preferences, file-association entry points, empty-state actions, crop controls,
 the main panel headings, the complete first-run, open-status, and Help shortcut
 surface, every Trash, permanent-delete, and restore message, the concurrent-work
-wait sentences, and rating write failures. Remaining panel, metadata, and
-editing explanations still use the explicit English fallback. The roadmap keeps complete catalog coverage and native
+wait sentences, rating write failures, and the dock, rating, and Undo Trash copy
+the chrome projection produces, including its accessible names. Remaining image
+information, metadata, appearance, and editing explanations still use the
+explicit English fallback. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called
 complete. Destructive-action copy tells someone whether their file still
 exists, so it needs native review before the accessibility and language matrix
@@ -57,6 +59,11 @@ of by review:
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in
 every language rather than formatting the same sentence twice.
+
+Where a pure projection owns the copy, it translates. `chrome` takes the
+language as one more immutable input fact and returns translated labels,
+tooltips, and accessible names, so no render site has to remember a lookup that
+would silently succeed in English if it were forgotten.
 
 ## Adding a language
 

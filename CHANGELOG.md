@@ -17,6 +17,10 @@ and organized by user-visible concern.
   copy, and recovery guidance. Counts and file names are placed by each
   language rather than appended in English word order. A permanent-delete
   confirmation is now recognized in the language it was shown in.
+- Dock disclosure controls, panel position and image background choices, the
+  rating menu and its filter, every rating status and unavailable reason, and
+  Undo Trash are translated, and so are the accessible names a screen reader
+  announces for them.
 - The "wait for the folder scan to finish" family of messages is translated.
   Each language owns the whole sentence rather than receiving English word
   order, and the attempted action is now a typed value, so an untranslatable

@@ -495,6 +495,7 @@ impl UiFrameOwned {
 
     fn chrome_view_model(&self) -> ChromeViewModel {
         ChromeViewModel::new(ChromeInput {
+            language: self.language,
             dock: self.dock,
             is_loading: self.is_loading,
             is_opening: self.is_opening,
@@ -1428,8 +1429,7 @@ fn edit_menu(
             .color(colors.text),
         |ui| {
             ui.set_min_width(210.0);
-            let mut crop = chrome.crop_control();
-            crop.label = frame.text(crop.label);
+            let crop = chrome.crop_control();
             if menu_tool_button(ui, crop).clicked() {
                 actions.push(UiAction::ToggleCrop);
                 ui.close();
@@ -1544,15 +1544,13 @@ fn tools_menu(
             .color(colors.text),
         |ui| {
             ui.set_min_width(210.0);
-            let mut crop = chrome.crop_control();
-            crop.label = frame.text(crop.label);
+            let crop = chrome.crop_control();
             if menu_tool_button(ui, crop).clicked() {
                 actions.push(UiAction::ToggleCrop);
                 ui.close();
             }
 
-            let mut heal = chrome.heal_control();
-            heal.label = frame.text(heal.label);
+            let heal = chrome.heal_control();
             if menu_tool_button(ui, heal).clicked() {
                 actions.push(UiAction::ToggleHeal);
                 ui.close();
@@ -1567,8 +1565,7 @@ fn spot_heal_menu_items(
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
 ) {
-    let mut heal = chrome.heal_control();
-    heal.label = frame.text(heal.label);
+    let heal = chrome.heal_control();
     if menu_tool_button(ui, heal).clicked() {
         actions.push(UiAction::ToggleHeal);
         ui.close();
@@ -1736,11 +1733,11 @@ fn view_menu(
                 panels_menu(ui, actions, chrome);
             });
             ui.menu_button(frame.text(tr!("Panel Position")), |ui| {
-                panel_position_menu(ui, actions, chrome);
+                panel_position_menu(ui, actions, chrome, frame.language);
             });
             ui.separator();
             ui.menu_button(frame.text(tr!("Image Background")), |ui| {
-                background_menu(ui, actions, frame.background_override);
+                background_menu(ui, actions, frame.background_override, frame.language);
             });
             ui.menu_button(
                 crate::chrome::appearance_menu_label(frame.theme_preference),
@@ -1926,9 +1923,15 @@ fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeVie
     }
 }
 
-fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+fn panel_position_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    chrome: ChromeViewModel,
+    language: Language,
+) {
     ui.set_min_width(224.0);
     render_dock_side_choices(
+        language,
         ui,
         actions,
         "TOOLS",
@@ -1938,6 +1941,7 @@ fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: C
     );
     ui.separator();
     render_dock_side_choices(
+        language,
         ui,
         actions,
         "IMAGE INFORMATION",
@@ -1948,6 +1952,7 @@ fn panel_position_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: C
 }
 
 fn render_dock_side_choices(
+    language: Language,
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     heading: &str,
@@ -1962,7 +1967,7 @@ fn render_dock_side_choices(
             .color(colors.muted)
             .strong(),
     );
-    for choice in crate::chrome::dock_side_choices(panel, current) {
+    for choice in crate::chrome::dock_side_choices(language, panel, current) {
         let response = ui.radio(choice.selected, choice.label);
         response.widget_info(|| {
             WidgetInfo::selected(
@@ -1979,9 +1984,14 @@ fn render_dock_side_choices(
     }
 }
 
-fn background_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, current: Option<[f64; 4]>) {
+fn background_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    current: Option<[f64; 4]>,
+    language: Language,
+) {
     ui.set_min_width(172.0);
-    for choice in crate::chrome::background_choices(current) {
+    for choice in crate::chrome::background_choices(language, current) {
         if ui.radio(choice.selected, choice.label).clicked() {
             actions.push(UiAction::SetBackground(choice.value));
             ui.close();
@@ -3436,7 +3446,7 @@ fn render_tools_panel(
                 let disclosure = chrome
                     .dock
                     .tools
-                    .disclosure()
+                    .disclosure(frame.language)
                     .expect("visible tools dock has disclosure state");
                 if dock_disclosure_button(ui, disclosure).clicked() {
                     actions.push(UiAction::ToggleToolsPanelExpansion);
@@ -3909,7 +3919,7 @@ fn render_filmstrip(
                             let disclosure = chrome
                                 .dock
                                 .filmstrip
-                                .disclosure()
+                                .disclosure(frame.language)
                                 .expect("visible filmstrip has disclosure state");
                             if dock_disclosure_button(ui, disclosure).clicked() {
                                 actions.push(UiAction::ToggleFilmstripPanelExpansion);
@@ -3959,7 +3969,7 @@ fn render_filmstrip(
                     let disclosure = chrome
                         .dock
                         .filmstrip
-                        .disclosure()
+                        .disclosure(frame.language)
                         .expect("visible filmstrip has disclosure state");
                     if dock_disclosure_button(ui, disclosure).clicked() {
                         actions.push(UiAction::ToggleFilmstripPanelExpansion);

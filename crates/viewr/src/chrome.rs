@@ -3,6 +3,7 @@
 //! The event loop owns every mutable fact. This module projects those facts into
 //! immutable control state so egui and native accessibility remain thin adapters.
 
+use crate::locale::Language;
 /// Logical height reserved for the persistent menu and image status bar.
 pub const TOP_BAR_HEIGHT: f32 = 40.0;
 /// Logical width of the collapsed tools rail.
@@ -22,6 +23,142 @@ pub(crate) const RATING_DISCOVERY_WRITE_STATUS: &str =
     "Wait for folder ratings to finish loading before changing this rating.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
+
+// Catalog keys for the copy this projection owns. The view model translates
+// them here so no render site has to remember to, and
+// `every_chrome_string_is_cataloged` keeps the set complete.
+const COLLAPSE_TOOLS: &str = "Collapse tools panel";
+const EXPAND_TOOLS: &str = "Expand tools panel";
+const COLLAPSE_FOLDER: &str = "Collapse folder previews";
+const EXPAND_FOLDER: &str = "Expand folder previews";
+const COPY_TOOLS: &str = "Tools";
+const COPY_IMAGE_INFORMATION: &str = "Image Information";
+const COPY_LEFT: &str = "Left";
+const COPY_RIGHT: &str = "Right";
+const COPY_PANEL_SIDE: &str = "{panel}: {side}";
+const COPY_THEME_DEFAULT: &str = "Theme Default";
+const COPY_BLACK: &str = "Black";
+const COPY_NEUTRAL_GRAY: &str = "Neutral Gray";
+const COPY_WHITE: &str = "White";
+const COPY_UNDO_TRASH: &str = "Undo Trash";
+const COPY_UNDO_TRASH_WITH_HELP: &str = "{label}. {help}";
+const COPY_RESTORE_UNSETTLED: &str = "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash.";
+const COPY_UNDO_TRASH_AVAILABLE: &str =
+    "Restores the latest safely recoverable Trash action. It may belong to another folder.";
+const COPY_UNDO_TRASH_NONE: &str = "No safely recoverable Trash action is available.";
+const COPY_RATING_LOADING_IMAGE: &str = "Rating: Loading image";
+const COPY_RATING_IMAGE_UNAVAILABLE: &str = "Rating: Image unavailable";
+const COPY_RATING_OPEN_AN_IMAGE: &str = "Rating: Open an image";
+const COPY_RATING_READING: &str = "Rating: Reading...";
+const COPY_RATING_UNRATED: &str = "Rating: Unrated";
+const COPY_RATING_REJECTED: &str = "Rating: Rejected";
+const COPY_RATING_CONFLICT: &str = "Rating: Conflict";
+const COPY_RATING_UNSUPPORTED_STATUS: &str = "Rating: Unsupported";
+const COPY_RATING_UNREADABLE_STATUS: &str = "Rating: Unreadable";
+const COPY_RATING_VALUE_STATUS: &str = "Rating: {rating} of 5";
+const COPY_RATING_VALUE: &str = "{rating} of 5";
+const COPY_UNRATED: &str = "Unrated";
+const COPY_CROP: &str = "Crop";
+const COPY_CANCEL_CROP: &str = "Cancel Crop";
+const COPY_SPOT_HEAL: &str = "Spot Heal";
+const COPY_FINISH_SPOT_HEAL: &str = "Finish Spot Heal";
+const COPY_FINISHING_SPOT_HEAL: &str = "Finishing Spot Heal...";
+const COPY_RATING_CHOICE_NAME: &str = "Rating {label}, shortcut {shortcut}";
+const COPY_FILTER_ALL: &str = "All images";
+const COPY_FILTER_AT_LEAST: &str = "At least {rating}";
+const COPY_FILTER_CHOICE_NAME: &str = "Rating filter: {label}";
+const COPY_RATING_FILTER_READING: &str = "Rating Filter: Reading folder...";
+const COPY_RATING_FILTER_OPEN_FOLDER: &str = "Rating Filter: Open a folder";
+const COPY_FILTER_ALL_STATUS: &str = "Rating Filter: All images";
+const COPY_FILTER_AT_LEAST_STATUS: &str = "Rating Filter: At least {rating}";
+const COPY_RATING_WAIT_FOR_LOAD: &str = "Wait for the selected image to finish loading.";
+const COPY_RATING_RELOAD_FIRST: &str = "Reload or open another image before assigning a rating.";
+const COPY_RATING_OPEN_TO_ASSIGN: &str = "Open an image to assign a rating.";
+const COPY_RATING_NOT_READY: &str = "Rating is not ready yet.";
+const COPY_RATING_READ_ONLY: &str = "This image's rating is read-only in viewr.";
+const COPY_RATING_UNSAFE_SOURCE: &str = "Safe source identity is unavailable for rating writes.";
+const COPY_RATING_UNREADABLE: &str =
+    "Rating could not be read. Close and reopen viewr before changing it.";
+const COPY_RATING_UNSUPPORTED: &str = "This image has unsupported rating metadata.";
+
+/// Placeholder for a rating value.
+const RATING_PLACEHOLDER: &str = "{rating}";
+/// Placeholder for a panel name.
+const PANEL_PLACEHOLDER: &str = "{panel}";
+/// Placeholder for a dock side.
+const SIDE_PLACEHOLDER: &str = "{side}";
+/// Placeholder for a control label.
+const LABEL_PLACEHOLDER: &str = "{label}";
+/// Placeholder for help text appended to an accessible name.
+const HELP_PLACEHOLDER: &str = "{help}";
+/// Placeholder for a keyboard shortcut.
+const SHORTCUT_PLACEHOLDER: &str = "{shortcut}";
+
+/// Complete copy surface owned by this projection, for the coverage test.
+#[cfg(test)]
+const CHROME_COPY: &[&str] = &[
+    RATING_RECOVERY_STATUS,
+    RATING_DISCOVERY_WRITE_STATUS,
+    SAVE_RECOVERY_STATUS,
+    COLLAPSE_TOOLS,
+    EXPAND_TOOLS,
+    COLLAPSE_FOLDER,
+    EXPAND_FOLDER,
+    COPY_TOOLS,
+    COPY_IMAGE_INFORMATION,
+    COPY_LEFT,
+    COPY_RIGHT,
+    COPY_PANEL_SIDE,
+    COPY_THEME_DEFAULT,
+    COPY_BLACK,
+    COPY_NEUTRAL_GRAY,
+    COPY_WHITE,
+    COPY_UNDO_TRASH,
+    COPY_UNDO_TRASH_WITH_HELP,
+    COPY_RESTORE_UNSETTLED,
+    COPY_UNDO_TRASH_AVAILABLE,
+    COPY_UNDO_TRASH_NONE,
+    COPY_RATING_LOADING_IMAGE,
+    COPY_RATING_IMAGE_UNAVAILABLE,
+    COPY_RATING_OPEN_AN_IMAGE,
+    COPY_RATING_READING,
+    COPY_RATING_UNRATED,
+    COPY_RATING_REJECTED,
+    COPY_RATING_CONFLICT,
+    COPY_RATING_UNSUPPORTED_STATUS,
+    COPY_RATING_UNREADABLE_STATUS,
+    COPY_RATING_VALUE_STATUS,
+    COPY_RATING_VALUE,
+    COPY_UNRATED,
+    COPY_CROP,
+    COPY_CANCEL_CROP,
+    COPY_SPOT_HEAL,
+    COPY_FINISH_SPOT_HEAL,
+    COPY_FINISHING_SPOT_HEAL,
+    COPY_RATING_CHOICE_NAME,
+    COPY_FILTER_ALL,
+    COPY_FILTER_AT_LEAST,
+    COPY_FILTER_CHOICE_NAME,
+    COPY_RATING_FILTER_READING,
+    COPY_RATING_FILTER_OPEN_FOLDER,
+    COPY_FILTER_ALL_STATUS,
+    COPY_FILTER_AT_LEAST_STATUS,
+    COPY_RATING_WAIT_FOR_LOAD,
+    COPY_RATING_RELOAD_FIRST,
+    COPY_RATING_OPEN_TO_ASSIGN,
+    COPY_RATING_NOT_READY,
+    COPY_RATING_READ_ONLY,
+    COPY_RATING_UNSAFE_SOURCE,
+    COPY_RATING_UNREADABLE,
+    COPY_RATING_UNSUPPORTED,
+];
+
+fn panel_side_label(language: Language, panel: &str, side: &'static str) -> String {
+    language
+        .text(COPY_PANEL_SIDE)
+        .replace(PANEL_PLACEHOLDER, panel)
+        .replace(SIDE_PLACEHOLDER, language.text(side))
+}
 
 /// Horizontal edge used by a docked side panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,27 +303,27 @@ pub(crate) struct SideDockView {
 }
 
 impl SideDockView {
-    pub fn disclosure(self) -> Option<DisclosureView> {
+    pub fn disclosure(self, language: Language) -> Option<DisclosureView> {
         match (self.side, self.state) {
             (_, DockState::Hidden) => None,
             (DockSide::Left, DockState::Expanded) => Some(DisclosureView {
                 direction: DisclosureDirection::Left,
-                label: "Collapse tools panel",
+                label: language.text(COLLAPSE_TOOLS),
                 expanded: true,
             }),
             (DockSide::Left, DockState::Collapsed) => Some(DisclosureView {
                 direction: DisclosureDirection::Right,
-                label: "Expand tools panel",
+                label: language.text(EXPAND_TOOLS),
                 expanded: false,
             }),
             (DockSide::Right, DockState::Expanded) => Some(DisclosureView {
                 direction: DisclosureDirection::Right,
-                label: "Collapse tools panel",
+                label: language.text(COLLAPSE_TOOLS),
                 expanded: true,
             }),
             (DockSide::Right, DockState::Collapsed) => Some(DisclosureView {
                 direction: DisclosureDirection::Left,
-                label: "Expand tools panel",
+                label: language.text(EXPAND_TOOLS),
                 expanded: false,
             }),
         }
@@ -199,17 +336,17 @@ pub(crate) struct BottomDockView {
 }
 
 impl BottomDockView {
-    pub fn disclosure(self) -> Option<DisclosureView> {
+    pub fn disclosure(self, language: Language) -> Option<DisclosureView> {
         match self.state {
             DockState::Hidden => None,
             DockState::Collapsed => Some(DisclosureView {
                 direction: DisclosureDirection::Up,
-                label: "Expand folder previews",
+                label: language.text(EXPAND_FOLDER),
                 expanded: false,
             }),
             DockState::Expanded => Some(DisclosureView {
                 direction: DisclosureDirection::Down,
-                label: "Collapse folder previews",
+                label: language.text(COLLAPSE_FOLDER),
                 expanded: true,
             }),
         }
@@ -323,23 +460,27 @@ pub(crate) struct DockSideChoice {
     pub accessibility_label: String,
 }
 
-pub(crate) fn dock_side_choices(panel: PositionedPanel, current: DockSide) -> [DockSideChoice; 2] {
-    let panel_name = match panel {
-        PositionedPanel::Tools => "Tools",
-        PositionedPanel::ImageInfo => "Image Information",
-    };
+pub(crate) fn dock_side_choices(
+    language: Language,
+    panel: PositionedPanel,
+    current: DockSide,
+) -> [DockSideChoice; 2] {
+    let panel_name = language.text(match panel {
+        PositionedPanel::Tools => COPY_TOOLS,
+        PositionedPanel::ImageInfo => COPY_IMAGE_INFORMATION,
+    });
     [
         DockSideChoice {
             side: DockSide::Left,
-            label: "Left",
+            label: language.text(COPY_LEFT),
             selected: current == DockSide::Left,
-            accessibility_label: format!("{panel_name}: Left"),
+            accessibility_label: panel_side_label(language, panel_name, COPY_LEFT),
         },
         DockSideChoice {
             side: DockSide::Right,
-            label: "Right",
+            label: language.text(COPY_RIGHT),
             selected: current == DockSide::Right,
-            accessibility_label: format!("{panel_name}: Right"),
+            accessibility_label: panel_side_label(language, panel_name, COPY_RIGHT),
         },
     ]
 }
@@ -347,6 +488,9 @@ pub(crate) fn dock_side_choices(panel: PositionedPanel, current: DockSide) -> [D
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)] // independent event-loop facts, not derived policy
 pub(crate) struct ChromeInput {
+    /// Interface language, so copy is translated here rather than at each
+    /// render site that would have to remember.
+    pub language: Language,
     pub dock: DockInput,
     pub is_loading: bool,
     pub is_opening: bool,
@@ -452,7 +596,7 @@ pub(crate) struct UndoTrashView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RatingChoiceView {
     pub assignment: crate::ratings::RatingAssignment,
-    pub label: &'static str,
+    pub label: String,
     pub shortcut: &'static str,
     pub enabled: bool,
     pub selected: bool,
@@ -563,11 +707,11 @@ impl ChromeViewModel {
     #[must_use]
     pub fn crop_control(self) -> ToolControlView {
         ToolControlView {
-            label: if self.input.is_cropping {
-                "Cancel Crop"
+            label: self.input.language.text(if self.input.is_cropping {
+                COPY_CANCEL_CROP
             } else {
-                "Crop"
-            },
+                COPY_CROP
+            }),
             shortcut: if self.input.is_cropping { "Esc" } else { "C" },
             enabled: self.is_enabled(ChromeControl::Crop),
             selected: self.input.is_cropping,
@@ -577,13 +721,13 @@ impl ChromeViewModel {
     #[must_use]
     pub fn heal_control(self) -> ToolControlView {
         ToolControlView {
-            label: if self.input.dock.heal_active {
-                "Finish Spot Heal"
+            label: self.input.language.text(if self.input.dock.heal_active {
+                COPY_FINISH_SPOT_HEAL
             } else if self.input.heal_busy {
-                "Finishing Spot Heal..."
+                COPY_FINISHING_SPOT_HEAL
             } else {
-                "Spot Heal"
-            },
+                COPY_SPOT_HEAL
+            }),
             shortcut: if self.input.dock.heal_active {
                 "Esc"
             } else {
@@ -597,21 +741,26 @@ impl ChromeViewModel {
     #[must_use]
     pub fn undo_trash(self) -> UndoTrashView {
         let unsettled = self.input.curation_busy || self.input.restore_recovery_unsettled;
-        let help = if unsettled {
-            "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash."
+        let language = self.input.language;
+        let help = language.text(if unsettled {
+            COPY_RESTORE_UNSETTLED
         } else if self.input.has_undo_trash {
-            "Restores the latest safely recoverable Trash action. It may belong to another folder."
+            COPY_UNDO_TRASH_AVAILABLE
         } else {
-            "No safely recoverable Trash action is available."
-        };
+            COPY_UNDO_TRASH_NONE
+        });
+        let label = language.text(COPY_UNDO_TRASH);
         let accessibility_label = if !self.input.has_undo_trash && !unsettled {
-            "Undo Trash".to_owned()
+            label.to_owned()
         } else {
-            format!("Undo Trash. {help}")
+            language
+                .text(COPY_UNDO_TRASH_WITH_HELP)
+                .replace(LABEL_PLACEHOLDER, label)
+                .replace(HELP_PLACEHOLDER, help)
         };
         UndoTrashView {
             enabled: self.is_enabled(ChromeControl::UndoTrash),
-            label: "Undo Trash",
+            label,
             shortcut: "U",
             help,
             accessibility_label,
@@ -619,31 +768,40 @@ impl ChromeViewModel {
     }
 
     #[must_use]
-    pub fn rating_menu_label(self) -> &'static str {
+    pub fn rating_menu_label(self) -> String {
+        let language = self.input.language;
         if self.input.dock.has_image {
-            rating_status_label(self.input.rating_state)
-        } else if self.input.is_opening {
-            "Rating: Loading image"
-        } else if self.input.load_failed {
-            "Rating: Image unavailable"
-        } else {
-            "Rating: Open an image"
+            return rating_status_label(language, self.input.rating_state);
         }
+        language
+            .text(if self.input.is_opening {
+                COPY_RATING_LOADING_IMAGE
+            } else if self.input.load_failed {
+                COPY_RATING_IMAGE_UNAVAILABLE
+            } else {
+                COPY_RATING_OPEN_AN_IMAGE
+            })
+            .to_owned()
     }
 
     #[must_use]
     pub fn rating_filter_menu_label(self) -> String {
+        let language = self.input.language;
         if self.input.folder_scan_busy {
-            "Rating Filter: Reading folder...".to_owned()
+            language.text(COPY_RATING_FILTER_READING).to_owned()
         } else if self.input.rating_folder_count == 0 {
-            "Rating Filter: Open a folder".to_owned()
+            language.text(COPY_RATING_FILTER_OPEN_FOLDER).to_owned()
         } else {
-            rating_filter_label(self.input.rating_filter)
+            rating_filter_label(language, self.input.rating_filter)
         }
     }
 
     #[must_use]
     pub fn rating_unavailable_text(self) -> &'static str {
+        self.input.language.text(self.rating_unavailable_source())
+    }
+
+    const fn rating_unavailable_source(self) -> &'static str {
         if self.input.rating_recovery_unsettled {
             return RATING_RECOVERY_STATUS;
         }
@@ -652,84 +810,82 @@ impl ChromeViewModel {
         }
         if !self.input.dock.has_image {
             if self.input.is_opening {
-                return "Wait for the selected image to finish loading.";
+                return COPY_RATING_WAIT_FOR_LOAD;
             }
             if self.input.load_failed {
-                return "Reload or open another image before assigning a rating.";
+                return COPY_RATING_RELOAD_FIRST;
             }
-            return "Open an image to assign a rating.";
+            return COPY_RATING_OPEN_TO_ASSIGN;
         }
         match self.input.rating_capability {
-            crate::ratings::RatingWriteCapability::WritableJpeg => "Rating is not ready yet.",
-            crate::ratings::RatingWriteCapability::ReadOnlyFormat => {
-                "This image's rating is read-only in viewr."
-            }
-            crate::ratings::RatingWriteCapability::UnsafeSource => {
-                "Safe source identity is unavailable for rating writes."
-            }
-            crate::ratings::RatingWriteCapability::ObservationFailed => {
-                "Rating could not be read. Close and reopen viewr before changing it."
-            }
-            crate::ratings::RatingWriteCapability::UnsupportedMetadata => {
-                "This image has unsupported rating metadata."
-            }
+            crate::ratings::RatingWriteCapability::WritableJpeg => COPY_RATING_NOT_READY,
+            crate::ratings::RatingWriteCapability::ReadOnlyFormat => COPY_RATING_READ_ONLY,
+            crate::ratings::RatingWriteCapability::UnsafeSource => COPY_RATING_UNSAFE_SOURCE,
+            crate::ratings::RatingWriteCapability::ObservationFailed => COPY_RATING_UNREADABLE,
+            crate::ratings::RatingWriteCapability::UnsupportedMetadata => COPY_RATING_UNSUPPORTED,
         }
     }
 
     #[must_use]
     pub fn rating_choices(self) -> Vec<RatingChoiceView> {
         let enabled = self.is_enabled(ChromeControl::RatingChoice);
+        let language = self.input.language;
         std::iter::once((
             crate::ratings::RatingAssignment::Clear,
-            "Unrated",
+            language.text(COPY_UNRATED).to_owned(),
             "0",
             self.input.rating_state == crate::ratings::RatingState::Unrated,
         ))
         .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
-            let label = rating_value_label(rating);
-            let shortcut = rating_value_shortcut(rating);
             (
                 crate::ratings::RatingAssignment::Set(rating),
-                label,
-                shortcut,
+                rating_value_label(language, rating),
+                rating_value_shortcut(rating),
                 self.input.rating_state == crate::ratings::RatingState::Rated(rating),
             )
         }))
         .map(|(assignment, label, shortcut, selected)| RatingChoiceView {
             assignment,
+            accessibility_label: language
+                .text(COPY_RATING_CHOICE_NAME)
+                .replace(LABEL_PLACEHOLDER, &label)
+                .replace(SHORTCUT_PLACEHOLDER, shortcut),
             label,
             shortcut,
             enabled,
             selected,
-            accessibility_label: format!("Rating {label}, shortcut {shortcut}"),
         })
         .collect()
     }
 
     #[must_use]
     pub fn rating_filter_choices(self) -> Vec<RatingFilterChoiceView> {
-        std::iter::once((
-            crate::ratings::RatingFilter::All,
-            "All images".to_owned(),
-            "All images".to_owned(),
-        ))
-        .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
-            let label = format!("At least {}", rating.get());
-            (
-                crate::ratings::RatingFilter::AtLeast(rating),
-                label.clone(),
-                format!("Rating filter: {label}"),
+        let language = self.input.language;
+        let all = language.text(COPY_FILTER_ALL).to_owned();
+        // "All images" already reads as a complete name, so it keeps the
+        // unprefixed accessible name it has always had.
+        std::iter::once((crate::ratings::RatingFilter::All, all.clone(), all))
+            .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
+                let label = language
+                    .text(COPY_FILTER_AT_LEAST)
+                    .replace(RATING_PLACEHOLDER, &rating.get().to_string());
+                (
+                    crate::ratings::RatingFilter::AtLeast(rating),
+                    label.clone(),
+                    language
+                        .text(COPY_FILTER_CHOICE_NAME)
+                        .replace(LABEL_PLACEHOLDER, &label),
+                )
+            }))
+            .map(
+                |(filter, label, accessibility_label)| RatingFilterChoiceView {
+                    filter,
+                    label,
+                    selected: self.input.rating_filter == filter,
+                    accessibility_label,
+                },
             )
-        }))
-        .map(
-            |(filter, label, accessibility_label)| RatingFilterChoiceView {
-                filter,
-                label,
-                selected: self.input.rating_filter == filter,
-                accessibility_label,
-            },
-        )
-        .collect()
+            .collect()
     }
 
     const fn current_selection_ready(self) -> bool {
@@ -859,38 +1015,30 @@ impl ChromeViewModel {
     }
 }
 
-pub(crate) const fn rating_status_label(state: crate::ratings::RatingState) -> &'static str {
-    match state {
-        crate::ratings::RatingState::Loading => "Rating: Reading...",
-        crate::ratings::RatingState::Unrated => "Rating: Unrated",
-        crate::ratings::RatingState::Rated(rating) => rating_status_value_label(rating),
-        crate::ratings::RatingState::Rejected => "Rating: Rejected",
-        crate::ratings::RatingState::Conflict => "Rating: Conflict",
-        crate::ratings::RatingState::Unsupported => "Rating: Unsupported",
-        crate::ratings::RatingState::Unreadable => "Rating: Unreadable",
-    }
+pub(crate) fn rating_status_label(
+    language: Language,
+    state: crate::ratings::RatingState,
+) -> String {
+    let source = match state {
+        crate::ratings::RatingState::Loading => COPY_RATING_READING,
+        crate::ratings::RatingState::Unrated => COPY_RATING_UNRATED,
+        crate::ratings::RatingState::Rated(rating) => {
+            return language
+                .text(COPY_RATING_VALUE_STATUS)
+                .replace(RATING_PLACEHOLDER, &rating.get().to_string());
+        }
+        crate::ratings::RatingState::Rejected => COPY_RATING_REJECTED,
+        crate::ratings::RatingState::Conflict => COPY_RATING_CONFLICT,
+        crate::ratings::RatingState::Unsupported => COPY_RATING_UNSUPPORTED_STATUS,
+        crate::ratings::RatingState::Unreadable => COPY_RATING_UNREADABLE_STATUS,
+    };
+    language.text(source).to_owned()
 }
 
-const fn rating_status_value_label(rating: crate::ratings::Rating) -> &'static str {
-    match rating.get() {
-        1 => "Rating: 1 of 5",
-        2 => "Rating: 2 of 5",
-        3 => "Rating: 3 of 5",
-        4 => "Rating: 4 of 5",
-        5 => "Rating: 5 of 5",
-        _ => "Rating: Unsupported",
-    }
-}
-
-const fn rating_value_label(rating: crate::ratings::Rating) -> &'static str {
-    match rating.get() {
-        1 => "1 of 5",
-        2 => "2 of 5",
-        3 => "3 of 5",
-        4 => "4 of 5",
-        5 => "5 of 5",
-        _ => "Unsupported",
-    }
+fn rating_value_label(language: Language, rating: crate::ratings::Rating) -> String {
+    language
+        .text(COPY_RATING_VALUE)
+        .replace(RATING_PLACEHOLDER, &rating.get().to_string())
 }
 
 const fn rating_value_shortcut(rating: crate::ratings::Rating) -> &'static str {
@@ -904,12 +1052,15 @@ const fn rating_value_shortcut(rating: crate::ratings::Rating) -> &'static str {
     }
 }
 
-pub(crate) fn rating_filter_label(filter: crate::ratings::RatingFilter) -> String {
+pub(crate) fn rating_filter_label(
+    language: Language,
+    filter: crate::ratings::RatingFilter,
+) -> String {
     match filter {
-        crate::ratings::RatingFilter::All => "Rating Filter: All images".to_owned(),
-        crate::ratings::RatingFilter::AtLeast(rating) => {
-            format!("Rating Filter: At least {}", rating.get())
-        }
+        crate::ratings::RatingFilter::All => language.text(COPY_FILTER_ALL_STATUS).to_owned(),
+        crate::ratings::RatingFilter::AtLeast(rating) => language
+            .text(COPY_FILTER_AT_LEAST_STATUS)
+            .replace(RATING_PLACEHOLDER, &rating.get().to_string()),
     }
 }
 
@@ -934,25 +1085,28 @@ pub(crate) fn appearance_choices(
         .collect()
 }
 
-pub(crate) fn background_choices(current: Option<[f64; 4]>) -> [BackgroundChoiceView; 4] {
+pub(crate) fn background_choices(
+    language: Language,
+    current: Option<[f64; 4]>,
+) -> [BackgroundChoiceView; 4] {
     [
         BackgroundChoiceView {
-            label: "Theme Default",
+            label: language.text(COPY_THEME_DEFAULT),
             value: None,
             selected: current.is_none(),
         },
         BackgroundChoiceView {
-            label: "Black",
+            label: language.text(COPY_BLACK),
             value: Some([0.0, 0.0, 0.0, 1.0]),
             selected: current == Some([0.0, 0.0, 0.0, 1.0]),
         },
         BackgroundChoiceView {
-            label: "Neutral Gray",
+            label: language.text(COPY_NEUTRAL_GRAY),
             value: Some([0.2, 0.2, 0.2, 1.0]),
             selected: current == Some([0.2, 0.2, 0.2, 1.0]),
         },
         BackgroundChoiceView {
-            label: "White",
+            label: language.text(COPY_WHITE),
             value: Some([1.0, 1.0, 1.0, 1.0]),
             selected: current == Some([1.0, 1.0, 1.0, 1.0]),
         },
@@ -961,6 +1115,77 @@ pub(crate) fn background_choices(current: Option<[f64; 4]>) -> [BackgroundChoice
 
 #[cfg(test)]
 mod tests {
+    use crate::locale::Language;
+    use crate::locale::is_cataloged;
+
+    /// Assertions state the English copy, so the projection is built with it.
+    const EN: Language = Language::English;
+    const TRANSLATED: [Language; 3] = [Language::Spanish, Language::French, Language::German];
+
+    /// Every string this projection can show has all four languages.
+    #[test]
+    fn every_chrome_string_is_cataloged() {
+        let missing: Vec<_> = super::CHROME_COPY
+            .iter()
+            .copied()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(missing.is_empty(), "uncataloged chrome copy: {missing:?}");
+    }
+
+    /// Chrome copy is translated, and every placeholder is filled.
+    #[test]
+    fn chrome_copy_is_translated_and_fully_substituted() {
+        for language in TRANSLATED {
+            for source in super::CHROME_COPY.iter().copied() {
+                // A frame made only of placeholders and punctuation can be the
+                // same in two languages, so it cannot prove a translation ran.
+                // It is named here rather than skipped by a pattern, and it is
+                // still required to be in the catalog above.
+                if source == super::COPY_PANEL_SIDE || source == super::COPY_UNDO_TRASH_WITH_HELP {
+                    continue;
+                }
+                assert_ne!(
+                    language.text(source),
+                    source,
+                    "{language:?} fell back to English: {source}"
+                );
+            }
+            let mut input = ready_input();
+            input.language = language;
+            let model = ChromeViewModel::new(input);
+            let mut shown = vec![
+                model.rating_menu_label(),
+                model.rating_filter_menu_label(),
+                model.rating_unavailable_text().to_owned(),
+                model.undo_trash().accessibility_label,
+            ];
+            shown.extend(
+                model
+                    .rating_choices()
+                    .into_iter()
+                    .flat_map(|choice| [choice.label, choice.accessibility_label]),
+            );
+            shown.extend(
+                model
+                    .rating_filter_choices()
+                    .into_iter()
+                    .flat_map(|choice| [choice.label, choice.accessibility_label]),
+            );
+            shown.extend(
+                dock_side_choices(language, PositionedPanel::Tools, DockSide::Left)
+                    .into_iter()
+                    .map(|choice| choice.accessibility_label),
+            );
+            for message in shown {
+                assert!(
+                    !message.contains('{') && !message.contains('}'),
+                    "unsubstituted placeholder in {language:?}: {message}"
+                );
+            }
+        }
+    }
+
     use super::{
         ChromeControl, ChromeInput, ChromeLayout, ChromeViewModel, DisclosureDirection, DockInput,
         DockSide, DockState, DockViewModel, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
@@ -971,6 +1196,7 @@ mod tests {
 
     fn ready_input() -> ChromeInput {
         ChromeInput {
+            language: EN,
             dock: DockInput {
                 has_image: true,
                 has_multiple_images: true,
@@ -1596,11 +1822,11 @@ mod tests {
             assert!(toggle.enabled && toggle.selected);
         }
 
-        let left_expanded = model.tools.disclosure().expect("visible tools");
+        let left_expanded = model.tools.disclosure(EN).expect("visible tools");
         assert_eq!(left_expanded.direction, DisclosureDirection::Left);
         assert_eq!(left_expanded.label, "Collapse tools panel");
         assert!(left_expanded.expanded);
-        let filmstrip = model.filmstrip.disclosure().expect("visible filmstrip");
+        let filmstrip = model.filmstrip.disclosure(EN).expect("visible filmstrip");
         assert_eq!(filmstrip.direction, DisclosureDirection::Down);
         assert_eq!(filmstrip.label, "Collapse folder previews");
 
@@ -1610,13 +1836,13 @@ mod tests {
         input.filmstrip_expanded = false;
         let model = DockViewModel::new(input);
         assert_eq!(
-            model.tools.disclosure().expect("visible tools").direction,
+            model.tools.disclosure(EN).expect("visible tools").direction,
             DisclosureDirection::Left
         );
         assert_eq!(
             model
                 .filmstrip
-                .disclosure()
+                .disclosure(EN)
                 .expect("visible filmstrip")
                 .direction,
             DisclosureDirection::Up
@@ -1627,7 +1853,7 @@ mod tests {
     fn dock_side_choices_have_one_selected_accessible_radio() {
         for panel in [PositionedPanel::Tools, PositionedPanel::ImageInfo] {
             for side in [DockSide::Left, DockSide::Right] {
-                let choices = dock_side_choices(panel, side);
+                let choices = dock_side_choices(EN, panel, side);
                 assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
                 assert_eq!(
                     choices
@@ -1653,7 +1879,7 @@ mod tests {
             Some([0.2, 0.2, 0.2, 1.0]),
             Some([1.0, 1.0, 1.0, 1.0]),
         ] {
-            let choices = background_choices(value);
+            let choices = background_choices(EN, value);
             assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
         }
         for preference in crate::theme::Preference::ALL {

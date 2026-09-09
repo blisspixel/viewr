@@ -5,6 +5,35 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Localization
+
+- The first-run card, the opening and failed-open status line, the Retry
+  control, and the complete About shortcut list are now translated into Spanish,
+  French, and German instead of staying English while the menus changed
+  language. A file name is substituted after translation, so each language
+  places it where its grammar needs it.
+- Every Trash, permanent-delete, and restore message is now translated,
+  including the confirmation dialog, its buttons, progress status, failure
+  copy, and recovery guidance. Counts and file names are placed by each
+  language rather than appended in English word order. A permanent-delete
+  confirmation is now recognized in the language it was shown in.
+- Dock disclosure controls, panel position and image background choices, the
+  rating menu and its filter, every rating status and unavailable reason, and
+  Undo Trash are translated, and so are the accessible names a screen reader
+  announces for them.
+- The "wait for the folder scan to finish" family of messages is translated.
+  Each language owns the whole sentence rather than receiving English word
+  order, and the attempted action is now a typed value, so an untranslatable
+  English phrase cannot be passed in.
+- Rating write failures and the loss of the details worker are translated, so
+  the message that says whether a file was changed is in the reader's language.
+- Interface copy that is missing from the language catalog now fails the build
+  rather than rendering English in every language, and the empty-state card and
+  status line share one owner so the same sentence cannot drift apart.
+- About now names the collage, matching the rest of the interface, instead of
+  calling it a mosaic. The German name for the full-image collage no longer
+  reads as "fullscreen collage".
+
 ### Product quality
 
 - Culling a folder no longer stalls after a few Delete presses. A later folder

@@ -40,15 +40,17 @@ use crate::crop_state::{
 use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
 use crate::curation_state::{
     CurationCloseDisposition, CurationKind, CurationRecovery, CurationTerminalState,
-    GuardedSourceAction, PERMANENT_DELETE_ACTION, curation_close_disposition,
+    GuardedSourceAction, RestoreOutcomeCounts, curation_close_disposition,
     curation_recovery_message, curation_status, guarded_source_action_failure_message,
-    permanent_delete_confirmed, permanent_delete_description, permanent_delete_success_message,
-    removal_unready_message, restore_result_message, single_trash_result_message,
+    permanent_delete_action, permanent_delete_confirmed, permanent_delete_description,
+    permanent_delete_success_message, removal_unready_message, restore_result_message,
+    single_trash_result_message,
 };
 use crate::current_work::{
-    ActiveModeAllowance, CurrentWork, blocked_action_message, browse_work_blocker, crop_work,
-    curation_action_preflight, curation_work, current_work_blocker, image_preparation_work,
-    spot_heal_source_blocker, spot_heal_work, trash_submission_work_blocker,
+    ActiveModeAllowance, BlockedAction, CurrentWork, blocked_action_message, browse_work_blocker,
+    crop_work, curation_action_preflight, curation_work, current_work_blocker,
+    image_preparation_work, spot_heal_source_blocker, spot_heal_work,
+    trash_submission_work_blocker,
 };
 use crate::decode::{DecodedImage, LoadedImage};
 use crate::edit_state::edit_transaction_failure_message;
@@ -71,6 +73,7 @@ use crate::keyboard_route::{
     single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
     space_tap_fits, widget_popup_owns_event,
 };
+use crate::locale::{Language, tr};
 use crate::playlist::{
     FilterSelection, Playlist, PlaylistReconcile, ScanPurpose, filter_selection_changes_source,
 };
@@ -565,13 +568,13 @@ struct CurationWorker {
 }
 
 impl CurationWorker {
-    fn status(&self, closing: bool, pending_trash: usize) -> String {
+    fn status(&self, language: Language, closing: bool, pending_trash: usize) -> String {
         let submitted = if matches!(self.context, CurationContext::Trash(_)) {
             self.context.submitted().saturating_add(pending_trash)
         } else {
             self.context.submitted()
         };
-        curation_status(self.context.kind(), submitted, closing)
+        curation_status(language, self.context.kind(), submitted, closing)
     }
 }
 
@@ -1306,7 +1309,7 @@ impl App {
     fn open_path_request(&mut self, path: PathBuf) {
         match path_entry(&path, Path::is_dir) {
             PathEntry::Folder => {
-                if self.block_action_while_curating("opening another folder") {
+                if self.block_action_while_curating(BlockedAction::OpenAnotherFolder) {
                     return;
                 }
                 self.cancel_open_with_check();
@@ -1318,7 +1321,7 @@ impl App {
     }
 
     fn load_and_scan(&mut self, path: PathBuf) {
-        if self.block_action_while_curating("opening another image") {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherImage) {
             return;
         }
         let path = crate::fs::canonical_file_path(&path).unwrap_or(path);
@@ -1357,7 +1360,7 @@ impl App {
     }
 
     fn open_image_dialog(&mut self) {
-        if self.block_action_while_curating("opening another image") {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherImage) {
             return;
         }
         self.cancel_open_with_check();
@@ -1371,7 +1374,7 @@ impl App {
     }
 
     fn open_folder_dialog(&mut self) {
-        if self.block_action_while_curating("opening another folder") {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherFolder) {
             return;
         }
         self.cancel_open_with_check();
@@ -1454,9 +1457,9 @@ impl App {
         self.language = preference.resolve();
         match crate::locale::save(preference) {
             Ok(()) => {
-                let label = self.language.text("Language");
+                let label = self.language.text(crate::locale::tr!("Language"));
                 let selected = if matches!(preference, crate::locale::Preference::System) {
-                    self.language.text("System")
+                    self.language.text(crate::locale::tr!("System"))
                 } else {
                     preference.native_name()
                 };
@@ -2444,7 +2447,7 @@ impl App {
                 if let Some(playlist) = self.playlist.as_mut() {
                     playlist.set_rating(&context.path, rating.state);
                 }
-                self.show_toast(auxiliary_disconnect_message());
+                self.show_toast(auxiliary_disconnect_message(self.language));
                 self.request_redraw();
                 return;
             }
@@ -2622,7 +2625,7 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_busy("changing the rating") {
+        if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
@@ -2695,7 +2698,7 @@ impl App {
             self.show_toast(message);
             return false;
         }
-        if self.block_action_while_busy("changing the rating") {
+        if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return false;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
@@ -2809,7 +2812,7 @@ impl App {
                         }
                     }
                 }
-                self.show_toast(rating_write_failure_message(error));
+                self.show_toast(rating_write_failure_message(self.language, error));
             }
         }
         self.kick_prefetch();
@@ -2820,7 +2823,7 @@ impl App {
     }
 
     fn set_rating_filter(&mut self, filter: RatingFilter) {
-        if self.block_action_while_busy("changing the rating filter") {
+        if self.block_action_while_busy(BlockedAction::ChangeRatingFilter) {
             return;
         }
         let worker_active = self.rating_scan_worker.is_some();
@@ -2989,7 +2992,7 @@ impl App {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_curating("retrying the image load") {
+        if self.block_action_while_curating(BlockedAction::RetryImageLoad) {
             return;
         }
         let Some(path) = self.session.selected_path.clone() else {
@@ -3005,7 +3008,7 @@ impl App {
     fn reload_current_image(&mut self) {
         use crate::file_coherence::ReloadStartBlocker;
 
-        if self.block_action_while_curating("reloading this file") {
+        if self.block_action_while_curating(BlockedAction::ReloadFile) {
             return;
         }
         if let Some(blocker) = crate::file_coherence::reload_start_blocker([
@@ -3046,7 +3049,7 @@ impl App {
     }
 
     fn open_current_with(&mut self) {
-        if self.block_action_while_busy("opening the source in another app") {
+        if self.block_action_while_busy(BlockedAction::OpenInAnotherApp) {
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -4092,7 +4095,9 @@ impl App {
     }
 
     fn rotate_current(&mut self, quarter_turns: i32) {
-        if self.block_action_with_mode_allowance("rotating the image", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::RotateImage, ActiveModeAllowance::Crop)
+        {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -4113,7 +4118,9 @@ impl App {
     }
 
     fn flip_current_horizontally(&mut self) {
-        if self.block_action_with_mode_allowance("flipping the image", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::FlipImage, ActiveModeAllowance::Crop)
+        {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -4123,7 +4130,9 @@ impl App {
     }
 
     fn flip_current_vertically(&mut self) {
-        if self.block_action_with_mode_allowance("flipping the image", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::FlipImage, ActiveModeAllowance::Crop)
+        {
             return;
         }
         if self.current_loaded_path().is_some() {
@@ -4450,6 +4459,7 @@ impl App {
     fn trash_current(&mut self) {
         let Some((path, source)) = self.removal_candidate() else {
             if let Some(message) = removal_unready_message(
+                self.language,
                 GuardedSourceAction::Trash,
                 self.mosaic.is_active(),
                 self.session.selected_path.is_some(),
@@ -4462,10 +4472,17 @@ impl App {
         if let Some(blocker) =
             trash_submission_work_blocker(self.active_work(ActiveModeAllowance::None))
         {
-            self.show_toast(blocked_action_message("moving this file to Trash", blocker));
+            self.show_toast(blocked_action_message(
+                self.language,
+                BlockedAction::Trash,
+                blocker,
+            ));
             return;
         }
-        if let Some(message) = self.curation_recovery.source_removal_preflight() {
+        if let Some(message) = self
+            .curation_recovery
+            .source_removal_preflight(self.language)
+        {
             self.show_toast(message);
             return;
         }
@@ -4490,7 +4507,8 @@ impl App {
             }
             TrashAdmission::Busy(kind) => {
                 self.show_toast(blocked_action_message(
-                    "moving this file to Trash",
+                    self.language,
+                    BlockedAction::Trash,
                     curation_work(kind),
                 ));
             }
@@ -4605,7 +4623,7 @@ impl App {
         log::error!(
             "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
         );
-        let message = curation_recovery_message(kind);
+        let message = curation_recovery_message(self.language, kind);
         self.curation_recovery.record(kind);
         if abandoned == 0 {
             self.show_toast(message);
@@ -4683,40 +4701,44 @@ impl App {
 
     fn block_action_with_mode_allowance(
         &mut self,
-        action: &str,
+        action: BlockedAction,
         allowance: ActiveModeAllowance,
     ) -> bool {
         if let Some(blocker) = self.busy_blocker(allowance) {
-            self.show_toast(blocked_action_message(action, blocker));
+            self.show_toast(blocked_action_message(self.language, action, blocker));
             true
         } else {
             false
         }
     }
 
-    fn block_action_while_busy(&mut self, action: &str) -> bool {
+    fn block_action_while_busy(&mut self, action: BlockedAction) -> bool {
         self.block_action_with_mode_allowance(action, ActiveModeAllowance::None)
     }
 
-    fn block_edit_history_while_busy(&mut self, action: &str) -> bool {
+    fn block_edit_history_while_busy(&mut self, action: BlockedAction) -> bool {
         self.block_action_with_mode_allowance(action, ActiveModeAllowance::SpotHeal)
     }
 
     fn block_browse_while_busy(&mut self) -> bool {
         if let Some(blocker) = browse_work_blocker(self.active_work(ActiveModeAllowance::None)) {
-            self.show_toast(blocked_action_message("browsing to another image", blocker));
+            self.show_toast(blocked_action_message(
+                self.language,
+                BlockedAction::Browse,
+                blocker,
+            ));
             true
         } else {
             false
         }
     }
 
-    fn block_action_while_curating(&mut self, action: &str) -> bool {
+    fn block_action_while_curating(&mut self, action: BlockedAction) -> bool {
         let Some(worker) = self.curation_worker.as_ref() else {
             return false;
         };
         let blocker = curation_work(worker.context.kind());
-        self.show_toast(blocked_action_message(action, blocker));
+        self.show_toast(blocked_action_message(self.language, action, blocker));
         true
     }
 
@@ -4809,7 +4831,10 @@ impl App {
         if self.current_loaded_path().is_none() {
             return;
         }
-        if self.block_action_with_mode_allowance("changing Crop", ActiveModeAllowance::SpotHeal) {
+        if self.block_action_with_mode_allowance(
+            BlockedAction::ChangeCrop,
+            ActiveModeAllowance::SpotHeal,
+        ) {
             return;
         }
 
@@ -4965,16 +4990,21 @@ impl App {
             self.request_redraw();
             return;
         }
-        if let Some(message) =
-            spot_heal_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
-        {
+        if let Some(message) = spot_heal_source_blocker(
+            self.language,
+            self.session.is_loading(),
+            self.session.load_error.is_some(),
+        ) {
             self.show_toast(message);
             return;
         }
         if self.current_loaded_path().is_none() {
             return;
         }
-        if self.block_action_with_mode_allowance("changing Spot Heal", ActiveModeAllowance::Crop) {
+        if self.block_action_with_mode_allowance(
+            BlockedAction::ChangeSpotHeal,
+            ActiveModeAllowance::Crop,
+        ) {
             return;
         }
         if !self.can_heal_current_image() {
@@ -5017,7 +5047,7 @@ impl App {
     }
 
     fn refresh_heal_source(&mut self) {
-        if self.block_edit_history_while_busy("refreshing the heal source") {
+        if self.block_edit_history_while_busy(BlockedAction::RefreshHealSource) {
             return;
         }
         let Some(refresh) = self.heal.refresh.as_ref() else {
@@ -5096,7 +5126,7 @@ impl App {
         if !self.heal.active {
             return;
         }
-        if self.block_edit_history_while_busy("starting a spot-heal stroke") {
+        if self.block_edit_history_while_busy(BlockedAction::StartHealStroke) {
             return;
         }
         self.heal.stroke.clear();
@@ -5276,7 +5306,7 @@ impl App {
         if !self.heal.history.can_undo() {
             return;
         }
-        if self.block_edit_history_while_busy("undoing an edit") {
+        if self.block_edit_history_while_busy(BlockedAction::UndoEdit) {
             return;
         }
         let result = {
@@ -5312,7 +5342,7 @@ impl App {
         if !self.heal.history.can_redo() {
             return;
         }
-        if self.block_edit_history_while_busy("redoing an edit") {
+        if self.block_edit_history_while_busy(BlockedAction::RedoEdit) {
             return;
         }
         let result = {
@@ -5744,6 +5774,7 @@ impl App {
     fn permanent_delete_current(&mut self) {
         let Some((path, source)) = self.removal_candidate() else {
             if let Some(message) = removal_unready_message(
+                self.language,
                 GuardedSourceAction::PermanentDelete,
                 self.mosaic.is_active(),
                 self.session.selected_path.is_some(),
@@ -5753,16 +5784,20 @@ impl App {
             }
             return;
         };
-        if self.block_action_while_busy("permanently deleting this file") {
+        if self.block_action_while_busy(BlockedAction::PermanentlyDelete) {
             return;
         }
-        if let Some(message) = self.curation_recovery.source_removal_preflight() {
+        if let Some(message) = self
+            .curation_recovery
+            .source_removal_preflight(self.language)
+        {
             self.show_toast(message);
             return;
         }
         if let Err(error) = crate::curate::verify_accepted_source_native(&path, &source) {
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
             self.show_toast(guarded_source_action_failure_message(
+                self.language,
                 GuardedSourceAction::PermanentDelete,
                 &error,
             ));
@@ -5771,18 +5806,18 @@ impl App {
         let safe_name = prefetch::privacy_safe_file_name(&path).replace('"', "?");
         let confirmed = rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Warning)
-            .set_title("Permanently delete?")
-            .set_description(permanent_delete_description(&safe_name))
+            .set_title(self.language.text(tr!("Permanently delete?")))
+            .set_description(permanent_delete_description(self.language, &safe_name))
             .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                PERMANENT_DELETE_ACTION.to_owned(),
-                "Cancel".to_owned(),
+                permanent_delete_action(self.language).to_owned(),
+                self.language.text(tr!("Cancel")).to_owned(),
             ))
             .show();
         let confirmed_label = match &confirmed {
             rfd::MessageDialogResult::Custom(label) => Some(label.as_str()),
             _ => None,
         };
-        if !permanent_delete_confirmed(confirmed_label) {
+        if !permanent_delete_confirmed(self.language, confirmed_label) {
             return;
         }
         let removal = self.removal_context_for_path(path.clone());
@@ -5812,6 +5847,7 @@ impl App {
                 self.revert_submitted_removal(context);
                 log_guarded_action_failure(GuardedSourceAction::Trash, &error);
                 self.show_toast(guarded_source_action_failure_message(
+                    self.language,
                     GuardedSourceAction::Trash,
                     &error,
                 ));
@@ -5852,6 +5888,7 @@ impl App {
             self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
         }
         self.show_toast(single_trash_result_message(
+            self.language,
             has_receipt,
             previous_undo_preserved,
         ));
@@ -5867,6 +5904,7 @@ impl App {
             self.revert_submitted_removal(context);
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
             self.show_toast(guarded_source_action_failure_message(
+                self.language,
                 GuardedSourceAction::PermanentDelete,
                 &error,
             ));
@@ -5894,6 +5932,7 @@ impl App {
         }
         let safe_name = prefetch::privacy_safe_file_name(&context.path).replace('"', "?");
         self.show_toast(permanent_delete_success_message(
+            self.language,
             &safe_name,
             previous_trash_undo,
         ));
@@ -6054,15 +6093,16 @@ impl App {
             .as_ref()
             .map(|worker| worker.context.kind());
         if let Some(message) = curation_action_preflight(
+            self.language,
             active,
             !self.last_trashed.is_empty(),
-            "restoring files from Trash",
-            "Nothing to restore from Trash",
+            BlockedAction::RestoreFromTrash,
+            crate::current_work::NOTHING_TO_RESTORE,
         ) {
             self.show_toast(message);
             return;
         }
-        if self.block_action_while_busy("restoring files from Trash") {
+        if self.block_action_while_busy(BlockedAction::RestoreFromTrash) {
             return;
         }
 
@@ -6181,13 +6221,16 @@ impl App {
         }
 
         self.show_toast(restore_result_message(
-            restored_count,
-            retry_now,
-            resolve_then_retry,
-            manual_review,
-            terminal,
-            first_failure,
-            restores_active_playlist,
+            self.language,
+            RestoreOutcomeCounts {
+                restored: restored_count,
+                retry_now,
+                resolve_then_retry,
+                manual_review,
+                terminal,
+                first_failure,
+                active_playlist: restores_active_playlist,
+            },
         ));
         if failure_total == 0 {
             CurationTerminalState::Succeeded
@@ -6359,7 +6402,7 @@ impl App {
     }
 
     fn save_as(&mut self) {
-        if self.block_action_while_curating("saving a copy") {
+        if self.block_action_while_curating(BlockedAction::SaveCopy) {
             return;
         }
         if let Some(blocker) = save_start_blocker([
@@ -6610,7 +6653,7 @@ impl App {
                         log::error!(
                             "curation worker returned a mismatched completion: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
                         );
-                        let message = curation_recovery_message(kind);
+                        let message = curation_recovery_message(self.language, kind);
                         self.curation_recovery.record(kind);
                         self.show_toast(message);
                         return;
@@ -6663,7 +6706,9 @@ impl App {
         let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
             return;
         };
-        if self.block_action_with_mode_allowance("applying the crop", ActiveModeAllowance::Crop) {
+        if self
+            .block_action_with_mode_allowance(BlockedAction::ApplyCrop, ActiveModeAllowance::Crop)
+        {
             return;
         }
         let Some(rect) = self.transform.crop_rect else {
@@ -7829,13 +7874,17 @@ impl ApplicationHandler<UserEvent> for App {
                 let preview_recovery_unsettled = self.preview_recovery_unsettled;
                 let preview_load_retry_blocked = self.preview_load_retry_blocked;
                 let curation_status = self.curation_worker.as_ref().map(|worker| {
-                    worker.status(self.close_after_curation, self.pending_trash.len())
+                    worker.status(
+                        self.language,
+                        self.close_after_curation,
+                        self.pending_trash.len(),
+                    )
                 });
                 let trash_move_busy = self
                     .curation_worker
                     .as_ref()
                     .is_some_and(|worker| matches!(worker.context.kind(), CurationKind::Trash));
-                let curation_recovery_status = self.curation_recovery.status();
+                let curation_recovery_status = self.curation_recovery.status(self.language);
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
                 let folder_scan_busy = self.exclusive_folder_scan();

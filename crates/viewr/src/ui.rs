@@ -85,10 +85,8 @@ const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
 const EXTERNAL_EDIT_BADGE: &str = "External F5";
 const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
-const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::reload_reminder_copy();
-pub(crate) const CROP_RECOVERY_STATUS: &str =
-    "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
-pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";
+const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMINDER;
+pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
@@ -1083,13 +1081,13 @@ fn render_top_operation_status(
             );
         });
         if frame.save_recovery_unsettled {
-            add_status(ui, SAVE_RECOVERY_STATUS);
+            add_status(ui, frame.text(SAVE_RECOVERY_STATUS));
         } else if frame.crop_recovery_unsettled {
-            add_status(ui, CROP_RECOVERY_STATUS);
+            add_status(ui, frame.text(CROP_RECOVERY_STATUS));
         } else if frame.preview_recovery_unsettled {
-            add_status(ui, PREVIEW_RECOVERY_STATUS);
+            add_status(ui, frame.text(PREVIEW_RECOVERY_STATUS));
         } else if frame.rating.recovery_unsettled {
-            add_status(ui, RATING_RECOVERY_STATUS);
+            add_status(ui, frame.text(RATING_RECOVERY_STATUS));
         } else {
             if let Some(status) = image_open_status(
                 frame.language,
@@ -1123,17 +1121,17 @@ fn render_top_operation_status(
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, "Applying crop...");
     } else if frame.save_recovery_unsettled {
-        add_status(ui, SAVE_RECOVERY_STATUS);
+        add_status(ui, frame.text(SAVE_RECOVERY_STATUS));
     } else if frame.crop_recovery_unsettled {
-        add_status(ui, CROP_RECOVERY_STATUS);
+        add_status(ui, frame.text(CROP_RECOVERY_STATUS));
     } else if frame.preview_recovery_unsettled {
-        add_status(ui, PREVIEW_RECOVERY_STATUS);
+        add_status(ui, frame.text(PREVIEW_RECOVERY_STATUS));
     } else if frame.rating.recovery_unsettled {
-        add_status(ui, RATING_RECOVERY_STATUS);
+        add_status(ui, frame.text(RATING_RECOVERY_STATUS));
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
         add_status(ui, status);
     } else if frame.source_gone {
-        add_top_status(ui, crate::file_coherence::current_gone_copy(), colors);
+        add_top_status(ui, frame.text(crate::file_coherence::CURRENT_GONE), colors);
     } else if frame.external_edit_pending {
         add_top_status_with_external_edit(ui, EXTERNAL_EDIT_STANDALONE_STATUS, true, colors);
     } else if frame.rating.outside_filter {
@@ -6547,7 +6545,7 @@ mod tests {
             .expect("AccessKit update should be generated");
         assert!(update.nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Label
-                && node.value() == Some(crate::file_coherence::current_gone_copy())
+                && node.value() == Some(crate::file_coherence::CURRENT_GONE)
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
     }

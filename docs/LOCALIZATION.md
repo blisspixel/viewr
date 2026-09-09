@@ -25,8 +25,9 @@ Preferences, file-association entry points, empty-state actions, crop controls,
 the main panel headings, the complete first-run, open-status, and Help shortcut
 surface, every Trash, permanent-delete, and restore message, the concurrent-work
 wait sentences, rating write failures, and the dock, rating, and Undo Trash copy
-the chrome projection produces, including its accessible names. Remaining image
-information, metadata, appearance, and editing explanations still use the
+the chrome projection produces, including its accessible names, crop and Save As
+recovery, reload wait reasons, and edit-presentation failures. Remaining image
+information, metadata, appearance, and some editing explanations still use the
 explicit English fallback. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called
 complete. Destructive-action copy tells someone whether their file still
@@ -46,8 +47,12 @@ of by review:
   the lookup directly, which would step around that build check.
 - Copy that a pure seam supplies as a value cannot use `tr!`, so each such seam
   proves its own coverage by enumerating every string it can emit.
-  `shortcuts::every_visible_string_is_cataloged` and
-  `curation_state::every_curation_message_is_cataloged` do this. A seam that is
+  `shortcuts::every_visible_string_is_cataloged`,
+  `curation_state::every_curation_message_is_cataloged`,
+  `crop_state::every_crop_message_is_cataloged`,
+  `file_coherence::every_coherence_message_is_cataloged`,
+  `save_state::every_save_message_is_cataloged`, and
+  `edit_state::every_edit_message_is_cataloged` do this. A seam that is
   not yet cataloged has no such test; adding one is how that surface is
   migrated.
 - A seam that composes sentences from counts and names also proves the result.

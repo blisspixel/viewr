@@ -5,7 +5,29 @@
 //! close coordination derived from immutable facts.
 
 use crate::chrome::SAVE_RECOVERY_STATUS;
+use crate::locale::Language;
 use crate::playlist::ScanPurpose;
+
+const WAIT_FOLDER_OPEN: &str =
+    "Wait for the selected folder to finish opening before saving a copy";
+const WAIT_RATING_WRITE: &str = "Wait for the rating update to finish before saving a copy";
+const WAIT_PREVIEW: &str = "Wait for the image preview to finish before saving";
+const WAIT_SPOT_HEAL: &str = "Wait for spot heal to finish before saving";
+const WAIT_CROP: &str = "Wait for the crop to finish before saving";
+const WAIT_CROP_SELECTION: &str = "Apply or cancel the crop before saving a copy";
+const SAVE_ALREADY: &str = "A copy is already being saved";
+
+#[cfg(test)]
+const ALL_COPY: &[&str] = &[
+    WAIT_FOLDER_OPEN,
+    WAIT_RATING_WRITE,
+    WAIT_PREVIEW,
+    WAIT_SPOT_HEAL,
+    WAIT_CROP,
+    WAIT_CROP_SELECTION,
+    SAVE_ALREADY,
+    SAVE_RECOVERY_STATUS,
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CloseDisposition {
@@ -80,21 +102,20 @@ pub(crate) fn save_start_blocker<const N: usize>(
 }
 
 #[must_use]
-pub(crate) const fn save_start_blocker_message(blocker: SaveStartBlocker) -> &'static str {
-    match blocker {
+pub(crate) fn save_start_blocker_message(
+    language: Language,
+    blocker: SaveStartBlocker,
+) -> &'static str {
+    language.text(match blocker {
         SaveStartBlocker::Recovery => SAVE_RECOVERY_STATUS,
-        SaveStartBlocker::FolderOpen => {
-            "Wait for the selected folder to finish opening before saving a copy"
-        }
-        SaveStartBlocker::RatingWrite => {
-            "Wait for the rating update to finish before saving a copy"
-        }
-        SaveStartBlocker::Preview => "Wait for the image preview to finish before saving",
-        SaveStartBlocker::SpotHeal => "Wait for spot heal to finish before saving",
-        SaveStartBlocker::Crop => "Wait for the crop to finish before saving",
-        SaveStartBlocker::CropSelection => "Apply or cancel the crop before saving a copy",
-        SaveStartBlocker::Save => "A copy is already being saved",
-    }
+        SaveStartBlocker::FolderOpen => WAIT_FOLDER_OPEN,
+        SaveStartBlocker::RatingWrite => WAIT_RATING_WRITE,
+        SaveStartBlocker::Preview => WAIT_PREVIEW,
+        SaveStartBlocker::SpotHeal => WAIT_SPOT_HEAL,
+        SaveStartBlocker::Crop => WAIT_CROP,
+        SaveStartBlocker::CropSelection => WAIT_CROP_SELECTION,
+        SaveStartBlocker::Save => SAVE_ALREADY,
+    })
 }
 
 #[must_use]
@@ -105,8 +126,29 @@ pub(crate) const fn folder_scan_blocks_save(purpose: Option<&ScanPurpose>) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::{Language, is_cataloged};
     use crate::playlist::ScanPurpose;
     use std::path::PathBuf;
+
+    #[test]
+    fn every_save_message_is_cataloged() {
+        let missing: Vec<_> = ALL_COPY
+            .iter()
+            .copied()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(missing.is_empty(), "uncataloged save copy: {missing:?}");
+    }
+
+    #[test]
+    fn save_blocker_copy_is_translated() {
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_ne!(
+                save_start_blocker_message(language, SaveStartBlocker::FolderOpen),
+                save_start_blocker_message(Language::English, SaveStartBlocker::FolderOpen)
+            );
+        }
+    }
 
     #[test]
     fn close_disposition_exhausts_save_and_curation_activity() {
@@ -258,35 +300,39 @@ mod tests {
             Crop, CropSelection, FolderOpen, Preview, RatingWrite, Recovery, Save, SpotHeal,
         };
 
+        let en = crate::locale::Language::English;
         assert_eq!(
-            save_start_blocker_message(FolderOpen),
+            save_start_blocker_message(en, FolderOpen),
             "Wait for the selected folder to finish opening before saving a copy"
         );
         assert_eq!(
-            save_start_blocker_message(RatingWrite),
+            save_start_blocker_message(en, RatingWrite),
             "Wait for the rating update to finish before saving a copy"
         );
         assert_eq!(
-            save_start_blocker_message(Preview),
+            save_start_blocker_message(en, Preview),
             "Wait for the image preview to finish before saving"
         );
         assert_eq!(
-            save_start_blocker_message(SpotHeal),
+            save_start_blocker_message(en, SpotHeal),
             "Wait for spot heal to finish before saving"
         );
         assert_eq!(
-            save_start_blocker_message(Crop),
+            save_start_blocker_message(en, Crop),
             "Wait for the crop to finish before saving"
         );
         assert_eq!(
-            save_start_blocker_message(CropSelection),
+            save_start_blocker_message(en, CropSelection),
             "Apply or cancel the crop before saving a copy"
         );
         assert_eq!(
-            save_start_blocker_message(Save),
+            save_start_blocker_message(en, Save),
             "A copy is already being saved"
         );
-        assert_eq!(save_start_blocker_message(Recovery), SAVE_RECOVERY_STATUS);
+        assert_eq!(
+            save_start_blocker_message(en, Recovery),
+            SAVE_RECOVERY_STATUS
+        );
         assert_eq!(
             SAVE_RECOVERY_STATUS,
             "Save As stopped unexpectedly. Close and reopen viewr before saving again."

@@ -5,6 +5,7 @@
 //! and terminal dispositions derived from immutable facts.
 
 use crate::chrome::{RATING_DISCOVERY_WRITE_STATUS, RATING_RECOVERY_STATUS};
+use crate::locale::Language;
 use crate::ratings::{
     RatingFilter, RatingObservation, RatingState, RatingWriteCapability, RatingWriteError,
 };
@@ -156,9 +157,24 @@ pub(crate) const fn rating_close_disposition(
 
 /// Path-free guidance after the auxiliary details worker endpoint is lost.
 #[must_use]
-pub(crate) const fn auxiliary_disconnect_message() -> &'static str {
-    "Image details, animation, and rating reading stopped unexpectedly. Close and reopen viewr before continuing."
+pub(crate) fn auxiliary_disconnect_message(language: Language) -> &'static str {
+    language.text(AUXILIARY_DISCONNECT)
 }
+
+/// Catalog keys for rating copy. `every_rating_message_is_cataloged` holds them.
+const AUXILIARY_DISCONNECT: &str = "Image details, animation, and rating reading stopped unexpectedly. Close and reopen viewr before continuing.";
+const READ_ONLY_FORMAT: &str =
+    "This image's rating is read-only in viewr. The file was not changed.";
+const UNSUPPORTED_METADATA: &str =
+    "This image has unsupported rating metadata. The file was not changed.";
+const UNREADABLE_METADATA: &str =
+    "viewr could not read this image's rating safely. The file was not changed.";
+const SOURCE_CHANGED: &str = "The image changed on disk before the rating could be saved. Press F5 to reload, then try again.";
+const PERMISSION_DENIED: &str = "Could not save the rating because the image or its folder is read-only. The previous rating is unchanged.";
+const WRITE_FAILED: &str = "Could not save the rating safely. The previous rating is unchanged.";
+const VERIFICATION_RESTORED: &str =
+    "The rating update could not be verified. The original image was restored.";
+const RECOVERY_FAILED: &str = "The rating update could not be verified or restored. Stop editing this image and restore it from a trusted backup.";
 
 /// Rating observation forced after auxiliary endpoint loss.
 #[must_use]
@@ -171,39 +187,68 @@ pub(crate) const fn rating_after_auxiliary_disconnect() -> RatingObservation {
 
 /// Path-free user message for a terminal rating write failure.
 #[must_use]
-pub(crate) const fn rating_write_failure_message(error: RatingWriteError) -> &'static str {
+pub(crate) fn rating_write_failure_message(
+    language: Language,
+    error: RatingWriteError,
+) -> &'static str {
+    language.text(write_failure_source(error))
+}
+
+const fn write_failure_source(error: RatingWriteError) -> &'static str {
     match error {
-        RatingWriteError::ReadOnlyFormat => {
-            "This image's rating is read-only in viewr. The file was not changed."
-        }
-        RatingWriteError::UnsupportedMetadata => {
-            "This image has unsupported rating metadata. The file was not changed."
-        }
-        RatingWriteError::UnreadableMetadata => {
-            "viewr could not read this image's rating safely. The file was not changed."
-        }
-        RatingWriteError::SourceChanged => {
-            "The image changed on disk before the rating could be saved. Press F5 to reload, then try again."
-        }
-        RatingWriteError::PermissionDenied => {
-            "Could not save the rating because the image or its folder is read-only. The previous rating is unchanged."
-        }
-        RatingWriteError::WriteFailed => {
-            "Could not save the rating safely. The previous rating is unchanged."
-        }
-        RatingWriteError::VerificationRestored => {
-            "The rating update could not be verified. The original image was restored."
-        }
-        RatingWriteError::RecoveryFailed => {
-            "The rating update could not be verified or restored. Stop editing this image and restore it from a trusted backup."
-        }
+        RatingWriteError::ReadOnlyFormat => READ_ONLY_FORMAT,
+        RatingWriteError::UnsupportedMetadata => UNSUPPORTED_METADATA,
+        RatingWriteError::UnreadableMetadata => UNREADABLE_METADATA,
+        RatingWriteError::SourceChanged => SOURCE_CHANGED,
+        RatingWriteError::PermissionDenied => PERMISSION_DENIED,
+        RatingWriteError::WriteFailed => WRITE_FAILED,
+        RatingWriteError::VerificationRestored => VERIFICATION_RESTORED,
+        RatingWriteError::RecoveryFailed => RECOVERY_FAILED,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::is_cataloged;
     use crate::ratings::Rating;
+
+    /// Assertions state the English copy, so the seam is called with it.
+    const EN: Language = Language::English;
+    const TRANSLATED: [Language; 3] = [Language::Spanish, Language::French, Language::German];
+
+    /// Every rating message this seam owns has all four languages.
+    ///
+    /// The two shared status strings come from `chrome` and are cataloged
+    /// with that seam.
+    #[test]
+    fn every_rating_message_is_cataloged() {
+        let mut sources = vec![AUXILIARY_DISCONNECT];
+        sources.extend(WRITE_ERRORS.map(write_failure_source));
+        let missing: Vec<_> = sources
+            .into_iter()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(missing.is_empty(), "uncataloged rating copy: {missing:?}");
+    }
+
+    /// A rating failure says whether the file changed, in the user's language.
+    #[test]
+    fn rating_failure_copy_is_translated() {
+        for language in TRANSLATED {
+            assert_ne!(
+                auxiliary_disconnect_message(language),
+                auxiliary_disconnect_message(EN)
+            );
+            for error in WRITE_ERRORS {
+                assert_ne!(
+                    rating_write_failure_message(language, error),
+                    rating_write_failure_message(EN, error),
+                    "{language:?} fell back to English for {error:?}"
+                );
+            }
+        }
+    }
 
     const WRITE_ERRORS: [RatingWriteError; 8] = [
         RatingWriteError::ReadOnlyFormat,
@@ -308,7 +353,7 @@ mod tests {
 
     #[test]
     fn auxiliary_disconnect_copy_requires_a_restart_without_promising_success() {
-        let message = auxiliary_disconnect_message();
+        let message = auxiliary_disconnect_message(EN);
         assert!(message.contains("Close and reopen viewr"));
         assert!(message.contains("rating"));
         assert!(!message.contains("recover"));
@@ -324,14 +369,14 @@ mod tests {
     #[test]
     fn rating_write_failure_copy_is_exhaustive_and_path_free() {
         for error in WRITE_ERRORS {
-            let message = rating_write_failure_message(error);
+            let message = rating_write_failure_message(EN, error);
             assert!(!message.is_empty());
             assert!(!message.contains('\\'));
             assert!(!message.contains('/'));
             assert!(!message.contains('\n'));
         }
         assert_eq!(
-            rating_write_failure_message(RatingWriteError::WriteFailed),
+            rating_write_failure_message(EN, RatingWriteError::WriteFailed),
             "Could not save the rating safely. The previous rating is unchanged."
         );
     }

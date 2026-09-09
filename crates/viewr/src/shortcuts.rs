@@ -1,7 +1,12 @@
 //! Covered first-run and Help shortcut copy.
 //!
 //! About, the empty state, and the product-quality matrix quote this catalog
-//! instead of a truncated one-line summary.
+//! instead of a truncated one-line summary. Every source string here is an
+//! English catalog key, and `every_visible_string_is_cataloged` keeps it that
+//! way, so the surface a first-time user reads is translated rather than
+//! falling back to English one string at a time.
+
+use crate::locale::Language;
 
 /// How the empty-state card should speak.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +41,22 @@ pub(crate) struct ShortcutGroup {
 pub(crate) const FIRST_RUN_SCOPE: &str = "Open File, Open Folder, or drop a file or folder. A dropped file also browses its folder when access allows. Open Folder selects the folder for this session.";
 /// Shown while the first decode of a launch or retry is in progress.
 pub(crate) const OPENING_DESCRIPTION: &str = "Decoding locally while the window stays responsive.";
+/// Heading template while the first decode is in progress.
+const OPENING_HEADING: &str = "Opening {subject}";
+/// Heading template after a failed open.
+const FAILED_HEADING: &str = "Could not open {subject}";
+/// Heading with nothing selected.
+const EMPTY_HEADING: &str = "Open an image";
+/// Placeholder replaced with the selected file name after translation.
+const SUBJECT_PLACEHOLDER: &str = "{subject}";
+/// Heading while opening a file whose name is not known.
+const OPENING_UNNAMED_HEADING: &str = "Opening the image";
+/// Heading after a failed open of a file whose name is not known.
+const FAILED_UNNAMED_HEADING: &str = "Could not open the image";
+/// Retry control name after a failed open.
+const RETRY_HEADING: &str = "Retry opening {subject}";
+/// Retry control name when the file name is not known.
+const RETRY_UNNAMED_HEADING: &str = "Retry opening the image";
 const MAX_EMPTY_ERROR_CHARS: usize = 160;
 
 /// Help catalog. Keys match the event-loop shortcuts, including page step.
@@ -70,7 +91,7 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             },
             ShortcutSpec {
                 keys: "Page Up / Page Down",
-                action: "Previous / next image or mosaic group",
+                action: "Previous / next image or collage group",
             },
             ShortcutSpec {
                 keys: "[ / ]",
@@ -111,7 +132,7 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             },
             ShortcutSpec {
                 keys: "Esc",
-                action: "Leave tool, mosaic, or fullscreen",
+                action: "Leave tool, collage, or fullscreen",
             },
             ShortcutSpec {
                 keys: "T G I",
@@ -153,32 +174,98 @@ pub(crate) fn format_shortcut_keys(keys: &str, primary: &str) -> String {
 }
 
 /// Empty, opening, or failed-open copy for the startup card.
+///
+/// The file name is substituted after translation so a language can place the
+/// subject where its grammar needs it. Decoder and I/O error text stays in the
+/// words the platform produced.
 #[must_use]
 pub(crate) fn empty_state_copy(
+    language: Language,
     is_opening: bool,
     load_error: Option<&str>,
     selected_file_name: Option<&str>,
 ) -> EmptyStateCopy {
-    let subject = selected_file_name.unwrap_or("image");
     if is_opening {
         return EmptyStateCopy {
-            heading: format!("Opening {subject}"),
-            description: OPENING_DESCRIPTION.to_owned(),
+            heading: heading_for(
+                language,
+                OPENING_HEADING,
+                OPENING_UNNAMED_HEADING,
+                selected_file_name,
+            ),
+            description: language.text(OPENING_DESCRIPTION).to_owned(),
             show_retry: false,
         };
     }
     if let Some(error) = load_error {
         return EmptyStateCopy {
-            heading: format!("Could not open {subject}"),
+            heading: heading_for(
+                language,
+                FAILED_HEADING,
+                FAILED_UNNAMED_HEADING,
+                selected_file_name,
+            ),
             description: bound_user_error(error),
             show_retry: true,
         };
     }
     EmptyStateCopy {
-        heading: "Open an image".to_owned(),
-        description: FIRST_RUN_SCOPE.to_owned(),
+        heading: language.text(EMPTY_HEADING).to_owned(),
+        description: language.text(FIRST_RUN_SCOPE).to_owned(),
         show_retry: false,
     }
+}
+
+/// Top-status line for an image that is opening or failed to open.
+///
+/// The status line and the empty-state card say the same sentence, so they
+/// share one owner instead of formatting it twice in two languages.
+#[must_use]
+pub(crate) fn open_status(
+    language: Language,
+    is_opening: bool,
+    has_error: bool,
+    selected_file_name: Option<&str>,
+) -> Option<String> {
+    if has_error {
+        return Some(heading_for(
+            language,
+            FAILED_HEADING,
+            FAILED_UNNAMED_HEADING,
+            selected_file_name,
+        ));
+    }
+    is_opening.then(|| {
+        heading_for(
+            language,
+            OPENING_HEADING,
+            OPENING_UNNAMED_HEADING,
+            selected_file_name,
+        )
+    })
+}
+
+/// Accessible and visible name for the empty-state Retry control.
+#[must_use]
+pub(crate) fn retry_label(language: Language, selected_file_name: Option<&str>) -> String {
+    heading_for(
+        language,
+        RETRY_HEADING,
+        RETRY_UNNAMED_HEADING,
+        selected_file_name,
+    )
+}
+
+fn heading_for(
+    language: Language,
+    named: &'static str,
+    unnamed: &'static str,
+    selected_file_name: Option<&str>,
+) -> String {
+    let Some(name) = selected_file_name else {
+        return language.text(unnamed).to_owned();
+    };
+    language.text(named).replace(SUBJECT_PLACEHOLDER, name)
 }
 
 /// Keep decoder and I/O errors from overflowing the empty-state card.
@@ -195,6 +282,102 @@ pub(crate) fn bound_user_error(error: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::is_cataloged;
+
+    /// Every string this seam can show has a translation in all four languages.
+    ///
+    /// The lookup falls back to English for an uncataloged key, so without this
+    /// the first surface a new user sees would quietly stay English while the
+    /// menus around it changed language.
+    #[test]
+    fn every_visible_string_is_cataloged() {
+        let mut visible: Vec<&'static str> = vec![
+            FIRST_RUN_SCOPE,
+            OPENING_DESCRIPTION,
+            OPENING_HEADING,
+            FAILED_HEADING,
+            EMPTY_HEADING,
+            OPENING_UNNAMED_HEADING,
+            FAILED_UNNAMED_HEADING,
+            RETRY_HEADING,
+            RETRY_UNNAMED_HEADING,
+        ];
+        for group in ABOUT_SHORTCUT_GROUPS {
+            visible.push(group.heading);
+            visible.extend(group.items.iter().map(|item| item.action));
+        }
+        let missing: Vec<_> = visible
+            .into_iter()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "uncataloged first-run copy: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn headings_substitute_the_file_name_after_translation() {
+        let opening = empty_state_copy(Language::German, true, None, Some("night.png"));
+        assert_eq!(opening.heading, "night.png wird geöffnet");
+        assert_eq!(
+            opening.description,
+            "Lokale Dekodierung, während das Fenster reaktionsfähig bleibt."
+        );
+
+        let unnamed = empty_state_copy(Language::Spanish, true, None, None);
+        assert_eq!(unnamed.heading, "Abriendo la imagen");
+
+        let failed = empty_state_copy(Language::French, false, Some("truncated"), Some("a.png"));
+        assert_eq!(failed.heading, "Impossible d’ouvrir a.png");
+        assert_eq!(
+            failed.description, "truncated",
+            "decoder text stays as produced"
+        );
+    }
+
+    #[test]
+    fn status_line_and_empty_card_say_the_same_sentence() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            for name in [Some("night.png"), None] {
+                assert_eq!(
+                    open_status(language, true, false, name).as_deref(),
+                    Some(
+                        empty_state_copy(language, true, None, name)
+                            .heading
+                            .as_str()
+                    ),
+                );
+                assert_eq!(
+                    open_status(language, false, true, name).as_deref(),
+                    Some(
+                        empty_state_copy(language, false, Some("failed"), name)
+                            .heading
+                            .as_str()
+                    ),
+                );
+            }
+            assert_eq!(open_status(language, false, false, None), None);
+        }
+    }
+
+    #[test]
+    fn user_facing_copy_names_the_collage_not_the_module() {
+        let actions: Vec<_> = ABOUT_SHORTCUT_GROUPS
+            .iter()
+            .flat_map(|group| group.items.iter())
+            .map(|item| item.action)
+            .collect();
+        assert!(
+            !actions.iter().any(|action| action.contains("mosaic")),
+            "the user-facing name is collage: {actions:?}"
+        );
+    }
 
     #[test]
     fn about_catalog_covers_pages_reload_panels_and_fit() {
@@ -215,10 +398,10 @@ mod tests {
             "T G I Panels",
             "Space Fit; hold to pan",
             "Ctrl+O Open file",
-            "Page Up / Page Down Previous / next image or mosaic group",
+            "Page Up / Page Down Previous / next image or collage group",
             "F / F11 Fullscreen",
             "Up / Shift+G Full-image collage",
-            "Esc Leave tool, mosaic, or fullscreen",
+            "Esc Leave tool, collage, or fullscreen",
             "Ctrl+Shift+S Save As",
             "Delete Move to Trash",
             "U Undo Trash",
@@ -234,18 +417,23 @@ mod tests {
 
     #[test]
     fn empty_state_copy_distinguishes_first_run_opening_and_failure() {
-        let first = empty_state_copy(false, None, None);
+        let first = empty_state_copy(Language::English, false, None, None);
         assert_eq!(first.heading, "Open an image");
         assert_eq!(first.description, FIRST_RUN_SCOPE);
         assert!(first.description.contains("drop a file or folder"));
         assert!(!first.show_retry);
 
-        let opening = empty_state_copy(true, None, Some("night.png"));
+        let opening = empty_state_copy(Language::English, true, None, Some("night.png"));
         assert_eq!(opening.heading, "Opening night.png");
         assert_eq!(opening.description, OPENING_DESCRIPTION);
         assert!(!opening.show_retry);
 
-        let failed = empty_state_copy(false, Some("truncated"), Some("night.png"));
+        let failed = empty_state_copy(
+            Language::English,
+            false,
+            Some("truncated"),
+            Some("night.png"),
+        );
         assert_eq!(failed.heading, "Could not open night.png");
         assert_eq!(failed.description, "truncated");
         assert!(failed.show_retry);

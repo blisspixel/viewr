@@ -1088,6 +1088,42 @@ const MESSAGES: &[Message] = &[
         german: "\"{name}\" wurde endgültig gelöscht. Dies kann nicht rückgängig gemacht werden.",
     },
     Message {
+        english: "Wait for this photo to finish opening before moving it to Trash",
+        spanish: "Espere a que esta foto termine de abrirse antes de moverla a la papelera",
+        french: "Attendez la fin de l’ouverture de cette photo avant de la mettre à la corbeille",
+        german: "Warten Sie, bis dieses Foto geöffnet ist, bevor Sie es in den Papierkorb verschieben",
+    },
+    Message {
+        english: "Wait for this photo to finish opening before permanently deleting it",
+        spanish: "Espere a que esta foto termine de abrirse antes de eliminarla permanentemente",
+        french: "Attendez la fin de l’ouverture de cette photo avant de la supprimer définitivement",
+        german: "Warten Sie, bis dieses Foto geöffnet ist, bevor Sie es endgültig löschen",
+    },
+    Message {
+        english: "Reload or open another image before moving it to Trash",
+        spanish: "Vuelva a cargar u abra otra imagen antes de moverla a la papelera",
+        french: "Rechargez ou ouvrez une autre image avant de la mettre à la corbeille",
+        german: "Laden Sie das Bild neu oder öffnen Sie ein anderes, bevor Sie es in den Papierkorb verschieben",
+    },
+    Message {
+        english: "Reload or open another image before permanently deleting it",
+        spanish: "Vuelva a cargar u abra otra imagen antes de eliminarla permanentemente",
+        french: "Rechargez ou ouvrez une autre image avant de la supprimer définitivement",
+        german: "Laden Sie das Bild neu oder öffnen Sie ein anderes, bevor Sie es endgültig löschen",
+    },
+    Message {
+        english: "Wait for the selected image to finish opening before moving it to Trash",
+        spanish: "Espere a que la imagen seleccionada termine de abrirse antes de moverla a la papelera",
+        french: "Attendez la fin de l’ouverture de l’image sélectionnée avant de la mettre à la corbeille",
+        german: "Warten Sie, bis das ausgewählte Bild geöffnet ist, bevor Sie es in den Papierkorb verschieben",
+    },
+    Message {
+        english: "Wait for the selected image to finish opening before permanently deleting it",
+        spanish: "Espere a que la imagen seleccionada termine de abrirse antes de eliminarla permanentemente",
+        french: "Attendez la fin de l’ouverture de l’image sélectionnée avant de la supprimer définitivement",
+        german: "Warten Sie, bis das ausgewählte Bild geöffnet ist, bevor Sie es endgültig löschen",
+    },
+    Message {
         english: "Restore blocked: The original folder already contains an item with that name. Move or rename it, then retry with U.",
         spanish: "Restauración bloqueada: la carpeta original ya contiene un elemento con ese nombre. Muévalo o renómbrelo, luego reintente con U.",
         french: "Restauration bloquée : le dossier d’origine contient déjà un élément portant ce nom. Déplacez-le ou renommez-le, puis réessayez avec U.",

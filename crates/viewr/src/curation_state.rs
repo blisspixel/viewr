@@ -51,6 +51,18 @@ mod key {
         "Moved to Trash, but U is unavailable for this move. Use the system Trash for recovery.";
 
     pub(super) const DELETE_PERMANENTLY: &str = "Delete permanently";
+    pub(super) const MOSAIC_TRASH_UNREADY: &str =
+        "Wait for this photo to finish opening before moving it to Trash";
+    pub(super) const MOSAIC_DELETE_UNREADY: &str =
+        "Wait for this photo to finish opening before permanently deleting it";
+    pub(super) const LOAD_FAILED_TRASH_UNREADY: &str =
+        "Reload or open another image before moving it to Trash";
+    pub(super) const LOAD_FAILED_DELETE_UNREADY: &str =
+        "Reload or open another image before permanently deleting it";
+    pub(super) const SELECTED_TRASH_UNREADY: &str =
+        "Wait for the selected image to finish opening before moving it to Trash";
+    pub(super) const SELECTED_DELETE_UNREADY: &str =
+        "Wait for the selected image to finish opening before permanently deleting it";
     pub(super) const DELETE_CONFIRMATION: &str = "Delete \"{name}\" forever?\n\nThis skips the system Trash and cannot be undone from viewr.";
     pub(super) const DELETED_PRIOR_UNDO_KEPT: &str = "Permanently deleted \"{name}\". This cannot be undone; U still restores the previous Trash action.";
     pub(super) const DELETED: &str = "Permanently deleted \"{name}\". This cannot be undone.";
@@ -110,6 +122,12 @@ mod key {
         TRASHED_PRIOR_UNDO_KEPT,
         TRASHED_WITHOUT_UNDO,
         DELETE_PERMANENTLY,
+        MOSAIC_TRASH_UNREADY,
+        MOSAIC_DELETE_UNREADY,
+        LOAD_FAILED_TRASH_UNREADY,
+        LOAD_FAILED_DELETE_UNREADY,
+        SELECTED_TRASH_UNREADY,
+        SELECTED_DELETE_UNREADY,
         DELETE_CONFIRMATION,
         DELETED_PRIOR_UNDO_KEPT,
         DELETED,
@@ -372,41 +390,32 @@ pub(crate) fn permanent_delete_confirmed(language: Language, custom_label: Optio
 /// destructive target to name.
 #[must_use]
 pub(crate) fn removal_unready_message(
+    language: Language,
     action: GuardedSourceAction,
     mosaic: bool,
     has_selection: bool,
     load_failed: bool,
 ) -> Option<&'static str> {
     if mosaic {
-        return Some(match action {
-            GuardedSourceAction::Trash => {
-                "Wait for this photo to finish opening before moving it to Trash"
-            }
-            GuardedSourceAction::PermanentDelete => {
-                "Wait for this photo to finish opening before permanently deleting it"
-            }
-        });
+        return Some(language.text(match action {
+            GuardedSourceAction::Trash => key::MOSAIC_TRASH_UNREADY,
+            GuardedSourceAction::PermanentDelete => key::MOSAIC_DELETE_UNREADY,
+        }));
     }
     if !has_selection {
         return None;
     }
-    Some(if load_failed {
+    Some(language.text(if load_failed {
         match action {
-            GuardedSourceAction::Trash => "Reload or open another image before moving it to Trash",
-            GuardedSourceAction::PermanentDelete => {
-                "Reload or open another image before permanently deleting it"
-            }
+            GuardedSourceAction::Trash => key::LOAD_FAILED_TRASH_UNREADY,
+            GuardedSourceAction::PermanentDelete => key::LOAD_FAILED_DELETE_UNREADY,
         }
     } else {
         match action {
-            GuardedSourceAction::Trash => {
-                "Wait for the selected image to finish opening before moving it to Trash"
-            }
-            GuardedSourceAction::PermanentDelete => {
-                "Wait for the selected image to finish opening before permanently deleting it"
-            }
+            GuardedSourceAction::Trash => key::SELECTED_TRASH_UNREADY,
+            GuardedSourceAction::PermanentDelete => key::SELECTED_DELETE_UNREADY,
         }
-    })
+    }))
 }
 
 /// Path-free success copy after permanent delete. `safe_name` must already be
@@ -647,6 +656,26 @@ mod tests {
             }
         }
         produced.push(permanent_delete_action(language).to_owned());
+        for action in [
+            GuardedSourceAction::Trash,
+            GuardedSourceAction::PermanentDelete,
+        ] {
+            produced.push(
+                removal_unready_message(language, action, true, false, false)
+                    .expect("collage wait copy")
+                    .to_owned(),
+            );
+            produced.push(
+                removal_unready_message(language, action, false, true, true)
+                    .expect("failed-load wait copy")
+                    .to_owned(),
+            );
+            produced.push(
+                removal_unready_message(language, action, false, true, false)
+                    .expect("selected wait copy")
+                    .to_owned(),
+            );
+        }
         produced.push(permanent_delete_description(language, "night.png"));
         for previous in [false, true] {
             produced.push(permanent_delete_success_message(
@@ -983,23 +1012,29 @@ mod tests {
     #[test]
     fn removal_unready_copy_names_the_wait_without_a_silent_no_op() {
         assert_eq!(
-            removal_unready_message(GuardedSourceAction::Trash, true, false, false),
+            removal_unready_message(EN, GuardedSourceAction::Trash, true, false, false),
             Some("Wait for this photo to finish opening before moving it to Trash")
         );
         assert_eq!(
-            removal_unready_message(GuardedSourceAction::PermanentDelete, true, true, false),
+            removal_unready_message(EN, GuardedSourceAction::PermanentDelete, true, true, false),
             Some("Wait for this photo to finish opening before permanently deleting it")
         );
         assert_eq!(
-            removal_unready_message(GuardedSourceAction::Trash, false, true, true),
+            removal_unready_message(EN, GuardedSourceAction::Trash, false, true, true),
             Some("Reload or open another image before moving it to Trash")
         );
         assert_eq!(
-            removal_unready_message(GuardedSourceAction::PermanentDelete, false, true, false),
+            removal_unready_message(EN, GuardedSourceAction::PermanentDelete, false, true, false),
             Some("Wait for the selected image to finish opening before permanently deleting it")
         );
         assert_eq!(
-            removal_unready_message(GuardedSourceAction::PermanentDelete, false, false, false),
+            removal_unready_message(
+                EN,
+                GuardedSourceAction::PermanentDelete,
+                false,
+                false,
+                false
+            ),
             None
         );
     }

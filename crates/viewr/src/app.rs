@@ -4459,6 +4459,7 @@ impl App {
     fn trash_current(&mut self) {
         let Some((path, source)) = self.removal_candidate() else {
             if let Some(message) = removal_unready_message(
+                self.language,
                 GuardedSourceAction::Trash,
                 self.mosaic.is_active(),
                 self.session.selected_path.is_some(),
@@ -5773,6 +5774,7 @@ impl App {
     fn permanent_delete_current(&mut self) {
         let Some((path, source)) = self.removal_candidate() else {
             if let Some(message) = removal_unready_message(
+                self.language,
                 GuardedSourceAction::PermanentDelete,
                 self.mosaic.is_active(),
                 self.session.selected_path.is_some(),

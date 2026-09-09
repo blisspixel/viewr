@@ -26,9 +26,10 @@ the main panel headings, the complete first-run, open-status, and Help shortcut
 surface, every Trash, permanent-delete, and restore message, the concurrent-work
 wait sentences, rating write failures, and the dock, rating, and Undo Trash copy
 the chrome projection produces, including its accessible names, crop and Save As
-recovery, reload wait reasons, and edit-presentation failures. Remaining image
-information, metadata, appearance, and some editing explanations still use the
-explicit English fallback. The roadmap keeps complete catalog coverage and native
+recovery, reload wait reasons, edit-presentation failures, Image Information,
+folder sort, top-chrome busy status, Update, and Save As overwrite confirmation.
+Remaining file-association guidance, some hover help, and leftover app toasts
+still use the explicit English fallback. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called
 complete. Destructive-action copy tells someone whether their file still
 exists, so it needs native review before the accessibility and language matrix

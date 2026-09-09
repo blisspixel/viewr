@@ -1440,7 +1440,11 @@ impl App {
             }
         }
         match crate::folder_sort_preference::save(sort) {
-            Ok(()) => self.show_toast(format!("Default folder sort: {}", sort.label())),
+            Ok(()) => self.show_toast(
+                self.language
+                    .text(crate::locale::tr!("Default folder sort: {sort}"))
+                    .replace("{sort}", self.language.text(sort.label())),
+            ),
             Err(error) => {
                 log::error!(
                     "failed to save folder sort preference: {}",

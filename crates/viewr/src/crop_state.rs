@@ -8,7 +8,37 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::decode::DecodedImage;
-use crate::ui::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
+use crate::locale::Language;
+
+/// Persistent crop recovery status after an unexpected crop stop.
+pub(crate) const CROP_RECOVERY_STATUS: &str =
+    "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
+/// Persistent preview-recovery status after the display-preview executor is lost.
+pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";
+
+const CROP_FAILURE_RESTORED: &str =
+    "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again.";
+const CROP_FAILURE_CHANGED: &str = "Crop was not applied because the image changed.";
+const CROP_DISCONNECT_RESTORED: &str = "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again.";
+const CROP_DISCONNECT_CHANGED: &str = "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again.";
+const CROP_PREVIEW_DISCONNECT_RESTORED: &str = "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again.";
+const CROP_PREVIEW_DISCONNECT_CHANGED: &str = "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again.";
+const WAIT_FOR_OPEN_BEFORE_CROP: &str = "Wait for the image to finish opening before cropping";
+const RETRY_LOAD_BEFORE_CROP: &str = "Retry the failed image load before cropping";
+
+#[cfg(test)]
+const ALL: &[&str] = &[
+    CROP_RECOVERY_STATUS,
+    PREVIEW_RECOVERY_STATUS,
+    CROP_FAILURE_RESTORED,
+    CROP_FAILURE_CHANGED,
+    CROP_DISCONNECT_RESTORED,
+    CROP_DISCONNECT_CHANGED,
+    CROP_PREVIEW_DISCONNECT_RESTORED,
+    CROP_PREVIEW_DISCONNECT_CHANGED,
+    WAIT_FOR_OPEN_BEFORE_CROP,
+    RETRY_LOAD_BEFORE_CROP,
+];
 
 /// Identity facts that decide whether a crop recovery snapshot still applies.
 #[derive(Clone, Copy)]
@@ -36,66 +66,75 @@ pub(crate) fn crop_recovery_matches(
 }
 
 #[must_use]
-pub(crate) const fn crop_failure_message(selection_restored: bool) -> &'static str {
-    if selection_restored {
-        "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
+pub(crate) fn crop_failure_message(language: Language, selection_restored: bool) -> &'static str {
+    language.text(if selection_restored {
+        CROP_FAILURE_RESTORED
     } else {
-        "Crop was not applied because the image changed."
-    }
+        CROP_FAILURE_CHANGED
+    })
 }
 
 #[must_use]
-pub(crate) const fn crop_disconnect_message(selection_restored: bool) -> &'static str {
-    if selection_restored {
-        "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
+pub(crate) fn crop_disconnect_message(
+    language: Language,
+    selection_restored: bool,
+) -> &'static str {
+    language.text(if selection_restored {
+        CROP_DISCONNECT_RESTORED
     } else {
-        "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
-    }
+        CROP_DISCONNECT_CHANGED
+    })
 }
 
 #[must_use]
-pub(crate) const fn crop_preview_disconnect_message(selection_restored: bool) -> &'static str {
-    if selection_restored {
-        "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
+pub(crate) fn crop_preview_disconnect_message(
+    language: Language,
+    selection_restored: bool,
+) -> &'static str {
+    language.text(if selection_restored {
+        CROP_PREVIEW_DISCONNECT_RESTORED
     } else {
-        "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
-    }
+        CROP_PREVIEW_DISCONNECT_CHANGED
+    })
 }
 
 #[must_use]
-pub(crate) const fn crop_recovery_blocker(
+pub(crate) fn crop_recovery_blocker(
+    language: Language,
     crop_recovery_unsettled: bool,
     preview_recovery_unsettled: bool,
 ) -> Option<&'static str> {
     if crop_recovery_unsettled {
-        Some(CROP_RECOVERY_STATUS)
+        Some(language.text(CROP_RECOVERY_STATUS))
     } else if preview_recovery_unsettled {
-        Some(PREVIEW_RECOVERY_STATUS)
+        Some(language.text(PREVIEW_RECOVERY_STATUS))
     } else {
         None
     }
 }
 
 #[must_use]
-pub(crate) const fn preview_retry_blocker(
+pub(crate) fn preview_retry_blocker(
+    language: Language,
     preview_load_retry_blocked: bool,
 ) -> Option<&'static str> {
     if preview_load_retry_blocked {
-        Some(PREVIEW_RECOVERY_STATUS)
+        Some(language.text(PREVIEW_RECOVERY_STATUS))
     } else {
         None
     }
 }
 
 #[must_use]
-pub(crate) const fn crop_source_blocker(
+pub(crate) fn crop_source_blocker(
+    language: Language,
     image_open_in_progress: bool,
     image_open_failed: bool,
 ) -> Option<&'static str> {
     if image_open_in_progress {
-        Some("Wait for the image to finish opening before cropping")
+        Some(language.text(WAIT_FOR_OPEN_BEFORE_CROP))
     } else if image_open_failed {
-        Some("Retry the failed image load before cropping")
+        Some(language.text(RETRY_LOAD_BEFORE_CROP))
     } else {
         None
     }
@@ -104,7 +143,11 @@ pub(crate) const fn crop_source_blocker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::is_cataloged;
     use std::path::PathBuf;
+
+    const EN: Language = Language::English;
+    const TRANSLATED: [Language; 3] = [Language::Spanish, Language::French, Language::German];
 
     fn sample_image() -> Arc<DecodedImage> {
         Arc::new(DecodedImage {
@@ -164,13 +207,51 @@ mod tests {
     }
 
     #[test]
+    fn every_crop_message_is_cataloged() {
+        let missing: Vec<_> = ALL
+            .iter()
+            .copied()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(missing.is_empty(), "uncataloged crop copy: {missing:?}");
+    }
+
+    #[test]
+    fn crop_copy_is_translated() {
+        for language in TRANSLATED {
+            for restored in [false, true] {
+                assert_ne!(
+                    crop_failure_message(language, restored),
+                    crop_failure_message(EN, restored)
+                );
+                assert_ne!(
+                    crop_disconnect_message(language, restored),
+                    crop_disconnect_message(EN, restored)
+                );
+                assert_ne!(
+                    crop_preview_disconnect_message(language, restored),
+                    crop_preview_disconnect_message(EN, restored)
+                );
+            }
+            assert_ne!(
+                crop_recovery_blocker(language, true, false),
+                crop_recovery_blocker(EN, true, false)
+            );
+            assert_ne!(
+                crop_source_blocker(language, true, false),
+                crop_source_blocker(EN, true, false)
+            );
+        }
+    }
+
+    #[test]
     fn crop_failure_copy_distinguishes_restored_selection() {
         assert_eq!(
-            crop_failure_message(true),
+            crop_failure_message(EN, true),
             "Crop was not applied. Original image unchanged; selection restored. Press Enter to try again."
         );
         assert_eq!(
-            crop_failure_message(false),
+            crop_failure_message(EN, false),
             "Crop was not applied because the image changed."
         );
     }
@@ -178,11 +259,11 @@ mod tests {
     #[test]
     fn crop_disconnect_copy_requires_restart_without_promising_retry() {
         assert_eq!(
-            crop_disconnect_message(true),
+            crop_disconnect_message(EN, true),
             "Crop stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
         );
         assert_eq!(
-            crop_disconnect_message(false),
+            crop_disconnect_message(EN, false),
             "Crop stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
         );
     }
@@ -190,40 +271,43 @@ mod tests {
     #[test]
     fn crop_preview_disconnect_copy_and_recovery_priority_are_truthful() {
         assert_eq!(
-            crop_preview_disconnect_message(true),
+            crop_preview_disconnect_message(EN, true),
             "Crop could not finish because display preview preparation stopped unexpectedly. Original image unchanged; selection restored. Close and reopen viewr before cropping again."
         );
         assert_eq!(
-            crop_preview_disconnect_message(false),
+            crop_preview_disconnect_message(EN, false),
             "Display preview preparation stopped unexpectedly after the image changed. Close and reopen viewr before cropping again."
         );
         assert_eq!(
-            crop_recovery_blocker(true, true),
+            crop_recovery_blocker(EN, true, true),
             Some(CROP_RECOVERY_STATUS)
         );
         assert_eq!(
-            crop_recovery_blocker(false, true),
+            crop_recovery_blocker(EN, false, true),
             Some(PREVIEW_RECOVERY_STATUS)
         );
-        assert_eq!(crop_recovery_blocker(false, false), None);
-        assert_eq!(preview_retry_blocker(true), Some(PREVIEW_RECOVERY_STATUS));
-        assert_eq!(preview_retry_blocker(false), None);
+        assert_eq!(crop_recovery_blocker(EN, false, false), None);
+        assert_eq!(
+            preview_retry_blocker(EN, true),
+            Some(PREVIEW_RECOVERY_STATUS)
+        );
+        assert_eq!(preview_retry_blocker(EN, false), None);
     }
 
     #[test]
     fn crop_source_requires_a_settled_successful_image_load() {
         assert_eq!(
-            crop_source_blocker(true, false),
+            crop_source_blocker(EN, true, false),
             Some("Wait for the image to finish opening before cropping")
         );
         assert_eq!(
-            crop_source_blocker(false, true),
+            crop_source_blocker(EN, false, true),
             Some("Retry the failed image load before cropping")
         );
         assert_eq!(
-            crop_source_blocker(true, true),
+            crop_source_blocker(EN, true, true),
             Some("Wait for the image to finish opening before cropping")
         );
-        assert_eq!(crop_source_blocker(false, false), None);
+        assert_eq!(crop_source_blocker(EN, false, false), None);
     }
 }

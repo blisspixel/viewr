@@ -790,13 +790,16 @@ Make viewing excellent, not merely functional.
   shortcuts, or mismatched accessible names. Native review of the whole catalog
   remains a gate before the v0.7 language row. The first-run card, open and
   failed-open status, Retry, About shortcuts, Trash and restore copy,
-  concurrent-work wait sentences, rating write failures, and the dock, rating,
-  and Undo Trash chrome including accessible names are now cataloged. One
+  concurrent-work wait sentences, rating write failures, the dock, rating, and
+  Undo Trash chrome including accessible names, crop and Save As recovery,
+  reload wait reasons, edit-presentation failures, Image Information, folder
+  sort, Update, and Save As overwrite confirmation are now cataloged. One
   sentence has one owner across the empty-state card and the status line, an
   uncataloged interface literal fails the build, and a composed wait sentence is
   one frame per language rather than English word order. Remaining
-  image-information, preferences, and file-association copy is still migrated
-  one seam at a time, each with the coverage test in `docs/LOCALIZATION.md`.
+  file-association guidance, some hover help, and leftover app toasts are still
+  migrated one seam at a time, each with the coverage test in
+  `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

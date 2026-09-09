@@ -5,6 +5,15 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Localization
+
+- Crop, Save As, reload, and edit-presentation failure copy is now translated,
+  including the wait reasons that block those actions. The attempted edit is a
+  typed value, so an untranslatable English phrase cannot be passed in.
+- Image Information, folder sort, top-chrome busy status, Update, and Save As
+  overwrite confirmation follow the selected language, including Capture,
+  Source Privacy, Export Privacy, and page or animation stepping names.
+
 ## 0.6.2 - 2026-09-09
 
 ### Localization

@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use crate::fs::ImageSourceMatch;
+use crate::locale::Language;
 
 /// What the retained current source looks like at its selected pathname.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,18 +189,48 @@ pub(crate) fn reload_start_blocker<const N: usize>(
     blockers.into_iter().flatten().next()
 }
 
+const RELOAD_WAIT_SPOT_HEAL: &str = "Wait for Spot Heal to finish before reloading";
+const RELOAD_WAIT_CROP: &str = "Wait for the crop to finish before reloading";
+const RELOAD_WAIT_SAVE: &str = "Wait for Save As to finish before reloading";
+const RELOAD_WAIT_RATING_WRITE: &str = "Wait for the rating update to finish before reloading";
+const RELOAD_WAIT_RATING_DISCOVERY: &str =
+    "Wait for folder ratings to finish loading before reloading";
+const RELOAD_WAIT_IMAGE_PREPARATION: &str = "An image is already loading";
+/// Status copy when a silent reload would destroy in-memory edits.
+pub(crate) const RELOAD_REMINDER: &str =
+    "Source may have changed. Press F5 when it is safe to reload.";
+/// Status copy when the selected path no longer names the presented file.
+pub(crate) const CURRENT_GONE: &str =
+    "This file is no longer at its selected path. The last good image remains visible.";
+/// Status copy when a folder refresh followed the presented object to a new name.
+pub(crate) const RENAMED: &str = "This file was renamed. The last good image remains visible";
+
+#[cfg(test)]
+const ALL_COPY: &[&str] = &[
+    RELOAD_WAIT_SPOT_HEAL,
+    RELOAD_WAIT_CROP,
+    RELOAD_WAIT_SAVE,
+    RELOAD_WAIT_RATING_WRITE,
+    RELOAD_WAIT_RATING_DISCOVERY,
+    RELOAD_WAIT_IMAGE_PREPARATION,
+    RELOAD_REMINDER,
+    CURRENT_GONE,
+    RENAMED,
+];
+
 #[must_use]
-pub(crate) const fn reload_start_blocker_message(blocker: ReloadStartBlocker) -> &'static str {
-    match blocker {
-        ReloadStartBlocker::SpotHeal => "Wait for Spot Heal to finish before reloading",
-        ReloadStartBlocker::Crop => "Wait for the crop to finish before reloading",
-        ReloadStartBlocker::Save => "Wait for Save As to finish before reloading",
-        ReloadStartBlocker::RatingWrite => "Wait for the rating update to finish before reloading",
-        ReloadStartBlocker::RatingDiscovery => {
-            "Wait for folder ratings to finish loading before reloading"
-        }
-        ReloadStartBlocker::ImagePreparation => "An image is already loading",
-    }
+pub(crate) fn reload_start_blocker_message(
+    language: Language,
+    blocker: ReloadStartBlocker,
+) -> &'static str {
+    language.text(match blocker {
+        ReloadStartBlocker::SpotHeal => RELOAD_WAIT_SPOT_HEAL,
+        ReloadStartBlocker::Crop => RELOAD_WAIT_CROP,
+        ReloadStartBlocker::Save => RELOAD_WAIT_SAVE,
+        ReloadStartBlocker::RatingWrite => RELOAD_WAIT_RATING_WRITE,
+        ReloadStartBlocker::RatingDiscovery => RELOAD_WAIT_RATING_DISCOVERY,
+        ReloadStartBlocker::ImagePreparation => RELOAD_WAIT_IMAGE_PREPARATION,
+    })
 }
 
 /// Decide the visible response. Busy work wins so a watcher cannot fight a
@@ -383,25 +414,55 @@ pub(crate) const fn open_with_availability() -> OpenWithAvailability {
 
 /// Status copy when a silent reload would destroy in-memory edits.
 #[must_use]
-pub(crate) const fn reload_reminder_copy() -> &'static str {
-    "Source may have changed. Press F5 when it is safe to reload."
+pub(crate) fn reload_reminder_copy(language: Language) -> &'static str {
+    language.text(RELOAD_REMINDER)
 }
 
 /// Status copy when the selected path no longer names the presented file.
 #[must_use]
-pub(crate) const fn current_gone_copy() -> &'static str {
-    "This file is no longer at its selected path. The last good image remains visible."
+pub(crate) fn current_gone_copy(language: Language) -> &'static str {
+    language.text(CURRENT_GONE)
 }
 
 /// Status copy when a folder refresh followed the presented object to a new name.
 #[must_use]
-pub(crate) const fn renamed_copy() -> &'static str {
-    "This file was renamed. The last good image remains visible"
+pub(crate) fn renamed_copy(language: Language) -> &'static str {
+    language.text(RENAMED)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locale::is_cataloged;
+
+    const EN: Language = Language::English;
+    const TRANSLATED: [Language; 3] = [Language::Spanish, Language::French, Language::German];
+
+    #[test]
+    fn every_coherence_message_is_cataloged() {
+        let missing: Vec<_> = ALL_COPY
+            .iter()
+            .copied()
+            .filter(|source| !is_cataloged(source))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "uncataloged file-coherence copy: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn coherence_copy_is_translated() {
+        for language in TRANSLATED {
+            assert_ne!(reload_reminder_copy(language), reload_reminder_copy(EN));
+            assert_ne!(current_gone_copy(language), current_gone_copy(EN));
+            assert_ne!(renamed_copy(language), renamed_copy(EN));
+            assert_ne!(
+                reload_start_blocker_message(language, ReloadStartBlocker::Crop),
+                reload_start_blocker_message(EN, ReloadStartBlocker::Crop)
+            );
+        }
+    }
 
     fn idle() -> SessionBusy {
         SessionBusy {
@@ -556,11 +617,11 @@ mod tests {
         );
         assert_eq!(reload_start_blocker([None; 6]), None);
         assert_eq!(
-            reload_start_blocker_message(RatingDiscovery),
+            reload_start_blocker_message(Language::English, RatingDiscovery),
             "Wait for folder ratings to finish loading before reloading"
         );
         assert_eq!(
-            reload_start_blocker_message(ImagePreparation),
+            reload_start_blocker_message(Language::English, ImagePreparation),
             "An image is already loading"
         );
     }
@@ -585,7 +646,7 @@ mod tests {
             )),
             CoherenceAction::GoneAndRescan
         );
-        assert!(current_gone_copy().contains("last good image remains visible"));
+        assert!(current_gone_copy(Language::English).contains("last good image remains visible"));
     }
 
     #[test]
@@ -754,8 +815,8 @@ mod tests {
             open_with_availability(),
             OpenWithAvailability::NativeChooser
         );
-        assert!(reload_reminder_copy().contains("Press F5"));
-        assert!(renamed_copy().contains("renamed"));
+        assert!(reload_reminder_copy(Language::English).contains("Press F5"));
+        assert!(renamed_copy(Language::English).contains("renamed"));
     }
 
     #[test]

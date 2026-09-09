@@ -53,7 +53,7 @@ use crate::current_work::{
     trash_submission_work_blocker,
 };
 use crate::decode::{DecodedImage, LoadedImage};
-use crate::edit_state::edit_transaction_failure_message;
+use crate::edit_state::{EditAction, edit_transaction_failure_message};
 use crate::entry_state::{
     FolderScanDisposition, FolderScanSuccess, PathEntry, committed_scan_path_is_admissible,
     folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
@@ -1440,7 +1440,11 @@ impl App {
             }
         }
         match crate::folder_sort_preference::save(sort) {
-            Ok(()) => self.show_toast(format!("Default folder sort: {}", sort.label())),
+            Ok(()) => self.show_toast(
+                self.language
+                    .text(crate::locale::tr!("Default folder sort: {sort}"))
+                    .replace("{sort}", self.language.text(sort.label())),
+            ),
             Err(error) => {
                 log::error!(
                     "failed to save folder sort preference: {}",
@@ -2089,12 +2093,12 @@ impl App {
         self.preview_recovery_unsettled = true;
         if kind == PresentationKind::Cropped {
             let restored = crop_recovery.is_some_and(|recovery| self.restore_failed_crop(recovery));
-            self.show_toast(crop_preview_disconnect_message(restored));
+            self.show_toast(crop_preview_disconnect_message(self.language, restored));
             return;
         }
         self.preview_load_retry_blocked = true;
         self.session.load_error = Some(crate::ui::PREVIEW_RECOVERY_STATUS.to_owned());
-        self.show_toast(crate::ui::PREVIEW_RECOVERY_STATUS);
+        self.show_toast(self.language.text(crate::ui::PREVIEW_RECOVERY_STATUS));
     }
 
     fn report_presentation_failure(
@@ -2105,7 +2109,7 @@ impl App {
     ) {
         if kind == PresentationKind::Cropped {
             let restored = crop_recovery.is_some_and(|recovery| self.restore_failed_crop(recovery));
-            self.show_toast(crop_failure_message(restored));
+            self.show_toast(crop_failure_message(self.language, restored));
             return;
         }
         if let Some(load_error) = durable_presentation_error(kind, &message) {
@@ -2988,7 +2992,8 @@ impl App {
     }
 
     fn retry_current_image_load(&mut self) {
-        if let Some(message) = preview_retry_blocker(self.preview_load_retry_blocked) {
+        if let Some(message) = preview_retry_blocker(self.language, self.preview_load_retry_blocked)
+        {
             self.show_toast(message);
             return;
         }
@@ -3025,7 +3030,10 @@ impl App {
             (self.session.is_loading() || self.preview_job.is_some())
                 .then_some(ReloadStartBlocker::ImagePreparation),
         ]) {
-            self.show_toast(crate::file_coherence::reload_start_blocker_message(blocker));
+            self.show_toast(crate::file_coherence::reload_start_blocker_message(
+                self.language,
+                blocker,
+            ));
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -3291,7 +3299,7 @@ impl App {
             CoherenceAction::RemindReload => {
                 self.external_edit_pending = true;
                 if announce {
-                    self.show_toast(crate::file_coherence::reload_reminder_copy());
+                    self.show_toast(crate::file_coherence::reload_reminder_copy(self.language));
                 }
             }
             CoherenceAction::ReloadCurrent => self.reload_current_from_disk_quietly(),
@@ -3304,7 +3312,7 @@ impl App {
                 self.external_edit_pending = false;
                 self.source_gone = true;
                 if announce {
-                    self.show_toast(crate::file_coherence::current_gone_copy());
+                    self.show_toast(crate::file_coherence::current_gone_copy(self.language));
                 }
             }
             CoherenceAction::RescanFolder => self.refresh_folder_membership(),
@@ -3312,7 +3320,7 @@ impl App {
                 self.cancel_rating_disclosure_for_source_change();
                 self.external_edit_pending = true;
                 if announce {
-                    self.show_toast(crate::file_coherence::reload_reminder_copy());
+                    self.show_toast(crate::file_coherence::reload_reminder_copy(self.language));
                 }
                 self.refresh_folder_membership();
             }
@@ -3350,11 +3358,11 @@ impl App {
             }
             crate::file_coherence::GoneRescanResult::Renamed => {
                 self.source_gone = false;
-                self.show_toast(crate::file_coherence::renamed_copy());
+                self.show_toast(crate::file_coherence::renamed_copy(self.language));
             }
             crate::file_coherence::GoneRescanResult::Missing => {
                 self.source_gone = true;
-                self.show_toast(crate::file_coherence::current_gone_copy());
+                self.show_toast(crate::file_coherence::current_gone_copy(self.language));
             }
         }
     }
@@ -4816,15 +4824,18 @@ impl App {
             return;
         }
         if let Some(message) = crop_recovery_blocker(
+            self.language,
             self.crop_recovery_unsettled,
             self.preview_recovery_unsettled,
         ) {
             self.show_toast(message);
             return;
         }
-        if let Some(message) =
-            crop_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
-        {
+        if let Some(message) = crop_source_blocker(
+            self.language,
+            self.session.is_loading(),
+            self.session.load_error.is_some(),
+        ) {
             self.show_toast(message);
             return;
         }
@@ -5292,7 +5303,9 @@ impl App {
                         self.current_image_reuse = ImageReuseEligibility::Ineligible;
                         self.show_toast(message);
                     }
-                    Err(error) => self.report_edit_transaction_failure("Spot heal", &error),
+                    Err(error) => {
+                        self.report_edit_transaction_failure(EditAction::SpotHeal, &error);
+                    }
                 }
             }
             Err(error) => {
@@ -5333,7 +5346,7 @@ impl App {
                 self.heal.refresh = None;
                 self.show_toast("Undid spot heal");
             }
-            Err(error) => self.report_edit_transaction_failure("Undo", &error),
+            Err(error) => self.report_edit_transaction_failure(EditAction::Undo, &error),
             Ok(false) => {}
         }
     }
@@ -5369,27 +5382,42 @@ impl App {
                 self.heal.refresh = None;
                 self.show_toast("Redid spot heal");
             }
-            Err(error) => self.report_edit_transaction_failure("Redo", &error),
+            Err(error) => self.report_edit_transaction_failure(EditAction::Redo, &error),
             Ok(false) => {}
         }
     }
 
     fn report_edit_transaction_failure(
         &mut self,
-        action: &str,
+        action: EditAction,
         error: &crate::heal::PatchPresentationError<String>,
     ) {
-        log::error!("edit presentation transaction failed during {action}: {error}");
+        log::error!("edit presentation transaction failed during {action:?}: {error}");
         if error.rollback_failed() {
             if let Some(path) = self.session.selected_path.clone() {
                 self.spawn_image_load(path);
-                self.show_toast(edit_transaction_failure_message(action, error, true));
+                self.show_toast(edit_transaction_failure_message(
+                    self.language,
+                    action,
+                    error,
+                    true,
+                ));
             } else {
                 self.invalidate_displayed_image();
-                self.show_toast(edit_transaction_failure_message(action, error, false));
+                self.show_toast(edit_transaction_failure_message(
+                    self.language,
+                    action,
+                    error,
+                    false,
+                ));
             }
         } else {
-            self.show_toast(edit_transaction_failure_message(action, error, false));
+            self.show_toast(edit_transaction_failure_message(
+                self.language,
+                action,
+                error,
+                false,
+            ));
         }
     }
 
@@ -6428,7 +6456,7 @@ impl App {
             self.save_transaction_active()
                 .then_some(SaveStartBlocker::Save),
         ]) {
-            self.show_toast(save_start_blocker_message(blocker));
+            self.show_toast(save_start_blocker_message(self.language, blocker));
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -6691,15 +6719,18 @@ impl App {
     /// so the exported pixel dimensions keep the ratio exactly.
     fn apply_crop_rect(&mut self) {
         if let Some(message) = crop_recovery_blocker(
+            self.language,
             self.crop_recovery_unsettled,
             self.preview_recovery_unsettled,
         ) {
             self.show_toast(message);
             return;
         }
-        if let Some(message) =
-            crop_source_blocker(self.session.is_loading(), self.session.load_error.is_some())
-        {
+        if let Some(message) = crop_source_blocker(
+            self.language,
+            self.session.is_loading(),
+            self.session.load_error.is_some(),
+        ) {
             self.show_toast(message);
             return;
         }
@@ -6790,7 +6821,7 @@ impl App {
             JobPoll::Ready(CropJobResult::Failed(error)) => {
                 log::error!("crop computation failed: {error}");
                 let restored = self.restore_failed_crop(recovery);
-                self.show_toast(crop_failure_message(restored));
+                self.show_toast(crop_failure_message(self.language, restored));
                 return;
             }
             JobPoll::Ready(CropJobResult::Cancelled) => {
@@ -6802,7 +6833,7 @@ impl App {
                 log::error!("crop job disconnected before publishing a result");
                 let restored = self.restore_failed_crop(recovery);
                 self.crop_recovery_unsettled = true;
-                self.show_toast(crop_disconnect_message(restored));
+                self.show_toast(crop_disconnect_message(self.language, restored));
                 return;
             }
             JobPoll::Pending => unreachable!("pending crop result returned early"),
@@ -9213,7 +9244,12 @@ mod test {
         assert_eq!(refresh.candidate_index, 1);
         assert_eq!(refresh.candidate_count, 3);
 
-        let message = edit_transaction_failure_message("Spot heal", &error, false);
+        let message = edit_transaction_failure_message(
+            crate::locale::Language::English,
+            EditAction::SpotHeal,
+            &error,
+            false,
+        );
         assert!(message.ends_with("Try again."));
         assert!(!message.contains("Spot healed"));
         assert!(!message.contains("private"));

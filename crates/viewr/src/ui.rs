@@ -85,10 +85,8 @@ const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.
 const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
 const EXTERNAL_EDIT_BADGE: &str = "External F5";
 const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
-const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::reload_reminder_copy();
-pub(crate) const CROP_RECOVERY_STATUS: &str =
-    "Crop stopped unexpectedly. Close and reopen viewr before cropping again.";
-pub(crate) const PREVIEW_RECOVERY_STATUS: &str = "Display preview preparation stopped unexpectedly. Close and reopen viewr before opening another over-limit image or cropping again.";
+const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMINDER;
+pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
 const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
@@ -622,7 +620,7 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     });
 
     if frame.save_overwrite_pending {
-        render_save_overwrite_confirmation(ui, &mut actions);
+        render_save_overwrite_confirmation(ui, &mut actions, frame);
     } else if frame.rating.pending_disclosure.is_some() {
         render_rating_disclosure(ui, &mut actions, frame);
     } else if frame.show_update {
@@ -1069,10 +1067,10 @@ fn render_top_operation_status(
         add_status(ui, status);
     } else if frame.rating.write_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_status(ui, "Saving rating...");
+        add_status(ui, frame.text(tr!("Saving rating...")));
     } else if frame.rating.discovery_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_status(ui, "Reading folder ratings...");
+        add_status(ui, frame.text(tr!("Reading folder ratings...")));
     } else if frame.dock.has_image && frame.load_error.is_some() {
         ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RetryLoad), |ui| {
             add_retry_button(
@@ -1083,13 +1081,13 @@ fn render_top_operation_status(
             );
         });
         if frame.save_recovery_unsettled {
-            add_status(ui, SAVE_RECOVERY_STATUS);
+            add_status(ui, frame.text(SAVE_RECOVERY_STATUS));
         } else if frame.crop_recovery_unsettled {
-            add_status(ui, CROP_RECOVERY_STATUS);
+            add_status(ui, frame.text(CROP_RECOVERY_STATUS));
         } else if frame.preview_recovery_unsettled {
-            add_status(ui, PREVIEW_RECOVERY_STATUS);
+            add_status(ui, frame.text(PREVIEW_RECOVERY_STATUS));
         } else if frame.rating.recovery_unsettled {
-            add_status(ui, RATING_RECOVERY_STATUS);
+            add_status(ui, frame.text(RATING_RECOVERY_STATUS));
         } else {
             if let Some(status) = image_open_status(
                 frame.language,
@@ -1115,42 +1113,44 @@ fn render_top_operation_status(
         }
     } else if frame.dock.has_image && frame.is_loading {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_status(ui, "Preparing preview...");
+        add_status(ui, frame.text(tr!("Preparing preview...")));
     } else if frame.dock.has_image && frame.save_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_status(ui, "Saving...");
+        add_status(ui, frame.text(tr!("Saving...")));
     } else if frame.dock.has_image && frame.crop_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_status(ui, "Applying crop...");
+        add_status(ui, frame.text(tr!("Applying crop...")));
     } else if frame.save_recovery_unsettled {
-        add_status(ui, SAVE_RECOVERY_STATUS);
+        add_status(ui, frame.text(SAVE_RECOVERY_STATUS));
     } else if frame.crop_recovery_unsettled {
-        add_status(ui, CROP_RECOVERY_STATUS);
+        add_status(ui, frame.text(CROP_RECOVERY_STATUS));
     } else if frame.preview_recovery_unsettled {
-        add_status(ui, PREVIEW_RECOVERY_STATUS);
+        add_status(ui, frame.text(PREVIEW_RECOVERY_STATUS));
     } else if frame.rating.recovery_unsettled {
-        add_status(ui, RATING_RECOVERY_STATUS);
+        add_status(ui, frame.text(RATING_RECOVERY_STATUS));
     } else if let Some(status) = frame.curation_recovery_status.as_deref() {
         add_status(ui, status);
     } else if frame.source_gone {
-        add_top_status(ui, crate::file_coherence::current_gone_copy(), colors);
+        add_top_status(ui, frame.text(crate::file_coherence::CURRENT_GONE), colors);
     } else if frame.external_edit_pending {
         add_top_status_with_external_edit(ui, EXTERNAL_EDIT_STANDALONE_STATUS, true, colors);
     } else if frame.rating.outside_filter {
         add_top_status(
             ui,
-            "Outside current filter. Next or Previous returns to matching images.",
+            frame.text(tr!(
+                "Outside current filter. Next or Previous returns to matching images."
+            )),
             colors,
         );
     } else if frame.folder_scan_busy && frame.dock.has_image {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
-        add_status(ui, "Reading folder...");
+        add_status(ui, frame.text(tr!("Reading folder...")));
     } else if let Some(toast) = frame.toast.as_deref() {
         add_top_toast(ui, toast, colors);
     } else if frame.has_unsaved_pixel_edits {
         add_top_toast(
             ui,
-            "Edited pixels are in memory. Save As writes a copy.",
+            frame.text(tr!("Edited pixels are in memory. Save As writes a copy.")),
             colors,
         );
     }
@@ -1723,7 +1723,10 @@ fn view_menu(
                 });
             });
             ui.menu_button(
-                format!("Folder Sort: {}", frame.folder_sort.label()),
+                frame
+                    .language
+                    .text(tr!("Folder Sort: {sort}"))
+                    .replace("{sort}", frame.text(frame.folder_sort.label())),
                 |ui| folder_sort_menu(ui, actions, frame),
             );
             ui.separator();
@@ -1752,7 +1755,7 @@ fn view_menu(
 fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     ui.set_min_width(210.0);
     ui.add_enabled_ui(!frame.folder_scan_busy, |ui| {
-        folder_sort_radios(ui, actions, frame.folder_sort, true);
+        folder_sort_radios(ui, actions, frame.folder_sort, frame.language, true);
     });
     ui.separator();
     ui.label(
@@ -1768,16 +1771,18 @@ fn folder_sort_radios(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     selected: crate::fs::FolderSort,
+    language: Language,
     close_menu: bool,
 ) {
     for sort in [crate::fs::FolderSort::Latest, crate::fs::FolderSort::Name] {
-        let response = ui.radio(selected == sort, sort.label());
+        let label = language.text(sort.label());
+        let response = ui.radio(selected == sort, label);
         response.widget_info(|| {
             WidgetInfo::selected(
                 WidgetType::RadioButton,
                 ui.is_enabled(),
                 selected == sort,
-                sort.label(),
+                label,
             )
         });
         if response.clicked() {
@@ -1834,9 +1839,9 @@ fn view_sequence_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
     ui.separator();
     if let Some(animation) = frame.animation {
         let label = if animation.is_playing {
-            "Pause Animation"
+            frame.text(tr!("Pause Animation"))
         } else {
-            "Play Animation"
+            frame.text(tr!("Play Animation"))
         };
         if ui.add(egui::Button::new(label)).clicked() {
             actions.push(UiAction::ToggleAnimationPlayback);
@@ -1844,14 +1849,20 @@ fn view_sequence_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
         }
     }
     if ui
-        .add_enabled(can_previous, egui::Button::new(previous).shortcut_text("["))
+        .add_enabled(
+            can_previous,
+            egui::Button::new(frame.text(previous)).shortcut_text("["),
+        )
         .clicked()
     {
         actions.push(UiAction::StepSequence(-1));
         ui.close();
     }
     if ui
-        .add_enabled(can_next, egui::Button::new(next).shortcut_text("]"))
+        .add_enabled(
+            can_next,
+            egui::Button::new(frame.text(next)).shortcut_text("]"),
+        )
         .clicked()
     {
         actions.push(UiAction::StepSequence(1));
@@ -1861,9 +1872,9 @@ fn view_sequence_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
 
 fn view_fullscreen_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let fullscreen_label = if frame.dock.immersive {
-        "Exit Fullscreen"
+        frame.text(tr!("Exit Fullscreen"))
     } else {
-        "Fullscreen"
+        frame.text(tr!("Fullscreen"))
     };
     if ui
         .add(
@@ -2223,6 +2234,74 @@ fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors, frame: 
         });
 }
 
+fn render_update_body(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) -> bool {
+    ui.heading(
+        RichText::new(frame.text(tr!("Update viewr")))
+            .size(22.0)
+            .color(colors.text),
+    );
+    ui.label(
+        RichText::new(
+            frame
+                .language
+                .text(tr!("Current version: {version}"))
+                .replace("{version}", env!("CARGO_PKG_VERSION")),
+        )
+        .size(13.0)
+        .color(colors.muted),
+    );
+    ui.add_space(12.0);
+    ui.label(
+        RichText::new(frame.text(tr!(
+            "viewr never checks for or downloads updates by itself."
+        )))
+        .size(13.0)
+        .color(colors.text),
+    );
+    ui.label(
+        RichText::new(frame.text(tr!(
+            "Updates are explicit and come from the official GitHub release."
+        )))
+        .size(13.0)
+        .color(colors.muted),
+    );
+    ui.label(
+        RichText::new(frame.text(tr!(
+            "Open the latest stable release in your browser, review its version and checksums, then close viewr before installing it."
+        )))
+        .size(13.0)
+        .color(colors.text),
+    );
+    ui.add_space(10.0);
+    let mut handoff = false;
+    if ui
+        .add(
+            egui::Button::new(
+                RichText::new(frame.text(tr!("Get latest release")))
+                    .strong()
+                    .color(colors.accent_ink),
+            )
+            .fill(colors.accent)
+            .min_size(Vec2::new(180.0, 36.0)),
+        )
+        .on_hover_text(crate::cli::OFFICIAL_LATEST_RELEASE_URL)
+        .clicked()
+    {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(
+            crate::cli::OFFICIAL_LATEST_RELEASE_URL,
+        ));
+        handoff = true;
+    }
+    ui.label(
+        RichText::new(frame.text(tr!(
+            "This hands off only the release URL to your default browser. viewr itself does not connect to GitHub or run an updater."
+        )))
+        .size(12.0)
+        .color(colors.muted),
+    );
+    handoff
+}
+
 fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
@@ -2245,63 +2324,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
                     .max_height(body_height)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        ui.heading(RichText::new("Update viewr").size(22.0).color(colors.text));
-                        ui.label(
-                            RichText::new(format!(
-                                "Current version: {}",
-                                env!("CARGO_PKG_VERSION")
-                            ))
-                            .size(13.0)
-                            .color(colors.muted),
-                        );
-                        ui.add_space(12.0);
-                        ui.label(
-                            RichText::new(
-                                "viewr never checks for or downloads updates by itself.",
-                            )
-                            .size(13.0)
-                            .color(colors.text),
-                        );
-                        ui.label(
-                            RichText::new(
-                                "Updates are explicit and come from the official GitHub release.",
-                            )
-                            .size(13.0)
-                            .color(colors.muted),
-                        );
-                        ui.label(
-                            RichText::new(
-                                "Open the latest stable release in your browser, review its version and checksums, then close viewr before installing it.",
-                            )
-                            .size(13.0)
-                            .color(colors.text),
-                        );
-                        ui.add_space(10.0);
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(frame.text(tr!("Get latest release")))
-                                        .strong()
-                                        .color(colors.accent_ink),
-                                )
-                                .fill(colors.accent)
-                                .min_size(Vec2::new(180.0, 36.0)),
-                            )
-                            .on_hover_text(crate::cli::OFFICIAL_LATEST_RELEASE_URL)
-                            .clicked()
-                        {
-                            ui.ctx().open_url(egui::OpenUrl::new_tab(
-                                crate::cli::OFFICIAL_LATEST_RELEASE_URL,
-                            ));
-                            handoff = true;
-                        }
-                        ui.label(
-                            RichText::new(
-                                "This hands off only the release URL to your default browser. viewr itself does not connect to GitHub or run an updater.",
-                            )
-                            .size(12.0)
-                            .color(colors.muted),
-                        );
+                        handoff = render_update_body(ui, frame, colors);
                     });
                 if handoff {
                     close_clicked = true;
@@ -2357,20 +2380,20 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                     .color(colors.text),
             );
             ui.label(
-                RichText::new(
-                    "Used for future folders, launches, Folder Previews, and full-image collage groups. The file you open stays selected.",
-                )
+                RichText::new(frame.text(tr!(
+                    "Used for future folders, launches, Folder Previews, and full-image collage groups. The file you open stays selected."
+                )))
                 .size(12.5)
                 .color(colors.muted),
             );
             ui.add_space(6.0);
             ui.add_enabled_ui(!frame.folder_scan_busy, |ui| {
-                folder_sort_radios(ui, actions, frame.folder_sort, false);
+                folder_sort_radios(ui, actions, frame.folder_sort, frame.language, false);
             });
             ui.label(
-                RichText::new(
-                    "Latest First uses file modification time. Name uses natural filename order.",
-                )
+                RichText::new(frame.text(tr!(
+                    "Latest First uses file modification time. Name uses natural filename order."
+                )))
                 .size(12.0)
                 .color(colors.muted),
             );
@@ -2595,7 +2618,11 @@ fn render_platform_file_association_steps(
     }
 }
 
-fn render_save_overwrite_confirmation(ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+fn render_save_overwrite_confirmation(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+) {
     let colors = chrome_colors(ui);
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
@@ -2620,31 +2647,31 @@ fn render_save_overwrite_confirmation(ui: &mut egui::Ui, actions: &mut Vec<UiAct
         .show(ui.ctx(), |ui| {
             ui.set_max_width(430.0);
             ui.heading(
-                RichText::new("Replace existing file?")
+                RichText::new(frame.text(tr!("Replace existing file?")))
                     .size(25.0)
                     .color(colors.text),
             );
             ui.add_space(10.0);
             ui.label(
-                RichText::new(
-                    "The selected Save As destination exists. Replace that exact file with this exported copy?",
-                )
+                RichText::new(frame.text(tr!(
+                    "The selected Save As destination exists. Replace that exact file with this exported copy?"
+                )))
                 .size(13.5)
                 .color(colors.text),
             );
             ui.label(
-                RichText::new(
-                    "viewr rechecks this exact file immediately before replacement and stops if that check detects a change.",
-                )
+                RichText::new(frame.text(tr!(
+                    "viewr rechecks this exact file immediately before replacement and stops if that check detects a change."
+                )))
                 .size(12.5)
                 .color(colors.muted),
             );
             ui.add_space(14.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Replace file").clicked() {
+                if ui.button(frame.text(tr!("Replace file"))).clicked() {
                     confirm_clicked = true;
                 }
-                let cancel = ui.button("Cancel");
+                let cancel = ui.button(frame.text(tr!("Cancel")));
                 if focus_cancel {
                     cancel.request_focus();
                 }
@@ -2983,8 +3010,11 @@ fn render_image_info_panel(
                 ui.heading(RichText::new(frame.text(tr!("Image Information"))).color(colors.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new("Close").min_size(Vec2::new(52.0, 36.0)))
-                        .on_hover_text("Close panel (I)")
+                        .add(
+                            egui::Button::new(frame.text(tr!("Close")))
+                                .min_size(Vec2::new(52.0, 36.0)),
+                        )
+                        .on_hover_text(frame.text(tr!("Close panel (I)")))
                         .clicked()
                     {
                         actions.push(UiAction::ToggleImageInfo);
@@ -3006,7 +3036,12 @@ fn render_image_info_panel(
 fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     ui.separator();
-    ui.label(RichText::new("File").color(colors.muted).small().strong());
+    ui.label(
+        RichText::new(frame.text(tr!("File")))
+            .color(colors.muted)
+            .small()
+            .strong(),
+    );
     ui.add_space(4.0);
     if let Some(path) = &frame.file_path {
         let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
@@ -3023,10 +3058,24 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
         ui.label(RichText::new(value).color(colors.muted));
     }
     if let Some(color_profile) = frame.color_profile {
-        ui.label(RichText::new(format!("Color · {}", color_profile.label())).color(colors.muted));
+        ui.label(
+            RichText::new(
+                frame
+                    .language
+                    .text(tr!("Color · {profile}"))
+                    .replace("{profile}", frame.text(color_profile.label())),
+            )
+            .color(colors.muted),
+        );
     }
     ui.label(
-        RichText::new(format!("Display · {}", frame.display_output.label())).color(colors.muted),
+        RichText::new(
+            frame
+                .language
+                .text(tr!("Display · {status}"))
+                .replace("{status}", frame.text(frame.display_output.label())),
+        )
+        .color(colors.muted),
     );
     render_animation_controls(ui, actions, frame, colors);
     render_page_controls(ui, actions, frame, colors);
@@ -3044,9 +3093,9 @@ fn render_animation_controls(
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let (label, tooltip) = if animation.is_playing {
-            ("Pause", "Pause animation")
+            (frame.text(tr!("Pause")), frame.text(tr!("Pause animation")))
         } else {
-            ("Play", "Play animation")
+            (frame.text(tr!("Play")), frame.text(tr!("Play animation")))
         };
         if ui
             .add(egui::Button::new(label).min_size(Vec2::new(64.0, 36.0)))
@@ -3058,8 +3107,8 @@ fn render_animation_controls(
         render_sequence_step_button(
             ui,
             actions,
-            "Previous",
-            "Previous frame",
+            frame.text(tr!("Previous")),
+            frame.text(tr!("Previous frame")),
             "[",
             animation.can_previous,
             -1,
@@ -3067,18 +3116,23 @@ fn render_animation_controls(
         render_sequence_step_button(
             ui,
             actions,
-            "Next",
-            "Next frame",
+            frame.text(tr!("Next")),
+            frame.text(tr!("Next frame")),
             "]",
             animation.can_next,
             1,
         );
         ui.label(
-            RichText::new(format!(
-                "Frame {} of {}",
-                animation.frame_index.saturating_add(1),
-                animation.frame_count
-            ))
+            RichText::new(
+                frame
+                    .language
+                    .text(tr!("Frame {current} of {total}"))
+                    .replace(
+                        "{current}",
+                        &animation.frame_index.saturating_add(1).to_string(),
+                    )
+                    .replace("{total}", &animation.frame_count.to_string()),
+            )
             .color(colors.muted),
         );
     });
@@ -3095,11 +3149,15 @@ fn render_page_controls(
     };
     ui.add_space(6.0);
     ui.horizontal(|ui| {
+        let (previous_name, next_name) = match pages.noun {
+            "Icon" => (tr!("Previous Icon"), tr!("Next Icon")),
+            _ => (tr!("Previous page"), tr!("Next page")),
+        };
         render_sequence_step_button(
             ui,
             actions,
-            "Previous",
-            &format!("Previous {}", pages.noun.to_ascii_lowercase()),
+            frame.text(tr!("Previous")),
+            frame.text(previous_name),
             "[",
             pages.can_previous,
             -1,
@@ -3107,8 +3165,8 @@ fn render_page_controls(
         render_sequence_step_button(
             ui,
             actions,
-            "Next",
-            &format!("Next {}", pages.noun.to_ascii_lowercase()),
+            frame.text(tr!("Next")),
+            frame.text(next_name),
             "]",
             pages.can_next,
             1,
@@ -3191,15 +3249,19 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     ui.add_space(8.0);
     ui.separator();
     ui.label(
-        RichText::new("Capture")
+        RichText::new(frame.text(tr!("Capture")))
             .color(colors.muted)
             .small()
             .strong(),
     );
     ui.add_space(4.0);
-    image_detail_value(ui, "Camera", details.camera.as_deref());
-    image_detail_value(ui, "Lens", details.lens.as_deref());
-    image_detail_value(ui, "Captured", details.captured_at.as_deref());
+    image_detail_value(ui, frame.text(tr!("Camera")), details.camera.as_deref());
+    image_detail_value(ui, frame.text(tr!("Lens")), details.lens.as_deref());
+    image_detail_value(
+        ui,
+        frame.text(tr!("Captured")),
+        details.captured_at.as_deref(),
+    );
     let settings = [
         details.exposure.as_deref(),
         details.aperture.as_deref(),
@@ -3212,7 +3274,7 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     .join(" · ");
     image_detail_value(
         ui,
-        "Settings",
+        frame.text(tr!("Settings")),
         (!settings.is_empty()).then_some(settings.as_str()),
     );
 }
@@ -3224,45 +3286,63 @@ fn render_source_privacy(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     ui.add_space(8.0);
     ui.separator();
-    ui.label(RichText::new("Source Privacy").color(colors.text).strong());
+    ui.label(
+        RichText::new(frame.text(tr!("Source Privacy")))
+            .color(colors.text)
+            .strong(),
+    );
     ui.add_space(4.0);
     if details.exif_tag_count == 0 {
-        ui.label(RichText::new("No supported EXIF detected.").color(colors.muted));
+        ui.label(RichText::new(frame.text(tr!("No supported EXIF detected."))).color(colors.muted));
     } else {
-        let noun = if details.exif_tag_count == 1 {
-            "tag"
+        let template = if details.exif_tag_count == 1 {
+            tr!("{count} supported EXIF tag detected.")
         } else {
-            "tags"
+            tr!("{count} supported EXIF tags detected.")
         };
         ui.label(
-            RichText::new(format!(
-                "{} supported EXIF {noun} detected.",
-                details.exif_tag_count
-            ))
+            RichText::new(
+                frame
+                    .language
+                    .text(template)
+                    .replace("{count}", &details.exif_tag_count.to_string()),
+            )
             .color(colors.muted),
         );
         let categories = source_privacy_categories(details);
         if categories.is_empty() {
             ui.label(
-                RichText::new("No common identity or location fields detected.")
+                RichText::new(frame.text(tr!("No common identity or location fields detected.")))
                     .color(colors.muted),
             );
         } else {
             for category in categories {
-                ui.label(RichText::new(format!("Present: {category}")).color(colors.text));
+                ui.label(
+                    RichText::new(
+                        frame
+                            .language
+                            .text(tr!("Present: {category}"))
+                            .replace("{category}", frame.text(category)),
+                    )
+                    .color(colors.text),
+                );
             }
             ui.label(
-                RichText::new("Presence only. Sensitive values stay hidden on screen.")
-                    .size(11.0)
-                    .color(colors.muted),
+                RichText::new(frame.text(tr!(
+                    "Presence only. Sensitive values stay hidden on screen."
+                )))
+                .size(11.0)
+                .color(colors.muted),
             );
         }
     }
     ui.add_space(4.0);
     ui.label(
-        RichText::new("Limited EXIF scan. Other metadata or hidden pixel data may still exist.")
-            .size(11.0)
-            .color(colors.muted),
+        RichText::new(frame.text(tr!(
+            "Limited EXIF scan. Other metadata or hidden pixel data may still exist."
+        )))
+        .size(11.0)
+        .color(colors.muted),
     );
 }
 
@@ -3291,22 +3371,30 @@ fn render_export_privacy(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: 
     let colors = chrome_colors(ui);
     ui.add_space(8.0);
     ui.separator();
-    ui.label(RichText::new("Export Privacy").color(colors.text).strong());
+    ui.label(
+        RichText::new(frame.text(tr!("Export Privacy")))
+            .color(colors.text)
+            .strong(),
+    );
     ui.add_space(4.0);
     let mut retain_exif = frame.retain_exif;
     if ui
-        .checkbox(&mut retain_exif, "Keep camera metadata when saving")
-        .on_hover_text("When enabled, Save As keeps supported EXIF tags, including GPS.")
+        .checkbox(
+            &mut retain_exif,
+            frame.text(tr!("Keep camera metadata when saving")),
+        )
+        .on_hover_text(frame.text(tr!(
+            "When enabled, Save As keeps supported EXIF tags, including GPS."
+        )))
         .changed()
     {
         actions.push(UiAction::ToggleRetainExif);
     }
     ui.add_space(6.0);
     ui.label(
-        RichText::new(
-            "Off by default. Save As removes supported EXIF metadata, including GPS and camera \
-             identifiers. This choice lasts only for this session.",
-        )
+        RichText::new(frame.text(tr!(
+            "Off by default. Save As removes supported EXIF metadata, including GPS and camera identifiers. This choice lasts only for this session."
+        )))
         .size(11.0)
         .color(colors.muted),
     );
@@ -6547,7 +6635,7 @@ mod tests {
             .expect("AccessKit update should be generated");
         assert!(update.nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Label
-                && node.value() == Some(crate::file_coherence::current_gone_copy())
+                && node.value() == Some(crate::file_coherence::CURRENT_GONE)
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
     }

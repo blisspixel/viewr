@@ -5,6 +5,8 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+## 0.6.2 - 2026-09-09
+
 ### Localization
 
 - The first-run card, the opening and failed-open status line, the Retry

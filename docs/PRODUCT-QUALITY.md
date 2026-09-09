@@ -1,13 +1,13 @@
 # Product quality
 
-**Status:** open, and still open after the v0.6.1 tag. This matrix is the
+**Status:** open, and still open after the v0.6.2 tag. This matrix is the
 executable contract for first-time, power-user, admin, failure-recovery, and
 visual-polish paths. It does not close v0.6.
 Representative Windows, macOS, and Linux hardware still have to pass the same rows
 using the checksummed archives and synthetic fixture artifact from one retained
 candidate workflow run.
 
-v0.6.0 and v0.6.1 were published before any of those rows were recorded. The
+v0.6.0, v0.6.1, and v0.6.2 were published before any of those rows were recorded. The
 released archives therefore carry no representative-hardware evidence, the
 release notes state that limit, and this matrix is carried forward as open work
 that blocks the v0.7.0 tag.
@@ -183,7 +183,7 @@ Run the same workflow on every platform.
 | ID | Action | Required result |
 | --- | --- | --- |
 | PQ-AD-01 | `viewr doctor` | Reports binaries, worker protocol, windowing libraries, and graphics runtimes. A passing last line is not proof that a window opened. |
-| PQ-AD-02 | Inspect the installation contract in the candidate archive and open File > Default Image Viewer | README and INSTALL identify v0.6.1 as the current immutable public download. The named modal states that file associations are opt in, provides the platform-specific PNG and JPEG route, and blocks background actions. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, association, and rollback acceptance remain the v0.8 gate. |
+| PQ-AD-02 | Inspect the installation contract in the candidate archive and open File > Default Image Viewer | README and INSTALL identify v0.6.2 as the current immutable public download. The named modal states that file associations are opt in, provides the platform-specific PNG and JPEG route, and blocks background actions. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, association, and rollback acceptance remain the v0.8 gate. |
 | PQ-AD-03 | Help > Get latest release | The Update modal names the running version, refuses to check a network, and only the explicit button hands the release URL to the browser. |
 | PQ-AD-04 | Unsigned preview | OS trust warnings may appear. Docs do not tell anyone to disable platform security. |
 
@@ -339,6 +339,6 @@ private path, raw metadata, or unrelated screen content. If the tested artifact
 bytes change, the record no longer closes the gate.
 
 Do not tag v0.7.0 while any required platform row is unrecorded or any
-high-severity product-quality issue remains. v0.6.0 and v0.6.1 were tagged in
+high-severity product-quality issue remains. v0.6.0, v0.6.1, and v0.6.2 were tagged in
 exactly that state as explicit, documented exceptions; do not treat automated
 gates as a substitute for these hardware records.

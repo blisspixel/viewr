@@ -53,6 +53,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/releases/v0.5.0.md",
     "docs/releases/v0.6.0.md",
     "docs/releases/v0.6.1.md",
+    "docs/releases/v0.6.2.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-dark-example.png",
@@ -704,10 +705,10 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("/main/install.sh", combined)
         self.assertNotIn("/master/install.ps1", combined)
         self.assertNotIn("/master/install.sh", combined)
-        self.assertIn("/releases/download/v0.6.1/install.ps1", public_commands)
-        self.assertIn("/releases/download/v0.6.1/install.sh", public_commands)
-        self.assertIn("/releases/download/v0.6.1/install.ps1", compiled_commands)
-        self.assertIn("/releases/download/v0.6.1/install.sh", compiled_commands)
+        self.assertIn("/releases/download/v0.6.2/install.ps1", public_commands)
+        self.assertIn("/releases/download/v0.6.2/install.sh", public_commands)
+        self.assertIn("/releases/download/v0.6.2/install.ps1", compiled_commands)
+        self.assertIn("/releases/download/v0.6.2/install.sh", compiled_commands)
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

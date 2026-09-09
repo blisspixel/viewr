@@ -18,10 +18,10 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.6.1](https://github.com/blisspixel/viewr/releases/tag/v0.6.1), the shipped-feedback patch over the integrated product-quality beta, published without the carried representative-hardware matrix |
-| Workspace version | `0.6.1` while the carried v0.6 hardware gate remains open. A non-publishing candidate is identified by its full commit SHA and workflow run, not by treating its embedded version as a new public release |
+| Published install target | Immutable [v0.6.2](https://github.com/blisspixel/viewr/releases/tag/v0.6.2), the shipped-feedback patch over v0.6.1, published without the carried representative-hardware matrix |
+| Workspace version | `0.6.2` while the carried v0.6 hardware gate remains open. A non-publishing candidate is identified by its full commit SHA and workflow run, not by treating its embedded version as a new public release |
 | Active milestone | **v0.7.0**, beginning with the carried v0.6 representative-hardware gate and then human accessibility evidence |
-| Next version update | After the v0.6 hardware gate closes, one reviewed release-preparation change advances the workspace and release documents from `0.6.1` to `0.7.0` before v0.7 evidence is collected |
+| Next version update | After the v0.6 hardware gate closes, one reviewed release-preparation change advances the workspace and release documents from `0.6.2` to `0.7.0` before v0.7 evidence is collected |
 | Next tag allowed | **v0.7.0** only after both the carried v0.6 gate and the v0.7 exit criteria below are true. A later v0.6.x tag would require another narrowly scoped shipped-defect patch with explicit evidence limits |
 | Later tags | Blocked until every earlier minor gate is closed |
 
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.6.1 archives. The v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.6.2 archives. The v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -47,8 +47,11 @@ thumbnail substitution. Current development opens folders newest-modified first,
 retains a saved natural-name alternative, keeps routine Trash outcomes in top chrome,
 makes Spot Heal persistence explicit, provides an opt-in platform association
 guide for PNG, JPEG, and other selected types, accepts repeated fully presented
-images through one bounded serialized Trash queue, and bundles initial English,
-Spanish, French, and German interface catalogs. Appearance, default folder sort,
+images through one bounded serialized Trash queue, and bundles English, Spanish,
+French, and German interface catalogs covering first-run, About, Trash, wait
+copy, rating failures, and chrome including accessible names. Remaining image
+information and some preference copy still uses the documented English fallback.
+Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
 
@@ -83,6 +86,9 @@ v0.6.0  Integrated product-quality beta  [released, hardware matrix open]
    |
    v
 v0.6.1  Shipped-feedback patch           [released, same matrix open]
+   |
+   v
+v0.6.2  Curation and localization patch  [released, same matrix open]
    |
    v
 v0.7.0  Accessibility evidence preview  [next]
@@ -147,7 +153,7 @@ claim attached retroactively to the immutable v0.6.0 release.
 6. Land one reviewed release-preparation change that advances `Cargo.toml`,
    `Cargo.lock`, compiled version-specific commands, the changelog candidate
    section, prospective `docs/releases/v0.7.0.md`, and relevant status documents
-   from `0.6.1` to `0.7.0`. README and INSTALL remain on v0.6.1 throughout
+   from `0.6.2` to `0.7.0`. README and INSTALL remain on v0.6.2 throughout
    candidate evidence and advance only in the final tag-ready change.
 7. Require CI and fuzz on the exact release-preparation commit, then dispatch a
    new non-publishing candidate run. The earlier v0.6 candidate cannot supply
@@ -172,8 +178,8 @@ claim attached retroactively to the immutable v0.6.0 release.
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.6.1` | Immutable tag and release assets | Never rewritten. A shipped correction uses a new v0.6.x tag |
-| Carried v0.6 evidence candidate | `0.6.1` | Full commit SHA plus one `Release artifacts` run | Replaced after any candidate-invalidating change |
+| Public release | `0.6.2` | Immutable tag and release assets | Never rewritten. A shipped correction uses a new v0.6.x tag |
+| Carried v0.6 evidence candidate | `0.6.2` | Full commit SHA plus one `Release artifacts` run | Replaced after any candidate-invalidating change |
 | v0.7 evidence line | `0.7.0` | Full commit SHA plus one v0.7 candidate run | Begins only after Stage A closes and the reviewed version update lands |
 | Published v0.7 | `0.7.0` | Immutable tag and release assets | Roadmap advances to v0.8.0; public install links change only after publication |
 
@@ -209,7 +215,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped as v0.6.0 and refined in v0.6.1 with its hardware matrix still open | The v0.6 product scope and shipped-feedback patch are released, but their representative-hardware acceptance evidence was not collected. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Closing it requires one fresh exact-commit candidate, three representative-hardware records, eight performance reports, and an accepted validator result. It blocks the v0.7.0 version update and tag. |
+| Integrated product quality | Shipped as v0.6.0 and refined in v0.6.1 and v0.6.2 with its hardware matrix still open | The v0.6 product scope and shipped-feedback patches are released, but their representative-hardware acceptance evidence was not collected. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Closing it requires one fresh exact-commit candidate, three representative-hardware records, eight performance reports, and an accepted validator result. It blocks the v0.7.0 version update and tag. |
 | Human accessibility evidence | Open for v0.7 | After the carried v0.6 gate closes, update the workspace to `0.7.0`, build one exact-commit candidate, and complete the Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/v0.7.0/`. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -254,7 +260,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.6.1; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.6.2; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -274,7 +280,7 @@ code but still owes its representative-hardware evidence.
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
 - [x] Make the release-state and quality-gate contract executable: canonical
-  documentation now agrees on the public unsigned v0.6.1 state, CI runs the exact
+  documentation now agrees on the public unsigned v0.6.2 state, CI runs the exact
   locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
   against an explicit transitive baseline without unexplained warnings.
 - [ ] For v0.9, produce and verify a signed Windows delivery, a Developer ID-signed and
@@ -575,8 +581,8 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set after the current planning change reaches `main`. v0.6.0 and
-  v0.6.1 were tagged and published before this box could be checked, so the
+  candidate set after the current planning change reaches `main`. v0.6.0,
+  v0.6.1, and v0.6.2 were tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.
 - [x] Make About, the empty card, and README essential controls quote one covered

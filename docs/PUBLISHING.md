@@ -67,10 +67,11 @@ workflow results, and release assets remain the source of truth:
   [v0.6.2](https://github.com/blisspixel/viewr/releases/tag/v0.6.2). Its
   release notes carry the same open representative-hardware evidence limit
   and the remaining English fallback plus native-review gate.
-- [ ] Publish and verify annotated tag `v0.6.3`, the shipped-feedback patch for
-  remaining recovery copy and Image Information. Its release notes carry the
-  same open representative-hardware evidence limit and the remaining English
-  fallback plus native-review gate.
+- [x] Publish and verify annotated tag `v0.6.3`, the shipped-feedback patch for
+  remaining recovery copy and Image Information. Published; see the GitHub release
+  [v0.6.3](https://github.com/blisspixel/viewr/releases/tag/v0.6.3). Its
+  release notes carry the same open representative-hardware evidence limit
+  and the remaining English fallback plus native-review gate.
 
 ## Version state policy
 
@@ -344,6 +345,20 @@ The official Windows archive has SHA-256
 re-verifies from the release page with its matching sidecar, a 44-file internal
 manifest, verified release provenance, and an attestation bound to
 `release.yml@refs/tags/v0.6.2` at that commit. The official archive verifier
+accepts that download.
+
+For v0.6.3, [main CI run 34372942262](https://github.com/blisspixel/viewr/actions/runs/34372942262)
+passed all seven jobs, [fuzz run 34372942213](https://github.com/blisspixel/viewr/actions/runs/34372942213)
+passed both targets, and [CodeQL run 34372941778](https://github.com/blisspixel/viewr/actions/runs/34372941778)
+passed on commit `43f4a33e343e14b5ea412eae317538d2c3193401`.
+[Release run 34374038497](https://github.com/blisspixel/viewr/actions/runs/34374038497)
+then repeated all nine prerequisite jobs, built all four platform archives, and
+published the immutable 12-asset [v0.6.3 release](https://github.com/blisspixel/viewr/releases/tag/v0.6.3).
+The official Windows archive has SHA-256
+`2f024d06b6ef87c71cf6ba857c537e3b930a6b052f3f21d1fdc184019709d678` and
+re-verifies from the release page with its matching sidecar, a 45-file internal
+manifest, verified release provenance, and an attestation bound to
+`release.yml@refs/tags/v0.6.3` at that commit. The official archive verifier
 accepts that download.
 
 ## Required before a broadly recommended 1.0

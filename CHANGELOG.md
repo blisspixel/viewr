@@ -12,6 +12,11 @@ and organized by user-visible concern.
   French, and German instead of staying English while the menus changed
   language. A file name is substituted after translation, so each language
   places it where its grammar needs it.
+- Every Trash, permanent-delete, and restore message is now translated,
+  including the confirmation dialog, its buttons, progress status, failure
+  copy, and recovery guidance. Counts and file names are placed by each
+  language rather than appended in English word order. A permanent-delete
+  confirmation is now recognized in the language it was shown in.
 - Interface copy that is missing from the language catalog now fails the build
   rather than rendering English in every language, and the empty-state card and
   status line share one owner so the same sentence cannot drift apart.

@@ -22,11 +22,14 @@ oversized, or unreadable state fails to System with path-free recovery guidance.
 
 The bundled catalog covers the primary menu bar, file and folder entry points,
 Preferences, file-association entry points, empty-state actions, crop controls,
-the main panel headings, and the complete first-run, open-status, and Help
-shortcut surface. Advanced status, recovery, metadata, and editing explanations
-currently use the explicit English fallback. The roadmap keeps complete catalog
-coverage and native assistive-technology review as open work before
-localization can be called complete.
+the main panel headings, the complete first-run, open-status, and Help shortcut
+surface, and every Trash, permanent-delete, and restore message. Remaining
+advanced status, metadata, and editing explanations still use the explicit
+English fallback. The roadmap keeps complete catalog coverage and native
+assistive-technology review as open work before localization can be called
+complete. Destructive-action copy tells someone whether their file still
+exists, so it needs native review before the accessibility and language matrix
+is recorded.
 
 Source strings have one catalog lookup boundary in `locale.rs`. Language
 selection never branches through platform UI code, and missing catalog entries
@@ -40,9 +43,16 @@ of by review:
 - `locale::interface_literals_bind_to_the_catalog` rejects a literal passed to
   the lookup directly, which would step around that build check.
 - Copy that a pure seam supplies as a value cannot use `tr!`, so each such seam
-  proves its own coverage by enumerating every string it can emit. `shortcuts`
-  does this in `every_visible_string_is_cataloged`. A seam that is not yet
-  cataloged has no such test; adding one is how that surface is migrated.
+  proves its own coverage by enumerating every string it can emit.
+  `shortcuts::every_visible_string_is_cataloged` and
+  `curation_state::every_curation_message_is_cataloged` do this. A seam that is
+  not yet cataloged has no such test; adding one is how that surface is
+  migrated.
+- A seam that composes sentences from counts and names also proves the result.
+  `curation_state::composed_copy_is_translated_and_fully_substituted` builds
+  every message it can produce in all four languages, then requires each
+  translated string to differ from its English source and to contain no
+  leftover placeholder brace.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

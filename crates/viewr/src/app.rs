@@ -40,10 +40,11 @@ use crate::crop_state::{
 use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
 use crate::curation_state::{
     CurationCloseDisposition, CurationKind, CurationRecovery, CurationTerminalState,
-    GuardedSourceAction, PERMANENT_DELETE_ACTION, curation_close_disposition,
+    GuardedSourceAction, RestoreOutcomeCounts, curation_close_disposition,
     curation_recovery_message, curation_status, guarded_source_action_failure_message,
-    permanent_delete_confirmed, permanent_delete_description, permanent_delete_success_message,
-    removal_unready_message, restore_result_message, single_trash_result_message,
+    permanent_delete_action, permanent_delete_confirmed, permanent_delete_description,
+    permanent_delete_success_message, removal_unready_message, restore_result_message,
+    single_trash_result_message,
 };
 use crate::current_work::{
     ActiveModeAllowance, CurrentWork, blocked_action_message, browse_work_blocker, crop_work,
@@ -71,6 +72,7 @@ use crate::keyboard_route::{
     single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
     space_tap_fits, widget_popup_owns_event,
 };
+use crate::locale::{Language, tr};
 use crate::playlist::{
     FilterSelection, Playlist, PlaylistReconcile, ScanPurpose, filter_selection_changes_source,
 };
@@ -565,13 +567,13 @@ struct CurationWorker {
 }
 
 impl CurationWorker {
-    fn status(&self, closing: bool, pending_trash: usize) -> String {
+    fn status(&self, language: Language, closing: bool, pending_trash: usize) -> String {
         let submitted = if matches!(self.context, CurationContext::Trash(_)) {
             self.context.submitted().saturating_add(pending_trash)
         } else {
             self.context.submitted()
         };
-        curation_status(self.context.kind(), submitted, closing)
+        curation_status(language, self.context.kind(), submitted, closing)
     }
 }
 
@@ -4465,7 +4467,10 @@ impl App {
             self.show_toast(blocked_action_message("moving this file to Trash", blocker));
             return;
         }
-        if let Some(message) = self.curation_recovery.source_removal_preflight() {
+        if let Some(message) = self
+            .curation_recovery
+            .source_removal_preflight(self.language)
+        {
             self.show_toast(message);
             return;
         }
@@ -4605,7 +4610,7 @@ impl App {
         log::error!(
             "curation worker disconnected before a result: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
         );
-        let message = curation_recovery_message(kind);
+        let message = curation_recovery_message(self.language, kind);
         self.curation_recovery.record(kind);
         if abandoned == 0 {
             self.show_toast(message);
@@ -5756,13 +5761,17 @@ impl App {
         if self.block_action_while_busy("permanently deleting this file") {
             return;
         }
-        if let Some(message) = self.curation_recovery.source_removal_preflight() {
+        if let Some(message) = self
+            .curation_recovery
+            .source_removal_preflight(self.language)
+        {
             self.show_toast(message);
             return;
         }
         if let Err(error) = crate::curate::verify_accepted_source_native(&path, &source) {
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
             self.show_toast(guarded_source_action_failure_message(
+                self.language,
                 GuardedSourceAction::PermanentDelete,
                 &error,
             ));
@@ -5771,18 +5780,18 @@ impl App {
         let safe_name = prefetch::privacy_safe_file_name(&path).replace('"', "?");
         let confirmed = rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Warning)
-            .set_title("Permanently delete?")
-            .set_description(permanent_delete_description(&safe_name))
+            .set_title(self.language.text(tr!("Permanently delete?")))
+            .set_description(permanent_delete_description(self.language, &safe_name))
             .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                PERMANENT_DELETE_ACTION.to_owned(),
-                "Cancel".to_owned(),
+                permanent_delete_action(self.language).to_owned(),
+                self.language.text(tr!("Cancel")).to_owned(),
             ))
             .show();
         let confirmed_label = match &confirmed {
             rfd::MessageDialogResult::Custom(label) => Some(label.as_str()),
             _ => None,
         };
-        if !permanent_delete_confirmed(confirmed_label) {
+        if !permanent_delete_confirmed(self.language, confirmed_label) {
             return;
         }
         let removal = self.removal_context_for_path(path.clone());
@@ -5812,6 +5821,7 @@ impl App {
                 self.revert_submitted_removal(context);
                 log_guarded_action_failure(GuardedSourceAction::Trash, &error);
                 self.show_toast(guarded_source_action_failure_message(
+                    self.language,
                     GuardedSourceAction::Trash,
                     &error,
                 ));
@@ -5852,6 +5862,7 @@ impl App {
             self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
         }
         self.show_toast(single_trash_result_message(
+            self.language,
             has_receipt,
             previous_undo_preserved,
         ));
@@ -5867,6 +5878,7 @@ impl App {
             self.revert_submitted_removal(context);
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
             self.show_toast(guarded_source_action_failure_message(
+                self.language,
                 GuardedSourceAction::PermanentDelete,
                 &error,
             ));
@@ -5894,6 +5906,7 @@ impl App {
         }
         let safe_name = prefetch::privacy_safe_file_name(&context.path).replace('"', "?");
         self.show_toast(permanent_delete_success_message(
+            self.language,
             &safe_name,
             previous_trash_undo,
         ));
@@ -6181,13 +6194,16 @@ impl App {
         }
 
         self.show_toast(restore_result_message(
-            restored_count,
-            retry_now,
-            resolve_then_retry,
-            manual_review,
-            terminal,
-            first_failure,
-            restores_active_playlist,
+            self.language,
+            RestoreOutcomeCounts {
+                restored: restored_count,
+                retry_now,
+                resolve_then_retry,
+                manual_review,
+                terminal,
+                first_failure,
+                active_playlist: restores_active_playlist,
+            },
         ));
         if failure_total == 0 {
             CurationTerminalState::Succeeded
@@ -6610,7 +6626,7 @@ impl App {
                         log::error!(
                             "curation worker returned a mismatched completion: operation={kind:?}, submitted={submitted}, abandoned={abandoned}"
                         );
-                        let message = curation_recovery_message(kind);
+                        let message = curation_recovery_message(self.language, kind);
                         self.curation_recovery.record(kind);
                         self.show_toast(message);
                         return;
@@ -7829,13 +7845,17 @@ impl ApplicationHandler<UserEvent> for App {
                 let preview_recovery_unsettled = self.preview_recovery_unsettled;
                 let preview_load_retry_blocked = self.preview_load_retry_blocked;
                 let curation_status = self.curation_worker.as_ref().map(|worker| {
-                    worker.status(self.close_after_curation, self.pending_trash.len())
+                    worker.status(
+                        self.language,
+                        self.close_after_curation,
+                        self.pending_trash.len(),
+                    )
                 });
                 let trash_move_busy = self
                     .curation_worker
                     .as_ref()
                     .is_some_and(|worker| matches!(worker.context.kind(), CurationKind::Trash));
-                let curation_recovery_status = self.curation_recovery.status();
+                let curation_recovery_status = self.curation_recovery.status(self.language);
                 let restore_recovery_unsettled =
                     self.curation_recovery.contains(CurationKind::Restore);
                 let folder_scan_busy = self.exclusive_folder_scan();

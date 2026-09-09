@@ -192,6 +192,7 @@ pub(crate) fn route_consumed_keyboard_key_in_context(key: &Key, context: EscapeC
         Key::Named(NamedKey::ArrowUp) => context.is_cropping || !context.is_mosaic,
         Key::Named(NamedKey::ArrowDown) => context.is_cropping || context.is_mosaic,
         Key::Named(NamedKey::Escape) => escape_action(context) != EscapeAction::None,
+        key if is_trash_shortcut_key(key) => context.is_mosaic,
         _ => false,
     }
 }
@@ -200,6 +201,43 @@ pub(crate) fn route_consumed_keyboard_key_in_context(key: &Key, context: EscapeC
 pub(crate) fn is_trash_shortcut_key(key: &Key) -> bool {
     matches!(key, Key::Named(NamedKey::Delete))
         || (cfg!(target_os = "macos") && matches!(key, Key::Named(NamedKey::Backspace)))
+}
+
+/// Delete versus Shift+Delete. The event loop binds both to the same focused
+/// ready photo, including in the full-image collage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DeletionShortcut {
+    Trash,
+    PermanentDelete,
+}
+
+#[must_use]
+pub(crate) const fn deletion_shortcut(shift: bool) -> DeletionShortcut {
+    if shift {
+        DeletionShortcut::PermanentDelete
+    } else {
+        DeletionShortcut::Trash
+    }
+}
+
+/// Keys collage must receive even when a photo button holds AccessKit focus.
+#[must_use]
+pub(crate) fn mosaic_key_reaches_app(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::Named(
+            NamedKey::Enter
+                | NamedKey::ArrowLeft
+                | NamedKey::ArrowRight
+                | NamedKey::ArrowUp
+                | NamedKey::ArrowDown
+                | NamedKey::Home
+                | NamedKey::End
+                | NamedKey::PageUp
+                | NamedKey::PageDown
+        )
+    ) || is_trash_shortcut_key(key)
+        || matches!(key, Key::Character(character) if character.eq_ignore_ascii_case("u"))
 }
 
 #[cfg(test)]
@@ -397,6 +435,22 @@ mod tests {
             &Key::Named(NamedKey::ArrowUp),
             collage,
         ));
+        assert!(route_consumed_keyboard_key_in_context(
+            &Key::Named(NamedKey::Delete),
+            collage,
+        ));
+        assert!(!route_consumed_keyboard_key(
+            &Key::Named(NamedKey::Delete),
+            false,
+            false,
+            false,
+        ));
+        assert_eq!(deletion_shortcut(false), DeletionShortcut::Trash);
+        assert_eq!(deletion_shortcut(true), DeletionShortcut::PermanentDelete);
+        assert!(mosaic_key_reaches_app(&Key::Named(NamedKey::Delete)));
+        assert!(mosaic_key_reaches_app(&Key::Named(NamedKey::Enter)));
+        assert!(mosaic_key_reaches_app(&Key::Character("u".into())));
+        assert!(!mosaic_key_reaches_app(&Key::Character("r".into())));
     }
 
     #[test]

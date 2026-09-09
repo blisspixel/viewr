@@ -5,6 +5,8 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+## 0.6.3 - 2026-09-09
+
 ### Localization
 
 - Crop, Save As, reload, and edit-presentation failure copy is now translated,

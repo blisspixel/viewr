@@ -5,6 +5,20 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Localization
+
+- The first-run card, the opening and failed-open status line, the Retry
+  control, and the complete About shortcut list are now translated into Spanish,
+  French, and German instead of staying English while the menus changed
+  language. A file name is substituted after translation, so each language
+  places it where its grammar needs it.
+- Interface copy that is missing from the language catalog now fails the build
+  rather than rendering English in every language, and the empty-state card and
+  status line share one owner so the same sentence cannot drift apart.
+- About now names the collage, matching the rest of the interface, instead of
+  calling it a mosaic. The German name for the full-image collage no longer
+  reads as "fullscreen collage".
+
 ### Product quality
 
 - Culling a folder no longer stalls after a few Delete presses. A later folder

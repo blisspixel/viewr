@@ -36,6 +36,56 @@ impl Language {
     }
 }
 
+/// Compile-time catalog binding for one user-visible literal.
+///
+/// A literal that is not in `MESSAGES` fails the build, so new interface copy
+/// cannot reach one language while silently staying English in the other three.
+pub(crate) const fn assert_cataloged(english: &str) {
+    let mut index = 0;
+    while index < MESSAGES.len() {
+        if same_source(MESSAGES[index].english, english) {
+            return;
+        }
+        index += 1;
+    }
+    panic!("user-visible literal is missing from the language catalog");
+}
+
+const fn same_source(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+/// Catalog membership for copy that arrives as a value rather than a literal.
+///
+/// Pure copy seams enumerate their complete message set through this so their
+/// own tests prove coverage that a literal check cannot see.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn is_cataloged(english: &str) -> bool {
+    MESSAGES.iter().any(|message| message.english == english)
+}
+
+/// Bind one user-visible literal to its catalog entry at compile time.
+macro_rules! tr {
+    ($english:literal) => {{
+        const _: () = $crate::locale::assert_cataloged($english);
+        $english
+    }};
+}
+
+pub(crate) use tr;
+
 /// Persisted language choice. System is the privacy-preserving default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Preference {
@@ -431,7 +481,9 @@ const MESSAGES: &[Message] = &[
         english: "Full-Image Collage",
         spanish: "Collage de imágenes completas",
         french: "Mosaïque d’images complètes",
-        german: "Vollbild-Collage",
+        // "Vollbild" is the German word for fullscreen, so it cannot carry
+        // "full-image" here without naming a different feature.
+        german: "Collage vollständiger Bilder",
     },
     Message {
         english: "Panels",
@@ -679,11 +731,242 @@ const MESSAGES: &[Message] = &[
         french: "Système",
         german: "System",
     },
+    // First-run card and Help shortcut copy owned by `shortcuts`.
+    Message {
+        english: "Open an image",
+        spanish: "Abrir una imagen",
+        french: "Ouvrir une image",
+        german: "Ein Bild öffnen",
+    },
+    Message {
+        english: "Opening {subject}",
+        spanish: "Abriendo {subject}",
+        french: "Ouverture de {subject}",
+        german: "{subject} wird geöffnet",
+    },
+    Message {
+        english: "Could not open {subject}",
+        spanish: "No se pudo abrir {subject}",
+        french: "Impossible d’ouvrir {subject}",
+        german: "{subject} konnte nicht geöffnet werden",
+    },
+    Message {
+        english: "Retry opening {subject}",
+        spanish: "Reintentar abrir {subject}",
+        french: "Réessayer d’ouvrir {subject}",
+        german: "{subject} erneut öffnen",
+    },
+    Message {
+        english: "Retry opening the image",
+        spanish: "Reintentar abrir la imagen",
+        french: "Réessayer d’ouvrir l’image",
+        german: "Bild erneut öffnen",
+    },
+    Message {
+        english: "Opening the image",
+        spanish: "Abriendo la imagen",
+        french: "Ouverture de l’image",
+        german: "Bild wird geöffnet",
+    },
+    Message {
+        english: "Could not open the image",
+        spanish: "No se pudo abrir la imagen",
+        french: "Impossible d’ouvrir l’image",
+        german: "Bild konnte nicht geöffnet werden",
+    },
+    Message {
+        english: "Open File, Open Folder, or drop a file or folder. A dropped file also browses its folder when access allows. Open Folder selects the folder for this session.",
+        spanish: "Abrir archivo, Abrir carpeta, o suelte un archivo o una carpeta. Un archivo soltado también explora su carpeta cuando el acceso lo permite. Abrir carpeta selecciona la carpeta para esta sesión.",
+        french: "Ouvrir un fichier, Ouvrir un dossier, ou déposez un fichier ou un dossier. Un fichier déposé parcourt aussi son dossier lorsque l’accès le permet. Ouvrir un dossier sélectionne le dossier pour cette session.",
+        german: "Datei öffnen, Ordner öffnen, oder ziehen Sie eine Datei oder einen Ordner hierher. Eine abgelegte Datei durchsucht auch ihren Ordner, sofern der Zugriff es erlaubt. Ordner öffnen wählt den Ordner für diese Sitzung.",
+    },
+    Message {
+        english: "Decoding locally while the window stays responsive.",
+        spanish: "Decodificando localmente mientras la ventana sigue respondiendo.",
+        french: "Décodage local pendant que la fenêtre reste réactive.",
+        german: "Lokale Dekodierung, während das Fenster reaktionsfähig bleibt.",
+    },
+    Message {
+        english: "Open",
+        spanish: "Abrir",
+        french: "Ouvrir",
+        german: "Öffnen",
+    },
+    Message {
+        english: "Browse",
+        spanish: "Explorar",
+        french: "Parcourir",
+        german: "Durchsuchen",
+    },
+    Message {
+        english: "Open file",
+        spanish: "Abrir archivo",
+        french: "Ouvrir un fichier",
+        german: "Datei öffnen",
+    },
+    Message {
+        english: "Open folder",
+        spanish: "Abrir carpeta",
+        french: "Ouvrir un dossier",
+        german: "Ordner öffnen",
+    },
+    Message {
+        english: "Save As",
+        spanish: "Guardar como",
+        french: "Enregistrer sous",
+        german: "Speichern unter",
+    },
+    Message {
+        english: "Previous / next image",
+        spanish: "Imagen anterior / siguiente",
+        french: "Image précédente / suivante",
+        german: "Vorheriges / nächstes Bild",
+    },
+    Message {
+        english: "First / last image",
+        spanish: "Primera / última imagen",
+        french: "Première / dernière image",
+        german: "Erstes / letztes Bild",
+    },
+    Message {
+        english: "Previous / next image or collage group",
+        spanish: "Imagen o grupo del collage anterior / siguiente",
+        french: "Image ou groupe de la mosaïque précédent / suivant",
+        german: "Vorheriges / nächstes Bild oder Collage-Gruppe",
+    },
+    Message {
+        english: "Previous / next page or frame",
+        spanish: "Página o fotograma anterior / siguiente",
+        french: "Page ou trame précédente / suivante",
+        german: "Vorherige / nächste Seite oder Einzelbild",
+    },
+    Message {
+        english: "Reload file",
+        spanish: "Volver a cargar el archivo",
+        french: "Recharger le fichier",
+        german: "Datei neu laden",
+    },
+    Message {
+        english: "Fit; hold to pan",
+        spanish: "Ajustar; mantener para desplazar",
+        french: "Ajuster ; maintenir pour déplacer",
+        german: "Einpassen; halten zum Verschieben",
+    },
+    Message {
+        english: "Fit",
+        spanish: "Ajustar",
+        french: "Ajuster",
+        german: "Einpassen",
+    },
+    Message {
+        english: "Actual size",
+        spanish: "Tamaño real",
+        french: "Taille réelle",
+        german: "Originalgröße",
+    },
+    Message {
+        english: "Zoom",
+        spanish: "Zoom",
+        french: "Zoom",
+        german: "Zoom",
+    },
+    Message {
+        english: "Fullscreen",
+        spanish: "Pantalla completa",
+        french: "Plein écran",
+        german: "Vollbild",
+    },
+    Message {
+        english: "Full-image collage",
+        spanish: "Collage de imágenes completas",
+        french: "Mosaïque d’images complètes",
+        german: "Collage vollständiger Bilder",
+    },
+    Message {
+        english: "Leave tool, collage, or fullscreen",
+        spanish: "Salir de la herramienta, el collage o la pantalla completa",
+        french: "Quitter l’outil, la mosaïque ou le plein écran",
+        german: "Werkzeug, Collage oder Vollbild verlassen",
+    },
+    Message {
+        english: "Clear or set rating",
+        spanish: "Borrar o asignar valoración",
+        french: "Effacer ou définir la note",
+        german: "Bewertung löschen oder setzen",
+    },
+    Message {
+        english: "Crop / Spot Heal",
+        spanish: "Recortar / Corrección puntual",
+        french: "Recadrer / Correction ponctuelle",
+        german: "Zuschneiden / Bereichsreparatur",
+    },
+    Message {
+        english: "Rotate and flip",
+        spanish: "Girar y voltear",
+        french: "Pivoter et retourner",
+        german: "Drehen und spiegeln",
+    },
+    Message {
+        english: "Undo Trash",
+        spanish: "Deshacer envío a la papelera",
+        french: "Annuler la mise à la corbeille",
+        german: "Verschieben in den Papierkorb rückgängig machen",
+    },
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Interface literals reach the catalog through `tr!`, never directly.
+    ///
+    /// The lookup falls back to the English source for an unknown key, so a
+    /// bare literal would render English in Spanish, French, and German without
+    /// failing anything. `tr!` turns that into a build error, and this keeps a
+    /// later change from quietly stepping around it.
+    #[test]
+    fn interface_literals_bind_to_the_catalog() {
+        // Built at run time so this test does not match its own source.
+        let bare = format!(".{}(\"", "text");
+        let source_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        for entry in std::fs::read_dir(&source_dir).expect("read src") {
+            let path = entry.expect("source entry").path();
+            if path.extension().is_none_or(|extension| extension != "rs")
+                || path.file_name().is_some_and(|name| name == "locale.rs")
+            {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read source");
+            for (number, line) in source.lines().enumerate() {
+                if line.contains(&bare) {
+                    offenders.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "pass interface literals through tr! so a missing catalog entry fails the build: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn uncataloged_source_is_reported_rather_than_translated() {
+        // The same scan `tr!` performs at build time, run here so its comparison
+        // is exercised rather than only evaluated by the compiler.
+        assert_cataloged("Close");
+        assert!(same_source("Close", "Close"));
+        assert!(!same_source("Close", "Closed"));
+        assert!(!same_source("Close", "Clone"));
+
+        assert!(is_cataloged("Open File..."));
+        assert!(!is_cataloged("Open File...."));
+        assert_eq!(
+            Language::German.text("not in the catalog"),
+            "not in the catalog"
+        );
+        assert_eq!(Language::German.text(tr!("Close")), "Schließen");
+    }
 
     #[test]
     fn locale_resolution_is_bounded_and_uses_primary_language_subtags() {

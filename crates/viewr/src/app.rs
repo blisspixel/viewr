@@ -1454,9 +1454,9 @@ impl App {
         self.language = preference.resolve();
         match crate::locale::save(preference) {
             Ok(()) => {
-                let label = self.language.text("Language");
+                let label = self.language.text(crate::locale::tr!("Language"));
                 let selected = if matches!(preference, crate::locale::Preference::System) {
-                    self.language.text("System")
+                    self.language.text(crate::locale::tr!("System"))
                 } else {
                     preference.native_name()
                 };

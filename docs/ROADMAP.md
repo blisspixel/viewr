@@ -781,7 +781,12 @@ Make viewing excellent, not merely functional.
 - [ ] Complete localization evidence: catalog every remaining advanced status,
   recovery, metadata, and editing explanation, then pass the native language and
   assistive-technology matrix without clipped copy, missing glyphs, unstable
-  shortcuts, or mismatched accessible names.
+  shortcuts, or mismatched accessible names. The first-run card, open and
+  failed-open status, Retry, and the complete About shortcut list are now
+  cataloged, one sentence has one owner across the card and the status line, and
+  an uncataloged interface literal fails the build instead of silently rendering
+  English. Remaining seams are migrated one at a time, each with the coverage
+  test described in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

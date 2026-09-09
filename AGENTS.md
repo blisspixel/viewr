@@ -31,8 +31,14 @@ matches the task:
 | JPEG XMP ratings and filters | `docs/RATINGS.md` |
 | No-network and metadata rules | `docs/PRIVACY.md` |
 | What each check proves | `docs/VERIFY.md` |
+| Hardware, accessibility, performance matrices | `docs/PRODUCT-QUALITY.md`, `docs/ACCESSIBILITY.md`, `docs/PERFORMANCE.md` |
+| Visible copy and language catalogs | `docs/LOCALIZATION.md` |
 | Tags, version, public install links | `docs/PUBLISHING.md` |
 | Optional models (not shipped) | `docs/LOCAL-INTELLIGENCE.md` |
+
+The `Current position` and `Release gate` tables in `docs/ROADMAP.md` are the
+only statement of the active milestone and which gates are still open. Read them
+before proposing work. They move faster than this file.
 
 Distinguish planned work (`docs/ROADMAP.md`), implemented behavior (source
 and tests), shipped behavior (`CHANGELOG.md` and `docs/releases/`), and
@@ -83,6 +89,8 @@ covered module, not in `app.rs`.
 | Full-image collage | `mosaic` (user-facing name is collage) |
 | Keyboard routing | `keyboard_route` |
 | Generation / stale-work currency | `work_currency` |
+| Visible copy and language catalogs | `locale` |
+| Shortcut names, Help and About listings | `shortcuts` |
 
 Before adding a logger, cache, filesystem helper, persistence path, decoder,
 color transform, or completion channel, find the existing one and extend it.
@@ -120,6 +128,7 @@ Normal local loop after a Rust change:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
+cargo test --workspace --doc --locked
 ```
 
 After Python tooling changes:
@@ -138,6 +147,15 @@ that merely runs.
 Green CI is the floor. Release-impacting work uses the full gate in
 `docs/VERIFY.md`. Performance, accessibility, and product-quality claims
 need the evidence those documents define.
+
+Milestone evidence is candidate-bound. One non-publishing `Release artifacts`
+run for one exact commit supplies the archives and fixture for a matrix. Do not
+mix runs, substitute a developer build, or reuse an earlier milestone's
+candidate, and repeat every affected row after a candidate-invalidating change.
+Records live under `docs/release-evidence/<matrix>/<version>/` and must pass
+`scripts/product_quality_evidence.py` or the accessibility procedure that owns
+them. A missing row stays visible as a gap; it is never backfilled against a
+published tag.
 
 ## Engineering bar
 
@@ -159,7 +177,9 @@ need the evidence those documents define.
 
 Local inspection, reversible edits, tests, and isolated worktrees are in
 scope. Do not commit, push, tag, publish, dispatch `Release artifacts`, or
-change GitHub release state unless the user asked. Do not run the public
+change GitHub release state unless the user asked. `main` is protected and
+linear: work lands through a branch and a reviewed pull request with the
+required checks green, never a direct push, merge commit, or force push. Do not run the public
 installers as part of development. Do not operate on the user's real photos;
 use synthetic fixtures. Report vulnerabilities only through `SECURITY.md`.
 

@@ -82,6 +82,7 @@ ARCHIVE_DOCUMENTATION_PATHS = (
     "docs/releases/v0.6.1.md",
     "docs/releases/v0.6.2.md",
     "docs/releases/v0.6.3.md",
+    "docs/releases/v0.6.4.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-dark-example.png",

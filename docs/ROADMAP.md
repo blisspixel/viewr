@@ -991,6 +991,10 @@ submission.
 - [x] Reproducibly buildable local/CI release artifacts.
 - [x] Deletes use system Trash through the `trash` crate on Windows and Linux or
   `NSFileManager` on macOS, not a local `_trash` folder.
+- [x] Local-first network storage: photos on home and studio network-attached storage
+  (NAS), SMB shares, CIFS mounts, and NFS volumes are accessed as ordinary files
+  through standard operating-system filesystem APIs without linking an application
+  network stack, preserving the zero-network privacy invariant.
 
 Definition of done: the app runs correctly with network denied by packaging
 profile and/or process policy where implemented, fuzzing finds no crashes at the
@@ -1010,6 +1014,10 @@ install from source or a simple GitHub-style release artifact.
 - [ ] Display-fidelity acceptance from Priority 2 remains open.
 - [ ] Publisher-authenticated native install surfaces once external signing and
   notarization credentials are available.
+- [ ] Pure-Rust developer tooling: transition repository quality validation, privacy
+  checking, license auditing, and release packaging scripts from Python and PowerShell
+  into a standalone companion Cargo workspace (`xtask`), keeping the runtime `viewr`
+  binary lean and dependency-minimal while removing non-Rust scripting dependencies.
 
 Definition of done: a careful user can build or download a release artifact, set
 viewr as their image viewer if they choose, and never think about bloat again.

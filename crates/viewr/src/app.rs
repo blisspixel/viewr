@@ -3209,7 +3209,9 @@ impl App {
             return;
         };
         let folder = path.parent().map(Path::to_owned);
-        let folder_stamp = folder.as_deref().and_then(crate::fs::directory_stamp);
+        // Avoid synchronous full directory enumeration on the UI thread. The background
+        // coherence thread initializes its own baseline stamp on its first tick.
+        let folder_stamp = None;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
         let latest = Arc::new(Mutex::new(None));
@@ -3444,10 +3446,19 @@ impl App {
             )
             .map(Arc::clone)?;
             Some((path, source))
-        } else {
-            let path = self.current_loaded_path()?.to_owned();
+        } else if let Some(path) = self.current_loaded_path() {
             let source = self.current_source.as_ref().map(Arc::clone)?;
-            Some((path, source))
+            Some((path.to_owned(), source))
+        } else if let Some(path) = self
+            .session
+            .selected_path
+            .as_deref()
+            .filter(|_| self.session.load_error.is_none())
+        {
+            let source = self.prefetch_sources.get(path).map(Arc::clone);
+            source.map(|source| (path.to_owned(), source))
+        } else {
+            None
         }
     }
 
@@ -4342,9 +4353,15 @@ impl App {
                 .filter(|path| self.session.presented_path.as_deref() != Some(path.as_path()))
                 .collect()
         } else {
-            playlist.visible_neighbor_paths(2)
+            playlist.visible_neighbor_paths(3)
         };
         let candidate_paths = exclude_blocked_neighbors(candidate_paths, &blocked);
+        let mut keep_paths: HashSet<&Path> = candidate_paths.iter().map(PathBuf::as_path).collect();
+        if let Some(selected) = self.session.selected_path.as_deref() {
+            keep_paths.insert(selected);
+        }
+        self.prefetch_schedule.cancel_superseded_except(&keep_paths);
+
         let targets: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)> = candidate_paths
             .into_iter()
             .filter(|p| !self.prefetch.contains(p) && self.prefetch_schedule.is_eligible(p))

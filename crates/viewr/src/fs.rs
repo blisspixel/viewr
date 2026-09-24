@@ -58,15 +58,15 @@ pub(crate) enum ImageSourceMatch {
 }
 
 #[cfg(unix)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct FileIdentity {
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FileIdentity {
     device: u64,
     inode: u64,
 }
 
 #[cfg(target_os = "windows")]
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct FileIdentity {
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FileIdentity {
     volume: u64,
     file_id: [u8; 16],
 }
@@ -79,6 +79,12 @@ pub(crate) struct ScanProvenance {
 }
 
 impl ScanProvenance {
+    /// Opaque identity of the underlying filesystem object.
+    #[must_use]
+    pub(crate) fn identity(self) -> FileIdentity {
+        self.identity
+    }
+
     /// Whether two scan records name the same filesystem object.
     ///
     /// Rename updates version evidence while preserving object identity, so a
@@ -1382,7 +1388,8 @@ fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Res
     use std::mem::{MaybeUninit, size_of};
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+        BY_HANDLE_FILE_INFORMATION, FILE_ID_INFO, FileIdInfo, GetFileInformationByHandle,
+        GetFileInformationByHandleEx,
     };
 
     let mut info = MaybeUninit::<FILE_ID_INFO>::uninit();
@@ -1399,15 +1406,35 @@ fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Res
             size,
         )
     };
-    if succeeded == 0 {
-        return Err(io::Error::last_os_error());
+    if succeeded != 0 {
+        // SAFETY: A successful call initialized the complete FILE_ID_INFO buffer.
+        let info = unsafe { info.assume_init() };
+        return Ok(FileIdentity {
+            volume: info.VolumeSerialNumber,
+            file_id: info.FileId.Identifier,
+        });
     }
-    // SAFETY: A successful call initialized the complete FILE_ID_INFO buffer.
-    let info = unsafe { info.assume_init() };
-    Ok(FileIdentity {
-        volume: info.VolumeSerialNumber,
-        file_id: info.FileId.Identifier,
-    })
+
+    // Fallback for SMB shares, NAS volumes (Samba, TrueNAS, Synology, QNAP), and non-NTFS
+    // filesystems where FileIdInfo returns ERROR_INVALID_PARAMETER (87) or ERROR_NOT_SUPPORTED (50).
+    let mut by_handle = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // SAFETY: `file` owns a valid handle. `by_handle` points to writable storage of
+    // exactly size_of::<BY_HANDLE_FILE_INFORMATION>() bytes.
+    let succeeded =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), by_handle.as_mut_ptr()) };
+    if succeeded != 0 {
+        // SAFETY: A successful call initialized the complete BY_HANDLE_FILE_INFORMATION buffer.
+        let info = unsafe { by_handle.assume_init() };
+        let mut file_id = [0u8; 16];
+        file_id[..4].copy_from_slice(&info.nFileIndexHigh.to_ne_bytes());
+        file_id[4..8].copy_from_slice(&info.nFileIndexLow.to_ne_bytes());
+        return Ok(FileIdentity {
+            volume: u64::from(info.dwVolumeSerialNumber),
+            file_id,
+        });
+    }
+
+    Err(io::Error::last_os_error())
 }
 
 #[cfg(unix)]

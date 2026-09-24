@@ -164,11 +164,12 @@ pub(crate) fn current_work_blocker<const N: usize>(
     work.into_iter().flatten().next()
 }
 
-/// Folder browsing may replace an in-flight decode. The last good frame stays
-/// until the newly selected image is ready.
+/// Folder browsing may replace an in-flight decode or continue while a background
+/// move to Trash completes. The last good frame stays until the newly selected
+/// image is ready.
 #[must_use]
 pub(crate) const fn blocks_browse(work: CurrentWork) -> bool {
-    !matches!(work, CurrentWork::ImagePreparation)
+    !matches!(work, CurrentWork::ImagePreparation | CurrentWork::TrashMove)
 }
 
 /// Select the first browse blocker after ignoring replaceable image preparation.
@@ -441,6 +442,7 @@ mod tests {
     #[test]
     fn browse_and_spot_heal_preflight_inspect_every_relevant_fact() {
         assert!(!blocks_browse(CurrentWork::ImagePreparation));
+        assert!(!blocks_browse(CurrentWork::TrashMove));
         assert!(blocks_browse(CurrentWork::Crop));
         assert!(blocks_browse(CurrentWork::FolderScan));
         assert!(blocks_browse(CurrentWork::SpotHeal));

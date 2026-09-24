@@ -188,6 +188,9 @@ users who explicitly want it.
   the reviewed OpenURI Open With chooser, and
   protected by a verified Internet-socket deny policy before threads start. This
   layered invariant is enforced in CI and at runtime (see `PRIVACY.md`).
+  Photos stored on local network storage (NAS, SMB, CIFS, NFS) are accessed
+  as standard operating-system filesystem paths; no userland network client or
+  remote protocol stack exists in viewr.
 - **Ship sandboxed with network denied:** repository profiles target macOS App
   Sandbox, Windows AppContainer, and Linux Flatpak without `--share=network`.
   Local package construction and schema/profile verification are implemented;

@@ -21,6 +21,12 @@ code, and where possible it's enforced in CI so it can't quietly regress.
 - Your photos, filenames, and folder structure **never leave your machine.**
   viewr does **not** build or retain a library index, thumbnail database, or
   "recent folders" list of your collection.
+- **Local-first network storage.** Photos stored on home or studio network-attached
+  storage (NAS), SMB shares, CIFS mounts, or NFS volumes are accessed strictly as
+  ordinary files through operating-system filesystem APIs. viewr runs no userland
+  network client, remote protocol, or background scanner; the operating system
+  kernel redirector handles file access, keeping your photo library private and
+  local to your environment.
 - **Native dialog and external-app boundary.** Open, Open Folder, Save As path
   choice, and permanent-delete confirmation use native operating-system dialogs.
   When a captured Save As destination already exists, viewr adds an app-owned,

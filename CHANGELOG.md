@@ -5,6 +5,33 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Performance and navigation
+
+- Culling rapidly through a folder no longer freezes or drops Delete commands.
+  Browsing now proceeds immediately while a background move to Trash completes,
+  and prefetched successor images can be deleted without waiting for presentation
+  to settle.
+- Speculative neighbor prefetch now prioritizes forward images in navigation order
+  and decodes up to 3 upcoming photos ahead into the in-memory cache, keeping
+  rapid review and deletion smooth. Navigation to a new index cancels superseded
+  in-flight decode jobs so background workers and decoders focus on upcoming photos.
+- Opening large folders no longer pauses the UI thread. The initial directory
+  stamp for file coherence is taken on the background coherence thread rather
+  than synchronously during image presentation.
+- Folder membership reconciliation now indexes existing files by identity in
+  O(1) time rather than performing a quadratic rename search across every item,
+  and reuses borrowed paths instead of cloning path buffers across the catalog.
+
+### Storage and filesystem
+
+- Windows file identity queries now fall back to standard handle information
+  when 128-bit file identifiers are unsupported. Photos and folders on network
+  storage (NAS, SMB, CIFS, and non-NTFS volumes) open and decode reliably.
+- Documentation and roadmap entries clarify that local network storage is
+  accessed through standard operating-system file paths under viewr's zero-network
+  application privacy model, and plan the transition of repository verification
+  scripts to pure-Rust companion tooling.
+
 ## 0.6.3 - 2026-09-09
 
 ### Localization

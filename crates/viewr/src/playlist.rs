@@ -409,27 +409,28 @@ impl Playlist {
 
         let previous_selected = self.files.get(self.index).cloned();
         let previous_selected_provenance = self.provenance.get(self.index).copied().flatten();
-        let previous_paths: HashSet<PathBuf> = self.files.iter().cloned().collect();
-        let by_path = self
+        let previous_paths: HashSet<&Path> = self.files.iter().map(PathBuf::as_path).collect();
+        let by_path: HashMap<&Path, RatingState> = self
             .files
             .iter()
-            .zip(&self.ratings)
-            .map(|(path, rating)| (path.clone(), *rating))
-            .collect::<HashMap<_, _>>();
+            .map(PathBuf::as_path)
+            .zip(self.ratings.iter().copied())
+            .collect();
+
+        let mut by_identity: HashMap<crate::fs::FileIdentity, (&Path, RatingState)> =
+            HashMap::new();
+        for ((old_path, old_provenance), rating) in
+            self.files.iter().zip(&self.provenance).zip(&self.ratings)
+        {
+            if let Some(prov) = old_provenance {
+                by_identity.insert(prov.identity(), (old_path.as_path(), *rating));
+            }
+        }
 
         let inherited = files
             .iter()
             .zip(&provenance)
-            .map(|(path, scanned)| {
-                inherited_catalog_rating(
-                    path,
-                    *scanned,
-                    &self.files,
-                    &self.provenance,
-                    &self.ratings,
-                    &by_path,
-                )
-            })
+            .map(|(path, scanned)| inherited_catalog_rating(path, *scanned, &by_path, &by_identity))
             .collect::<Vec<_>>();
 
         let mut rename_sources = HashSet::new();
@@ -443,16 +444,18 @@ impl Playlist {
             ratings.push(rating);
         }
 
-        let new_paths: HashSet<PathBuf> = files.iter().cloned().collect();
+        let new_paths: HashSet<&Path> = files.iter().map(PathBuf::as_path).collect();
         let removed = self
             .files
             .iter()
-            .filter(|path| !new_paths.contains(*path) && !rename_sources.contains(*path))
+            .filter(|path| !new_paths.contains(path.as_path()) && !rename_sources.contains(*path))
             .cloned()
             .collect::<Vec<_>>();
         let added = files
             .iter()
-            .filter(|path| !previous_paths.contains(*path) && !rename_targets.contains(*path))
+            .filter(|path| {
+                !previous_paths.contains(path.as_path()) && !rename_targets.contains(*path)
+            })
             .count();
 
         self.files = files;
@@ -606,10 +609,8 @@ impl Playlist {
 fn inherited_catalog_rating(
     path: &Path,
     provenance: Option<ScanProvenance>,
-    files: &[PathBuf],
-    provenances: &[Option<ScanProvenance>],
-    ratings: &[RatingState],
-    by_path: &HashMap<PathBuf, RatingState>,
+    by_path: &HashMap<&Path, RatingState>,
+    by_identity: &HashMap<crate::fs::FileIdentity, (&Path, RatingState)>,
 ) -> (RatingState, Option<PathBuf>) {
     if let Some(rating) = by_path.get(path) {
         return (*rating, None);
@@ -617,10 +618,10 @@ fn inherited_catalog_rating(
     let Some(new_provenance) = provenance else {
         return (RatingState::Loading, None);
     };
-    for ((old_path, old_provenance), rating) in files.iter().zip(provenances).zip(ratings) {
-        if old_path != path && old_provenance.is_some_and(|old| old.same_object(new_provenance)) {
-            return (*rating, Some(old_path.clone()));
-        }
+    if let Some(&(old_path, rating)) = by_identity.get(&new_provenance.identity())
+        && old_path != path
+    {
+        return (rating, Some(old_path.to_path_buf()));
     }
     (RatingState::Loading, None)
 }

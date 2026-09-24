@@ -26,6 +26,8 @@ history, crash-report uploader, or automatic update check.
   and performance budgets run in CI.
 - **Private by construction.** The application dependency graph contains no HTTP
   or TLS client. Photos, paths, metadata, ratings, and diagnostics stay local.
+  Local network shares (NAS, SMB, NFS) are accessed through standard operating-system
+  file paths without an application network client.
 - **Focused, not bare.** Folder navigation, ratings, rotation, crop, bounded Spot
   Heal, Save As, and conversion are intentional core viewer tools. Deeper work
   stays with an editor you choose through native Open With, without adding a

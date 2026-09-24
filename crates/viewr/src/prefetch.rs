@@ -247,6 +247,17 @@ impl PrefetchSchedule {
         }
     }
 
+    /// Cancel in-flight speculative jobs whose paths are no longer in `keep`.
+    pub(crate) fn cancel_superseded_except(&mut self, keep: &HashSet<&Path>) {
+        for job in &mut self.active {
+            if job.context().generation == self.generation
+                && !keep.contains(job.context().path.as_path())
+            {
+                job.context().cancellation.store(1, Ordering::Release);
+            }
+        }
+    }
+
     /// Number of accepted jobs whose owner endpoints are still active.
     #[must_use]
     pub(crate) fn in_flight_len(&self) -> usize {
@@ -545,12 +556,12 @@ pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize>
     }
     let mut out = Vec::new();
     for d in 1..=radius {
-        if let Some(i) = current.checked_sub(d) {
-            out.push(i);
-        }
         let next = current + d;
         if next < len {
             out.push(next);
+        }
+        if let Some(i) = current.checked_sub(d) {
+            out.push(i);
         }
     }
     out
@@ -635,7 +646,7 @@ mod tests {
     fn neighbor_indices_near_edges() {
         assert_eq!(neighbor_indices(0, 5, 2), vec![1, 2]);
         assert_eq!(neighbor_indices(4, 5, 2), vec![3, 2]);
-        assert_eq!(neighbor_indices(2, 5, 1), vec![1, 3]);
+        assert_eq!(neighbor_indices(2, 5, 1), vec![3, 1]);
         assert!(neighbor_indices(0, 0, 2).is_empty());
     }
 

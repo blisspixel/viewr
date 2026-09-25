@@ -51,6 +51,7 @@ const COPY_RATING_IMAGE_UNAVAILABLE: &str = "Rating: Image unavailable";
 const COPY_RATING_OPEN_AN_IMAGE: &str = "Rating: Open an image";
 const COPY_RATING_READING: &str = "Rating: Reading...";
 const COPY_RATING_UNRATED: &str = "Rating: Unrated";
+const COPY_RATING_JPEG_ONLY_STATUS: &str = "Rating: JPEG only";
 const COPY_RATING_REJECTED: &str = "Rating: Rejected";
 const COPY_RATING_CONFLICT: &str = "Rating: Conflict";
 const COPY_RATING_UNSUPPORTED_STATUS: &str = "Rating: Unsupported";
@@ -123,6 +124,7 @@ const CHROME_COPY: &[&str] = &[
     COPY_RATING_OPEN_AN_IMAGE,
     COPY_RATING_READING,
     COPY_RATING_UNRATED,
+    COPY_RATING_JPEG_ONLY_STATUS,
     COPY_RATING_REJECTED,
     COPY_RATING_CONFLICT,
     COPY_RATING_UNSUPPORTED_STATUS,
@@ -771,6 +773,14 @@ impl ChromeViewModel {
     pub fn rating_menu_label(self) -> String {
         let language = self.input.language;
         if self.input.dock.has_image {
+            // A format with no rating reader or writer has nothing to show as
+            // Unrated. Name the supported scope instead of a dead-end state.
+            if self.input.rating_state == crate::ratings::RatingState::Unrated
+                && self.input.rating_capability
+                    == crate::ratings::RatingWriteCapability::ReadOnlyFormat
+            {
+                return language.text(COPY_RATING_JPEG_ONLY_STATUS).to_owned();
+            }
             return rating_status_label(language, self.input.rating_state);
         }
         language
@@ -1720,6 +1730,36 @@ mod tests {
             assert!(!model.is_enabled(ChromeControl::RatingChoice));
             assert!(model.rating_unavailable_text().contains(expected));
         }
+    }
+
+    #[test]
+    fn read_only_format_names_the_jpeg_rating_scope_instead_of_unrated() {
+        let mut input = ready_input();
+        input.rating_state = crate::ratings::RatingState::Unrated;
+        input.rating_capability = crate::ratings::RatingWriteCapability::ReadOnlyFormat;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_menu_label(),
+            "Rating: JPEG only"
+        );
+        input.language = Language::German;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_menu_label(),
+            "Bewertung: nur JPEG"
+        );
+
+        input.language = Language::English;
+        input.rating_capability = crate::ratings::RatingWriteCapability::WritableJpeg;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_menu_label(),
+            "Rating: Unrated"
+        );
+
+        input.rating_capability = crate::ratings::RatingWriteCapability::ReadOnlyFormat;
+        input.dock.has_image = false;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_menu_label(),
+            "Rating: Open an image"
+        );
     }
 
     #[test]

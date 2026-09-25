@@ -56,8 +56,9 @@ returns no authority for file mutation.
   auto-play. Pages may differ in size. `[` and `]` plus Image Information and
   View menu step one page without wrapping. TIFF identity is "Page N of M". ICO
   identity is "Icon N of M" plus the current pixel size, starting on the
-  already-presented largest still when that size exists in the directory.
-  In-progress crop or Spot Heal blocks a page change instead of destroying the
+  already-presented largest still when that size exists in the directory. The
+  top status shows that identity beside the folder position at every window
+  width, so a multi-page file never reads as a single still. In-progress crop or Spot Heal blocks a page change instead of destroying the
   edit. A still container remains a still image, and a decode that cannot read
   every page keeps the first still image with an explicit status.
 - SVG decoding accepts bounded vector markup but rejects both embedded raster

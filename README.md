@@ -171,11 +171,11 @@ White. Appearance changes interface chrome and canvas only, never image pixels.
 
 ## Project status
 
-v0.6.3 is the current public preview and install target, not a percentage-complete
-score or a claim that the product is finished. It is the shipped-feedback patch
-over v0.6.2 and the integrated v0.6.0 product-quality beta.
+v0.6.4 is the current public preview and install target, not a percentage-complete
+score or a claim that the product is finished. It is the network storage and
+culling patch over v0.6.3 and the integrated v0.6.0 product-quality beta.
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, v0.6.1, and v0.6.2 remain published. `main` continues the logical order in the
+v0.4.0, v0.5.0, v0.6.1, v0.6.2, and v0.6.3 remain published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.7.0** accessibility
 evidence through v0.9 publisher authentication, then v1.0.
 The [current release notes](docs/releases/v0.6.4.md) state the exact published

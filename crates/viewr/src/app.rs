@@ -273,8 +273,7 @@ fn run_internal(
         external_edit_pending: false,
         source_gone: false,
         modifiers: ModifiersState::default(),
-        toast: None,
-        toast_until: None,
+        toast: StatusToast::default(),
         egui_repaint_at: None,
         cursor_pos: (0.0, 0.0),
         last_click: None,
@@ -947,6 +946,50 @@ impl HealTool {
     }
 }
 
+/// How long an ordinary outcome toast stays in chrome.
+const TOAST_DURATION: Duration = Duration::from_secs(3);
+
+/// Chrome outcome message. A timed toast expires on its own; a navigation
+/// notice has no deadline and stays until the user moves to another image or
+/// source, or a newer message replaces it.
+#[derive(Debug, Default)]
+struct StatusToast {
+    message: Option<String>,
+    until: Option<Instant>,
+}
+
+impl StatusToast {
+    fn show(&mut self, message: impl Into<String>, now: Instant) {
+        self.message = Some(message.into());
+        self.until = Some(now + TOAST_DURATION);
+    }
+
+    fn show_until_navigation(&mut self, message: impl Into<String>) {
+        self.message = Some(message.into());
+        self.until = None;
+    }
+
+    fn expire(&mut self, now: Instant) {
+        if self.until.is_some_and(|until| now > until) {
+            *self = Self::default();
+        }
+    }
+
+    fn dismiss_navigation_notice(&mut self) {
+        if self.until.is_none() {
+            self.message = None;
+        }
+    }
+
+    fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    const fn deadline(&self) -> Option<Instant> {
+        self.until
+    }
+}
+
 /// The whole application state. Deliberately small.
 #[allow(clippy::struct_excessive_bools)] // independent UI/session mode bits
 struct App {
@@ -1081,10 +1124,8 @@ struct App {
     source_gone: bool,
     /// Latest keyboard modifiers (for Shift+Delete, etc.).
     modifiers: ModifiersState,
-    /// Transient outcome message shown in chrome when chrome is visible.
-    toast: Option<String>,
-    /// When the toast should disappear.
-    toast_until: Option<Instant>,
+    /// Outcome message shown in chrome when chrome is visible.
+    toast: StatusToast,
     /// Deadline requested by egui for delayed UI state such as tooltips.
     egui_repaint_at: Option<Instant>,
     /// Latest cursor position in physical pixels.
@@ -1307,6 +1348,7 @@ fn run_coherence_watch(
 impl App {
     /// Open one path delivered by the command line, a drop, or the desktop.
     fn open_path_request(&mut self, path: PathBuf) {
+        self.toast.dismiss_navigation_notice();
         match path_entry(&path, Path::is_dir) {
             PathEntry::Folder => {
                 if self.block_action_while_curating(BlockedAction::OpenAnotherFolder) {
@@ -1810,7 +1852,7 @@ impl App {
             {
                 log::warn!("folder scan unavailable: {error}");
             }
-            self.show_toast(message);
+            self.show_notice_until_navigation(message);
         }
         match (disposition, purpose, files) {
             (
@@ -4263,6 +4305,7 @@ impl App {
         if self.block_browse_while_busy() {
             return;
         }
+        self.toast.dismiss_navigation_notice();
         self.go_to_index_ready(new_index);
     }
 
@@ -4629,7 +4672,7 @@ impl App {
         log::warn!("queued Trash submissions stopped after failed move: abandoned={abandoned}");
         let failure = self
             .toast
-            .as_deref()
+            .message()
             .unwrap_or("The move to Trash needs attention.");
         self.show_toast(format!(
             "{failure} {abandoned} queued files were not sent to Trash."
@@ -4768,8 +4811,17 @@ impl App {
     }
 
     fn show_toast(&mut self, msg: impl Into<String>) {
-        self.toast = Some(msg.into());
-        self.toast_until = Some(Instant::now() + Duration::from_secs(3));
+        self.toast.show(msg, Instant::now());
+        if let Some(r) = self.renderer.as_ref() {
+            r.window().request_redraw();
+        }
+    }
+
+    /// Show a notice that explains which image is on screen and why. It stays
+    /// until the user navigates or opens another source, or another message
+    /// replaces it, so a slow reader never sees only the substituted image.
+    fn show_notice_until_navigation(&mut self, msg: impl Into<String>) {
+        self.toast.show_until_navigation(msg);
         if let Some(r) = self.renderer.as_ref() {
             r.window().request_redraw();
         }
@@ -7854,12 +7906,7 @@ impl ApplicationHandler<UserEvent> for App {
                     probe.idle_redraws = probe.idle_redraws.saturating_add(1);
                 }
                 let mut ui_actions = Vec::new();
-                if let Some(until) = self.toast_until
-                    && Instant::now() > until
-                {
-                    self.toast = None;
-                    self.toast_until = None;
-                }
+                self.toast.expire(Instant::now());
                 // Snapshot UI/transform state before exclusive borrow of the renderer.
                 let scale_factor = self
                     .renderer
@@ -7909,7 +7956,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
-                let toast = self.toast.clone();
+                let toast = self.toast.message().map(str::to_owned);
                 let preview_kind = self.preview_job.as_ref().map(|job| job.context().kind);
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
@@ -8567,7 +8614,7 @@ impl ApplicationHandler<UserEvent> for App {
             .and_then(crate::animated::AnimationPlayback::next_deadline);
         let next_repaint = [
             self.egui_repaint_at,
-            self.toast_until,
+            self.toast.deadline(),
             probe_repaint_at,
             animation_repaint_at,
         ]
@@ -8699,6 +8746,58 @@ fn complete_patch_presentation<E>(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn timed_toast_expires_but_survives_navigation_dismissal() {
+        let start = Instant::now();
+        let mut toast = StatusToast::default();
+        toast.show("Moved to Trash. Undo with U.", start);
+
+        toast.dismiss_navigation_notice();
+        assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
+        assert_eq!(toast.deadline(), Some(start + TOAST_DURATION));
+
+        toast.expire(start + TOAST_DURATION);
+        assert!(toast.message().is_some());
+        toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
+        assert_eq!(toast.message(), None);
+        assert_eq!(toast.deadline(), None);
+    }
+
+    #[test]
+    fn navigation_notice_outlives_timers_until_navigation() {
+        let start = Instant::now();
+        let mut toast = StatusToast::default();
+        toast.show("Rating saved", start);
+        toast.show_until_navigation(
+            "The selected image is no longer available. Opening the first image in the folder.",
+        );
+        assert_eq!(toast.deadline(), None);
+
+        toast.expire(start + Duration::from_mins(10));
+        assert_eq!(
+            toast.message(),
+            Some(
+                "The selected image is no longer available. Opening the first image in the folder."
+            )
+        );
+
+        toast.dismiss_navigation_notice();
+        assert_eq!(toast.message(), None);
+    }
+
+    #[test]
+    fn newer_timed_toast_replaces_navigation_notice() {
+        let start = Instant::now();
+        let mut toast = StatusToast::default();
+        toast.show_until_navigation("Browsing only this file.");
+        toast.show("Moved to Trash. Undo with U.", start);
+
+        toast.dismiss_navigation_notice();
+        assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
+        toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
+        assert_eq!(toast.message(), None);
+    }
 
     #[test]
     fn source_change_cancels_pending_overwrite_without_touching_destination() {

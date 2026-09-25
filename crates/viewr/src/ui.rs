@@ -1046,6 +1046,7 @@ fn render_top_menu(
                     ui.spacing_mut().item_spacing.x = TOP_METADATA_SPACING;
                     render_top_operation_status(ui, actions, frame, chrome, colors);
                     render_top_rating_position(ui, frame, colors);
+                    render_top_page_position(ui, frame, colors);
                     render_top_image_facts(ui, frame, chrome, colors);
                 });
             });
@@ -1237,6 +1238,27 @@ fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: C
             });
         ui.add_space(TOP_METADATA_GAP);
     }
+}
+
+/// Keep TIFF page and ICO icon identity beside the folder position so a
+/// multi-page file never reads as a single still image.
+fn render_top_page_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) else {
+        return;
+    };
+    Frame::new()
+        .fill(colors.raised)
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(8, 3))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(&pages.visible_label)
+                    .size(12.5)
+                    .color(colors.muted),
+            )
+            .on_hover_text(&pages.accessibility_label);
+        });
+    ui.add_space(TOP_METADATA_GAP);
 }
 
 fn render_top_image_facts(
@@ -6982,6 +7004,77 @@ mod tests {
             position.x0 - rating.x1 >= 8.0,
             "rating and folder position are crowded: {rating:?}, {position:?}"
         );
+    }
+
+    fn top_bar_bounds_for(frame: &UiFrameOwned, width: f32, value: &str) -> Option<egui::Rect> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut input = accessibility_input();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(width, 800.0),
+        ));
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .filter(|node| node.value() == Some(value))
+            .filter_map(egui::accesskit::Node::bounds)
+            .find(|bounds| bounds.y0 >= 0.0 && bounds.y1 <= f64::from(TOP_BAR_HEIGHT))
+            .map(|bounds| {
+                egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                )
+            })
+    }
+
+    #[test]
+    fn top_bar_shows_page_and_icon_identity_beside_folder_position() {
+        let mut frame = accessibility_test_frame();
+        assert!(
+            top_bar_bounds_for(&frame, 1_200.0, "Page 2 of 3").is_none(),
+            "a still image must not show a page chip"
+        );
+
+        frame.pages = Some(PageUiInfo {
+            index: 1,
+            count: 3,
+            noun: "Page",
+            can_previous: true,
+            can_next: true,
+            accessibility_label: "Page 2 of 3, 800 by 600".into(),
+            visible_label: "Page 2 of 3".into(),
+        });
+        let page = top_bar_bounds_for(&frame, 1_200.0, "Page 2 of 3").expect("TIFF page chip");
+        let rating = top_bar_bounds_for(&frame, 1_200.0, "Rating: Unrated").expect("rating chip");
+        let position = top_bar_bounds_for(&frame, 1_200.0, "1 / 2").expect("folder position");
+        assert!(
+            page.min.x - rating.max.x >= 8.0 && position.min.x - page.max.x >= 8.0,
+            "page chip must sit between rating and folder position: {rating:?}, {page:?}, {position:?}"
+        );
+        assert!(
+            top_bar_bounds_for(&frame, 640.0, "Page 2 of 3").is_some(),
+            "page identity must stay visible when compact chrome hides size and zoom"
+        );
+
+        frame.pages = Some(PageUiInfo {
+            index: 3,
+            count: 4,
+            noun: "Icon",
+            can_previous: true,
+            can_next: false,
+            accessibility_label: "Icon 4 of 4, 256 by 256".into(),
+            visible_label: "Icon 4 of 4 · 256×256".into(),
+        });
+        assert!(top_bar_bounds_for(&frame, 1_200.0, "Icon 4 of 4 · 256×256").is_some());
     }
 
     #[test]

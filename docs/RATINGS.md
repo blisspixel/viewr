@@ -93,7 +93,9 @@ Sources reviewed 2026-07-29.
   the primary modifier plus `1`. Both remain visible in View.
 - Edit > Rating exposes Unrated and 1 through 5 for discovery and pointer or
   keyboard access. The current state is always visible as text, such as
-  `Rating: 4 of 5`, without relying on color or a star glyph.
+  `Rating: 4 of 5`, without relying on color or a star glyph. A viewable format
+  with no rating reader or writer shows `Rating: JPEG only` instead of an
+  `Unrated` state it can never change.
 - View > Rating Filter exposes All images and At least 1 through At least 5. The
   filter is session-only, resets to All on a folder change, and writes nothing.
 - The top status keeps filename, dimensions, zoom, rating, and folder position in

@@ -413,13 +413,22 @@ and unsupported containers, remain visibly read-only.
   pixel edits are applied consistently to each displayed frame. A late animation
   decode cannot replace a newer image.
 
+### Substitution notices
+
+- Routine outcome toasts clear after three seconds. A folder-scan outcome that
+  explains which image is on screen, such as a requested image that is no longer
+  available so viewr opened the first image in its folder, or browsing limited
+  to one file, stays in the top status until the user navigates, opens another
+  source, or a newer message replaces it.
+
 ### Source pages
 
 - Multi-page TIFF and multi-size ICO are documents, not animations. They reuse
   the bounded sequence model, never auto-play, and may differ in size. Image
   Information and View expose Previous/Next with `[` and `]`. TIFF identity is
   Page N of M. ICO identity is Icon N of M plus pixel size, starting on the
-  already-presented largest still. An in-progress crop or Spot Heal refuses a
+  already-presented largest still. The top status shows the same identity beside
+  the folder position at every window width. An in-progress crop or Spot Heal refuses a
   page change instead of destroying the edit. A dimension change refits.
 
 ### Spot Heal

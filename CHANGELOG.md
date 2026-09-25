@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Playtest feedback
+
+- The top status now shows TIFF page identity (`Page 2 of 3`) and ICO icon
+  identity (`Icon 4 of 4 · 256×256`) beside the folder position at every window
+  width. Before, only Image Information showed which page or icon was on screen.
+- When a requested image is missing and viewr opens another image from its
+  folder, or a folder cannot be browsed fully, the explanation now stays in the
+  top status until you navigate or open something else. It no longer vanishes
+  after three seconds while the substituted image stays on screen.
+- The rating status on formats viewr cannot rate, such as PNG, TIFF, and WebP,
+  now reads `Rating: JPEG only` instead of `Rating: Unrated`.
+
 ## 0.6.4 - 2026-09-24
 
 ### Performance and navigation

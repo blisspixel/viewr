@@ -1607,6 +1607,12 @@ const MESSAGES: &[Message] = &[
         german: "Bewertung: nicht bewertet",
     },
     Message {
+        english: "Rating: JPEG only",
+        spanish: "Valoración: solo JPEG",
+        french: "Note : JPEG uniquement",
+        german: "Bewertung: nur JPEG",
+    },
+    Message {
         english: "Rating: Rejected",
         spanish: "Valoración: rechazada",
         french: "Note : rejetée",

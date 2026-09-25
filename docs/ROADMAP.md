@@ -159,7 +159,7 @@ claim attached retroactively to the immutable v0.6.0 release.
 6. Land one reviewed release-preparation change that advances `Cargo.toml`,
    `Cargo.lock`, compiled version-specific commands, the changelog candidate
    section, prospective `docs/releases/v0.7.0.md`, and relevant status documents
-   from `0.6.3` to `0.7.0`. README and INSTALL remain on v0.6.3 throughout
+   from `0.6.4` to `0.7.0`. README and INSTALL remain on v0.6.4 throughout
    candidate evidence and advance only in the final tag-ready change.
 7. Require CI and fuzz on the exact release-preparation commit, then dispatch a
    new non-publishing candidate run. The earlier v0.6 candidate cannot supply

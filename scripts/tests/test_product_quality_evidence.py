@@ -18,6 +18,9 @@ import zipfile
 from scripts import product_quality_evidence as evidence
 
 
+VERSION = evidence.EVIDENCE_VERSION
+
+
 COMMIT = "a" * 40
 DIGESTS = {
     "windows": "1" * 64,
@@ -110,7 +113,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         target = next(
             target
             for target in (*TARGETS.values(), "x86_64-apple-darwin")
-            if path.name == f"viewr-0.6.1-{target}.zip"
+            if path.name == f"viewr-{VERSION}-{target}.zip"
         )
         prefix = path.name.removesuffix(".zip")
         binary_name = "viewr.exe" if "windows" in target else "viewr"
@@ -119,7 +122,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             binary = archive.read(f"{prefix}/bin/{binary_name}")
             worker = archive.read(f"{prefix}/bin/{worker_name}")
         return {
-            "version": "0.6.1",
+            "version": f"{VERSION}",
             "target": target,
             "files": [
                 {
@@ -173,12 +176,12 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         decoder_digest: str = DECODER_SHA256,
     ) -> Path:
         fields = {
-            "Version": "0.6.1",
+            "Version": f"{VERSION}",
             "Candidate commit": commit,
             "Candidate workflow run": run_url,
             "Fixture artifact": "product-quality-fixtures",
             "Fixture manifest SHA-256": fixture_digest or ("4" * 64),
-            "Artifact filename": f"viewr-0.6.1-{TARGETS[platform]}.zip",
+            "Artifact filename": f"viewr-{VERSION}-{TARGETS[platform]}.zip",
             "Artifact SHA-256": digest or DIGESTS[platform],
             "Package type": "portable archive",
             **PLATFORM_METADATA[platform],
@@ -387,7 +390,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             decoder_digest = hashlib.sha256(worker).hexdigest()
             artifact_directory = artifact_root / f"viewr-{target}"
             artifact_directory.mkdir(parents=True, exist_ok=True)
-            name = f"viewr-0.6.1-{target}.zip"
+            name = f"viewr-{VERSION}-{target}.zip"
             archive = artifact_directory / name
             prefix = archive.name.removesuffix(".zip")
             binary_name = "viewr.exe" if platform == "windows" else "viewr"
@@ -416,7 +419,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         intel_target = "x86_64-apple-darwin"
         intel_directory = artifact_root / f"viewr-{intel_target}"
         intel_directory.mkdir(parents=True, exist_ok=True)
-        intel_archive = intel_directory / f"viewr-0.6.1-{intel_target}.zip"
+        intel_archive = intel_directory / f"viewr-{VERSION}-{intel_target}.zip"
         intel_prefix = intel_archive.name.removesuffix(".zip")
         with zipfile.ZipFile(intel_archive, "w") as package:
             package.writestr(f"{intel_prefix}/bin/viewr", b"synthetic Intel binary")
@@ -512,7 +515,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         path = self.write_record("windows")
         original = path.read_text(encoding="utf-8")
         cases = (
-            ("| Version | 0.6.1 |\n", "duplicate metadata field"),
+            (f"| Version | {VERSION} |\n", "duplicate metadata field"),
             ("| Unknown field | value |\n", "unexpected metadata fields"),
             (
                 "| PQ-FT-01 | Pass | Duplicate observation. |\n",
@@ -679,7 +682,9 @@ class ProductQualityEvidenceTests(unittest.TestCase):
 
     def test_exact_evidence_version_and_directory_are_required(self) -> None:
         path = self.write_record("windows", field_override=("Version", "0.5.0"))
-        with self.assertRaisesRegex(evidence.EvidenceError, "Version must be 0.6.1"):
+        with self.assertRaisesRegex(
+            evidence.EvidenceError, f"Version must be {re.escape(VERSION)}"
+        ):
             evidence.parse_record(path)
 
         valid = self.write_record("windows")
@@ -688,12 +693,13 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         misplaced = wrong_directory / valid.name
         misplaced.write_bytes(valid.read_bytes())
         with self.assertRaisesRegex(
-            evidence.EvidenceError, "must be stored under v0.6.1"
+            evidence.EvidenceError, f"must be stored under v{re.escape(VERSION)}"
         ):
             evidence.parse_record(misplaced)
 
         with self.assertRaisesRegex(
-            evidence.EvidenceError, "evidence directory must be named v0.6.1"
+            evidence.EvidenceError,
+            f"evidence directory must be named v{re.escape(VERSION)}",
         ):
             evidence.validate_gate(wrong_directory)
 
@@ -1012,7 +1018,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             "macos",
             field_override=(
                 "Artifact filename",
-                "viewr-0.6.1-x86_64-apple-darwin.zip",
+                f"viewr-{VERSION}-x86_64-apple-darwin.zip",
             ),
         )
         with self.assertRaisesRegex(evidence.EvidenceError, "aarch64-apple-darwin"):
@@ -1020,7 +1026,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
 
     def test_invalid_provenance_is_rejected(self) -> None:
         cases = (
-            ("Version", "v0.6.1", "Version must be 0.6.1"),
+            ("Version", f"v{VERSION}", f"Version must be {re.escape(VERSION)}"),
             ("Candidate commit", "abc123", "full lowercase SHA"),
             ("Candidate workflow run", "https://example.com/1", "canonical run URL"),
             ("Fixture artifact", "fixtures", "Fixture artifact"),
@@ -1149,7 +1155,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
                 artifact_root = self.write_candidate_gate()
                 target = TARGETS["windows"]
                 archive = (
-                    artifact_root / f"viewr-{target}" / f"viewr-0.6.1-{target}.zip"
+                    artifact_root / f"viewr-{target}" / f"viewr-{VERSION}-{target}.zip"
                 )
                 original_verify = self.verify_test_archive
 
@@ -1566,7 +1572,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
     def test_candidate_gate_rejects_unbound_artifacts(self) -> None:
         artifact_root = self.write_candidate_gate()
         target = TARGETS["windows"]
-        archive = artifact_root / f"viewr-{target}" / f"viewr-0.6.1-{target}.zip"
+        archive = artifact_root / f"viewr-{target}" / f"viewr-{VERSION}-{target}.zip"
         archive.write_bytes(b"different candidate bytes")
         changed_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         archive.with_suffix(".zip.sha256").write_bytes(
@@ -1643,10 +1649,10 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         intel_sidecar = (
             artifact_root
             / f"viewr-{intel_target}"
-            / f"viewr-0.6.1-{intel_target}.zip.sha256"
+            / f"viewr-{VERSION}-{intel_target}.zip.sha256"
         )
         intel_sidecar.write_text(
-            f"{'0' * 64}  viewr-0.6.1-{intel_target}.zip\n", encoding="ascii"
+            f"{'0' * 64}  viewr-{VERSION}-{intel_target}.zip\n", encoding="ascii"
         )
         with self.assertRaisesRegex(evidence.EvidenceError, "sidecar does not match"):
             evidence.validate_candidate_gate(
@@ -1657,7 +1663,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         intel_sidecar = (
             artifact_root
             / f"viewr-{intel_target}"
-            / f"viewr-0.6.1-{intel_target}.zip.sha256"
+            / f"viewr-{VERSION}-{intel_target}.zip.sha256"
         )
         intel_sidecar.unlink()
         with self.assertRaisesRegex(evidence.EvidenceError, "artifact set mismatch"):
@@ -1704,6 +1710,89 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         with contextlib.redirect_stderr(error):
             self.assertEqual(evidence.main(["fixture-manifest", str(fixture_root)]), 1)
         self.assertIn("refusing to replace", error.getvalue())
+
+    def test_rollup_command_prints_an_observation_the_gate_parses_back_exactly(
+        self,
+    ) -> None:
+        platform = "linux"
+        for session in evidence.PERFORMANCE_SESSIONS[platform]:
+            self.write_performance_report(
+                session, platform, MAIN_SHA256, DECODER_SHA256
+            )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(
+                evidence.main(
+                    [
+                        "rollup",
+                        str(self.directory),
+                        "--platform",
+                        platform,
+                        "--viewr-sha256",
+                        MAIN_SHA256,
+                        "--viewr-decode-sha256",
+                        DECODER_SHA256,
+                    ]
+                ),
+                0,
+            )
+        observation = output.getvalue().strip()
+        seen: set[str] = set()
+        summaries = [
+            evidence._validate_performance_report(
+                self.directory / "performance" / f"{session}.json",
+                session,
+                evidence.PERFORMANCE_HOST_PLATFORMS[platform],
+                {"viewr": MAIN_SHA256, "viewr-decode": DECODER_SHA256},
+                seen,
+                set(),
+            )
+            for session in evidence.PERFORMANCE_SESSIONS[platform]
+        ]
+        recorded = evidence._validate_performance_observation(
+            self.directory / "linux.md",
+            platform,
+            {"PQ-VS-04": evidence.Result("Pass", observation)},
+        )
+        self.assertEqual(recorded, evidence.performance_rollup(summaries))
+        self.assertNotIn("e-", observation.lower().replace("decode", ""))
+
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(
+                evidence.main(
+                    [
+                        "rollup",
+                        str(self.directory),
+                        "--platform",
+                        platform,
+                        "--viewr-sha256",
+                        "0" * 64,
+                        "--viewr-decode-sha256",
+                        DECODER_SHA256,
+                    ]
+                ),
+                1,
+            )
+        self.assertTrue(error.getvalue(), "a digest mismatch is reported, not printed")
+
+    def test_performance_numbers_never_use_exponent_notation(self) -> None:
+        rollup = {
+            label: 0.00001
+            if label not in {"idle redraws", "file count", "cache count"}
+            else 1
+            for label in evidence.PERFORMANCE_PATTERNS
+        }
+        text = evidence.format_performance_observation(
+            "windows",
+            rollup,
+            {"viewr": MAIN_SHA256, "viewr-decode": DECODER_SHA256},
+        )
+        self.assertIn("window ready: 0.00001 ms", text)
+        for label, pattern in evidence.PERFORMANCE_PATTERNS.items():
+            match = pattern.search(text)
+            self.assertIsNotNone(match, label)
+            self.assertEqual(evidence._performance_value(match), rollup[label])
 
     def test_main_reports_success_and_failure(self) -> None:
         path = self.write_record("windows")
@@ -1854,6 +1943,46 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         self.assertEqual([record.platform for record in records], list(TARGETS))
         load_metadata.assert_called_once_with(123456)
         download.assert_called_once()
+
+
+class EvidenceDocumentationDriftTests(unittest.TestCase):
+    """Keep version-bearing evidence prose bound to the values the gate enforces."""
+
+    def test_evidence_version_is_the_workspace_version(self) -> None:
+        self.assertEqual(
+            VERSION,
+            evidence.release_artifact.workspace_version(evidence.REPOSITORY_ROOT),
+        )
+        self.assertEqual(evidence.EVIDENCE_DIRECTORY, f"v{VERSION}")
+
+    def test_procedures_cite_only_the_current_evidence_directory(self) -> None:
+        pattern = re.compile(r"docs/release-evidence/product-quality/(v[0-9][^/\s`]*)")
+        for relative in (
+            "docs/PRODUCT-QUALITY.md",
+            "docs/VERIFY.md",
+            "docs/PUBLISHING.md",
+        ):
+            text = (evidence.REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+            cited = set(pattern.findall(text))
+            with self.subTest(document=relative):
+                self.assertTrue(cited)
+                self.assertEqual(cited, {evidence.EVIDENCE_DIRECTORY})
+
+    def test_install_contract_row_names_the_published_readme_version(self) -> None:
+        readme = (evidence.REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+        published = set(
+            re.findall(
+                r"/releases/download/(v[0-9]+\.[0-9]+\.[0-9]+)/install\.", readme
+            )
+        )
+        self.assertEqual(len(published), 1, published)
+        (release,) = published
+        self.assertEqual(evidence.MANUAL_OBSERVATION_TERMS["PQ-AD-02"][0], release)
+        matrix = evidence.MATRIX_PATH.read_text(encoding="utf-8")
+        row = next(
+            line for line in matrix.splitlines() if line.startswith("| PQ-AD-02 |")
+        )
+        self.assertIn(f"identify {release} as the current", row)
 
 
 if __name__ == "__main__":

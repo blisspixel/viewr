@@ -53,7 +53,12 @@ disappears. This spec is the converged result of two rounds of design critique
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
   spacing. Long names truncate with the full value available as a tooltip. Routine
   three-second outcomes, including Move to Trash, use this status area instead of
-  covering the image. Immersive fullscreen and the full-image collage have no top
+  covering the image. Each status item keeps a fixed allocation, except that in
+  windows at least 720px wide the outcome or navigation notice, always drawn
+  last, receives all the width the metadata chips and a 120px filename slice do
+  not need. A sticky explanation such as a missing-image substitution therefore
+  reads whole whenever the window has room. Immersive
+  fullscreen and the full-image collage have no top
   chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`
   shows a 64px docked panel containing only high-frequency image operations:
@@ -289,11 +294,14 @@ and unsupported containers, remain visibly read-only.
   over rating shortcuts.
 - Edit owns rating assignment. View owns the session-only minimum-rating filter.
   The current textual rating and any active filter remain visible outside menus.
-  Rating assignment waits for bounded folder rating discovery to finish. This
-  prevents a scan that observed the previous value from replacing a newly written
-  value in the playlist and status after the source transaction commits. Filter
-  controls remain available during discovery so the user can cancel it by showing
-  all images.
+  Rating assignment does not wait for bounded folder rating discovery. Discovery
+  fills only entries that are still loading, so a scan that observed the previous
+  value cannot replace a value written while it ran. Filter controls remain
+  available during discovery so the user can cancel it by showing all images.
+- Browsing continues while a rating write finishes, so rate then advance never
+  waits for the file to be replaced. Only a request that would decode the file
+  being written waits for it: returning to that image, or opening the full-image
+  collage. Other commands still wait for the write to settle.
   When no image matches the filter, Escape or folder-navigation keys restore All
   images instead of doing nothing.
 - One canonical folder catalog in the selected session order owns Trash and Undo
@@ -428,7 +436,9 @@ and unsupported containers, remain visibly read-only.
   Information and View expose Previous/Next with `[` and `]`. TIFF identity is
   Page N of M. ICO identity is Icon N of M plus pixel size, starting on the
   already-presented largest still. The top status shows the same identity beside
-  the folder position at every window width. An in-progress crop or Spot Heal refuses a
+  the folder position at every window width, flanked by previous and next step
+  buttons that disable at the first and last page, so a page turn is
+  discoverable without the shortcut. An in-progress crop or Spot Heal refuses a
   page change instead of destroying the edit. A dimension change refits.
 
 ### Spot Heal

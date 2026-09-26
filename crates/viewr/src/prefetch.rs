@@ -19,6 +19,32 @@ pub const DEFAULT_CAPACITY: usize = 5;
 pub const DEFAULT_MAX_BYTES: usize = 256 * 1024 * 1024;
 const MAX_SAFE_FILENAME_CHARS: usize = 96;
 const MAX_ACTIVE_JOBS: usize = 4;
+/// Neighbors decoded ahead in the direction of travel. Culling moves one way
+/// through a folder, so the next steps matter more than the ones behind.
+pub(crate) const NEIGHBORS_AHEAD: usize = 3;
+/// Neighbors kept behind, so one step back is still instant.
+pub(crate) const NEIGHBORS_BEHIND: usize = 1;
+
+/// Direction of the most recent folder step.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Heading {
+    #[default]
+    Forward,
+    Backward,
+}
+
+impl Heading {
+    /// Heading of a step between catalog indices, or `None` when it stays put,
+    /// as when a successor takes the place of a file moved to Trash.
+    #[must_use]
+    pub(crate) fn between(from: usize, to: usize) -> Option<Self> {
+        match to.cmp(&from) {
+            std::cmp::Ordering::Greater => Some(Self::Forward),
+            std::cmp::Ordering::Less => Some(Self::Backward),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+}
 
 /// Stable, path-free failure categories for speculative decode diagnostics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -449,6 +475,61 @@ impl PrefetchCache {
         self.images.contains_key(&retained_path)
     }
 
+    /// Insert a speculative neighbor decode ranked against `window`, the current
+    /// neighbor paths in priority order. Room is made by evicting entries
+    /// outside the window first, least recently used first, then window
+    /// entries ranked after the new one, farthest first. A decode that could
+    /// fit only by evicting a nearer neighbor, or that is itself outside the
+    /// window and does not fit, is not cached, so a far decode never displaces
+    /// the next image when large photos exhaust the byte budget.
+    pub(crate) fn insert_ranked(
+        &mut self,
+        path: PathBuf,
+        image: impl Into<Arc<DecodedImage>>,
+        window: &[PathBuf],
+    ) -> bool {
+        let image = image.into();
+        let image_bytes = image.rgba.len();
+        if image_bytes > self.max_bytes {
+            return false;
+        }
+        if let Some(replaced) = self.images.remove(&path) {
+            self.current_bytes = self.current_bytes.saturating_sub(replaced.rgba.len());
+            self.order.retain(|candidate| candidate != &path);
+        }
+        let rank = |candidate: &Path| window.iter().position(|entry| entry == candidate);
+        let new_rank = rank(&path);
+        while self.images.len() + 1 > self.capacity
+            || self.current_bytes.saturating_add(image_bytes) > self.max_bytes
+        {
+            let outside = self
+                .order
+                .iter()
+                .find(|candidate| rank(candidate).is_none())
+                .cloned();
+            let victim = outside.or_else(|| {
+                let new_rank = new_rank?;
+                self.order
+                    .iter()
+                    .filter_map(|candidate| rank(candidate).map(|ranked| (ranked, candidate)))
+                    .filter(|(ranked, _)| *ranked > new_rank)
+                    .max_by_key(|(ranked, _)| *ranked)
+                    .map(|(_, candidate)| candidate.clone())
+            });
+            let Some(victim) = victim.filter(|_| new_rank.is_some()) else {
+                return false;
+            };
+            if let Some(evicted) = self.images.remove(&victim) {
+                self.current_bytes = self.current_bytes.saturating_sub(evicted.rgba.len());
+            }
+            self.order.retain(|candidate| candidate != &victim);
+        }
+        self.current_bytes = self.current_bytes.saturating_add(image_bytes);
+        self.order.push_back(path.clone());
+        self.images.insert(path, image);
+        true
+    }
+
     /// Insert only when both limits already have room, without evicting another
     /// full decode. This keeps a mosaic from repeatedly decoding images that
     /// displace one another at the byte boundary.
@@ -546,25 +627,32 @@ pub(crate) fn exclude_blocked_neighbors(
         .collect()
 }
 
-/// Indices around `current` to prefetch (prev/next, then ±2), clamped to `len`.
-///
-/// Does not include `current` itself. Stable order: nearer neighbors first.
+/// Indices to prefetch around `current`, clamped to `len`, in priority order:
+/// up to `ahead` positions in the direction of travel, nearest first, then up
+/// to `behind` positions the other way, nearest first. Excludes `current`.
 #[must_use]
-pub fn neighbor_indices(current: usize, len: usize, radius: usize) -> Vec<usize> {
-    if len == 0 || radius == 0 {
+pub(crate) fn neighbor_indices(
+    current: usize,
+    len: usize,
+    heading: Heading,
+    ahead: usize,
+    behind: usize,
+) -> Vec<usize> {
+    if current >= len {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    for d in 1..=radius {
-        let next = current + d;
-        if next < len {
-            out.push(next);
+    let step = |distance: usize, later: bool| {
+        if later {
+            current.checked_add(distance).filter(|index| *index < len)
+        } else {
+            current.checked_sub(distance)
         }
-        if let Some(i) = current.checked_sub(d) {
-            out.push(i);
-        }
-    }
-    out
+    };
+    let leads_later = heading == Heading::Forward;
+    (1..=ahead)
+        .map_while(|distance| step(distance, leads_later))
+        .chain((1..=behind).map_while(|distance| step(distance, !leads_later)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -643,11 +731,65 @@ mod tests {
     }
 
     #[test]
-    fn neighbor_indices_near_edges() {
-        assert_eq!(neighbor_indices(0, 5, 2), vec![1, 2]);
-        assert_eq!(neighbor_indices(4, 5, 2), vec![3, 2]);
-        assert_eq!(neighbor_indices(2, 5, 1), vec![3, 1]);
-        assert!(neighbor_indices(0, 0, 2).is_empty());
+    fn neighbor_indices_lead_in_the_direction_of_travel() {
+        use super::Heading::{Backward, Forward};
+        assert_eq!(neighbor_indices(5, 20, Forward, 3, 1), vec![6, 7, 8, 4]);
+        assert_eq!(neighbor_indices(5, 20, Backward, 3, 1), vec![4, 3, 2, 6]);
+        assert_eq!(neighbor_indices(0, 5, Forward, 3, 1), vec![1, 2, 3]);
+        assert_eq!(neighbor_indices(4, 5, Forward, 3, 1), vec![3]);
+        assert_eq!(neighbor_indices(1, 5, Backward, 3, 1), vec![0, 2]);
+        assert_eq!(neighbor_indices(2, 5, Forward, 1, 1), vec![3, 1]);
+        assert!(neighbor_indices(0, 0, Forward, 3, 1).is_empty());
+        assert!(neighbor_indices(9, 5, Forward, 3, 1).is_empty());
+        assert_eq!(super::Heading::between(3, 5), Some(Forward));
+        assert_eq!(super::Heading::between(5, 3), Some(Backward));
+        assert_eq!(super::Heading::between(4, 4), None);
+    }
+
+    #[test]
+    fn ranked_insert_never_lets_a_far_decode_evict_the_next_image() {
+        let window: Vec<PathBuf> = ["next", "second", "third", "behind"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        let size = 16;
+        let image = || bytes(1, size);
+        let mut cache = PrefetchCache::with_limits(8, size * 2);
+        assert!(cache.insert_ranked(PathBuf::from("next"), image(), &window));
+        assert!(cache.insert_ranked(PathBuf::from("second"), image(), &window));
+        assert!(
+            !cache.insert_ranked(PathBuf::from("third"), image(), &window),
+            "a farther decode must not evict a nearer one"
+        );
+        assert!(cache.contains(Path::new("next")) && cache.contains(Path::new("second")));
+
+        let mut cache = PrefetchCache::with_limits(8, size * 2);
+        assert!(cache.insert_ranked(PathBuf::from("third"), image(), &window));
+        assert!(cache.insert_ranked(PathBuf::from("second"), image(), &window));
+        assert!(cache.insert_ranked(PathBuf::from("next"), image(), &window));
+        assert!(
+            !cache.contains(Path::new("third")) && cache.contains(Path::new("next")),
+            "a nearer decode evicts the farthest ranked entry"
+        );
+
+        let mut cache = PrefetchCache::with_limits(2, usize::MAX);
+        assert!(cache.insert(PathBuf::from("stale"), image()));
+        assert!(cache.insert_ranked(PathBuf::from("third"), image(), &window));
+        assert!(cache.insert_ranked(PathBuf::from("next"), image(), &window));
+        assert!(
+            !cache.contains(Path::new("stale")) && cache.contains(Path::new("third")),
+            "entries outside the window are evicted before any ranked neighbor"
+        );
+        assert!(
+            !cache.insert_ranked(PathBuf::from("elsewhere"), image(), &window),
+            "a decode outside the window never evicts to make room"
+        );
+        let mut cache = PrefetchCache::with_limits(8, size * 2);
+        assert!(
+            !cache.insert_ranked(PathBuf::from("next"), bytes(2, size * 3), &window),
+            "an image larger than the whole budget is never cached"
+        );
+        assert!(cache.is_empty());
     }
 
     #[test]

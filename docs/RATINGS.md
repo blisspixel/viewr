@@ -85,10 +85,18 @@ Sources reviewed 2026-07-29.
   may run from that frame's collected controls. An operating-system open, drop,
   completed folder open, filter replacement, navigation, or source reload cancels
   a pending assignment before changing the active source.
-- Rating assignment waits while folder rating discovery is reading the bounded
-  source headers. Filter choices remain available so selecting All images can
-  cancel discovery. This serialization prevents a scan that observed the old
-  value from replacing a newly committed rating in the playlist and status.
+- Rating assignment stays available while folder rating discovery reads the
+  bounded source headers, so culling never waits for a large folder. Discovery
+  fills only entries that are still loading, so a scan that observed the old
+  value cannot replace a rating written while it ran; the write's own guarded
+  transaction decides the file's value. A discovery result that completes
+  during a rating write waits until the write settles before it re-applies the
+  filter, so the selection follows the final rating. Filter choices remain
+  available so selecting All images can cancel discovery.
+- Folder navigation continues while a rating write runs. The write is bound to
+  its own path and verified source, and no neighbor decode, cached decode, or
+  navigation may read that path until the write settles. If recovery fails, the
+  file is marked unreadable in the folder even when the view has moved on.
 - Fit Image to View moves to the primary modifier plus `0`. Actual Size moves to
   the primary modifier plus `1`. Both remain visible in View.
 - Edit > Rating exposes Unrated and 1 through 5 for discovery and pointer or

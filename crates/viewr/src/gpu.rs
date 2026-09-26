@@ -278,6 +278,8 @@ impl Renderer {
         if let (Some(adapter), Some(update)) =
             (self.accesskit.as_mut(), output.accesskit_update.take())
         {
+            let mut update = update;
+            crate::ui::settle_accessibility_focus(&mut update);
             adapter.update_if_active(|| update);
         }
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

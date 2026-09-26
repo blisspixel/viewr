@@ -49,8 +49,9 @@ makes Spot Heal persistence explicit, provides an opt-in platform association
 guide for PNG, JPEG, and other selected types, accepts repeated fully presented
 images through one bounded serialized Trash queue, and bundles English, Spanish,
 French, and German interface catalogs covering first-run, About, Trash, wait
-copy, rating failures, and chrome including accessible names. Remaining image
-information and some preference copy still uses the documented English fallback.
+copy, rating failures, every top-chrome toast and navigation notice, and every
+dialog, panel, and control including accessible names, enforced by a
+pseudo-language render test. Image Information value formats remain English.
 Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
@@ -285,6 +286,10 @@ code but still owes its representative-hardware evidence.
 - [ ] Complete Narrator, VoiceOver, and Orca acceptance using
   `docs/ACCESSIBILITY.md`, including crop, reload, animation, errors, and busy
   states.
+- [ ] Before the v0.7 candidate, follow the operating-system high-contrast and
+  text-size settings (Windows contrast themes and text size, macOS Increase
+  Contrast, GNOME text scaling), or record an approved exception. Interface
+  scale already follows the display scale.
 - [x] Publish [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0)
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.

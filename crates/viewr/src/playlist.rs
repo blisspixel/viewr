@@ -342,23 +342,39 @@ impl Playlist {
             .collect()
     }
 
-    pub(crate) fn visible_neighbor_paths(&self, radius: usize) -> Vec<PathBuf> {
-        if let Some(position) = self.visible_position() {
-            return crate::prefetch::neighbor_indices(position, self.visible_indices.len(), radius)
-                .into_iter()
-                .map(|visible| self.files[self.visible_indices[visible]].clone())
-                .collect();
-        }
-        let insertion = self
-            .visible_indices
-            .partition_point(|index| *index < self.index);
-        let start = insertion.saturating_sub(radius);
-        let end = insertion
-            .saturating_add(radius)
-            .min(self.visible_indices.len());
-        self.visible_indices[start..end]
-            .iter()
-            .map(|index| self.files[*index].clone())
+    /// Visible neighbors to decode ahead of navigation, in priority order.
+    ///
+    /// When the selection is outside the filter, the matching entries on each
+    /// side of its catalog position are its neighbors: `Next` lands on the one
+    /// after it and `Previous` on the one before it.
+    pub(crate) fn visible_neighbor_paths(
+        &self,
+        heading: crate::prefetch::Heading,
+        ahead: usize,
+        behind: usize,
+    ) -> Vec<PathBuf> {
+        use crate::prefetch::Heading;
+        let len = self.visible_indices.len();
+        let visible = if let Some(position) = self.visible_position() {
+            crate::prefetch::neighbor_indices(position, len, heading, ahead, behind)
+        } else {
+            let insertion = self
+                .visible_indices
+                .partition_point(|index| *index < self.index);
+            let (forward, backward) = match heading {
+                Heading::Forward => (ahead, behind),
+                Heading::Backward => (behind, ahead),
+            };
+            let after = (insertion..len).take(forward);
+            let before = (0..insertion).rev().take(backward);
+            match heading {
+                Heading::Forward => after.chain(before).collect(),
+                Heading::Backward => before.chain(after).collect(),
+            }
+        };
+        visible
+            .into_iter()
+            .map(|position| self.files[self.visible_indices[position]].clone())
             .collect()
     }
 
@@ -638,6 +654,7 @@ pub(crate) enum ScanPurpose {
 mod tests {
     use super::*;
     use crate::ephemeral::TempWorkspace;
+    use crate::prefetch::Heading;
     use crate::ratings::Rating;
 
     fn path(index: usize) -> PathBuf {
@@ -733,7 +750,10 @@ mod tests {
         assert!(playlist.outside_filter());
         assert_eq!(playlist.navigation_target(1), Some(4));
         assert_eq!(playlist.navigation_target(-1), Some(4));
-        assert_eq!(playlist.visible_neighbor_paths(2), [path(4)]);
+        assert_eq!(
+            playlist.visible_neighbor_paths(Heading::Forward, 2, 2),
+            [path(4)]
+        );
 
         let mut after_last_match = rated_playlist(4);
         after_last_match.set_filter(RatingFilter::AtLeast(Rating::new(4).unwrap()));
@@ -745,6 +765,43 @@ mod tests {
         between_matches.set_filter(RatingFilter::AtLeast(Rating::new(3).unwrap()));
         assert_eq!(between_matches.navigation_target(-999_999), Some(2));
         assert_eq!(between_matches.navigation_target(999_999), Some(6));
+    }
+
+    /// The app applies a discovery result only after an in-flight rating write
+    /// settles. Applied first, the result re-evaluates the filter against the
+    /// pre-write rating and moves the selection away from the image being rated.
+    #[test]
+    fn discovery_applied_after_a_write_keeps_the_rated_selection() {
+        let at_least_four = RatingFilter::AtLeast(Rating::new(4).unwrap());
+        let discovered = vec![
+            (path(0), RatingState::Rated(Rating::new(5).unwrap())),
+            (path(1), RatingState::Rated(Rating::new(2).unwrap())),
+            (path(2), RatingState::Rated(Rating::new(1).unwrap())),
+        ];
+        let setup = || {
+            let mut playlist = Playlist::new((0..3).map(path).collect(), 1);
+            playlist.set_rating(&path(1), RatingState::Rated(Rating::new(2).unwrap()));
+            playlist
+        };
+
+        let mut premature = setup();
+        premature.set_discovered_ratings(&discovered);
+        assert_eq!(
+            premature.set_filter(at_least_four),
+            FilterSelection::Select(0),
+            "a result applied during the write moves away from the image being rated"
+        );
+
+        let mut settled = setup();
+        settled.set_rating(&path(1), RatingState::Rated(Rating::new(5).unwrap()));
+        settled.set_discovered_ratings(&discovered);
+        assert_eq!(settled.set_filter(at_least_four), FilterSelection::Stay);
+        assert_eq!(settled.index, 1);
+        assert_eq!(
+            settled.ratings[1],
+            RatingState::Rated(Rating::new(5).unwrap()),
+            "the stale discovery value does not replace the written rating"
+        );
     }
 
     #[test]
@@ -804,7 +861,10 @@ mod tests {
         let mut playlist = rated_playlist(2);
         playlist.set_filter(RatingFilter::AtLeast(Rating::new(3).unwrap()));
         assert_eq!(playlist.visible_indices, [2, 4, 6]);
-        assert_eq!(playlist.visible_neighbor_paths(2), [path(4), path(6)]);
+        assert_eq!(
+            playlist.visible_neighbor_paths(Heading::Forward, 2, 2),
+            [path(4), path(6)]
+        );
         assert_eq!(playlist.visible_catalog_range(), [2, 4, 6]);
         assert_eq!(playlist.visible_position_for_catalog_index(2), Some(0));
         assert_eq!(playlist.visible_position_for_catalog_index(4), Some(1));
@@ -1071,7 +1131,11 @@ mod tests {
         assert!(!playlist.select(0));
         assert!(!playlist.set_rating(PathBuf::from("missing.jpg").as_path(), RatingState::Unrated));
         assert!(playlist.visible_catalog_range().is_empty());
-        assert!(playlist.visible_neighbor_paths(4).is_empty());
+        assert!(
+            playlist
+                .visible_neighbor_paths(Heading::Forward, 4, 4)
+                .is_empty()
+        );
     }
 
     #[test]

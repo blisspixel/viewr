@@ -47,8 +47,8 @@ use crate::curation_state::{
     single_trash_result_message,
 };
 use crate::current_work::{
-    ActiveModeAllowance, BlockedAction, CurrentWork, blocked_action_message, browse_work_blocker,
-    crop_work, curation_action_preflight, curation_work, current_work_blocker,
+    ActiveModeAllowance, BlockedAction, BrowseTarget, CurrentWork, blocked_action_message,
+    browse_work_blocker, crop_work, curation_action_preflight, curation_work, current_work_blocker,
     image_preparation_work, spot_heal_source_blocker, spot_heal_work,
     trash_submission_work_blocker,
 };
@@ -73,7 +73,7 @@ use crate::keyboard_route::{
     single_key_shortcut_allowed, space_press_starts_hold, space_release_must_unwind,
     space_tap_fits, widget_popup_owns_event,
 };
-use crate::locale::{Language, tr};
+use crate::locale::{Language, Localized, tr};
 use crate::playlist::{
     FilterSelection, Playlist, PlaylistReconcile, ScanPurpose, filter_selection_changes_source,
 };
@@ -88,11 +88,11 @@ use crate::presentation::{
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
-    RatingRecoveryTransition, RatingWriteTerminal, auxiliary_disconnect_message,
+    RatingRecoveryTransition, RatingWriteTerminal, SettledWriteView, auxiliary_disconnect_message,
     next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
     rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
-    rating_recovery_blocker, rating_write_discovery_blocker, rating_write_failure_message,
-    rating_write_target_is_current, reconcile_rating_write,
+    rating_recovery_blocker, rating_write_failure_message, rating_write_target_is_current,
+    reconcile_rating_write, settled_write_view,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
@@ -106,6 +106,7 @@ use crate::session::{
 use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
+use crate::ui::{ToastAnnouncement, ToastView};
 use crate::work_currency::{loaded_work_is_current, presented_work_is_current};
 
 /// Start viewr: create the event loop and run the application to completion.
@@ -291,6 +292,7 @@ fn run_internal(
         ),
         prefetch_sources: HashMap::new(),
         prefetch_schedule: prefetch::PrefetchSchedule::default(),
+        navigation_heading: prefetch::Heading::default(),
         event_proxy,
         performance_probe,
         startup_failure: None,
@@ -826,7 +828,7 @@ fn commit_presented_heal<E>(
     job: Option<crate::heal::SpotHealJob>,
     replacing_latest: bool,
     present: impl FnOnce(&DecodedImage, &crate::heal::ImagePatch) -> Result<(), E>,
-) -> Result<String, crate::heal::PatchPresentationError<E>> {
+) -> Result<(), crate::heal::PatchPresentationError<E>> {
     let inverse = crate::heal::apply_presented_patch(image, &result.patch, present)?;
     if !replacing_latest {
         history.record(inverse);
@@ -838,40 +840,74 @@ fn commit_presented_heal<E>(
             candidate_count: result.candidate_count,
         })
     });
-    Ok(heal_success_message(
-        replacing_latest,
-        result.candidate_index,
-        result.candidate_count,
-    ))
+    Ok(())
 }
 
 fn heal_success_message(
+    language: Language,
     replacing_latest: bool,
     candidate_index: usize,
     candidate_count: usize,
-) -> String {
+) -> Localized {
     if replacing_latest {
-        format!("Heal source {} of {}", candidate_index + 1, candidate_count)
+        language.fill(
+            tr!("Heal source {index} of {count}"),
+            &[
+                ("index", &(candidate_index + 1).to_string()),
+                ("count", &candidate_count.to_string()),
+            ],
+        )
     } else {
-        "Spot healed in memory. Use Save As to keep it; Undo is available.".to_owned()
+        language.localize(tr!(
+            "Spot healed in memory. Use Save As to keep it; Undo is available."
+        ))
     }
 }
 
 fn save_success_message(
+    language: Language,
     metadata: crate::edit::MetadataDisposition,
     includes_pixel_edits: bool,
-) -> String {
+) -> Localized {
     let copy = if includes_pixel_edits {
-        "Saved edited copy"
+        tr!("Saved edited copy")
     } else {
-        "Saved copy"
+        tr!("Saved copy")
     };
     let metadata = match metadata {
-        crate::edit::MetadataDisposition::Retained => "EXIF retained",
-        crate::edit::MetadataDisposition::NotPresent => "no EXIF found",
-        crate::edit::MetadataDisposition::Stripped => "metadata stripped",
+        crate::edit::MetadataDisposition::Retained => tr!("EXIF retained"),
+        crate::edit::MetadataDisposition::NotPresent => tr!("no EXIF found"),
+        crate::edit::MetadataDisposition::Stripped => tr!("metadata stripped"),
     };
-    format!("{copy} · {metadata}")
+    // The middle dot separates two complete phrases in every catalog language.
+    Localized::from_translated_seam(format!(
+        "{} · {}",
+        language.text(copy),
+        language.text(metadata)
+    ))
+}
+
+/// Append how many queued Trash moves were abandoned to an already localized
+/// failure, with singular and plural sentences owned by each language.
+fn queued_trash_abandoned_message(
+    language: Language,
+    failure: &Localized,
+    abandoned: usize,
+) -> Localized {
+    if abandoned == 1 {
+        language.fill(
+            tr!("{failure} 1 queued file was not sent to Trash."),
+            &[("failure", failure.as_str())],
+        )
+    } else {
+        language.fill(
+            tr!("{failure} {count} queued files were not sent to Trash."),
+            &[
+                ("failure", failure.as_str()),
+                ("count", &abandoned.to_string()),
+            ],
+        )
+    }
 }
 
 fn startup_preference_recovery_notice(
@@ -955,17 +991,20 @@ const TOAST_DURATION: Duration = Duration::from_secs(3);
 #[derive(Debug, Default)]
 struct StatusToast {
     message: Option<String>,
+    announcement: ToastAnnouncement,
     until: Option<Instant>,
 }
 
 impl StatusToast {
-    fn show(&mut self, message: impl Into<String>, now: Instant) {
+    fn show(&mut self, message: impl Into<String>, announcement: ToastAnnouncement, now: Instant) {
         self.message = Some(message.into());
+        self.announcement = announcement;
         self.until = Some(now + TOAST_DURATION);
     }
 
     fn show_until_navigation(&mut self, message: impl Into<String>) {
         self.message = Some(message.into());
+        self.announcement = ToastAnnouncement::Visual;
         self.until = None;
     }
 
@@ -977,12 +1016,19 @@ impl StatusToast {
 
     fn dismiss_navigation_notice(&mut self) {
         if self.until.is_none() {
-            self.message = None;
+            *self = Self::default();
         }
     }
 
     fn message(&self) -> Option<&str> {
         self.message.as_deref()
+    }
+
+    fn view(&self) -> Option<ToastView> {
+        self.message.as_ref().map(|text| ToastView {
+            text: text.clone(),
+            announcement: self.announcement,
+        })
     }
 
     const fn deadline(&self) -> Option<Instant> {
@@ -1154,6 +1200,8 @@ struct App {
     prefetch_sources: HashMap<PathBuf, Arc<crate::fs::ImageSource>>,
     /// Bounded owners, generations, cancellation, and terminal prefetch state.
     prefetch_schedule: prefetch::PrefetchSchedule,
+    /// Direction of the latest folder step; neighbor decode leads this way.
+    navigation_heading: prefetch::Heading,
     /// Wakes the event loop when background work finishes before a window exists.
     event_proxy: EventLoopProxy<UserEvent>,
     /// Explicit developer/CI performance probe; absent from normal launches.
@@ -1453,7 +1501,10 @@ impl App {
             Ok(_) => self.folder_scan_job = Some(job),
             Err(error) => {
                 log::error!("failed to start folder scan");
-                self.show_toast(format!("Could not scan folder: {error}"));
+                self.show_toast(self.language.fill(
+                    tr!("Could not scan folder: {error}"),
+                    &[("error", &error.to_string())],
+                ));
             }
         }
     }
@@ -1482,17 +1533,19 @@ impl App {
             }
         }
         match crate::folder_sort_preference::save(sort) {
-            Ok(()) => self.show_toast(
-                self.language
-                    .text(crate::locale::tr!("Default folder sort: {sort}"))
-                    .replace("{sort}", self.language.text(sort.label())),
-            ),
+            Ok(()) => self.show_toast(self.language.fill(
+                tr!("Default folder sort: {sort}"),
+                &[("sort", self.language.text(sort.label()))],
+            )),
             Err(error) => {
                 log::error!(
                     "failed to save folder sort preference: {}",
                     error.diagnostic_name()
                 );
-                self.show_toast(crate::folder_sort_preference::save_failure_message());
+                self.show_toast(
+                    self.language
+                        .localize(crate::folder_sort_preference::save_failure_message()),
+                );
             }
         }
         self.request_redraw();
@@ -1509,14 +1562,20 @@ impl App {
                 } else {
                     preference.native_name()
                 };
-                self.show_toast(format!("{label}: {selected}"));
+                self.show_toast(self.language.fill(
+                    tr!("{label}: {value}"),
+                    &[("label", label), ("value", selected)],
+                ));
             }
             Err(error) => {
                 log::error!(
                     "failed to save language preference: {}",
                     error.diagnostic_name()
                 );
-                self.show_toast(crate::locale::save_failure_message());
+                self.show_toast(
+                    self.language
+                        .localize(crate::locale::save_failure_message()),
+                );
             }
         }
         self.request_redraw();
@@ -1538,6 +1597,28 @@ impl App {
 
     fn insert_prefetched_image(&mut self, path: PathBuf, loaded: LoadedImage) -> bool {
         let retained = self.prefetch.insert(path.clone(), loaded.image);
+        if retained {
+            self.prefetch_sources.insert(path, loaded.source);
+        }
+        let prefetch = &self.prefetch;
+        self.prefetch_sources
+            .retain(|cached_path, _| prefetch.contains(cached_path));
+        retained
+    }
+
+    /// Cache a speculative neighbor decode by its rank in the current window,
+    /// so a far decode never evicts a nearer one under byte pressure.
+    fn insert_ranked_neighbor(&mut self, path: PathBuf, loaded: LoadedImage) -> bool {
+        let window = self.playlist.as_ref().map_or_else(Vec::new, |playlist| {
+            playlist.visible_neighbor_paths(
+                self.navigation_heading,
+                prefetch::NEIGHBORS_AHEAD,
+                prefetch::NEIGHBORS_BEHIND,
+            )
+        });
+        let retained = self
+            .prefetch
+            .insert_ranked(path.clone(), loaded.image, &window);
         if retained {
             self.prefetch_sources.insert(path, loaded.source);
         }
@@ -1852,7 +1933,7 @@ impl App {
             {
                 log::warn!("folder scan unavailable: {error}");
             }
-            self.show_notice_until_navigation(message);
+            self.show_notice_until_navigation(self.language.localize(message));
         }
         match (disposition, purpose, files) {
             (
@@ -2113,7 +2194,10 @@ impl App {
         match scheduled {
             Ok(()) => {
                 self.preview_job = Some(job);
-                self.show_toast("Preparing a display-sized preview in the background");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Preparing a display-sized preview in the background")),
+                );
             }
             Err(error) => {
                 let context = job.into_context();
@@ -2135,26 +2219,35 @@ impl App {
         self.preview_recovery_unsettled = true;
         if kind == PresentationKind::Cropped {
             let restored = crop_recovery.is_some_and(|recovery| self.restore_failed_crop(recovery));
-            self.show_toast(crop_preview_disconnect_message(self.language, restored));
+            self.show_toast(Localized::from_translated_seam(
+                crop_preview_disconnect_message(self.language, restored),
+            ));
             return;
         }
         self.preview_load_retry_blocked = true;
-        self.session.load_error = Some(crate::ui::PREVIEW_RECOVERY_STATUS.to_owned());
-        self.show_toast(self.language.text(crate::ui::PREVIEW_RECOVERY_STATUS));
+        self.session.load_error = Some(
+            self.language
+                .text(crate::ui::PREVIEW_RECOVERY_STATUS)
+                .to_owned(),
+        );
+        self.show_toast(self.language.localize(crate::ui::PREVIEW_RECOVERY_STATUS));
     }
 
     fn report_presentation_failure(
         &mut self,
         kind: PresentationKind,
-        message: String,
+        message: Localized,
         crop_recovery: Option<CropRecovery>,
     ) {
         if kind == PresentationKind::Cropped {
             let restored = crop_recovery.is_some_and(|recovery| self.restore_failed_crop(recovery));
-            self.show_toast(crop_failure_message(self.language, restored));
+            self.show_toast(Localized::from_translated_seam(crop_failure_message(
+                self.language,
+                restored,
+            )));
             return;
         }
-        if let Some(load_error) = durable_presentation_error(kind, &message) {
+        if let Some(load_error) = durable_presentation_error(kind, message.as_str()) {
             self.session.load_error = Some(load_error);
         }
         self.show_toast(message);
@@ -2187,7 +2280,10 @@ impl App {
                     }
                     self.report_presentation_failure(
                         kind,
-                        format!("Could not display image: {error}"),
+                        self.language.fill(
+                            tr!("Could not display image: {error}"),
+                            &[("error", &error.to_string())],
+                        ),
                         crop_recovery,
                     );
                     return;
@@ -2233,14 +2329,14 @@ impl App {
             PresentationKind::Cropped => {
                 self.unsaved_crop = true;
                 self.heal.reset_for_image();
-                self.show_toast("Crop applied");
+                self.show_toast(self.language.localize(tr!("Crop applied")));
             }
         }
         self.start_coherence_watch();
         if !full_resolution {
-            self.show_toast(
-                "Full image shown as a GPU-limited preview; export remains full resolution",
-            );
+            self.show_toast(self.language.localize(tr!(
+                "Full image shown as a GPU-limited preview; export remains full resolution"
+            )));
         }
     }
 
@@ -2295,7 +2391,10 @@ impl App {
                 }
                 self.report_presentation_failure(
                     kind,
-                    format!("Could not prepare image preview: {error}"),
+                    self.language.fill(
+                        tr!("Could not prepare image preview: {error}"),
+                        &[("error", error.as_str())],
+                    ),
                     crop_recovery,
                 );
             }
@@ -2453,7 +2552,10 @@ impl App {
             Ok(()) => self.auxiliary_job = Some(job),
             Err(error) => {
                 log::error!("failed to queue current-image details");
-                self.show_toast(format!("Image details unavailable: {error}"));
+                self.show_toast(self.language.fill(
+                    tr!("Image details unavailable: {error}"),
+                    &[("error", &error.to_string())],
+                ));
             }
         }
     }
@@ -2493,7 +2595,9 @@ impl App {
                 if let Some(playlist) = self.playlist.as_mut() {
                     playlist.set_rating(&context.path, rating.state);
                 }
-                self.show_toast(auxiliary_disconnect_message(self.language));
+                self.show_toast(Localized::from_translated_seam(
+                    auxiliary_disconnect_message(self.language),
+                ));
                 self.request_redraw();
                 return;
             }
@@ -2518,8 +2622,9 @@ impl App {
                 }
                 let image = playback.current_image();
                 if let Err(error) = self.present_sequence_image(&image, true) {
-                    self.show_toast(format!(
-                        "Animation unavailable; showing first frame: {error}"
+                    self.show_toast(self.language.fill(
+                        tr!("Animation unavailable; showing first frame: {error}"),
+                        &[("error", error.as_str())],
                     ));
                     return;
                 }
@@ -2535,8 +2640,9 @@ impl App {
                     current.width != image.width || current.height != image.height
                 });
                 if let Err(error) = self.present_sequence_image(&image, replace) {
-                    self.show_toast(format!(
-                        "Pages unavailable; showing the first image: {error}"
+                    self.show_toast(self.language.fill(
+                        tr!("Pages unavailable; showing the first image: {error}"),
+                        &[("error", error.as_str())],
                     ));
                     return;
                 }
@@ -2545,8 +2651,9 @@ impl App {
             Ok(AuxiliarySequence::None) => {}
             Err(error) => {
                 log::debug!("container sequence unavailable");
-                self.show_toast(format!(
-                    "Container pages unavailable; showing the first image: {error}"
+                self.show_toast(self.language.fill(
+                    tr!("Container pages unavailable; showing the first image: {error}"),
+                    &[("error", &error.clone())],
                 ));
             }
         }
@@ -2563,7 +2670,10 @@ impl App {
         };
         if let Err(error) = self.upload_realtime_image(&image) {
             self.animation = None;
-            self.show_toast(format!("Animation stopped: {error}"));
+            self.show_toast(self.language.fill(
+                tr!("Animation stopped: {error}"),
+                &[("error", &error.clone())],
+            ));
             return;
         }
         self.current_image = Some(image);
@@ -2591,7 +2701,10 @@ impl App {
             || self.unsaved_crop
         {
             if self.animation.is_some() || self.pages.is_some() {
-                self.show_toast(crate::pages::edit_blocks_page_step_copy().to_owned());
+                self.show_toast(
+                    self.language
+                        .localize(crate::pages::edit_blocks_page_step_copy()),
+                );
             }
             return;
         }
@@ -2615,7 +2728,10 @@ impl App {
         if let Err(error) = self.upload_realtime_image(&image) {
             self.animation = None;
             self.pages = None;
-            self.show_toast(format!("Could not show that page: {error}"));
+            self.show_toast(self.language.fill(
+                tr!("Could not show that page: {error}"),
+                &[("error", &error.clone())],
+            ));
             return;
         }
         let size_changed = previous_size
@@ -2638,7 +2754,10 @@ impl App {
         };
         if let Err(error) = self.upload_realtime_image(&image) {
             self.animation = None;
-            self.show_toast(format!("Animation stopped: {error}"));
+            self.show_toast(self.language.fill(
+                tr!("Animation stopped: {error}"),
+                &[("error", &error.clone())],
+            ));
             return;
         }
         self.current_image = Some(image);
@@ -2667,23 +2786,25 @@ impl App {
     }
 
     fn request_rating_assignment(&mut self, assignment: RatingAssignment) {
-        if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
-            self.show_toast(message);
-            return;
-        }
         if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
-            self.show_toast(message);
+            self.show_status_toast(self.language.localize(message));
             return;
         }
         let Some(path) = self.session.presented_path.clone() else {
-            self.show_toast("Open an image before assigning a rating");
+            self.show_status_toast(
+                self.language
+                    .localize(tr!("Open an image before assigning a rating")),
+            );
             return;
         };
         if self.session.selected_path.as_ref() != Some(&path) || self.current_source.is_none() {
-            self.show_toast("Wait for the selected image to finish loading");
+            self.show_status_toast(
+                self.language
+                    .localize(tr!("Wait for the selected image to finish loading")),
+            );
             return;
         }
         if assignment.expected_state() == self.presented_rating {
@@ -2692,27 +2813,25 @@ impl App {
         match self.current_rating_capability {
             RatingWriteCapability::WritableJpeg => {}
             RatingWriteCapability::ReadOnlyFormat => {
-                self.show_toast(
-                    "This image's rating is read-only in viewr. The file was not changed.",
-                );
+                self.show_status_toast(self.language.localize(tr!(
+                    "This image's rating is read-only in viewr. The file was not changed."
+                )));
                 return;
             }
             RatingWriteCapability::UnsupportedMetadata => {
-                self.show_toast(
-                    "This image has unsupported rating metadata. The file was not changed.",
-                );
+                self.show_status_toast(self.language.localize(tr!(
+                    "This image has unsupported rating metadata. The file was not changed."
+                )));
                 return;
             }
             RatingWriteCapability::UnsafeSource => {
-                self.show_toast(
-                    "viewr could not verify this image's source safely. The file was not changed.",
-                );
+                self.show_status_toast(self.language.localize(tr!(
+                    "viewr could not verify this image's source safely. The file was not changed."
+                )));
                 return;
             }
             RatingWriteCapability::ObservationFailed => {
-                self.show_toast(
-                    "The rating could not be read. Close and reopen viewr before changing this file.",
-                );
+                self.show_status_toast(self.language.localize(tr!("The rating could not be read. Close and reopen viewr before changing this file.")));
                 return;
             }
         }
@@ -2740,26 +2859,27 @@ impl App {
     }
 
     fn start_rating_write(&mut self, pending: &PendingRatingWrite) -> bool {
-        if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
-            self.show_toast(message);
-            return false;
-        }
         if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return false;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
-            self.show_toast(message);
+            self.show_status_toast(self.language.localize(message));
             return false;
         }
         if !rating_write_target_is_current(
             self.session.selected_path.as_ref() == Some(&pending.path),
             self.session.presented_path.as_ref() == Some(&pending.path),
         ) {
-            self.show_toast("The selected image changed before the rating could be saved");
+            self.show_status_toast(self.language.localize(tr!(
+                "The selected image changed before the rating could be saved"
+            )));
             return false;
         }
         let Some(source) = self.current_source.clone() else {
-            self.show_toast("Wait for the selected image to finish loading");
+            self.show_status_toast(
+                self.language
+                    .localize(tr!("Wait for the selected image to finish loading")),
+            );
             return false;
         };
         let path = pending.path.clone();
@@ -2781,10 +2901,12 @@ impl App {
                 result_rx: receiver,
                 join,
             });
-            self.show_toast("Saving rating...");
+            self.show_toast(self.language.localize(tr!("Saving rating...")));
             true
         } else {
-            self.show_toast("Could not save the rating safely. The previous rating is unchanged.");
+            self.show_status_toast(self.language.localize(tr!(
+                "Could not save the rating safely. The previous rating is unchanged."
+            )));
             false
         }
     }
@@ -2812,6 +2934,12 @@ impl App {
             std::mem::take(&mut self.close_after_rating_write),
             terminal_error,
         );
+        let presented_is_written = self.session.presented_path.as_ref() == Some(&worker.path);
+        let view = settled_write_view(
+            presented_is_written,
+            self.session.selected_path.as_ref() == Some(&worker.path),
+            self.session.is_loading() || self.preview_job.is_some(),
+        );
         match result {
             Ok(verified) => {
                 self.remove_prefetched_image(&worker.path);
@@ -2821,20 +2949,32 @@ impl App {
                         playlist.set_scan_provenance(&worker.path, Some(provenance));
                     }
                 }
-                if self.session.presented_path.as_ref() == Some(&worker.path) {
+                if presented_is_written {
                     self.presented_rating = next_presented_rating(
                         self.presented_rating,
                         PresentedRatingTransition::Replace(verified.state),
                     );
                     self.current_source = Some(Arc::new(verified.source));
                     self.current_rating_capability = RatingWriteCapability::WritableJpeg;
-                    self.start_coherence_watch();
-                    self.start_auxiliary_load(&worker.path);
+                }
+                match view {
+                    SettledWriteView::AdoptPresented => {
+                        self.start_coherence_watch();
+                        self.start_auxiliary_load(&worker.path);
+                    }
+                    // The incoming image starts its own watch and details.
+                    SettledWriteView::AdoptBehindIncoming => self.stop_coherence_watch(),
+                    SettledWriteView::ReloadSelected | SettledWriteView::FolderOnly => {}
                 }
                 match worker.assignment {
-                    RatingAssignment::Clear => self.show_toast("Rating cleared."),
+                    RatingAssignment::Clear => {
+                        self.show_status_toast(self.language.localize(tr!("Rating cleared.")));
+                    }
                     RatingAssignment::Set(rating) => {
-                        self.show_toast(format!("Rating {} of 5 saved.", rating.get()));
+                        self.show_status_toast(self.language.fill(
+                            tr!("Rating {rating} of 5 saved."),
+                            &[("rating", &rating.get().to_string())],
+                        ));
                     }
                 }
             }
@@ -2845,6 +2985,12 @@ impl App {
                         self.rating_recovery_unsettled,
                         RatingRecoveryTransition::MarkUnsettled,
                     );
+                    // Browsing may have moved on and retained the old decode;
+                    // the file's state is unknown wherever the view now is.
+                    self.remove_prefetched_image(&worker.path);
+                    if let Some(playlist) = self.playlist.as_mut() {
+                        playlist.set_rating(&worker.path, RatingState::Unreadable);
+                    }
                     if self.session.presented_path.as_ref() == Some(&worker.path) {
                         self.current_source = None;
                         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
@@ -2853,13 +2999,18 @@ impl App {
                             self.presented_rating,
                             PresentedRatingTransition::Replace(RatingState::Unreadable),
                         );
-                        if let Some(playlist) = self.playlist.as_mut() {
-                            playlist.set_rating(&worker.path, RatingState::Unreadable);
-                        }
                     }
                 }
-                self.show_toast(rating_write_failure_message(self.language, error));
+                self.show_status_toast(Localized::from_translated_seam(
+                    rating_write_failure_message(self.language, error),
+                ));
             }
+        }
+        if view == SettledWriteView::ReloadSelected {
+            // The pending load read the file or a cached decode before the
+            // write settled, so it restarts from the settled file.
+            self.remove_prefetched_image(&worker.path);
+            self.spawn_refreshed_image_load(worker.path.clone());
         }
         self.kick_prefetch();
         self.request_redraw();
@@ -2942,11 +3093,20 @@ impl App {
             if let Some(playlist) = self.playlist.as_mut() {
                 playlist.show_all();
             }
-            self.show_toast("Could not finish reading folder ratings. Showing all images.");
+            self.show_status_toast(self.language.localize(tr!(
+                "Could not finish reading folder ratings. Showing all images."
+            )));
         }
     }
 
     fn poll_rating_discovery(&mut self) {
+        // A completed scan re-applies the rating filter, which can move or
+        // clear the selection. While a rating write is in flight the current
+        // image's rating is not final, so the result stays queued until the
+        // write settles; `about_to_wait` polls the write first.
+        if self.rating_write_worker.is_some() {
+            return;
+        }
         let Some(worker) = self.rating_scan_worker.as_ref() else {
             return;
         };
@@ -2969,7 +3129,9 @@ impl App {
             if let Some(playlist) = self.playlist.as_mut() {
                 playlist.show_all();
             }
-            self.show_toast("Could not finish reading folder ratings. Showing all images.");
+            self.show_status_toast(self.language.localize(tr!(
+                "Could not finish reading folder ratings. Showing all images."
+            )));
             return;
         };
         let selection = if let Some(playlist) = self.playlist.as_mut() {
@@ -3036,7 +3198,7 @@ impl App {
     fn retry_current_image_load(&mut self) {
         if let Some(message) = preview_retry_blocker(self.language, self.preview_load_retry_blocked)
         {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if self.block_action_while_curating(BlockedAction::RetryImageLoad) {
@@ -3072,9 +3234,8 @@ impl App {
             (self.session.is_loading() || self.preview_job.is_some())
                 .then_some(ReloadStartBlocker::ImagePreparation),
         ]) {
-            self.show_toast(crate::file_coherence::reload_start_blocker_message(
-                self.language,
-                blocker,
+            self.show_toast(Localized::from_translated_seam(
+                crate::file_coherence::reload_start_blocker_message(self.language, blocker),
             ));
             return;
         }
@@ -3094,7 +3255,7 @@ impl App {
         self.transform = Transform::default();
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
         self.spawn_refreshed_image_load(path);
-        self.show_toast("Reloading file from disk");
+        self.show_toast(self.language.localize(tr!("Reloading file from disk")));
         self.request_redraw();
     }
 
@@ -3103,11 +3264,16 @@ impl App {
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
-            self.show_toast("Open With requires the current image to finish loading");
+            self.show_toast(self.language.localize(tr!(
+                "Open With requires the current image to finish loading"
+            )));
             return;
         };
         let Some(source) = self.current_source.as_ref().map(Arc::clone) else {
-            self.show_toast("Could not verify the current source for Open With");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Could not verify the current source for Open With")),
+            );
             return;
         };
         let generation = self.session.generation.load(Ordering::Acquire);
@@ -3132,11 +3298,17 @@ impl App {
                 let _ = completion.complete(source_match);
             });
         if spawn.is_err() {
-            self.show_toast("Could not start source verification for Open With");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Could not start source verification for Open With")),
+            );
             return;
         }
         self.open_with_job = Some(job);
-        self.show_toast("Verifying source for Open With");
+        self.show_toast(
+            self.language
+                .localize(tr!("Verifying source for Open With")),
+        );
     }
 
     fn cancel_open_with_check(&mut self) {
@@ -3169,7 +3341,10 @@ impl App {
         let source_match = match polled {
             JobPoll::Ready(source_match) => source_match,
             JobPoll::Disconnected => {
-                self.show_toast("Could not finish source verification for Open With");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Could not finish source verification for Open With")),
+                );
                 return;
             }
             JobPoll::Pending => unreachable!("pending Open With check returned early"),
@@ -3177,15 +3352,23 @@ impl App {
         match source_match {
             crate::fs::ImageSourceMatch::Same => {}
             crate::fs::ImageSourceMatch::Changed | crate::fs::ImageSourceMatch::Missing => {
-                self.show_toast("Source changed on disk. Press F5 before Open With");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Source changed on disk. Press F5 before Open With")),
+                );
                 return;
             }
             crate::fs::ImageSourceMatch::Unsupported => {
-                self.show_toast("Open With is unavailable for this linked or unsupported source");
+                self.show_toast(self.language.localize(tr!(
+                    "Open With is unavailable for this linked or unsupported source"
+                )));
                 return;
             }
             crate::fs::ImageSourceMatch::Unavailable => {
-                self.show_toast("Could not verify the current source for Open With");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Could not verify the current source for Open With")),
+                );
                 return;
             }
         }
@@ -3219,16 +3402,26 @@ impl App {
         match outcome {
             crate::open_with::OpenWithOutcome::Launched => {
                 self.external_edit_pending = true;
-                self.show_toast("Source opened in another app. Changes reload when that is safe");
+                self.show_toast(self.language.localize(tr!(
+                    "Source opened in another app. Changes reload when that is safe"
+                )));
             }
-            crate::open_with::OpenWithOutcome::Cancelled => self.show_toast("Open With canceled"),
+            crate::open_with::OpenWithOutcome::Cancelled => {
+                self.show_toast(self.language.localize(tr!("Open With canceled")));
+            }
             crate::open_with::OpenWithOutcome::InvalidPath => {
                 log::error!("Open With rejected an invalid path");
-                self.show_toast("Could not open the app chooser");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Could not open the app chooser")),
+                );
             }
             crate::open_with::OpenWithOutcome::Failed => {
                 log::error!("Open With chooser failed");
-                self.show_toast("Could not open the app chooser");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Could not open the app chooser")),
+                );
             }
         }
     }
@@ -3343,7 +3536,9 @@ impl App {
             CoherenceAction::RemindReload => {
                 self.external_edit_pending = true;
                 if announce {
-                    self.show_toast(crate::file_coherence::reload_reminder_copy(self.language));
+                    self.show_toast(Localized::from_translated_seam(
+                        crate::file_coherence::reload_reminder_copy(self.language),
+                    ));
                 }
             }
             CoherenceAction::ReloadCurrent => self.reload_current_from_disk_quietly(),
@@ -3356,7 +3551,9 @@ impl App {
                 self.external_edit_pending = false;
                 self.source_gone = true;
                 if announce {
-                    self.show_toast(crate::file_coherence::current_gone_copy(self.language));
+                    self.show_toast(Localized::from_translated_seam(
+                        crate::file_coherence::current_gone_copy(self.language),
+                    ));
                 }
             }
             CoherenceAction::RescanFolder => self.refresh_folder_membership(),
@@ -3364,7 +3561,9 @@ impl App {
                 self.cancel_rating_disclosure_for_source_change();
                 self.external_edit_pending = true;
                 if announce {
-                    self.show_toast(crate::file_coherence::reload_reminder_copy(self.language));
+                    self.show_toast(Localized::from_translated_seam(
+                        crate::file_coherence::reload_reminder_copy(self.language),
+                    ));
                 }
                 self.refresh_folder_membership();
             }
@@ -3402,11 +3601,15 @@ impl App {
             }
             crate::file_coherence::GoneRescanResult::Renamed => {
                 self.source_gone = false;
-                self.show_toast(crate::file_coherence::renamed_copy(self.language));
+                self.show_toast(Localized::from_translated_seam(
+                    crate::file_coherence::renamed_copy(self.language),
+                ));
             }
             crate::file_coherence::GoneRescanResult::Missing => {
                 self.source_gone = true;
-                self.show_toast(crate::file_coherence::current_gone_copy(self.language));
+                self.show_toast(Localized::from_translated_seam(
+                    crate::file_coherence::current_gone_copy(self.language),
+                ));
             }
         }
     }
@@ -3605,19 +3808,29 @@ impl App {
             self.leave_full_image_mosaic();
             return;
         }
-        if self.block_browse_while_busy() {
+        // The collage may decode the file a rating write is replacing.
+        if self.block_browse_while_busy(BrowseTarget::RatingWriteTarget) {
             return;
         }
         let Some(playlist) = self.playlist.as_ref() else {
-            self.show_toast("Full-image collage needs an open folder");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Full-image collage needs an open folder")),
+            );
             return;
         };
         if playlist.visible_len() < 2 {
-            self.show_toast("Full-image collage needs more than one matching photo");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Full-image collage needs more than one matching photo")),
+            );
             return;
         }
         let Some(current_index) = playlist.catalog_index() else {
-            self.show_toast("Full-image collage needs a selected photo");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Full-image collage needs a selected photo")),
+            );
             return;
         };
         let Some(page) = crate::mosaic::MosaicPage::containing(
@@ -3983,7 +4196,10 @@ impl App {
         }
         if let Err(error) = renderer.set_image(&image, preview) {
             log::error!("failed to refresh display color: {error}");
-            self.show_toast(format!("Could not update display color: {error}"));
+            self.show_toast(self.language.fill(
+                tr!("Could not update display color: {error}"),
+                &[("error", &error.to_string())],
+            ));
         }
     }
 
@@ -4225,7 +4441,10 @@ impl App {
                     self.show_filmstrip_panel = !self.show_filmstrip_panel;
                     self.request_redraw();
                 } else {
-                    self.show_toast("Folder previews need more than one image");
+                    self.show_toast(
+                        self.language
+                            .localize(tr!("Folder previews need more than one image")),
+                    );
                 }
             }
             "i" | "I" => {
@@ -4302,11 +4521,23 @@ impl App {
 
     fn go_to_index(&mut self, new_index: usize) {
         self.cancel_open_with_check();
-        if self.block_browse_while_busy() {
+        if self.block_browse_while_busy(self.browse_target(new_index)) {
             return;
         }
         self.toast.dismiss_navigation_notice();
         self.go_to_index_ready(new_index);
+    }
+
+    fn browse_target(&self, index: usize) -> BrowseTarget {
+        BrowseTarget::for_image(
+            self.playlist
+                .as_ref()
+                .and_then(|playlist| playlist.files.get(index))
+                .map(PathBuf::as_path),
+            self.rating_write_worker
+                .as_ref()
+                .map(|worker| worker.path.as_path()),
+        )
     }
 
     /// Navigate after a caller has completed its own mutation preflight.
@@ -4320,6 +4551,9 @@ impl App {
         };
         if playlist.files.is_empty() || new_index >= playlist.files.len() {
             return;
+        }
+        if let Some(heading) = prefetch::Heading::between(playlist.index, new_index) {
+            self.navigation_heading = heading;
         }
         let next_path = playlist.files[new_index].clone();
         let Some(current_path) = playlist.files.get(playlist.index) else {
@@ -4385,7 +4619,11 @@ impl App {
         if !neighbor_decode_may_start(self.session.is_loading(), self.mosaic.is_active()) {
             return;
         }
-        let blocked = self.pending_source_removal_paths();
+        let mut blocked = self.pending_source_removal_paths();
+        // A neighbor decode must not race a rating write's atomic replacement.
+        if let Some(worker) = self.rating_write_worker.as_ref() {
+            blocked.insert(worker.path.clone());
+        }
         let Some(playlist) = &self.playlist else {
             return;
         };
@@ -4396,7 +4634,11 @@ impl App {
                 .filter(|path| self.session.presented_path.as_deref() != Some(path.as_path()))
                 .collect()
         } else {
-            playlist.visible_neighbor_paths(3)
+            playlist.visible_neighbor_paths(
+                self.navigation_heading,
+                prefetch::NEIGHBORS_AHEAD,
+                prefetch::NEIGHBORS_BEHIND,
+            )
         };
         let candidate_paths = exclude_blocked_neighbors(candidate_paths, &blocked);
         let mut keep_paths: HashSet<&Path> = candidate_paths.iter().map(PathBuf::as_path).collect();
@@ -4473,7 +4715,7 @@ impl App {
                         let retained = if self.mosaic.is_active() {
                             self.insert_mosaic_image_if_fits(path.clone(), image)
                         } else {
-                            self.insert_prefetched_image(path.clone(), image)
+                            self.insert_ranked_neighbor(path.clone(), image)
                         };
                         if !retained {
                             if self.mosaic.is_active() {
@@ -4533,25 +4775,21 @@ impl App {
                 self.session.selected_path.is_some(),
                 self.session.load_error.is_some(),
             ) {
-                self.show_toast(message);
+                self.show_toast(Localized::from_translated_seam(message));
             }
             return;
         };
         if let Some(blocker) =
             trash_submission_work_blocker(self.active_work(ActiveModeAllowance::None))
         {
-            self.show_toast(blocked_action_message(
-                self.language,
-                BlockedAction::Trash,
-                blocker,
-            ));
+            self.refuse_blocked_action(BlockedAction::Trash, blocker);
             return;
         }
         if let Some(message) = self
             .curation_recovery
             .source_removal_preflight(self.language)
         {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         let pending = PendingTrash {
@@ -4569,16 +4807,10 @@ impl App {
                 self.request_redraw();
             }
             TrashAdmission::Full => {
-                self.show_toast(
-                    "The Trash queue is full. Wait for the current moves to finish before continuing.",
-                );
+                self.show_status_toast(self.language.localize(tr!("The Trash queue is full. Wait for the current moves to finish before continuing.")));
             }
             TrashAdmission::Busy(kind) => {
-                self.show_toast(blocked_action_message(
-                    self.language,
-                    BlockedAction::Trash,
-                    curation_work(kind),
-                ));
+                self.refuse_blocked_action(BlockedAction::Trash, curation_work(kind));
             }
             TrashAdmission::Start => {
                 // Drop speculative handles and advance the catalog before the
@@ -4587,7 +4819,7 @@ impl App {
                 self.commit_submitted_removal(&submitted);
                 if !self.start_trash_worker(
                     pending,
-                    "Could not start the move to Trash. Nothing was moved.",
+                    tr!("Could not start the move to Trash. Nothing was moved."),
                 ) {
                     self.revert_submitted_removal(&submitted);
                 }
@@ -4631,7 +4863,7 @@ impl App {
         let submitted = pending.context.clone();
         if self.start_trash_worker(
             pending,
-            "Could not start the next queued move to Trash. That file was not moved.",
+            tr!("Could not start the next queued move to Trash. That file was not moved."),
         ) {
             return true;
         }
@@ -4645,9 +4877,17 @@ impl App {
             log::error!(
                 "queued Trash submissions abandoned after worker spawn failure: count={abandoned}"
             );
-            self.show_toast(format!(
-                "Could not continue moving files to Trash. {abandoned} queued files were not moved."
-            ));
+            let message = if abandoned == 1 {
+                self.language.localize(tr!(
+                    "Could not continue moving files to Trash. 1 queued file was not moved."
+                ))
+            } else {
+                self.language.fill(
+                    tr!("Could not continue moving files to Trash. {count} queued files were not moved."),
+                    &[("count", &abandoned.to_string())],
+                )
+            };
+            self.show_toast(message);
         }
         false
     }
@@ -4670,12 +4910,17 @@ impl App {
         }
         let abandoned = self.revert_abandoned_trash_queue();
         log::warn!("queued Trash submissions stopped after failed move: abandoned={abandoned}");
-        let failure = self
-            .toast
-            .message()
-            .unwrap_or("The move to Trash needs attention.");
-        self.show_toast(format!(
-            "{failure} {abandoned} queued files were not sent to Trash."
+        let failure = self.toast.message().map_or_else(
+            || {
+                self.language
+                    .localize(tr!("The move to Trash needs attention."))
+            },
+            Localized::from_translated_seam,
+        );
+        self.show_toast(queued_trash_abandoned_message(
+            self.language,
+            &failure,
+            abandoned,
         ));
         false
     }
@@ -4693,11 +4938,14 @@ impl App {
         );
         let message = curation_recovery_message(self.language, kind);
         self.curation_recovery.record(kind);
+        let message = Localized::from_translated_seam(message);
         if abandoned == 0 {
             self.show_toast(message);
         } else {
-            self.show_toast(format!(
-                "{message} {abandoned} queued files were not sent to Trash."
+            self.show_toast(queued_trash_abandoned_message(
+                self.language,
+                &message,
+                abandoned,
             ));
         }
     }
@@ -4717,7 +4965,7 @@ impl App {
         });
         let Ok((result_rx, join)) = spawn else {
             log::error!("curation worker spawn failed: operation={kind:?}, submitted={submitted}");
-            self.show_toast(spawn_failure);
+            self.show_toast(self.language.localize(spawn_failure));
             return false;
         };
         log::info!("curation worker started: operation={kind:?}, submitted={submitted}");
@@ -4773,7 +5021,7 @@ impl App {
         allowance: ActiveModeAllowance,
     ) -> bool {
         if let Some(blocker) = self.busy_blocker(allowance) {
-            self.show_toast(blocked_action_message(self.language, action, blocker));
+            self.refuse_blocked_action(action, blocker);
             true
         } else {
             false
@@ -4788,13 +5036,11 @@ impl App {
         self.block_action_with_mode_allowance(action, ActiveModeAllowance::SpotHeal)
     }
 
-    fn block_browse_while_busy(&mut self) -> bool {
-        if let Some(blocker) = browse_work_blocker(self.active_work(ActiveModeAllowance::None)) {
-            self.show_toast(blocked_action_message(
-                self.language,
-                BlockedAction::Browse,
-                blocker,
-            ));
+    fn block_browse_while_busy(&mut self, target: BrowseTarget) -> bool {
+        if let Some(blocker) =
+            browse_work_blocker(self.active_work(ActiveModeAllowance::None), target)
+        {
+            self.refuse_blocked_action(BlockedAction::Browse, blocker);
             true
         } else {
             false
@@ -4806,12 +5052,36 @@ impl App {
             return false;
         };
         let blocker = curation_work(worker.context.kind());
-        self.show_toast(blocked_action_message(self.language, action, blocker));
+        self.refuse_blocked_action(action, blocker);
         true
     }
 
-    fn show_toast(&mut self, msg: impl Into<String>) {
-        self.toast.show(msg, Instant::now());
+    /// Explain why a requested action was refused. The refusal is the only
+    /// response to that request, so it is always announced politely. Every
+    /// `blocked_action_message` reaches the user through this method.
+    fn refuse_blocked_action(&mut self, action: BlockedAction, blocker: CurrentWork) {
+        self.show_status_toast(Localized::from_translated_seam(blocked_action_message(
+            self.language,
+            action,
+            blocker,
+        )));
+    }
+
+    fn show_toast(&mut self, msg: Localized) {
+        self.present_toast(msg, ToastAnnouncement::Visual);
+    }
+
+    /// Show an outcome that assistive technology announces politely. Use it
+    /// for results of an action the user just requested whose only feedback is
+    /// this message, such as a rating write, so the announcement follows the
+    /// message kind rather than its wording in any one language.
+    fn show_status_toast(&mut self, msg: Localized) {
+        self.present_toast(msg, ToastAnnouncement::PoliteStatus);
+    }
+
+    fn present_toast(&mut self, msg: Localized, announcement: ToastAnnouncement) {
+        self.toast
+            .show(msg.into_string(), announcement, Instant::now());
         if let Some(r) = self.renderer.as_ref() {
             r.window().request_redraw();
         }
@@ -4820,8 +5090,8 @@ impl App {
     /// Show a notice that explains which image is on screen and why. It stays
     /// until the user navigates or opens another source, or another message
     /// replaces it, so a slow reader never sees only the substituted image.
-    fn show_notice_until_navigation(&mut self, msg: impl Into<String>) {
-        self.toast.show_until_navigation(msg);
+    fn show_notice_until_navigation(&mut self, msg: Localized) {
+        self.toast.show_until_navigation(msg.into_string());
         if let Some(r) = self.renderer.as_ref() {
             r.window().request_redraw();
         }
@@ -4897,7 +5167,7 @@ impl App {
             self.crop_recovery_unsettled,
             self.preview_recovery_unsettled,
         ) {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if let Some(message) = crop_source_blocker(
@@ -4905,7 +5175,7 @@ impl App {
             self.session.is_loading(),
             self.session.load_error.is_some(),
         ) {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if self.current_loaded_path().is_none() {
@@ -5065,7 +5335,7 @@ impl App {
                 self.tools_panel_open = expanded;
             }
             if self.heal.is_busy() {
-                self.show_toast("Finishing spot heal in memory");
+                self.show_toast(self.language.localize(tr!("Finishing spot heal in memory")));
             }
             self.request_redraw();
             return;
@@ -5075,7 +5345,7 @@ impl App {
             self.session.is_loading(),
             self.session.load_error.is_some(),
         ) {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if self.current_loaded_path().is_none() {
@@ -5088,9 +5358,9 @@ impl App {
             return;
         }
         if !self.can_heal_current_image() {
-            self.show_toast(
-                "Spot Heal is unavailable for images larger than the GPU texture limit",
-            );
+            self.show_toast(self.language.localize(tr!(
+                "Spot Heal is unavailable for images larger than the GPU texture limit"
+            )));
             return;
         }
         self.pause_animation();
@@ -5131,11 +5401,17 @@ impl App {
             return;
         }
         let Some(refresh) = self.heal.refresh.as_ref() else {
-            self.show_toast("Apply a spot heal before refreshing its source");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Apply a spot heal before refreshing its source")),
+            );
             return;
         };
         if refresh.candidate_count < 2 {
-            self.show_toast("No alternate spot-heal source is available");
+            self.show_toast(
+                self.language
+                    .localize(tr!("No alternate spot-heal source is available")),
+            );
             return;
         }
         let candidate_index = (refresh.candidate_index + 1) % refresh.candidate_count;
@@ -5166,7 +5442,10 @@ impl App {
                 });
                 self.request_redraw();
             }
-            Err(error) => self.show_toast(format!("Could not refresh heal source: {error}")),
+            Err(error) => self.show_toast(self.language.fill(
+                tr!("Could not refresh heal source: {error}"),
+                &[("error", &error.to_string())],
+            )),
         }
     }
 
@@ -5232,7 +5511,10 @@ impl App {
             HealStrokeUpdate::TooManyPoints => {
                 self.heal.painting = false;
                 self.heal.stroke.clear();
-                self.show_toast("Spot-heal stroke is too long; use shorter strokes");
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Spot-heal stroke is too long; use shorter strokes")),
+                );
                 self.request_redraw();
             }
         }
@@ -5302,7 +5584,10 @@ impl App {
             }
             Err(error) => {
                 self.heal.stroke.clear();
-                self.show_toast(format!("Could not start spot heal: {error}"));
+                self.show_toast(self.language.fill(
+                    tr!("Could not start spot heal: {error}"),
+                    &[("error", &error.to_string())],
+                ));
             }
         }
     }
@@ -5325,7 +5610,10 @@ impl App {
                 self.heal.worker = None;
                 self.heal.stroke.clear();
                 if apply_result {
-                    self.show_toast("Spot heal stopped unexpectedly");
+                    self.show_toast(
+                        self.language
+                            .localize(tr!("Spot heal stopped unexpectedly")),
+                    );
                 }
                 return;
             }
@@ -5368,9 +5656,14 @@ impl App {
                         })
                 };
                 match apply_result {
-                    Ok(message) => {
+                    Ok(()) => {
                         self.current_image_reuse = ImageReuseEligibility::Ineligible;
-                        self.show_toast(message);
+                        self.show_toast(heal_success_message(
+                            self.language,
+                            replacing_latest,
+                            result.candidate_index,
+                            result.candidate_count,
+                        ));
                     }
                     Err(error) => {
                         self.report_edit_transaction_failure(EditAction::SpotHeal, &error);
@@ -5378,7 +5671,10 @@ impl App {
                 }
             }
             Err(error) => {
-                self.show_toast(format!("Spot heal failed: {error}"));
+                self.show_toast(self.language.fill(
+                    tr!("Spot heal failed: {error}"),
+                    &[("error", &error.clone())],
+                ));
             }
         }
         self.request_redraw();
@@ -5413,7 +5709,7 @@ impl App {
             Ok(true) => {
                 self.current_image_reuse = ImageReuseEligibility::Ineligible;
                 self.heal.refresh = None;
-                self.show_toast("Undid spot heal");
+                self.show_toast(self.language.localize(tr!("Undid spot heal")));
             }
             Err(error) => self.report_edit_transaction_failure(EditAction::Undo, &error),
             Ok(false) => {}
@@ -5449,7 +5745,7 @@ impl App {
             Ok(true) => {
                 self.current_image_reuse = ImageReuseEligibility::Ineligible;
                 self.heal.refresh = None;
-                self.show_toast("Redid spot heal");
+                self.show_toast(self.language.localize(tr!("Redid spot heal")));
             }
             Err(error) => self.report_edit_transaction_failure(EditAction::Redo, &error),
             Ok(false) => {}
@@ -5465,27 +5761,18 @@ impl App {
         if error.rollback_failed() {
             if let Some(path) = self.session.selected_path.clone() {
                 self.spawn_image_load(path);
-                self.show_toast(edit_transaction_failure_message(
-                    self.language,
-                    action,
-                    error,
-                    true,
+                self.show_toast(Localized::from_translated_seam(
+                    edit_transaction_failure_message(self.language, action, error, true),
                 ));
             } else {
                 self.invalidate_displayed_image();
-                self.show_toast(edit_transaction_failure_message(
-                    self.language,
-                    action,
-                    error,
-                    false,
+                self.show_toast(Localized::from_translated_seam(
+                    edit_transaction_failure_message(self.language, action, error, false),
                 ));
             }
         } else {
-            self.show_toast(edit_transaction_failure_message(
-                self.language,
-                action,
-                error,
-                false,
+            self.show_toast(Localized::from_translated_seam(
+                edit_transaction_failure_message(self.language, action, error, false),
             ));
         }
     }
@@ -5877,7 +6164,7 @@ impl App {
                 self.session.selected_path.is_some(),
                 self.session.load_error.is_some(),
             ) {
-                self.show_toast(message);
+                self.show_toast(Localized::from_translated_seam(message));
             }
             return;
         };
@@ -5888,15 +6175,17 @@ impl App {
             .curation_recovery
             .source_removal_preflight(self.language)
         {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if let Err(error) = crate::curate::verify_accepted_source_native(&path, &source) {
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
-            self.show_toast(guarded_source_action_failure_message(
-                self.language,
-                GuardedSourceAction::PermanentDelete,
-                &error,
+            self.show_toast(Localized::from_translated_seam(
+                guarded_source_action_failure_message(
+                    self.language,
+                    GuardedSourceAction::PermanentDelete,
+                    &error,
+                ),
             ));
             return;
         }
@@ -5925,11 +6214,14 @@ impl App {
             move || CurationCompletion::PermanentDelete {
                 result: crate::curate::permanent_delete_source(&path, &source),
             },
-            "Could not start permanent delete. Nothing was deleted.",
+            tr!("Could not start permanent delete. Nothing was deleted."),
         );
         if started {
             self.commit_submitted_removal(&removal);
-            self.show_toast("Permanently deleting file in the background");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Permanently deleting file in the background")),
+            );
         }
     }
 
@@ -5943,10 +6235,12 @@ impl App {
             Err(error) => {
                 self.revert_submitted_removal(context);
                 log_guarded_action_failure(GuardedSourceAction::Trash, &error);
-                self.show_toast(guarded_source_action_failure_message(
-                    self.language,
-                    GuardedSourceAction::Trash,
-                    &error,
+                self.show_toast(Localized::from_translated_seam(
+                    guarded_source_action_failure_message(
+                        self.language,
+                        GuardedSourceAction::Trash,
+                        &error,
+                    ),
                 ));
                 return CurationTerminalState::NeedsAttention;
             }
@@ -5984,10 +6278,8 @@ impl App {
         {
             self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
         }
-        self.show_toast(single_trash_result_message(
-            self.language,
-            has_receipt,
-            previous_undo_preserved,
+        self.show_toast(Localized::from_translated_seam(
+            single_trash_result_message(self.language, has_receipt, previous_undo_preserved),
         ));
         CurationTerminalState::Succeeded
     }
@@ -6000,10 +6292,12 @@ impl App {
         if let Err(error) = result {
             self.revert_submitted_removal(context);
             log_guarded_action_failure(GuardedSourceAction::PermanentDelete, &error);
-            self.show_toast(guarded_source_action_failure_message(
-                self.language,
-                GuardedSourceAction::PermanentDelete,
-                &error,
+            self.show_toast(Localized::from_translated_seam(
+                guarded_source_action_failure_message(
+                    self.language,
+                    GuardedSourceAction::PermanentDelete,
+                    &error,
+                ),
             ));
             return CurationTerminalState::NeedsAttention;
         }
@@ -6028,10 +6322,8 @@ impl App {
             self.after_paths_removed(std::slice::from_ref(&context.path), context.playlist_index);
         }
         let safe_name = prefetch::privacy_safe_file_name(&context.path).replace('"', "?");
-        self.show_toast(permanent_delete_success_message(
-            self.language,
-            &safe_name,
-            previous_trash_undo,
+        self.show_toast(Localized::from_translated_seam(
+            permanent_delete_success_message(self.language, &safe_name, previous_trash_undo),
         ));
         CurationTerminalState::Succeeded
     }
@@ -6108,8 +6400,9 @@ impl App {
     }
 
     fn handle_missing_selected_path(&mut self, path: PathBuf) {
-        self.session.set_selected_missing();
-        self.show_toast(crate::session::MISSING_IMAGE_STATUS);
+        self.session
+            .set_selected_missing(self.language.text(crate::session::MISSING_IMAGE_STATUS));
+        self.show_toast(self.language.localize(crate::session::MISSING_IMAGE_STATUS));
 
         let old_index = self
             .playlist
@@ -6160,9 +6453,7 @@ impl App {
                 self.cancel_pending_image_load();
                 self.session.selected_path = None;
                 self.invalidate_displayed_image();
-                self.show_toast(
-                    "The selected image is no longer available, and no remaining image matches the rating filter.",
-                );
+                self.show_status_toast(self.language.localize(tr!("The selected image is no longer available, and no remaining image matches the rating filter.")));
             }
         }
         self.sync_collage_after_catalog_change();
@@ -6196,7 +6487,7 @@ impl App {
             BlockedAction::RestoreFromTrash,
             crate::current_work::NOTHING_TO_RESTORE,
         ) {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if self.block_action_while_busy(BlockedAction::RestoreFromTrash) {
@@ -6228,9 +6519,9 @@ impl App {
         );
         let Ok((result_rx, join)) = spawn else {
             log::error!("trash restore worker spawn failed: submitted={restore_submitted}");
-            self.show_toast(
-                "Could not start Trash restore. Undo receipts are unchanged; retry with U.",
-            );
+            self.show_toast(self.language.localize(tr!(
+                "Could not start Trash restore. Undo receipts are unchanged; retry with U."
+            )));
             return;
         };
         log::info!("trash restore worker started: submitted={restore_submitted}");
@@ -6317,7 +6608,7 @@ impl App {
             self.apply_filter_selection(selection);
         }
 
-        self.show_toast(restore_result_message(
+        self.show_toast(Localized::from_translated_seam(restore_result_message(
             self.language,
             RestoreOutcomeCounts {
                 restored: restored_count,
@@ -6328,7 +6619,7 @@ impl App {
                 first_failure,
                 active_playlist: restores_active_playlist,
             },
-        ));
+        )));
         if failure_total == 0 {
             CurationTerminalState::Succeeded
         } else {
@@ -6416,8 +6707,11 @@ impl App {
         if let Err(error) = scheduled {
             self.session.receiver = None;
             log::error!("failed to queue foreground decode");
-            let message = format!("Could not start image decode: {error}");
-            self.session.load_error = Some(message.clone());
+            let message = self.language.fill(
+                tr!("Could not start image decode: {error}"),
+                &[("error", &error.to_string())],
+            );
+            self.session.load_error = Some(message.as_str().to_owned());
             self.show_toast(message);
         }
     }
@@ -6431,11 +6725,14 @@ impl App {
             WorkerPoll::Ready(completion) => completion,
             WorkerPoll::Disconnected => {
                 self.session.receiver = None;
-                let message = crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS.to_owned();
+                let message = self
+                    .language
+                    .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS)
+                    .to_owned();
                 self.session.load_error = Some(message.clone());
                 log::error!("foreground image result channel disconnected");
                 if self.current_image.is_some() {
-                    self.show_toast(decode_failure_toast(&message, true));
+                    self.show_toast(decode_failure_toast(self.language, &message, true));
                 }
                 self.request_redraw();
                 return;
@@ -6466,10 +6763,10 @@ impl App {
                     ForegroundLoadFailureDisposition::Other(error) => {
                         self.session.selected_missing = false;
                         log::error!("decode failed");
-                        let message = user_facing_decode_error(error);
+                        let message = user_facing_decode_error(self.language, error);
                         self.session.load_error = Some(message.clone());
                         if self.current_image.is_some() {
-                            self.show_toast(decode_failure_toast(&message, true));
+                            self.show_toast(decode_failure_toast(self.language, &message, true));
                         }
                         self.request_redraw();
                     }
@@ -6484,17 +6781,17 @@ impl App {
 
     fn cancel_save_overwrite_for_source_change(&mut self) {
         if cancel_pending_save_for_source_change(&mut self.pending_save) {
-            self.show_toast(
-                "Pending Save As overwrite canceled because the active image selection changed.",
-            );
+            self.show_toast(self.language.localize(tr!(
+                "Pending Save As overwrite canceled because the active image selection changed."
+            )));
         }
     }
 
     fn cancel_rating_disclosure_for_source_change(&mut self) {
         if cancel_pending_rating_for_source_change(&mut self.pending_rating_write) {
-            self.show_toast(
-                "Pending rating change canceled because the active image was reopened or changed.",
-            );
+            self.show_status_toast(self.language.localize(tr!(
+                "Pending rating change canceled because the active image was reopened or changed."
+            )));
         }
     }
 
@@ -6525,7 +6822,10 @@ impl App {
             self.save_transaction_active()
                 .then_some(SaveStartBlocker::Save),
         ]) {
-            self.show_toast(save_start_blocker_message(self.language, blocker));
+            self.show_toast(Localized::from_translated_seam(save_start_blocker_message(
+                self.language,
+                blocker,
+            )));
             return;
         }
         let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -6556,7 +6856,10 @@ impl App {
         let destination = match crate::edit::prepare_save_destination(&save_path) {
             Ok(destination) => destination,
             Err(error) => {
-                self.show_toast(format!("Save failed: {error}"));
+                self.show_toast(self.language.fill(
+                    tr!("Save failed: {error}"),
+                    &[("error", &error.to_string())],
+                ));
                 return;
             }
         };
@@ -6586,7 +6889,10 @@ impl App {
             return;
         };
         if let Err(error) = pending.destination.confirm_overwrite() {
-            self.show_toast(format!("Save failed: {error}"));
+            self.show_toast(self.language.fill(
+                tr!("Save failed: {error}"),
+                &[("error", &error.to_string())],
+            ));
             return;
         }
         self.start_save(pending);
@@ -6594,7 +6900,10 @@ impl App {
 
     fn cancel_save_overwrite(&mut self) {
         if self.pending_save.take().is_some() {
-            self.show_toast("Save canceled. No file was changed.");
+            self.show_toast(
+                self.language
+                    .localize(tr!("Save canceled. No file was changed.")),
+            );
         }
     }
 
@@ -6634,11 +6943,14 @@ impl App {
         match spawn {
             Ok(_) => {
                 self.save_job = Some(job);
-                self.show_toast("Saving copy in the background");
+                self.show_toast(self.language.localize(tr!("Saving copy in the background")));
             }
             Err(error) => {
                 log::error!("failed to start save worker");
-                self.show_toast(format!("Could not start save: {error}"));
+                self.show_toast(self.language.fill(
+                    tr!("Could not start save: {error}"),
+                    &[("error", &error.to_string())],
+                ));
             }
         }
     }
@@ -6659,18 +6971,25 @@ impl App {
         let includes_pixel_edits = self.unsaved_crop || self.heal.history.can_undo();
         let terminal = match polled {
             JobPoll::Ready(Ok(metadata)) => {
-                self.show_toast(save_success_message(metadata, includes_pixel_edits));
+                self.show_toast(save_success_message(
+                    self.language,
+                    metadata,
+                    includes_pixel_edits,
+                ));
                 SaveTerminalState::Succeeded
             }
             JobPoll::Ready(Err(error)) => {
                 log::error!("failed to save image");
-                self.show_toast(format!("Save failed: {error}"));
+                self.show_toast(
+                    self.language
+                        .fill(tr!("Save failed: {error}"), &[("error", &error.clone())]),
+                );
                 SaveTerminalState::Failed
             }
             JobPoll::Disconnected => {
                 log::error!("save job disconnected before publishing a result");
                 self.save_recovery_unsettled = true;
-                self.show_toast(crate::ui::SAVE_RECOVERY_STATUS);
+                self.show_toast(self.language.localize(crate::ui::SAVE_RECOVERY_STATUS));
                 SaveTerminalState::Disconnected
             }
             JobPoll::Pending => unreachable!("pending save result returned early"),
@@ -6752,7 +7071,7 @@ impl App {
                         );
                         let message = curation_recovery_message(self.language, kind);
                         self.curation_recovery.record(kind);
-                        self.show_toast(message);
+                        self.show_toast(Localized::from_translated_seam(message));
                         return;
                     }
                 };
@@ -6792,7 +7111,7 @@ impl App {
             self.crop_recovery_unsettled,
             self.preview_recovery_unsettled,
         ) {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         if let Some(message) = crop_source_blocker(
@@ -6800,7 +7119,7 @@ impl App {
             self.session.is_loading(),
             self.session.load_error.is_some(),
         ) {
-            self.show_toast(message);
+            self.show_toast(Localized::from_translated_seam(message));
             return;
         }
         let Some(source_path) = self.current_loaded_path().map(Path::to_owned) else {
@@ -6820,7 +7139,10 @@ impl App {
         let ratio = crop_ratio_for_source(self.transform.crop_ratio, self.transform.rotation_steps);
         let Some(pixel_rect) = crate::crop::crop_pixel_rect(rect, image.width, image.height, ratio)
         else {
-            self.show_toast("The selected ratio is too large for this image");
+            self.show_toast(
+                self.language
+                    .localize(tr!("The selected ratio is too large for this image")),
+            );
             return;
         };
 
@@ -6854,7 +7176,9 @@ impl App {
             self.animation = context.recovery.animation;
             self.pages = context.recovery.pages;
             self.auxiliary_job = context.recovery.auxiliary_job;
-            self.show_toast("Could not start crop. Selection kept; press Enter to try again.");
+            self.show_toast(self.language.localize(tr!(
+                "Could not start crop. Selection kept; press Enter to try again."
+            )));
             return;
         }
 
@@ -6867,7 +7191,10 @@ impl App {
         self.transform.is_cropping = false;
         self.transform.crop_start = None;
         self.crop_job = Some(job);
-        self.show_toast("Applying crop in the background");
+        self.show_toast(
+            self.language
+                .localize(tr!("Applying crop in the background")),
+        );
         self.request_redraw();
     }
 
@@ -6890,7 +7217,10 @@ impl App {
             JobPoll::Ready(CropJobResult::Failed(error)) => {
                 log::error!("crop computation failed: {error}");
                 let restored = self.restore_failed_crop(recovery);
-                self.show_toast(crop_failure_message(self.language, restored));
+                self.show_toast(Localized::from_translated_seam(crop_failure_message(
+                    self.language,
+                    restored,
+                )));
                 return;
             }
             JobPoll::Ready(CropJobResult::Cancelled) => {
@@ -6902,7 +7232,10 @@ impl App {
                 log::error!("crop job disconnected before publishing a result");
                 let restored = self.restore_failed_crop(recovery);
                 self.crop_recovery_unsettled = true;
-                self.show_toast(crop_disconnect_message(self.language, restored));
+                self.show_toast(Localized::from_translated_seam(crop_disconnect_message(
+                    self.language,
+                    restored,
+                )));
                 return;
             }
             JobPoll::Pending => unreachable!("pending crop result returned early"),
@@ -7271,7 +7604,7 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
                 if let Some(notice) = self.preference_recovery_notice.take() {
-                    self.show_toast(notice);
+                    self.show_toast(self.language.localize(notice));
                 }
                 let _ = self
                     .renderer
@@ -7426,14 +7759,20 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CloseRequested => {
                 if self.rating_write_worker.is_some() {
                     self.close_after_rating_write = true;
-                    self.show_toast("Finishing the rating update before closing...");
+                    self.show_toast(
+                        self.language
+                            .localize(tr!("Finishing the rating update before closing...")),
+                    );
                     return;
                 }
                 match close_disposition(self.save_job.is_some(), self.curation_worker.is_some()) {
                     CloseDisposition::Exit => event_loop.exit(),
                     CloseDisposition::WaitForSave => {
                         self.close_after_save = true;
-                        self.show_toast("Finishing Save As before closing...");
+                        self.show_toast(
+                            self.language
+                                .localize(tr!("Finishing Save As before closing...")),
+                        );
                     }
                     CloseDisposition::WaitForCuration => {
                         if !self.close_after_curation {
@@ -7453,9 +7792,9 @@ impl ApplicationHandler<UserEvent> for App {
                     CloseDisposition::WaitForSaveAndCuration => {
                         self.close_after_save = true;
                         self.close_after_curation = true;
-                        self.show_toast(
-                            "Finishing Save As and the file operation before closing...",
-                        );
+                        self.show_toast(self.language.localize(tr!(
+                            "Finishing Save As and the file operation before closing..."
+                        )));
                     }
                 }
             }
@@ -7956,7 +8295,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
-                let toast = self.toast.message().map(str::to_owned);
+                let toast = self.toast.view();
                 let preview_kind = self.preview_job.as_ref().map(|job| job.context().kind);
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
@@ -8026,8 +8365,8 @@ impl ApplicationHandler<UserEvent> for App {
                     noun: cursor.kind().noun(),
                     can_previous: cursor.can_step(-1),
                     can_next: cursor.can_step(1),
-                    visible_label: cursor.visible_copy(),
-                    accessibility_label: cursor.accessibility_copy(),
+                    visible_label: cursor.visible_copy(self.language),
+                    accessibility_label: cursor.accessibility_copy(self.language),
                 });
                 let details = self.image_details.clone();
                 let color_profile = self.current_image.as_ref().map(|image| image.color_profile);
@@ -8335,7 +8674,9 @@ impl ApplicationHandler<UserEvent> for App {
                                     "appearance preference save failed: {}",
                                     error.diagnostic_name()
                                 );
-                                self.show_toast(appearance_save_failure_message());
+                                self.show_toast(
+                                    self.language.localize(appearance_save_failure_message()),
+                                );
                             }
                         }
                         crate::ui::UiAction::SetLanguage(preference) => {
@@ -8453,11 +8794,11 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         crate::ui::UiAction::ToggleRetainExif => {
                             self.retain_exif = !self.retain_exif;
-                            self.show_toast(if self.retain_exif {
-                                "Saved copies will keep camera metadata (session only)"
+                            self.show_toast(self.language.localize(if self.retain_exif {
+                                tr!("Saved copies will keep camera metadata (session only)")
                             } else {
-                                "Saved copies will strip camera metadata (default)"
-                            });
+                                tr!("Saved copies will strip camera metadata (default)")
+                            }));
                         }
                         crate::ui::UiAction::ToggleAnimationPlayback => {
                             self.toggle_animation_playback();
@@ -8751,7 +9092,11 @@ mod test {
     fn timed_toast_expires_but_survives_navigation_dismissal() {
         let start = Instant::now();
         let mut toast = StatusToast::default();
-        toast.show("Moved to Trash. Undo with U.", start);
+        toast.show(
+            "Moved to Trash. Undo with U.",
+            ToastAnnouncement::Visual,
+            start,
+        );
 
         toast.dismiss_navigation_notice();
         assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
@@ -8768,11 +9113,16 @@ mod test {
     fn navigation_notice_outlives_timers_until_navigation() {
         let start = Instant::now();
         let mut toast = StatusToast::default();
-        toast.show("Rating saved", start);
+        toast.show("Rating saved", ToastAnnouncement::PoliteStatus, start);
         toast.show_until_navigation(
             "The selected image is no longer available. Opening the first image in the folder.",
         );
         assert_eq!(toast.deadline(), None);
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::Visual),
+            "a notice must not inherit the replaced message's announcement"
+        );
 
         toast.expire(start + Duration::from_mins(10));
         assert_eq!(
@@ -8791,12 +9141,52 @@ mod test {
         let start = Instant::now();
         let mut toast = StatusToast::default();
         toast.show_until_navigation("Browsing only this file.");
-        toast.show("Moved to Trash. Undo with U.", start);
+        toast.show(
+            "Moved to Trash. Undo with U.",
+            ToastAnnouncement::Visual,
+            start,
+        );
 
         toast.dismiss_navigation_notice();
         assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
         toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
         assert_eq!(toast.message(), None);
+    }
+
+    #[test]
+    fn status_announcement_travels_with_its_message_and_clears_on_expiry() {
+        let start = Instant::now();
+        let mut toast = StatusToast::default();
+        assert_eq!(toast.view(), None);
+
+        toast.show(
+            "Calificación 4 de 5 guardada.",
+            ToastAnnouncement::PoliteStatus,
+            start,
+        );
+        assert_eq!(
+            toast.view(),
+            Some(ToastView {
+                text: "Calificación 4 de 5 guardada.".to_owned(),
+                announcement: ToastAnnouncement::PoliteStatus,
+            }),
+            "announcement follows the sender's kind, not English wording"
+        );
+
+        toast.show("Saved copy", ToastAnnouncement::Visual, start);
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::Visual)
+        );
+
+        toast.show("Rating cleared.", ToastAnnouncement::PoliteStatus, start);
+        toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
+        assert_eq!(toast.view(), None);
+        toast.show_until_navigation("Browsing only this file.");
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::Visual)
+        );
     }
 
     #[test]
@@ -9375,22 +9765,48 @@ mod test {
 
     #[test]
     fn spot_heal_success_copy_names_memory_and_save_as_boundaries() {
-        let applied = heal_success_message(false, 0, 4);
-        assert!(applied.contains("in memory"));
-        assert!(applied.contains("Save As"));
-        assert!(applied.contains("Undo"));
-        assert_eq!(heal_success_message(true, 2, 4), "Heal source 3 of 4");
+        let applied = heal_success_message(Language::English, false, 0, 4);
+        assert!(applied.as_str().contains("in memory"));
+        assert!(applied.as_str().contains("Save As"));
+        assert!(applied.as_str().contains("Undo"));
+        assert_eq!(
+            heal_success_message(Language::English, true, 2, 4).as_str(),
+            "Heal source 3 of 4"
+        );
+        assert_eq!(
+            heal_success_message(Language::German, true, 2, 4).as_str(),
+            "Reparaturquelle 3 von 4"
+        );
     }
 
     #[test]
     fn save_success_copy_confirms_when_edited_pixels_were_exported() {
         assert_eq!(
-            save_success_message(crate::edit::MetadataDisposition::Stripped, true),
+            save_success_message(
+                Language::English,
+                crate::edit::MetadataDisposition::Stripped,
+                true
+            )
+            .as_str(),
             "Saved edited copy · metadata stripped"
         );
         assert_eq!(
-            save_success_message(crate::edit::MetadataDisposition::Retained, false),
+            save_success_message(
+                Language::English,
+                crate::edit::MetadataDisposition::Retained,
+                false
+            )
+            .as_str(),
             "Saved copy · EXIF retained"
+        );
+        assert_eq!(
+            save_success_message(
+                Language::French,
+                crate::edit::MetadataDisposition::NotPresent,
+                false
+            )
+            .as_str(),
+            "Copie enregistrée · aucune donnée EXIF"
         );
     }
 
@@ -9421,6 +9837,25 @@ mod test {
             ),
             Some("Could not restore some saved preferences. Using safe system defaults for them.")
         );
+        for notice in [
+            startup_preference_recovery_notice(Some(PreferenceRecovery::Invalid), None, None),
+            startup_preference_recovery_notice(
+                None,
+                Some(crate::folder_sort_preference::Recovery::Invalid),
+                None,
+            ),
+            startup_preference_recovery_notice(None, None, Some(crate::locale::Recovery::Invalid)),
+            startup_preference_recovery_notice(
+                Some(PreferenceRecovery::Invalid),
+                None,
+                Some(crate::locale::Recovery::Invalid),
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(crate::locale::is_cataloged(notice), "{notice}");
+        }
     }
 
     #[test]

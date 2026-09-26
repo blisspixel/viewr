@@ -3,7 +3,7 @@
 //! The event loop owns every mutable fact. This module projects those facts into
 //! immutable control state so egui and native accessibility remain thin adapters.
 
-use crate::locale::Language;
+use crate::locale::{Language, tr};
 /// Logical height reserved for the persistent menu and image status bar.
 pub const TOP_BAR_HEIGHT: f32 = 40.0;
 /// Logical width of the collapsed tools rail.
@@ -19,8 +19,6 @@ pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
 /// Logical width of the Image Information panel.
 pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
 pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
-pub(crate) const RATING_DISCOVERY_WRITE_STATUS: &str =
-    "Wait for folder ratings to finish loading before changing this rating.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 
@@ -99,7 +97,6 @@ const SHORTCUT_PLACEHOLDER: &str = "{shortcut}";
 #[cfg(test)]
 const CHROME_COPY: &[&str] = &[
     RATING_RECOVERY_STATUS,
-    RATING_DISCOVERY_WRITE_STATUS,
     SAVE_RECOVERY_STATUS,
     COLLAPSE_TOOLS,
     EXPAND_TOOLS,
@@ -636,6 +633,12 @@ pub(crate) struct ChromeViewModel {
 }
 
 impl ChromeViewModel {
+    /// Interface language the projection was built for.
+    #[must_use]
+    pub(crate) const fn language(self) -> Language {
+        self.input.language
+    }
+
     #[must_use]
     pub fn new(input: ChromeInput) -> Self {
         Self {
@@ -695,7 +698,6 @@ impl ChromeViewModel {
             ChromeControl::RatingMenu => !self.input.rating_write_busy,
             ChromeControl::RatingChoice => {
                 self.exclusive_current_action_ready()
-                    && !self.input.rating_discovery_busy
                     && !self.input.rating_recovery_unsettled
                     && self.input.rating_capability
                         == crate::ratings::RatingWriteCapability::WritableJpeg
@@ -814,9 +816,6 @@ impl ChromeViewModel {
     const fn rating_unavailable_source(self) -> &'static str {
         if self.input.rating_recovery_unsettled {
             return RATING_RECOVERY_STATUS;
-        }
-        if self.input.rating_discovery_busy {
-            return RATING_DISCOVERY_WRITE_STATUS;
         }
         if !self.input.dock.has_image {
             if self.input.is_opening {
@@ -1074,23 +1073,80 @@ pub(crate) fn rating_filter_label(
     }
 }
 
-pub(crate) fn appearance_menu_label(preference: crate::theme::Preference) -> String {
-    format!("Appearance: {}", preference.name())
+pub(crate) fn appearance_menu_label(
+    language: Language,
+    preference: crate::theme::Preference,
+) -> String {
+    language
+        .fill(
+            tr!("Appearance: {name}"),
+            &[("name", language.text(preference.name()))],
+        )
+        .into_string()
+}
+
+/// Translated chooser description. The English source copy lives in `theme`,
+/// whose public API stays language-neutral.
+fn appearance_description(
+    language: Language,
+    preference: crate::theme::Preference,
+    current_system_mode: Option<crate::theme::Mode>,
+) -> String {
+    use crate::theme::{Mode, Preference};
+    match (preference, current_system_mode) {
+        (Preference::System, Some(mode @ (Mode::Light | Mode::Dark))) => language
+            .fill(
+                tr!("Follows your operating system. Currently {mode}."),
+                &[("mode", language.text(mode.name()))],
+            )
+            .into_string(),
+        (Preference::System, Some(Mode::Console) | None) => language
+            .text(tr!(
+                "Follows your operating system's Light or Dark setting."
+            ))
+            .to_owned(),
+        (Preference::Light, _) => language
+            .text(tr!(
+                "Bright neutral chrome, light window frame, soft-white canvas."
+            ))
+            .to_owned(),
+        (Preference::Dark, _) => language
+            .text(tr!(
+                "Low-glare charcoal chrome, dark window frame, deep-ink canvas."
+            ))
+            .to_owned(),
+        (Preference::Console, _) => language
+            .text(tr!(
+                "Green-screen look, near-black canvas, phosphor-green chrome, monospaced type."
+            ))
+            .to_owned(),
+    }
 }
 
 pub(crate) fn appearance_choices(
+    language: Language,
     current: crate::theme::Preference,
     resolved: crate::theme::Mode,
 ) -> Vec<AppearanceChoiceView> {
     let current_system_mode = (current == crate::theme::Preference::System).then_some(resolved);
     crate::theme::Preference::ALL
         .into_iter()
-        .map(|preference| AppearanceChoiceView {
-            preference,
-            label: preference.name(),
-            description: preference.description(current_system_mode),
-            selected: current == preference,
-            accessibility_label: preference.accessible_label(current_system_mode),
+        .map(|preference| {
+            let label = language.text(preference.name());
+            let description = appearance_description(language, preference, current_system_mode);
+            let accessibility_label = language
+                .fill(
+                    tr!("{label}: {value}"),
+                    &[("label", label), ("value", &description)],
+                )
+                .into_string();
+            AppearanceChoiceView {
+                preference,
+                label,
+                description,
+                selected: current == preference,
+                accessibility_label,
+            }
         })
         .collect()
 }
@@ -1199,9 +1255,9 @@ mod tests {
     use super::{
         ChromeControl, ChromeInput, ChromeLayout, ChromeViewModel, DisclosureDirection, DockInput,
         DockSide, DockState, DockViewModel, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
-        HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, PanelKind, PositionedPanel,
-        RATING_DISCOVERY_WRITE_STATUS, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
-        appearance_choices, background_choices, dock_side_choices, viewport_insets,
+        HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, PanelKind, PositionedPanel, TOOLS_PANEL_WIDTH,
+        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, appearance_choices, background_choices,
+        dock_side_choices, viewport_insets,
     };
 
     fn ready_input() -> ChromeInput {
@@ -1451,17 +1507,16 @@ mod tests {
     }
 
     #[test]
-    fn rating_write_waits_for_discovery_while_filter_controls_remain_available() {
+    fn rating_write_stays_available_while_folder_discovery_runs() {
         let mut input = ready_input();
         input.rating_discovery_busy = true;
         let model = ChromeViewModel::new(input);
-        assert!(!model.is_enabled(ChromeControl::RatingChoice));
+        assert!(
+            model.is_enabled(ChromeControl::RatingChoice),
+            "culling must not wait for folder rating discovery"
+        );
         assert!(model.is_enabled(ChromeControl::RatingMenu));
         assert!(model.is_enabled(ChromeControl::RatingFilterMenu));
-        assert_eq!(
-            model.rating_unavailable_text(),
-            RATING_DISCOVERY_WRITE_STATUS
-        );
     }
 
     #[test]
@@ -1923,7 +1978,7 @@ mod tests {
             assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
         }
         for preference in crate::theme::Preference::ALL {
-            let choices = appearance_choices(preference, crate::theme::Mode::Dark);
+            let choices = appearance_choices(EN, preference, crate::theme::Mode::Dark);
             assert_eq!(choices.len(), 4);
             assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
             assert!(choices.iter().all(|choice| !choice.description.is_empty()));

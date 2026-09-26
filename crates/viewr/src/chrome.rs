@@ -19,8 +19,6 @@ pub const FILMSTRIP_PANEL_HEIGHT: f32 = 112.0;
 /// Logical width of the Image Information panel.
 pub const IMAGE_INFO_PANEL_WIDTH: f32 = 304.0;
 pub(crate) const RATING_RECOVERY_STATUS: &str = "Rating update is not settled. Restore this image from a trusted backup, then press F5 to reload.";
-pub(crate) const RATING_DISCOVERY_WRITE_STATUS: &str =
-    "Wait for folder ratings to finish loading before changing this rating.";
 pub(crate) const SAVE_RECOVERY_STATUS: &str =
     "Save As stopped unexpectedly. Close and reopen viewr before saving again.";
 
@@ -99,7 +97,6 @@ const SHORTCUT_PLACEHOLDER: &str = "{shortcut}";
 #[cfg(test)]
 const CHROME_COPY: &[&str] = &[
     RATING_RECOVERY_STATUS,
-    RATING_DISCOVERY_WRITE_STATUS,
     SAVE_RECOVERY_STATUS,
     COLLAPSE_TOOLS,
     EXPAND_TOOLS,
@@ -701,7 +698,6 @@ impl ChromeViewModel {
             ChromeControl::RatingMenu => !self.input.rating_write_busy,
             ChromeControl::RatingChoice => {
                 self.exclusive_current_action_ready()
-                    && !self.input.rating_discovery_busy
                     && !self.input.rating_recovery_unsettled
                     && self.input.rating_capability
                         == crate::ratings::RatingWriteCapability::WritableJpeg
@@ -820,9 +816,6 @@ impl ChromeViewModel {
     const fn rating_unavailable_source(self) -> &'static str {
         if self.input.rating_recovery_unsettled {
             return RATING_RECOVERY_STATUS;
-        }
-        if self.input.rating_discovery_busy {
-            return RATING_DISCOVERY_WRITE_STATUS;
         }
         if !self.input.dock.has_image {
             if self.input.is_opening {
@@ -1262,9 +1255,9 @@ mod tests {
     use super::{
         ChromeControl, ChromeInput, ChromeLayout, ChromeViewModel, DisclosureDirection, DockInput,
         DockSide, DockState, DockViewModel, FILMSTRIP_PANEL_HEIGHT, FILMSTRIP_RAIL_HEIGHT,
-        HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, PanelKind, PositionedPanel,
-        RATING_DISCOVERY_WRITE_STATUS, TOOLS_PANEL_WIDTH, TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT,
-        appearance_choices, background_choices, dock_side_choices, viewport_insets,
+        HEAL_PANEL_WIDTH, IMAGE_INFO_PANEL_WIDTH, PanelKind, PositionedPanel, TOOLS_PANEL_WIDTH,
+        TOOLS_RAIL_WIDTH, TOP_BAR_HEIGHT, appearance_choices, background_choices,
+        dock_side_choices, viewport_insets,
     };
 
     fn ready_input() -> ChromeInput {
@@ -1514,17 +1507,16 @@ mod tests {
     }
 
     #[test]
-    fn rating_write_waits_for_discovery_while_filter_controls_remain_available() {
+    fn rating_write_stays_available_while_folder_discovery_runs() {
         let mut input = ready_input();
         input.rating_discovery_busy = true;
         let model = ChromeViewModel::new(input);
-        assert!(!model.is_enabled(ChromeControl::RatingChoice));
+        assert!(
+            model.is_enabled(ChromeControl::RatingChoice),
+            "culling must not wait for folder rating discovery"
+        );
         assert!(model.is_enabled(ChromeControl::RatingMenu));
         assert!(model.is_enabled(ChromeControl::RatingFilterMenu));
-        assert_eq!(
-            model.rating_unavailable_text(),
-            RATING_DISCOVERY_WRITE_STATUS
-        );
     }
 
     #[test]

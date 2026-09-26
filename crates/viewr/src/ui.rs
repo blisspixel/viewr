@@ -5524,11 +5524,11 @@ mod tests {
     }
 
     #[test]
-    fn rating_discovery_disables_writes_but_keeps_filter_cancellation_available() {
+    fn rating_discovery_keeps_writes_and_filter_cancellation_available() {
         let mut frame = accessibility_test_frame();
         frame.rating.discovery_busy = true;
 
-        assert!(!control_enabled(&frame, ChromeControl::RatingChoice));
+        assert!(control_enabled(&frame, ChromeControl::RatingChoice));
         assert!(control_enabled(&frame, ChromeControl::RatingMenu));
         assert!(control_enabled(&frame, ChromeControl::RatingFilterMenu));
     }

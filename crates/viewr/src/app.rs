@@ -91,8 +91,8 @@ use crate::rating_state::{
     RatingRecoveryTransition, RatingWriteTerminal, auxiliary_disconnect_message,
     next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
     rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
-    rating_recovery_blocker, rating_write_discovery_blocker, rating_write_failure_message,
-    rating_write_target_is_current, reconcile_rating_write,
+    rating_recovery_blocker, rating_write_failure_message, rating_write_target_is_current,
+    reconcile_rating_write,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
@@ -2786,10 +2786,6 @@ impl App {
     }
 
     fn request_rating_assignment(&mut self, assignment: RatingAssignment) {
-        if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
-            self.show_status_toast(self.language.localize(message));
-            return;
-        }
         if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return;
         }
@@ -2863,10 +2859,6 @@ impl App {
     }
 
     fn start_rating_write(&mut self, pending: &PendingRatingWrite) -> bool {
-        if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
-            self.show_status_toast(self.language.localize(message));
-            return false;
-        }
         if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return false;
         }
@@ -3086,6 +3078,13 @@ impl App {
     }
 
     fn poll_rating_discovery(&mut self) {
+        // A completed scan re-applies the rating filter, which can move or
+        // clear the selection. While a rating write is in flight the current
+        // image's rating is not final, so the result stays queued until the
+        // write settles; `about_to_wait` polls the write first.
+        if self.rating_write_worker.is_some() {
+            return;
+        }
         let Some(worker) = self.rating_scan_worker.as_ref() else {
             return;
         };

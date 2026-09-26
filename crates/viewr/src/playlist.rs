@@ -767,6 +767,43 @@ mod tests {
         assert_eq!(between_matches.navigation_target(999_999), Some(6));
     }
 
+    /// The app applies a discovery result only after an in-flight rating write
+    /// settles. Applied first, the result re-evaluates the filter against the
+    /// pre-write rating and moves the selection away from the image being rated.
+    #[test]
+    fn discovery_applied_after_a_write_keeps_the_rated_selection() {
+        let at_least_four = RatingFilter::AtLeast(Rating::new(4).unwrap());
+        let discovered = vec![
+            (path(0), RatingState::Rated(Rating::new(5).unwrap())),
+            (path(1), RatingState::Rated(Rating::new(2).unwrap())),
+            (path(2), RatingState::Rated(Rating::new(1).unwrap())),
+        ];
+        let setup = || {
+            let mut playlist = Playlist::new((0..3).map(path).collect(), 1);
+            playlist.set_rating(&path(1), RatingState::Rated(Rating::new(2).unwrap()));
+            playlist
+        };
+
+        let mut premature = setup();
+        premature.set_discovered_ratings(&discovered);
+        assert_eq!(
+            premature.set_filter(at_least_four),
+            FilterSelection::Select(0),
+            "a result applied during the write moves away from the image being rated"
+        );
+
+        let mut settled = setup();
+        settled.set_rating(&path(1), RatingState::Rated(Rating::new(5).unwrap()));
+        settled.set_discovered_ratings(&discovered);
+        assert_eq!(settled.set_filter(at_least_four), FilterSelection::Stay);
+        assert_eq!(settled.index, 1);
+        assert_eq!(
+            settled.ratings[1],
+            RatingState::Rated(Rating::new(5).unwrap()),
+            "the stale discovery value does not replace the written rating"
+        );
+    }
+
     #[test]
     fn discovery_maps_by_path_across_order_removal_and_preserves_newer_states() {
         let discovered = vec![

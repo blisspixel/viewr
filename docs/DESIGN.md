@@ -294,11 +294,10 @@ and unsupported containers, remain visibly read-only.
   over rating shortcuts.
 - Edit owns rating assignment. View owns the session-only minimum-rating filter.
   The current textual rating and any active filter remain visible outside menus.
-  Rating assignment waits for bounded folder rating discovery to finish. This
-  prevents a scan that observed the previous value from replacing a newly written
-  value in the playlist and status after the source transaction commits. Filter
-  controls remain available during discovery so the user can cancel it by showing
-  all images.
+  Rating assignment does not wait for bounded folder rating discovery. Discovery
+  fills only entries that are still loading, so a scan that observed the previous
+  value cannot replace a value written while it ran. Filter controls remain
+  available during discovery so the user can cancel it by showing all images.
   When no image matches the filter, Escape or folder-navigation keys restore All
   images instead of doing nothing.
 - One canonical folder catalog in the selected session order owns Trash and Undo

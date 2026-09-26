@@ -1850,12 +1850,6 @@ const MESSAGES: &[Message] = &[
         german: "Die Aktualisierung der Bewertung ist nicht abgeschlossen. Stellen Sie dieses Bild aus einer vertrauenswürdigen Sicherung wieder her und drücken Sie F5 zum Neuladen.",
     },
     Message {
-        english: "Wait for folder ratings to finish loading before changing this rating.",
-        spanish: "Espere a que terminen de cargarse las valoraciones de la carpeta antes de cambiar esta valoración.",
-        french: "Attendez la fin du chargement des notes du dossier avant de modifier cette note.",
-        german: "Warten Sie, bis die Bewertungen des Ordners geladen sind, bevor Sie diese Bewertung ändern.",
-    },
-    Message {
         english: "Save As stopped unexpectedly. Close and reopen viewr before saving again.",
         spanish: "Guardar como se detuvo de forma inesperada. Cierre y vuelva a abrir viewr antes de guardar de nuevo.",
         french: "Enregistrer sous s’est interrompu de façon inattendue. Fermez et rouvrez viewr avant d’enregistrer à nouveau.",
@@ -3918,7 +3912,6 @@ mod tests {
             crate::session::MISSING_IMAGE_STATUS,
             crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS,
             crate::chrome::RATING_RECOVERY_STATUS,
-            crate::chrome::RATING_DISCOVERY_WRITE_STATUS,
             crate::chrome::SAVE_RECOVERY_STATUS,
             crate::crop_state::PREVIEW_RECOVERY_STATUS,
             crate::pages::edit_blocks_page_step_copy(),
@@ -3938,7 +3931,7 @@ mod tests {
             }
             checked += 1;
         }
-        assert_eq!(checked, 19);
+        assert_eq!(checked, 18);
     }
 
     #[test]

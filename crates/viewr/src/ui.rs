@@ -73,6 +73,8 @@ const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
 /// Smallest filename slice kept legible when a status needs the strip.
 const TOP_FILE_NAME_MIN_WIDTH: f32 = 120.0;
 const TOP_PAGE_STEP_WIDTH: f32 = 16.0;
+const TOP_PAGE_STEP_SPACING: f32 = 2.0;
+const TOP_PAGE_STEP_GLYPH_SIZE: f32 = 14.0;
 const TOP_PAGE_PREVIOUS_GLYPH: &str = "\u{23F4}";
 const TOP_PAGE_NEXT_GLYPH: &str = "\u{23F5}";
 const TOP_METADATA_GAP: f32 = 8.0;
@@ -1068,15 +1070,8 @@ fn render_top_menu(
                     // The reading strip owns its own separation instead of
                     // inheriting whatever spacing the menu titles need.
                     ui.spacing_mut().item_spacing.x = TOP_METADATA_SPACING;
-                    let budget = top_status_budget(
-                        ui.available_width(),
-                        top_metadata_reserve(ui, frame, chrome),
-                        ui.ctx().content_rect().width(),
-                    );
-                    ui.scope(|ui| {
-                        ui.set_max_width(budget);
-                        render_top_operation_status(ui, actions, frame, chrome, colors);
-                    });
+                    let reserve = top_metadata_reserve(ui, frame, chrome);
+                    render_top_operation_status(ui, actions, frame, chrome, colors, reserve);
                     render_top_rating_position(ui, frame, colors);
                     render_top_page_position(ui, actions, frame, colors);
                     render_top_image_facts(ui, frame, chrome, colors);
@@ -1091,9 +1086,13 @@ fn render_top_operation_status(
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
     colors: ChromeColors,
+    metadata_reserve: f32,
 ) {
     let add_status = |ui: &mut egui::Ui, status: &str| {
         add_top_status_with_external_edit(ui, status, frame.external_edit_pending, colors);
+    };
+    let add_toast = |ui: &mut egui::Ui, text: &str, announcement: ToastAnnouncement| {
+        add_top_toast(ui, text, announcement, colors, metadata_reserve);
     };
     if let Some(status) = frame.curation_status.as_deref() {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
@@ -1131,7 +1130,7 @@ fn render_top_operation_status(
                 add_status(ui, &status);
             }
             if let Some(toast) = frame.toast.as_ref() {
-                add_top_toast(ui, &toast.text, toast.announcement, colors);
+                add_toast(ui, &toast.text, toast.announcement);
             }
         }
     } else if frame.dock.has_image && frame.is_opening {
@@ -1179,13 +1178,12 @@ fn render_top_operation_status(
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, frame.text(tr!("Reading folder...")));
     } else if let Some(toast) = frame.toast.as_ref() {
-        add_top_toast(ui, &toast.text, toast.announcement, colors);
+        add_toast(ui, &toast.text, toast.announcement);
     } else if frame.has_unsaved_pixel_edits {
-        add_top_toast(
+        add_toast(
             ui,
             frame.text(tr!("Edited pixels are in memory. Save As writes a copy.")),
             ToastAnnouncement::Visual,
-            colors,
         );
     }
 }
@@ -1293,41 +1291,92 @@ fn render_top_page_position(
         .corner_radius(CornerRadius::same(6))
         .inner_margin(egui::Margin::symmetric(4, 1))
         .show(ui, |ui| {
-            // The parent strip lays out right to left, so the next step is
-            // added first to appear on the right.
-            ui.spacing_mut().item_spacing.x = 2.0;
-            render_sequence_step_button(
-                ui,
-                actions,
-                strip_step_button(TOP_PAGE_NEXT_GLYPH, colors),
-                frame.text(next_name),
-                "]",
-                pages.can_next,
-                1,
+            // The strip lays out right to left; the chip reads left to right
+            // so keyboard focus meets Previous before Next, as drawn. A
+            // left-to-right child claims all remaining width unless it is
+            // sized to its content first.
+            let step_width = strip_step_width(ui);
+            let content = Vec2::new(
+                2.0 * (step_width + TOP_PAGE_STEP_SPACING)
+                    + strip_text_width(ui, &pages.visible_label, 12.5),
+                ui.available_height(),
             );
-            ui.label(
-                RichText::new(&pages.visible_label)
-                    .size(12.5)
-                    .color(colors.muted),
-            )
-            .on_hover_text(&pages.accessibility_label);
-            render_sequence_step_button(
-                ui,
-                actions,
-                strip_step_button(TOP_PAGE_PREVIOUS_GLYPH, colors),
-                frame.text(previous_name),
-                "[",
-                pages.can_previous,
-                -1,
+            ui.allocate_ui_with_layout(
+                content,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = TOP_PAGE_STEP_SPACING;
+                    render_sequence_step_button(
+                        ui,
+                        actions,
+                        strip_step_button(TOP_PAGE_PREVIOUS_GLYPH, step_width, colors),
+                        frame.text(previous_name),
+                        "[",
+                        pages.can_previous,
+                        -1,
+                    );
+                    ui.label(
+                        RichText::new(&pages.visible_label)
+                            .size(12.5)
+                            .color(colors.muted),
+                    )
+                    .on_hover_text(&pages.accessibility_label);
+                    render_sequence_step_button(
+                        ui,
+                        actions,
+                        strip_step_button(TOP_PAGE_NEXT_GLYPH, step_width, colors),
+                        frame.text(next_name),
+                        "]",
+                        pages.can_next,
+                        1,
+                    );
+                },
             );
         });
     ui.add_space(TOP_METADATA_GAP);
 }
 
-fn strip_step_button(glyph: &'static str, colors: ChromeColors) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(glyph).size(14.0).color(colors.text))
-        .frame(false)
-        .min_size(Vec2::new(TOP_PAGE_STEP_WIDTH, 20.0))
+/// Width of one page step. Each step is sized to exactly this, the wider
+/// glyph plus button padding and never below the minimum hit width, so the
+/// strip reserve and the drawn chip agree in every appearance. A frameless
+/// egui button still keeps its style margin, and Console glyphs are wider.
+fn strip_step_width(ui: &egui::Ui) -> f32 {
+    let glyph = strip_text_width(ui, TOP_PAGE_PREVIOUS_GLYPH, TOP_PAGE_STEP_GLYPH_SIZE).max(
+        strip_text_width(ui, TOP_PAGE_NEXT_GLYPH, TOP_PAGE_STEP_GLYPH_SIZE),
+    );
+    (glyph + 2.0 * ui.spacing().button_padding.x).max(TOP_PAGE_STEP_WIDTH)
+}
+
+fn strip_step_button(
+    glyph: &'static str,
+    width: f32,
+    colors: ChromeColors,
+) -> egui::Button<'static> {
+    egui::Button::new(
+        RichText::new(glyph)
+            .size(TOP_PAGE_STEP_GLYPH_SIZE)
+            .color(colors.text),
+    )
+    .frame(false)
+    .min_size(Vec2::new(width, 20.0))
+}
+
+/// Unwrapped width of strip text in the active body family. Console
+/// appearance draws every text style in the monospace family.
+fn strip_text_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    let family = ui
+        .style()
+        .text_styles
+        .get(&egui::TextStyle::Body)
+        .map_or(egui::FontFamily::Proportional, |font| font.family.clone());
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::new(size, family),
+            Color32::WHITE,
+        )
+        .size()
+        .x
 }
 
 /// Width the top strip needs to the left of the operation status: the
@@ -1335,51 +1384,49 @@ fn strip_step_button(glyph: &'static str, colors: ChromeColors) -> egui::Button<
 /// its minimum legible slice. The status may use whatever remains, so a long
 /// explanation is shown whole whenever the window has room for it.
 fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewModel) -> f32 {
-    let measure = |text: &str, size: f32| {
-        ui.painter()
-            .layout_no_wrap(
-                text.to_owned(),
-                egui::FontId::proportional(size),
-                Color32::WHITE,
-            )
-            .size()
-            .x
-    };
-    let pill = |text: &str| measure(text, 12.5) + 16.0 + TOP_METADATA_GAP + TOP_METADATA_SPACING;
+    let measure = |text: &str, size: f32| strip_text_width(ui, text, size);
+    // A chip is its text, its 8px side margins, the strip spacing, and the
+    // reading gap added after it.
+    let chip = |text: &str| measure(text, 12.5) + 16.0 + TOP_METADATA_SPACING + TOP_METADATA_GAP;
     let mut reserve = 0.0;
     if let Some(label) = top_rating_position_label(frame) {
-        reserve += pill(&label);
+        reserve += chip(&label);
     }
     if let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) {
-        reserve += pill(&pages.visible_label) + 2.0 * (TOP_PAGE_STEP_WIDTH + 2.0);
+        // 4px side margins instead of 8, plus two steps with their spacing.
+        reserve +=
+            chip(&pages.visible_label) - 8.0 + 2.0 * (strip_step_width(ui) + TOP_PAGE_STEP_SPACING);
     }
     if !frame.dock.has_image {
         return reserve;
     }
-    reserve += pill(&chrome.rating_menu_label());
+    reserve += chip(&chrome.rating_menu_label());
     if is_compact_width(ui.ctx().content_rect().width()) {
         return reserve;
     }
-    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5) + TOP_METADATA_GAP;
+    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5) + TOP_METADATA_SPACING;
     if let Some((width, height)) = frame.img_size {
-        reserve += measure(&format!("{width} × {height}"), 12.5) + TOP_METADATA_GAP;
+        reserve +=
+            TOP_METADATA_GAP + measure(&format!("{width} × {height}"), 12.5) + TOP_METADATA_SPACING;
     }
     if let Some(path) = frame.file_path.as_ref() {
         let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
-        reserve += measure(&name, 13.5).min(TOP_FILE_NAME_MIN_WIDTH) + TOP_METADATA_GAP;
+        reserve += TOP_METADATA_GAP + measure(&name, 13.5).min(TOP_FILE_NAME_MIN_WIDTH);
     }
     reserve
 }
 
-/// Width granted to the operation-status group in the top strip. Compact
-/// windows leave the group unconstrained because each status item keeps its
-/// own compact cap. Wider windows grant everything the metadata does not need,
-/// never less than the standard allocation.
-fn top_status_budget(available: f32, reserve: f32, content_width: f32) -> f32 {
-    if is_compact_width(content_width) {
-        return available;
-    }
-    (available - reserve).max(available.min(TOP_STATUS_MAX_WIDTH))
+/// Width for a toast or navigation notice in the top strip. It is always the
+/// last operation-status item, so in a wide window it may take everything the
+/// metadata to its left does not need, never less than the standard cap that
+/// every other status item keeps. Compact windows keep the compact cap.
+fn top_toast_max_width(available: f32, metadata_reserve: f32, content_width: f32) -> f32 {
+    let floor = if is_compact_width(content_width) {
+        return available.min(TOP_STATUS_COMPACT_MAX_WIDTH);
+    } else {
+        TOP_STATUS_MAX_WIDTH
+    };
+    available.min((available - metadata_reserve).max(floor))
 }
 
 fn is_compact_width(content_width: f32) -> bool {
@@ -1760,8 +1807,13 @@ fn add_top_toast(
     message: &str,
     announcement: ToastAnnouncement,
     colors: ChromeColors,
+    metadata_reserve: f32,
 ) {
-    let max_width = top_status_max_width(ui);
+    let max_width = top_toast_max_width(
+        ui.available_width(),
+        metadata_reserve,
+        ui.ctx().content_rect().width(),
+    );
     ui.scope(|ui| {
         ui.set_max_width(max_width);
         let response = ui.add(
@@ -1775,15 +1827,13 @@ fn add_top_toast(
     });
 }
 
-/// Each status item in a compact window keeps a fixed cap. Otherwise it fills
-/// the allocation the strip granted through `top_status_budget`, eliding only
-/// what still does not fit.
 fn top_status_max_width(ui: &egui::Ui) -> f32 {
-    if is_compact_width(ui.ctx().content_rect().width()) {
-        ui.available_width().min(TOP_STATUS_COMPACT_MAX_WIDTH)
+    let responsive_limit = if is_compact_width(ui.ctx().content_rect().width()) {
+        TOP_STATUS_COMPACT_MAX_WIDTH
     } else {
-        ui.available_width()
-    }
+        TOP_STATUS_MAX_WIDTH
+    };
+    ui.available_width().min(responsive_limit)
 }
 
 fn mark_as_polite_status(response: &egui::Response) {
@@ -4801,8 +4851,8 @@ mod tests {
         TOP_STATUS_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
         add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
         crop_pixel_bounds, folder_sort_menu, image_open_status, menu_tool_button, mosaic_status,
-        panels_menu, rating_filter_menu, rating_menu, render, retry_open_label, top_status_budget,
-        undo_trash_menu_item,
+        panels_menu, rating_filter_menu, rating_menu, render, retry_open_label,
+        top_toast_max_width, undo_trash_menu_item,
     };
     use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
 
@@ -7215,16 +7265,17 @@ mod tests {
     }
 
     #[test]
-    fn status_budget_grants_wide_windows_the_space_metadata_leaves() {
-        assert!((top_status_budget(900.0, 400.0, 1_270.0) - 500.0).abs() < f32::EPSILON);
+    fn toast_width_grants_wide_windows_the_space_metadata_leaves() {
+        let width = |available, reserve, content| top_toast_max_width(available, reserve, content);
+        assert!((width(900.0, 400.0, 1_270.0) - 500.0).abs() < f32::EPSILON);
         assert!(
-            (top_status_budget(900.0, 850.0, 1_270.0) - TOP_STATUS_MAX_WIDTH).abs() < f32::EPSILON,
-            "crowded wide strips keep the standard allocation"
+            (width(900.0, 850.0, 1_270.0) - TOP_STATUS_MAX_WIDTH).abs() < f32::EPSILON,
+            "crowded wide strips keep the standard cap"
         );
-        assert!((top_status_budget(150.0, 850.0, 1_270.0) - 150.0).abs() < f32::EPSILON);
+        assert!((width(150.0, 850.0, 1_270.0) - 150.0).abs() < f32::EPSILON);
         assert!(
-            (top_status_budget(500.0, 100.0, 640.0) - 500.0).abs() < f32::EPSILON,
-            "compact windows cap each status item instead of the group"
+            (width(500.0, 100.0, 640.0) - TOP_STATUS_COMPACT_MAX_WIDTH).abs() < f32::EPSILON,
+            "compact windows keep the compact cap"
         );
     }
 
@@ -7262,61 +7313,135 @@ mod tests {
             .cloned()
     }
 
-    #[test]
-    fn long_navigation_notice_is_shown_whole_in_a_wide_strip() {
-        const NOTICE: &str =
-            "The selected image is no longer available. Opening the first image in the folder.";
+    const MISSING_NOTICE: &str =
+        "The selected image is no longer available. Opening the first image in the folder.";
+
+    /// Render twice so a changed appearance has applied its fonts, then return
+    /// the second frame's tree, the notice's unelided width, and the
+    /// filename's unelided width in that style.
+    fn strip_with_notice(
+        frame: &UiFrameOwned,
+        width: f32,
+    ) -> (egui::accesskit::TreeUpdate, f32, f32) {
         let context = egui::Context::default();
         context.enable_accesskit();
-        let mut frame = page_frame(true, true);
-        frame.toast = Some(visual_toast(NOTICE));
-        let mut input = accessibility_input();
-        input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::Vec2::new(1_270.0, 750.0),
-        ));
         let mut notice_width = 0.0;
-        let output = context.run_ui(input, |ui| {
-            notice_width = ui
-                .painter()
-                .layout_no_wrap(
-                    NOTICE.to_owned(),
-                    egui::FontId::proportional(12.5),
-                    egui::Color32::WHITE,
-                )
-                .size()
-                .x;
-            let _ = render(ui, &frame);
-        });
-        let update = output
-            .platform_output
-            .accesskit_update
-            .expect("top-bar AccessKit update");
-        let notice = update
+        let mut name_width = 0.0;
+        let mut update = None;
+        for _ in 0..2 {
+            let mut input = accessibility_input();
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(width, 750.0),
+            ));
+            let output = context.run_ui(input, |ui| {
+                let _ = render(ui, frame);
+                notice_width = super::strip_text_width(ui, MISSING_NOTICE, 12.5);
+                name_width = super::strip_text_width(ui, "current.png", 13.5);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        (
+            update.expect("top-bar AccessKit update"),
+            notice_width,
+            name_width,
+        )
+    }
+
+    fn node_bounds(
+        update: &egui::accesskit::TreeUpdate,
+        text: &str,
+    ) -> Option<egui::accesskit::Rect> {
+        update
             .nodes
             .iter()
             .map(|(_, node)| node)
-            .find(|node| node.value() == Some(NOTICE))
-            .and_then(egui::accesskit::Node::bounds)
-            .expect("navigation notice in the top strip");
+            .filter(|node| node.value() == Some(text) || node.label() == Some(text))
+            .filter_map(egui::accesskit::Node::bounds)
+            .find(|bounds| bounds.y1 <= f64::from(TOP_BAR_HEIGHT))
+    }
+
+    fn assert_notice_whole_beside_metadata(frame: &UiFrameOwned, width: f32) {
+        let (update, notice_width, _) = strip_with_notice(frame, width);
+        let notice = node_bounds(&update, MISSING_NOTICE).expect("notice in the top strip");
         assert!(
             notice.x1 - notice.x0 + 0.5 >= f64::from(notice_width),
-            "notice elided at 1270 px: {notice:?} narrower than {notice_width}"
+            "notice elided at {width} px: {notice:?} narrower than {notice_width}"
         );
-        assert!(notice.x1 <= 1_270.0 && notice.y1 <= f64::from(TOP_BAR_HEIGHT));
-        for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated"] {
-            let other = update
-                .nodes
-                .iter()
-                .map(|(_, node)| node)
-                .find(|node| node.value() == Some(value) || node.label() == Some(value))
-                .and_then(egui::accesskit::Node::bounds)
+        assert!(notice.x1 <= f64::from(width));
+        let help = node_bounds(&update, "Help").expect("Help menu title");
+        for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", "current.png"] {
+            let other = node_bounds(&update, value)
                 .unwrap_or_else(|| panic!("{value} stays in the strip beside the notice"));
             assert!(
                 other.x1 <= notice.x0 || other.x0 >= notice.x1,
                 "{value} overlaps the notice: {other:?} vs {notice:?}"
             );
+            assert!(
+                other.x0 >= help.x1,
+                "{value} was pushed into the menu titles: {other:?} vs {help:?}"
+            );
         }
+    }
+
+    #[test]
+    fn long_navigation_notice_is_shown_whole_in_a_wide_strip() {
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(MISSING_NOTICE));
+        assert_notice_whole_beside_metadata(&frame, 1_270.0);
+
+        frame.theme_mode = crate::theme::Mode::Console;
+        assert_notice_whole_beside_metadata(&frame, 1_500.0);
+    }
+
+    #[test]
+    fn an_unbounded_notice_never_displaces_the_metadata() {
+        let endless = "The selected image is no longer available. ".repeat(12);
+        for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Console] {
+            let mut frame = page_frame(true, true);
+            frame.theme_mode = mode;
+            frame.toast = Some(visual_toast(&endless));
+            let (update, _, name_width) = strip_with_notice(&frame, 1_270.0);
+            let help = node_bounds(&update, "Help").expect("Help menu title");
+            for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", "100%"] {
+                let chip = node_bounds(&update, value)
+                    .unwrap_or_else(|| panic!("{value} stays visible in {mode:?}"));
+                assert!(
+                    chip.x0 >= help.x1,
+                    "{value} was pushed into the menu titles in {mode:?}: {chip:?} vs {help:?}"
+                );
+            }
+            let name = node_bounds(&update, "current.png").expect("filename slice");
+            assert!(
+                name.x0 >= help.x1
+                    && name.x1 - name.x0 + 0.5
+                        >= f64::from(name_width.min(super::TOP_FILE_NAME_MIN_WIDTH)),
+                "{mode:?}: the filename lost its reserved slice: {name:?} of {name_width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_notice_after_a_failed_open_keeps_at_least_the_standard_width() {
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(MISSING_NOTICE));
+        frame.selected_file_name = Some(format!("{}.png", "long-name-".repeat(12)));
+        frame.load_error = Some("Could not decode this image".to_owned());
+        let (update, notice_width, _) = strip_with_notice(&frame, 1_270.0);
+        let notice = node_bounds(&update, MISSING_NOTICE).expect("notice beside Retry");
+        assert!(
+            notice.x1 - notice.x0 + 0.5 >= f64::from(TOP_STATUS_MAX_WIDTH.min(notice_width)),
+            "a long failure status must not starve the notice: {notice:?}"
+        );
+    }
+
+    #[test]
+    fn a_compact_notice_keeps_the_compact_cap() {
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(MISSING_NOTICE));
+        let (update, _, _) = strip_with_notice(&frame, 640.0);
+        let notice = node_bounds(&update, MISSING_NOTICE).expect("compact notice");
+        assert!(notice.x1 - notice.x0 <= f64::from(TOP_STATUS_COMPACT_MAX_WIDTH) + 1.0);
     }
 
     #[test]
@@ -7349,12 +7474,28 @@ mod tests {
         assert!(!next.is_disabled());
         assert_eq!(previous.keyboard_shortcut(), Some("["));
         assert_eq!(next.keyboard_shortcut(), Some("]"));
+        let position = |label: &str| {
+            update
+                .nodes
+                .iter()
+                .position(|(_, node)| node.label() == Some(label))
+                .expect("step node")
+        };
+        assert!(
+            position("Previous page") < position("Next page"),
+            "keyboard order must meet Previous before Next, as drawn"
+        );
         let label = top_bar_bounds_for(&frame, 1_200.0, "Page 2 of 3").expect("page identity");
         let previous = previous.bounds().expect("previous bounds");
         let next = next.bounds().expect("next bounds");
         assert!(
             previous.x1 <= f64::from(label.min.x) && next.x0 >= f64::from(label.max.x),
             "steps must flank the identity: {previous:?} {label:?} {next:?}"
+        );
+        let position = top_bar_bounds_for(&frame, 1_200.0, "1 / 2").expect("folder position");
+        assert!(
+            f64::from(position.min.x) - next.x1 <= 24.0,
+            "the chip must end at its next step, not reserve slack: {next:?} {position:?}"
         );
     }
 

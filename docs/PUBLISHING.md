@@ -372,6 +372,30 @@ manifest, verified release provenance, and an attestation bound to
 `release.yml@refs/tags/v0.6.3` at that commit. The official archive verifier
 accepts that download.
 
+For v0.6.4, [main CI run 36025882658](https://github.com/blisspixel/viewr/actions/runs/36025882658)
+passed all seven jobs and [fuzz run 36025882611](https://github.com/blisspixel/viewr/actions/runs/36025882611)
+passed both targets on commit `f2a9829bb323c3c1886e48cf6b7dece3cbd73e9d`.
+[Release run 36025938406](https://github.com/blisspixel/viewr/actions/runs/36025938406)
+then repeated the prerequisite jobs, built all four platform archives, and
+published the immutable 12-asset [v0.6.4 release](https://github.com/blisspixel/viewr/releases/tag/v0.6.4).
+The official Windows archive has SHA-256
+`8d0ea1d530bf4ab661b7ea383c50eb593c3503260c0a187ed0e53489a2875baf` and
+re-verifies from the release page with its matching sidecar and a 46-file
+internal manifest.
+
+For v0.6.5, [main CI run 36217291329](https://github.com/blisspixel/viewr/actions/runs/36217291329)
+passed all seven jobs and [fuzz run 36217291314](https://github.com/blisspixel/viewr/actions/runs/36217291314)
+passed both targets on commit `71ebd987fef62157e0f8f1660fd5c8c152acb30a`.
+[Release run 36217860486](https://github.com/blisspixel/viewr/actions/runs/36217860486)
+then repeated the prerequisite jobs, built all four platform archives, and
+published the immutable 12-asset [v0.6.5 release](https://github.com/blisspixel/viewr/releases/tag/v0.6.5).
+The official Windows archive has SHA-256
+`b15d7a8d9a3dc52798fc41a1d63348605a98a8e8896fd1e6f0dc18de2da909b4` and
+re-verifies from the release page with its matching sidecar, a 47-file internal
+manifest, verified release provenance, and an attestation bound to
+`release.yml@refs/tags/v0.6.5` at that commit. The official archive verifier
+accepts that download.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)

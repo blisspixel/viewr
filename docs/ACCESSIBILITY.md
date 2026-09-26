@@ -55,7 +55,8 @@ The minimum contract is:
   failure, and preview-preparation labels use polite AccessKit live-region
   semantics; long target text remains bounded and discoverable when visually
   elided. Rating-request outcomes, including completion, refusal, and failure,
-  are polite because they are the outcome source. The sender marks that kind
+  are polite because they are the outcome source, and so is every refusal of a
+  requested action by current work or a full Trash queue. The sender marks that kind
   when it raises the message, so announcement never depends on wording and is
   identical in every catalog language. `Saving rating...` and ordinary transient
   toasts remain semantic but non-live, so a coexisting visual toast is not a

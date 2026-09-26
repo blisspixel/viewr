@@ -4553,11 +4553,7 @@ impl App {
         if let Some(blocker) =
             trash_submission_work_blocker(self.active_work(ActiveModeAllowance::None))
         {
-            self.show_toast(blocked_action_message(
-                self.language,
-                BlockedAction::Trash,
-                blocker,
-            ));
+            self.refuse_blocked_action(BlockedAction::Trash, blocker);
             return;
         }
         if let Some(message) = self
@@ -4582,16 +4578,12 @@ impl App {
                 self.request_redraw();
             }
             TrashAdmission::Full => {
-                self.show_toast(
+                self.show_status_toast(
                     "The Trash queue is full. Wait for the current moves to finish before continuing.",
                 );
             }
             TrashAdmission::Busy(kind) => {
-                self.show_toast(blocked_action_message(
-                    self.language,
-                    BlockedAction::Trash,
-                    curation_work(kind),
-                ));
+                self.refuse_blocked_action(BlockedAction::Trash, curation_work(kind));
             }
             TrashAdmission::Start => {
                 // Drop speculative handles and advance the catalog before the
@@ -4786,7 +4778,7 @@ impl App {
         allowance: ActiveModeAllowance,
     ) -> bool {
         if let Some(blocker) = self.busy_blocker(allowance) {
-            self.show_toast(blocked_action_message(self.language, action, blocker));
+            self.refuse_blocked_action(action, blocker);
             true
         } else {
             false
@@ -4803,11 +4795,7 @@ impl App {
 
     fn block_browse_while_busy(&mut self) -> bool {
         if let Some(blocker) = browse_work_blocker(self.active_work(ActiveModeAllowance::None)) {
-            self.show_toast(blocked_action_message(
-                self.language,
-                BlockedAction::Browse,
-                blocker,
-            ));
+            self.refuse_blocked_action(BlockedAction::Browse, blocker);
             true
         } else {
             false
@@ -4819,8 +4807,15 @@ impl App {
             return false;
         };
         let blocker = curation_work(worker.context.kind());
-        self.show_toast(blocked_action_message(self.language, action, blocker));
+        self.refuse_blocked_action(action, blocker);
         true
+    }
+
+    /// Explain why a requested action was refused. The refusal is the only
+    /// response to that request, so it is always announced politely. Every
+    /// `blocked_action_message` reaches the user through this method.
+    fn refuse_blocked_action(&mut self, action: BlockedAction, blocker: CurrentWork) {
+        self.show_status_toast(blocked_action_message(self.language, action, blocker));
     }
 
     fn show_toast(&mut self, msg: impl Into<String>) {

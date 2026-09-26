@@ -284,7 +284,17 @@ cannot close the gate.
 
 ## Recording a result
 
-Create no result file until one platform run is complete. Store a completed run at
+Create no result file in the repository until one platform run is complete. To
+record as you go, start an unfilled record in a working directory outside the
+repository:
+
+```text
+python -B scripts/product_quality_evidence.py prepare <working-directory> --platform <platform>
+```
+
+It fills the fixed metadata, leaves every other value and result empty, and lists
+in a comment the terms each observation must name, so it fails validation until
+real evidence is recorded. It never replaces an existing file. Store a completed run at
 `docs/release-evidence/product-quality/<version>/<platform>.md`, using `windows`,
 `macos`, or `linux` for the platform name. Its first line is
 `# Product quality evidence: <platform>`. A two-column metadata table must contain

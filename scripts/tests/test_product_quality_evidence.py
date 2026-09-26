@@ -506,6 +506,82 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         self.assertEqual(record.fields["Candidate commit"], COMMIT)
         self.assertEqual(len(record.results), len(self.identifiers))
 
+    def test_prepared_skeleton_fails_until_filled_and_then_validates(self) -> None:
+        platform = "linux"
+        destination = evidence.write_record_skeleton(self.directory, platform)
+        self.assertEqual(destination, self.directory.resolve() / "linux.md")
+        skeleton = destination.read_text(encoding="utf-8")
+
+        # Unfilled, the record is rejected rather than accepted by default.
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.parse_record(destination, self.identifiers)
+
+        # Every matrix row appears once, in order, and every observation is empty.
+        rows = [
+            cells
+            for cells in map(evidence._table_cells, skeleton.splitlines())
+            if cells is not None
+            and len(cells) == 3
+            and cells[0] != "Check"
+            and cells[0] != "---"
+        ]
+        self.assertEqual([cells[0] for cells in rows], list(self.identifiers))
+        self.assertTrue(all(cells[1:] == ["", ""] for cells in rows))
+        # Guidance names every required term, outside any table row.
+        for identifier, terms in evidence.MANUAL_OBSERVATION_TERMS.items():
+            guidance = next(
+                line
+                for line in skeleton.splitlines()
+                if line.startswith(f"{identifier}:")
+            )
+            for term in terms:
+                self.assertIn(term, guidance)
+        self.assertIn(f"| Version | {VERSION} |", skeleton)
+        self.assertIn(
+            f"| Artifact filename | viewr-{VERSION}-{TARGETS[platform]}.zip |", skeleton
+        )
+
+        # Filling exactly the empty cells with real evidence produces a valid record.
+        valid = self.write_record(platform).read_text(encoding="utf-8")
+        values = {
+            cells[0]: cells[1:]
+            for cells in map(evidence._table_cells, valid.splitlines())
+            if cells is not None
+        }
+        filled = []
+        for line in skeleton.splitlines():
+            cells = evidence._table_cells(line)
+            if cells is not None and cells[0] in values and "" in cells[1:]:
+                line = "| " + " | ".join([cells[0], *values[cells[0]]]) + " |"
+            filled.append(line)
+        destination.write_text("\n".join(filled) + "\n", encoding="utf-8")
+        record = evidence.parse_record(destination, self.identifiers)
+        self.assertEqual(len(record.results), len(self.identifiers))
+
+    def test_prepare_command_refuses_to_replace_a_record(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(
+                evidence.main(["prepare", str(self.directory), "--platform", "macos"]),
+                0,
+            )
+        self.assertIn("macos.md", output.getvalue())
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(
+                evidence.main(["prepare", str(self.directory), "--platform", "macos"]),
+                1,
+            )
+        self.assertIn("refusing to replace", error.getvalue())
+        working = self.root / "run-in-progress"
+        working.mkdir()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                evidence.main(["prepare", str(working), "--platform", "linux"]), 0
+            )
+        with self.assertRaisesRegex(evidence.EvidenceError, "must be stored under"):
+            evidence.parse_record(working / "linux.md", self.identifiers)
+
     def test_missing_result_is_rejected(self) -> None:
         path = self.write_record("windows", omitted_result="PQ-FT-02")
         with self.assertRaisesRegex(evidence.EvidenceError, "missing matrix results"):

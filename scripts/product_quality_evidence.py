@@ -1801,6 +1801,93 @@ def local_performance_rollup(
     )
 
 
+def _row_guidance(identifier: str) -> str | None:
+    """What the validator requires of one row's observation, or None."""
+    requirements: list[str] = []
+    terms = MANUAL_OBSERVATION_TERMS.get(identifier)
+    if terms is not None:
+        requirements.append(
+            "Name " + "; ".join(terms) + "; and the host or session observed"
+        )
+    tokens = (
+        *AUTOMATED_PREREQUISITE_TOKENS.get(identifier, ()),
+        *AUTOMATED_ANCHOR_TOKENS.get(identifier, ()),
+    )
+    if tokens:
+        requirements.append(
+            "Cite the candidate workflow run and the tests " + "; ".join(tokens)
+        )
+    if identifier == "PQ-VS-04":
+        requirements.append(
+            "Paste the line printed by the rollup command for this platform"
+        )
+    if not requirements:
+        return None
+    return f"{identifier}: " + ". ".join(requirements) + "."
+
+
+def record_skeleton(platform: str, matrix_ids: Sequence[str]) -> str:
+    """Return an unfilled evidence record for one platform.
+
+    Fixed metadata is prefilled. Every other value and every result is left
+    empty, so the skeleton fails validation until a tester records real
+    evidence. The terms each observation must name are listed in a comment,
+    outside the tables, so they can never satisfy the check on their own.
+    """
+    if platform not in PLATFORM_TARGETS:
+        raise EvidenceError(f"unknown platform {platform!r}")
+    prefilled = {
+        "Version": EVIDENCE_VERSION,
+        "Fixture artifact": FIXTURE_ARTIFACT,
+        "Package type": "portable archive",
+    }
+    targets = PLATFORM_TARGETS[platform]
+    if len(targets) == 1:
+        prefilled["Artifact filename"] = f"viewr-{EVIDENCE_VERSION}-{targets[0]}.zip"
+    guidance = [
+        line
+        for line in (_row_guidance(identifier) for identifier in matrix_ids)
+        if line is not None
+    ]
+    lines = [
+        f"# Product quality evidence: {platform}",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        *(f"| {field} | {prefilled.get(field, '')} |" for field in REQUIRED_FIELDS),
+        "",
+        "<!--",
+        "Each Result is Pass, Fail, or Approved exception. Observations must",
+        "describe what was seen on this candidate, not restate the check.",
+        *guidance,
+        "-->",
+        "",
+        "| Check | Result | Observation |",
+        "| --- | --- | --- |",
+        *(f"| {identifier} |  |  |" for identifier in matrix_ids),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_record_skeleton(directory: Path, platform: str) -> Path:
+    """Create ``<directory>/<platform>.md`` from the skeleton, never replacing.
+
+    The directory is a working location for a run in progress. ``check`` still
+    requires the completed record to sit in the versioned evidence directory.
+    """
+    root = _require_directory(directory, "working directory")
+    destination = root / f"{platform}.md"
+    try:
+        with destination.open("x", encoding="utf-8", newline="\n") as record:
+            record.write(record_skeleton(platform, load_matrix_ids()))
+    except FileExistsError as error:
+        raise EvidenceError(
+            f"{destination}: refusing to replace an existing record"
+        ) from error
+    return destination
+
+
 def _load_run_metadata(run_id: int) -> dict[str, object]:
     fields = "conclusion,event,headBranch,headSha,status,url,workflowName,databaseId"
     try:
@@ -2028,6 +2115,11 @@ def _parser() -> argparse.ArgumentParser:
         "fixture-manifest", help="checksum a newly generated fixture directory"
     )
     fixtures.add_argument("directory", type=Path)
+    prepare = subparsers.add_parser(
+        "prepare", help="create an unfilled record for one platform"
+    )
+    prepare.add_argument("directory", type=Path)
+    prepare.add_argument("--platform", required=True, choices=sorted(PLATFORM_TARGETS))
     rollup = subparsers.add_parser(
         "rollup",
         help="validate one platform's performance reports and print its PQ-VS-04 line",
@@ -2051,6 +2143,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the evidence validator."""
     args = _parser().parse_args(argv)
     try:
+        if args.command == "prepare":
+            destination = write_record_skeleton(args.directory, args.platform)
+            print(f"unfilled evidence record created: {destination}")
+            return 0
         if args.command == "rollup":
             print(
                 local_performance_rollup(

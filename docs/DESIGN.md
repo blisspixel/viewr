@@ -53,10 +53,11 @@ disappears. This spec is the converged result of two rounds of design critique
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
   spacing. Long names truncate with the full value available as a tooltip. Routine
   three-second outcomes, including Move to Trash, use this status area instead of
-  covering the image. In windows at least 720px wide the status receives all
-  the width the metadata chips and a legible filename slice do not need, so a
-  sticky explanation such as a missing-image substitution reads whole whenever
-  the window has room; compact windows keep a fixed status allocation. Immersive
+  covering the image. Each status item keeps a fixed allocation, except that in
+  windows at least 720px wide the outcome or navigation notice, always drawn
+  last, receives all the width the metadata chips and a 120px filename slice do
+  not need. A sticky explanation such as a missing-image substitution therefore
+  reads whole whenever the window has room. Immersive
   fullscreen and the full-image collage have no top
   chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`

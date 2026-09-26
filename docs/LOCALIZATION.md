@@ -27,9 +27,12 @@ surface, every Trash, permanent-delete, and restore message, the concurrent-work
 wait sentences, rating write failures, and the dock, rating, and Undo Trash copy
 the chrome projection produces, including its accessible names, crop and Save As
 recovery, reload wait reasons, edit-presentation failures, Image Information,
-folder sort, top-chrome busy status, Update, and Save As overwrite confirmation.
-Remaining file-association guidance, some hover help, and leftover app toasts
-still use the explicit English fallback. The roadmap keeps complete catalog coverage and native
+folder sort, top-chrome busy status, Update, Save As overwrite confirmation,
+and every top-chrome toast and navigation notice. Remaining file-association
+guidance, some panel copy, and some hover help still use the explicit English
+fallback. Technical detail that an operating system or decoder supplies, such
+as the text after "Save failed:", is inserted untranslated into a translated
+sentence. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called
 complete. Destructive-action copy tells someone whether their file still
 exists, so it needs native review before the accessibility and language matrix
@@ -45,7 +48,19 @@ of by review:
 - Interface literals bind through `tr!`. A literal that is not in the catalog
   fails the build, so new copy cannot ship translated in English only.
 - `locale::interface_literals_bind_to_the_catalog` rejects a literal passed to
-  the lookup directly, which would step around that build check.
+  `text`, `localize`, `fill`, or `Localized::from_translated_seam` directly,
+  which would step around that build check.
+- Toasts and navigation notices accept only `Localized`, which is built by
+  `Language::localize`, by `Language::fill` for a cataloged template, or by
+  `Localized::from_translated_seam` for a seam that takes the language and
+  proves its own coverage. An English literal or an ad hoc `format!` passed to
+  a toast fails to compile. `fill` substitutes each `{name}` once, never
+  rescans an inserted value, and leaves an unknown placeholder visible.
+- `locale::toast_sources_passed_by_value_are_cataloged` covers the constants
+  and folder-scan notices that reach `localize` as values, and
+  `locale::every_translation_keeps_its_source_placeholders_and_is_unique`
+  rejects a duplicate source or a translation whose placeholders differ from
+  its English source.
 - Copy that a pure seam supplies as a value cannot use `tr!`, so each such seam
   proves its own coverage by enumerating every string it can emit.
   `shortcuts::every_visible_string_is_cataloged`,

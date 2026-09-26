@@ -36,6 +36,72 @@ impl Language {
     }
 }
 
+/// User-visible text already resolved for one language.
+///
+/// Chrome outcome messages accept only this type, so an English literal or an
+/// ad hoc `format!` cannot reach a toast without passing through the catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Localized(String);
+
+impl Localized {
+    /// Text from a pure seam that takes the `Language` itself and proves, in its
+    /// own tests, that every string it can return is cataloged.
+    #[must_use]
+    pub(crate) fn from_translated_seam(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    #[must_use]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub(crate) fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl Language {
+    /// Resolve one cataloged literal. Pass the literal through `tr!` so a
+    /// missing entry fails the build.
+    #[must_use]
+    pub(crate) fn localize(self, english: &'static str) -> Localized {
+        Localized(self.text(english).to_owned())
+    }
+
+    /// Resolve a cataloged template, then substitute each `{name}` placeholder
+    /// in one pass. Substituted values are never rescanned, so a value that
+    /// happens to contain braces is inserted verbatim. An unknown placeholder
+    /// is left visible rather than silently dropped.
+    #[must_use]
+    pub(crate) fn fill(self, template: &'static str, values: &[(&str, &str)]) -> Localized {
+        let translated = self.text(template);
+        let mut text = String::with_capacity(translated.len());
+        let mut rest = translated;
+        while let Some(open) = rest.find('{') {
+            text.push_str(&rest[..open]);
+            let candidate = &rest[open..];
+            let replacement = candidate.find('}').and_then(|close| {
+                let name = &candidate[1..close];
+                values
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (close, *value))
+            });
+            if let Some((close, value)) = replacement {
+                text.push_str(value);
+                rest = &candidate[close + 1..];
+            } else {
+                text.push('{');
+                rest = &candidate[1..];
+            }
+        }
+        text.push_str(rest);
+        Localized(text)
+    }
+}
+
 /// Compile-time catalog binding for one user-visible literal.
 ///
 /// A literal that is not in `MESSAGES` fails the build, so new interface copy
@@ -2470,6 +2536,618 @@ const MESSAGES: &[Message] = &[
         french: "Cela transmet uniquement l’URL de la version à votre navigateur par défaut. viewr lui-même ne se connecte pas à GitHub et n’exécute pas de programme de mise à jour.",
         german: "Dies übergibt nur die Versions-URL an Ihren Standardbrowser. viewr selbst verbindet sich nicht mit GitHub und führt keinen Updater aus.",
     },
+    Message {
+        english: "Preparing a display-sized preview in the background",
+        spanish: "Preparando en segundo plano una vista previa del tamaño de la pantalla",
+        french: "Préparation en arrière-plan d’un aperçu à la taille de l’écran",
+        german: "Vorschau in Bildschirmgröße wird im Hintergrund vorbereitet",
+    },
+    Message {
+        english: "Crop applied",
+        spanish: "Recorte aplicado",
+        french: "Recadrage appliqué",
+        german: "Zuschnitt angewendet",
+    },
+    Message {
+        english: "Full image shown as a GPU-limited preview; export remains full resolution",
+        spanish: "La imagen completa se muestra como vista previa limitada por la GPU; la exportación conserva la resolución completa",
+        french: "Image entière affichée en aperçu limité par le GPU ; l’export conserve la pleine résolution",
+        german: "Vollständiges Bild als GPU-begrenzte Vorschau angezeigt; der Export behält die volle Auflösung",
+    },
+    Message {
+        english: "Open an image before assigning a rating",
+        spanish: "Abra una imagen antes de asignar una valoración",
+        french: "Ouvrez une image avant d’attribuer une note",
+        german: "Öffnen Sie ein Bild, bevor Sie eine Bewertung vergeben",
+    },
+    Message {
+        english: "Wait for the selected image to finish loading",
+        spanish: "Espere a que la imagen seleccionada termine de cargarse",
+        french: "Attendez la fin du chargement de l’image sélectionnée",
+        german: "Warten Sie, bis das ausgewählte Bild vollständig geladen ist",
+    },
+    Message {
+        english: "viewr could not verify this image's source safely. The file was not changed.",
+        spanish: "viewr no pudo verificar de forma segura el origen de esta imagen. El archivo no cambió.",
+        french: "viewr n’a pas pu vérifier la source de cette image en toute sécurité. Le fichier n’a pas été modifié.",
+        german: "viewr konnte die Quelle dieses Bildes nicht sicher prüfen. Die Datei wurde nicht geändert.",
+    },
+    Message {
+        english: "The rating could not be read. Close and reopen viewr before changing this file.",
+        spanish: "No se pudo leer la valoración. Cierre y vuelva a abrir viewr antes de cambiar este archivo.",
+        french: "La note n’a pas pu être lue. Fermez puis rouvrez viewr avant de modifier ce fichier.",
+        german: "Die Bewertung konnte nicht gelesen werden. Schließen Sie viewr und öffnen Sie es erneut, bevor Sie diese Datei ändern.",
+    },
+    Message {
+        english: "The selected image changed before the rating could be saved",
+        spanish: "La imagen seleccionada cambió antes de que se pudiera guardar la valoración",
+        french: "L’image sélectionnée a changé avant l’enregistrement de la note",
+        german: "Das ausgewählte Bild hat sich geändert, bevor die Bewertung gespeichert werden konnte",
+    },
+    Message {
+        english: "Rating cleared.",
+        spanish: "Valoración eliminada.",
+        french: "Note effacée.",
+        german: "Bewertung entfernt.",
+    },
+    Message {
+        english: "Rating {rating} of 5 saved.",
+        spanish: "Valoración {rating} de 5 guardada.",
+        french: "Note {rating} sur 5 enregistrée.",
+        german: "Bewertung {rating} von 5 gespeichert.",
+    },
+    Message {
+        english: "Could not finish reading folder ratings. Showing all images.",
+        spanish: "No se pudieron terminar de leer las valoraciones de la carpeta. Se muestran todas las imágenes.",
+        french: "Impossible de terminer la lecture des notes du dossier. Toutes les images sont affichées.",
+        german: "Die Ordnerbewertungen konnten nicht vollständig gelesen werden. Alle Bilder werden angezeigt.",
+    },
+    Message {
+        english: "Reloading file from disk",
+        spanish: "Volviendo a cargar el archivo desde el disco",
+        french: "Rechargement du fichier depuis le disque",
+        german: "Datei wird vom Datenträger neu geladen",
+    },
+    Message {
+        english: "Open With requires the current image to finish loading",
+        spanish: "Abrir con requiere que la imagen actual termine de cargarse",
+        french: "Ouvrir avec nécessite que l’image actuelle ait fini de se charger",
+        german: "Öffnen mit erfordert, dass das aktuelle Bild vollständig geladen ist",
+    },
+    Message {
+        english: "Could not verify the current source for Open With",
+        spanish: "No se pudo verificar el origen actual para Abrir con",
+        french: "Impossible de vérifier la source actuelle pour Ouvrir avec",
+        german: "Die aktuelle Quelle konnte für Öffnen mit nicht geprüft werden",
+    },
+    Message {
+        english: "Could not start source verification for Open With",
+        spanish: "No se pudo iniciar la verificación del origen para Abrir con",
+        french: "Impossible de lancer la vérification de la source pour Ouvrir avec",
+        german: "Die Quellprüfung für Öffnen mit konnte nicht gestartet werden",
+    },
+    Message {
+        english: "Verifying source for Open With",
+        spanish: "Verificando el origen para Abrir con",
+        french: "Vérification de la source pour Ouvrir avec",
+        german: "Quelle wird für Öffnen mit geprüft",
+    },
+    Message {
+        english: "Could not finish source verification for Open With",
+        spanish: "No se pudo completar la verificación del origen para Abrir con",
+        french: "Impossible de terminer la vérification de la source pour Ouvrir avec",
+        german: "Die Quellprüfung für Öffnen mit konnte nicht abgeschlossen werden",
+    },
+    Message {
+        english: "Source changed on disk. Press F5 before Open With",
+        spanish: "El origen cambió en el disco. Pulse F5 antes de Abrir con",
+        french: "La source a changé sur le disque. Appuyez sur F5 avant Ouvrir avec",
+        german: "Die Quelle wurde auf dem Datenträger geändert. Drücken Sie F5 vor Öffnen mit",
+    },
+    Message {
+        english: "Open With is unavailable for this linked or unsupported source",
+        spanish: "Abrir con no está disponible para este origen vinculado o no compatible",
+        french: "Ouvrir avec n’est pas disponible pour cette source liée ou non prise en charge",
+        german: "Öffnen mit ist für diese verknüpfte oder nicht unterstützte Quelle nicht verfügbar",
+    },
+    Message {
+        english: "Source opened in another app. Changes reload when that is safe",
+        spanish: "Origen abierto en otra aplicación. Los cambios se vuelven a cargar cuando es seguro",
+        french: "Source ouverte dans une autre application. Les modifications se rechargent lorsque c’est sans risque",
+        german: "Quelle in einer anderen App geöffnet. Änderungen werden neu geladen, sobald das sicher ist",
+    },
+    Message {
+        english: "Open With canceled",
+        spanish: "Abrir con cancelado",
+        french: "Ouvrir avec annulé",
+        german: "Öffnen mit abgebrochen",
+    },
+    Message {
+        english: "Could not open the app chooser",
+        spanish: "No se pudo abrir el selector de aplicaciones",
+        french: "Impossible d’ouvrir le sélecteur d’applications",
+        german: "Die App-Auswahl konnte nicht geöffnet werden",
+    },
+    Message {
+        english: "Full-image collage needs an open folder",
+        spanish: "El collage de imágenes completas necesita una carpeta abierta",
+        french: "La mosaïque d’images complètes nécessite un dossier ouvert",
+        german: "Die Collage vollständiger Bilder benötigt einen geöffneten Ordner",
+    },
+    Message {
+        english: "Full-image collage needs more than one matching photo",
+        spanish: "El collage de imágenes completas necesita más de una foto coincidente",
+        french: "La mosaïque d’images complètes nécessite plus d’une photo correspondante",
+        german: "Die Collage vollständiger Bilder benötigt mehr als ein passendes Foto",
+    },
+    Message {
+        english: "Full-image collage needs a selected photo",
+        spanish: "El collage de imágenes completas necesita una foto seleccionada",
+        french: "La mosaïque d’images complètes nécessite une photo sélectionnée",
+        german: "Die Collage vollständiger Bilder benötigt ein ausgewähltes Foto",
+    },
+    Message {
+        english: "Folder previews need more than one image",
+        spanish: "Las vistas previas de carpeta necesitan más de una imagen",
+        french: "Les aperçus du dossier nécessitent plus d’une image",
+        german: "Ordnervorschauen benötigen mehr als ein Bild",
+    },
+    Message {
+        english: "The Trash queue is full. Wait for the current moves to finish before continuing.",
+        spanish: "La cola de la papelera está llena. Espere a que terminen los traslados actuales antes de continuar.",
+        french: "La file de la corbeille est pleine. Attendez la fin des déplacements en cours avant de continuer.",
+        german: "Die Papierkorb-Warteschlange ist voll. Warten Sie, bis die laufenden Verschiebungen abgeschlossen sind, bevor Sie fortfahren.",
+    },
+    Message {
+        english: "Finishing spot heal in memory",
+        spanish: "Terminando la corrección puntual en memoria",
+        french: "Finalisation de la correction ponctuelle en mémoire",
+        german: "Bereichsreparatur im Speicher wird abgeschlossen",
+    },
+    Message {
+        english: "Spot Heal is unavailable for images larger than the GPU texture limit",
+        spanish: "La corrección puntual no está disponible para imágenes que superan el límite de texturas de la GPU",
+        french: "La correction ponctuelle n’est pas disponible pour les images dépassant la limite de texture du GPU",
+        german: "Die Bereichsreparatur ist für Bilder über dem GPU-Texturlimit nicht verfügbar",
+    },
+    Message {
+        english: "Apply a spot heal before refreshing its source",
+        spanish: "Aplique una corrección puntual antes de actualizar su origen",
+        french: "Appliquez une correction ponctuelle avant d’en actualiser la source",
+        german: "Wenden Sie eine Bereichsreparatur an, bevor Sie deren Quelle aktualisieren",
+    },
+    Message {
+        english: "No alternate spot-heal source is available",
+        spanish: "No hay otro origen disponible para la corrección puntual",
+        french: "Aucune autre source de correction ponctuelle n’est disponible",
+        german: "Es ist keine alternative Quelle für die Bereichsreparatur verfügbar",
+    },
+    Message {
+        english: "Spot-heal stroke is too long; use shorter strokes",
+        spanish: "El trazo de corrección puntual es demasiado largo; use trazos más cortos",
+        french: "Le tracé de correction ponctuelle est trop long ; utilisez des tracés plus courts",
+        german: "Der Reparaturstrich ist zu lang; verwenden Sie kürzere Striche",
+    },
+    Message {
+        english: "Spot heal stopped unexpectedly",
+        spanish: "La corrección puntual se detuvo inesperadamente",
+        french: "La correction ponctuelle s’est arrêtée de façon inattendue",
+        german: "Die Bereichsreparatur wurde unerwartet beendet",
+    },
+    Message {
+        english: "Undid spot heal",
+        spanish: "Corrección puntual deshecha",
+        french: "Correction ponctuelle annulée",
+        german: "Bereichsreparatur rückgängig gemacht",
+    },
+    Message {
+        english: "Redid spot heal",
+        spanish: "Corrección puntual rehecha",
+        french: "Correction ponctuelle rétablie",
+        german: "Bereichsreparatur wiederhergestellt",
+    },
+    Message {
+        english: "Permanently deleting file in the background",
+        spanish: "Eliminando el archivo definitivamente en segundo plano",
+        french: "Suppression définitive du fichier en arrière-plan",
+        german: "Datei wird im Hintergrund endgültig gelöscht",
+    },
+    Message {
+        english: "The selected image is no longer available, and no remaining image matches the rating filter.",
+        spanish: "La imagen seleccionada ya no está disponible y ninguna imagen restante coincide con el filtro de valoración.",
+        french: "L’image sélectionnée n’est plus disponible et aucune image restante ne correspond au filtre de note.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar, und kein verbleibendes Bild entspricht dem Bewertungsfilter.",
+    },
+    Message {
+        english: "Could not start Trash restore. Undo receipts are unchanged; retry with U.",
+        spanish: "No se pudo iniciar la restauración desde la papelera. Los recibos para deshacer no cambiaron; reintente con U.",
+        french: "Impossible de lancer la restauration depuis la corbeille. Les reçus d’annulation sont inchangés ; réessayez avec U.",
+        german: "Die Wiederherstellung aus dem Papierkorb konnte nicht gestartet werden. Die Belege zum Rückgängigmachen bleiben unverändert; versuchen Sie es erneut mit U.",
+    },
+    Message {
+        english: "Pending Save As overwrite canceled because the active image selection changed.",
+        spanish: "Se canceló la sobrescritura pendiente de Guardar como porque cambió la imagen seleccionada.",
+        french: "Remplacement en attente par Enregistrer sous annulé, car l’image sélectionnée a changé.",
+        german: "Ausstehendes Überschreiben durch Speichern unter abgebrochen, weil sich die Bildauswahl geändert hat.",
+    },
+    Message {
+        english: "Pending rating change canceled because the active image was reopened or changed.",
+        spanish: "Se canceló el cambio de valoración pendiente porque la imagen activa se volvió a abrir o cambió.",
+        french: "Modification de note en attente annulée, car l’image active a été rouverte ou a changé.",
+        german: "Ausstehende Bewertungsänderung abgebrochen, weil das aktive Bild erneut geöffnet oder geändert wurde.",
+    },
+    Message {
+        english: "Save canceled. No file was changed.",
+        spanish: "Guardado cancelado. No se modificó ningún archivo.",
+        french: "Enregistrement annulé. Aucun fichier n’a été modifié.",
+        german: "Speichern abgebrochen. Keine Datei wurde geändert.",
+    },
+    Message {
+        english: "Saving copy in the background",
+        spanish: "Guardando la copia en segundo plano",
+        french: "Enregistrement de la copie en arrière-plan",
+        german: "Kopie wird im Hintergrund gespeichert",
+    },
+    Message {
+        english: "The selected ratio is too large for this image",
+        spanish: "La proporción seleccionada es demasiado grande para esta imagen",
+        french: "Le format sélectionné est trop grand pour cette image",
+        german: "Das gewählte Seitenverhältnis ist für dieses Bild zu groß",
+    },
+    Message {
+        english: "Could not start crop. Selection kept; press Enter to try again.",
+        spanish: "No se pudo iniciar el recorte. La selección se conserva; pulse Intro para intentarlo de nuevo.",
+        french: "Impossible de lancer le recadrage. Sélection conservée ; appuyez sur Entrée pour réessayer.",
+        german: "Der Zuschnitt konnte nicht gestartet werden. Die Auswahl bleibt erhalten; drücken Sie die Eingabetaste, um es erneut zu versuchen.",
+    },
+    Message {
+        english: "Applying crop in the background",
+        spanish: "Aplicando el recorte en segundo plano",
+        french: "Application du recadrage en arrière-plan",
+        german: "Zuschnitt wird im Hintergrund angewendet",
+    },
+    Message {
+        english: "Finishing the rating update before closing...",
+        spanish: "Terminando la actualización de la valoración antes de cerrar...",
+        french: "Finalisation de la mise à jour de la note avant la fermeture...",
+        german: "Bewertungsänderung wird vor dem Schließen abgeschlossen...",
+    },
+    Message {
+        english: "Finishing Save As before closing...",
+        spanish: "Terminando Guardar como antes de cerrar...",
+        french: "Finalisation d’Enregistrer sous avant la fermeture...",
+        german: "Speichern unter wird vor dem Schließen abgeschlossen...",
+    },
+    Message {
+        english: "Finishing Save As and the file operation before closing...",
+        spanish: "Terminando Guardar como y la operación de archivo antes de cerrar...",
+        french: "Finalisation d’Enregistrer sous et de l’opération sur le fichier avant la fermeture...",
+        german: "Speichern unter und der Dateivorgang werden vor dem Schließen abgeschlossen...",
+    },
+    Message {
+        english: "Could not scan folder: {error}",
+        spanish: "No se pudo examinar la carpeta: {error}",
+        french: "Impossible d’analyser le dossier : {error}",
+        german: "Der Ordner konnte nicht durchsucht werden: {error}",
+    },
+    Message {
+        english: "{label}: {value}",
+        spanish: "{label}: {value}",
+        french: "{label} : {value}",
+        german: "{label}: {value}",
+    },
+    Message {
+        english: "Image details unavailable: {error}",
+        spanish: "Detalles de la imagen no disponibles: {error}",
+        french: "Détails de l’image indisponibles : {error}",
+        german: "Bilddetails nicht verfügbar: {error}",
+    },
+    Message {
+        english: "Animation unavailable; showing first frame: {error}",
+        spanish: "Animación no disponible; se muestra el primer fotograma: {error}",
+        french: "Animation indisponible ; affichage de la première image : {error}",
+        german: "Animation nicht verfügbar; das erste Einzelbild wird angezeigt: {error}",
+    },
+    Message {
+        english: "Pages unavailable; showing the first image: {error}",
+        spanish: "Páginas no disponibles; se muestra la primera imagen: {error}",
+        french: "Pages indisponibles ; affichage de la première image : {error}",
+        german: "Seiten nicht verfügbar; das erste Bild wird angezeigt: {error}",
+    },
+    Message {
+        english: "Container pages unavailable; showing the first image: {error}",
+        spanish: "Páginas del contenedor no disponibles; se muestra la primera imagen: {error}",
+        french: "Pages du conteneur indisponibles ; affichage de la première image : {error}",
+        german: "Containerseiten nicht verfügbar; das erste Bild wird angezeigt: {error}",
+    },
+    Message {
+        english: "Animation stopped: {error}",
+        spanish: "Animación detenida: {error}",
+        french: "Animation arrêtée : {error}",
+        german: "Animation angehalten: {error}",
+    },
+    Message {
+        english: "Could not show that page: {error}",
+        spanish: "No se pudo mostrar esa página: {error}",
+        french: "Impossible d’afficher cette page : {error}",
+        german: "Diese Seite konnte nicht angezeigt werden: {error}",
+    },
+    Message {
+        english: "Could not update display color: {error}",
+        spanish: "No se pudo actualizar el color de la pantalla: {error}",
+        french: "Impossible de mettre à jour la couleur de l’écran : {error}",
+        german: "Die Bildschirmfarbe konnte nicht aktualisiert werden: {error}",
+    },
+    Message {
+        english: "Could not continue moving files to Trash. 1 queued file was not moved.",
+        spanish: "No se pudieron seguir moviendo archivos a la papelera. 1 archivo en cola no se movió.",
+        french: "Impossible de continuer la mise à la corbeille. 1 fichier en attente n’a pas été déplacé.",
+        german: "Das Verschieben in den Papierkorb konnte nicht fortgesetzt werden. 1 Datei in der Warteschlange wurde nicht verschoben.",
+    },
+    Message {
+        english: "Could not continue moving files to Trash. {count} queued files were not moved.",
+        spanish: "No se pudieron seguir moviendo archivos a la papelera. {count} archivos en cola no se movieron.",
+        french: "Impossible de continuer la mise à la corbeille. {count} fichiers en attente n’ont pas été déplacés.",
+        german: "Das Verschieben in den Papierkorb konnte nicht fortgesetzt werden. {count} Dateien in der Warteschlange wurden nicht verschoben.",
+    },
+    Message {
+        english: "{failure} 1 queued file was not sent to Trash.",
+        spanish: "{failure} 1 archivo en cola no se envió a la papelera.",
+        french: "{failure} 1 fichier en attente n’a pas été mis à la corbeille.",
+        german: "{failure} 1 Datei in der Warteschlange wurde nicht in den Papierkorb verschoben.",
+    },
+    Message {
+        english: "{failure} {count} queued files were not sent to Trash.",
+        spanish: "{failure} {count} archivos en cola no se enviaron a la papelera.",
+        french: "{failure} {count} fichiers en attente n’ont pas été mis à la corbeille.",
+        german: "{failure} {count} Dateien in der Warteschlange wurden nicht in den Papierkorb verschoben.",
+    },
+    Message {
+        english: "The move to Trash needs attention.",
+        spanish: "El traslado a la papelera requiere atención.",
+        french: "La mise à la corbeille nécessite votre attention.",
+        german: "Das Verschieben in den Papierkorb erfordert Ihre Aufmerksamkeit.",
+    },
+    Message {
+        english: "Could not refresh heal source: {error}",
+        spanish: "No se pudo actualizar el origen de la corrección: {error}",
+        french: "Impossible d’actualiser la source de correction : {error}",
+        german: "Die Reparaturquelle konnte nicht aktualisiert werden: {error}",
+    },
+    Message {
+        english: "Could not start spot heal: {error}",
+        spanish: "No se pudo iniciar la corrección puntual: {error}",
+        french: "Impossible de lancer la correction ponctuelle : {error}",
+        german: "Die Bereichsreparatur konnte nicht gestartet werden: {error}",
+    },
+    Message {
+        english: "Spot heal failed: {error}",
+        spanish: "La corrección puntual falló: {error}",
+        french: "Échec de la correction ponctuelle : {error}",
+        german: "Bereichsreparatur fehlgeschlagen: {error}",
+    },
+    Message {
+        english: "Save failed: {error}",
+        spanish: "Error al guardar: {error}",
+        french: "Échec de l’enregistrement : {error}",
+        german: "Speichern fehlgeschlagen: {error}",
+    },
+    Message {
+        english: "Could not start save: {error}",
+        spanish: "No se pudo iniciar el guardado: {error}",
+        french: "Impossible de lancer l’enregistrement : {error}",
+        german: "Das Speichern konnte nicht gestartet werden: {error}",
+    },
+    Message {
+        english: "Could not decode: {error}. The previous image remains visible; Retry is available.",
+        spanish: "No se pudo decodificar: {error}. La imagen anterior sigue visible; puede reintentar.",
+        french: "Impossible de décoder : {error}. L’image précédente reste visible ; Réessayer est disponible.",
+        german: "Dekodierung nicht möglich: {error}. Das vorherige Bild bleibt sichtbar; Erneut versuchen ist verfügbar.",
+    },
+    Message {
+        english: "Could not decode: {error}. Retry is available.",
+        spanish: "No se pudo decodificar: {error}. Puede reintentar.",
+        french: "Impossible de décoder : {error}. Réessayer est disponible.",
+        german: "Dekodierung nicht möglich: {error}. Erneut versuchen ist verfügbar.",
+    },
+    Message {
+        english: "Heal source {index} of {count}",
+        spanish: "Origen de corrección {index} de {count}",
+        french: "Source de correction {index} sur {count}",
+        german: "Reparaturquelle {index} von {count}",
+    },
+    Message {
+        english: "Spot healed in memory. Use Save As to keep it; Undo is available.",
+        spanish: "Corrección puntual aplicada en memoria. Use Guardar como para conservarla; puede deshacer.",
+        french: "Correction ponctuelle appliquée en mémoire. Utilisez Enregistrer sous pour la conserver ; l’annulation est disponible.",
+        german: "Bereichsreparatur im Speicher angewendet. Verwenden Sie Speichern unter, um sie zu behalten; Rückgängig ist verfügbar.",
+    },
+    Message {
+        english: "Saved copy",
+        spanish: "Copia guardada",
+        french: "Copie enregistrée",
+        german: "Kopie gespeichert",
+    },
+    Message {
+        english: "Saved edited copy",
+        spanish: "Copia editada guardada",
+        french: "Copie modifiée enregistrée",
+        german: "Bearbeitete Kopie gespeichert",
+    },
+    Message {
+        english: "EXIF retained",
+        spanish: "EXIF conservado",
+        french: "EXIF conservées",
+        german: "EXIF beibehalten",
+    },
+    Message {
+        english: "no EXIF found",
+        spanish: "sin EXIF",
+        french: "aucune donnée EXIF",
+        german: "keine EXIF-Daten gefunden",
+    },
+    Message {
+        english: "metadata stripped",
+        spanish: "metadatos eliminados",
+        french: "métadonnées supprimées",
+        german: "Metadaten entfernt",
+    },
+    Message {
+        english: "Saved copies will keep camera metadata (session only)",
+        spanish: "Las copias guardadas conservarán los metadatos de la cámara (solo en esta sesión)",
+        french: "Les copies enregistrées conserveront les métadonnées de l’appareil photo (session uniquement)",
+        german: "Gespeicherte Kopien behalten die Kameradaten (nur in dieser Sitzung)",
+    },
+    Message {
+        english: "Saved copies will strip camera metadata (default)",
+        spanish: "Las copias guardadas eliminarán los metadatos de la cámara (predeterminado)",
+        french: "Les copies enregistrées supprimeront les métadonnées de l’appareil photo (par défaut)",
+        german: "Gespeicherte Kopien entfernen die Kameradaten (Standard)",
+    },
+    Message {
+        english: "Finish or discard the current edit before changing pages.",
+        spanish: "Termine o descarte la edición actual antes de cambiar de página.",
+        french: "Terminez ou abandonnez la modification en cours avant de changer de page.",
+        german: "Schließen Sie die aktuelle Bearbeitung ab oder verwerfen Sie sie, bevor Sie die Seite wechseln.",
+    },
+    Message {
+        english: "Appearance changed for this session but could not be remembered. Check local configuration storage, then choose it again.",
+        spanish: "La apariencia cambió para esta sesión, pero no se pudo recordar. Revise el almacenamiento de configuración local y vuelva a elegirla.",
+        french: "L’apparence a changé pour cette session, mais n’a pas pu être mémorisée. Vérifiez le stockage de configuration local, puis choisissez-la de nouveau.",
+        german: "Das Erscheinungsbild wurde für diese Sitzung geändert, konnte aber nicht gespeichert werden. Prüfen Sie den lokalen Konfigurationsspeicher und wählen Sie es erneut.",
+    },
+    Message {
+        english: "Folder sort changed for this session but could not be remembered. Check local configuration storage, then choose it again.",
+        spanish: "El orden de carpeta cambió para esta sesión, pero no se pudo recordar. Revise el almacenamiento de configuración local y vuelva a elegirlo.",
+        french: "Le tri du dossier a changé pour cette session, mais n’a pas pu être mémorisé. Vérifiez le stockage de configuration local, puis choisissez-le de nouveau.",
+        german: "Die Ordnersortierung wurde für diese Sitzung geändert, konnte aber nicht gespeichert werden. Prüfen Sie den lokalen Konfigurationsspeicher und wählen Sie sie erneut.",
+    },
+    Message {
+        english: "Language changed for this session but could not be remembered. Check local configuration storage, then choose it again.",
+        spanish: "El idioma cambió para esta sesión, pero no se pudo recordar. Revise el almacenamiento de configuración local y vuelva a elegirlo.",
+        french: "La langue a changé pour cette session, mais n’a pas pu être mémorisée. Vérifiez le stockage de configuration local, puis choisissez-la de nouveau.",
+        german: "Die Sprache wurde für diese Sitzung geändert, konnte aber nicht gespeichert werden. Prüfen Sie den lokalen Konfigurationsspeicher und wählen Sie sie erneut.",
+    },
+    Message {
+        english: "The selected image is no longer available",
+        spanish: "La imagen seleccionada ya no está disponible",
+        french: "L’image sélectionnée n’est plus disponible",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar",
+    },
+    Message {
+        english: "Could not start the move to Trash. Nothing was moved.",
+        spanish: "No se pudo iniciar el traslado a la papelera. No se movió nada.",
+        french: "Impossible de lancer la mise à la corbeille. Rien n’a été déplacé.",
+        german: "Das Verschieben in den Papierkorb konnte nicht gestartet werden. Es wurde nichts verschoben.",
+    },
+    Message {
+        english: "Could not start the next queued move to Trash. That file was not moved.",
+        spanish: "No se pudo iniciar el siguiente traslado en cola a la papelera. Ese archivo no se movió.",
+        french: "Impossible de lancer la prochaine mise à la corbeille en attente. Ce fichier n’a pas été déplacé.",
+        german: "Das nächste Verschieben in den Papierkorb aus der Warteschlange konnte nicht gestartet werden. Diese Datei wurde nicht verschoben.",
+    },
+    Message {
+        english: "Could not start permanent delete. Nothing was deleted.",
+        spanish: "No se pudo iniciar la eliminación definitiva. No se eliminó nada.",
+        french: "Impossible de lancer la suppression définitive. Rien n’a été supprimé.",
+        german: "Das endgültige Löschen konnte nicht gestartet werden. Es wurde nichts gelöscht.",
+    },
+    Message {
+        english: "Could not display image: {error}",
+        spanish: "No se pudo mostrar la imagen: {error}",
+        french: "Impossible d’afficher l’image : {error}",
+        german: "Das Bild konnte nicht angezeigt werden: {error}",
+    },
+    Message {
+        english: "Could not prepare image preview: {error}",
+        spanish: "No se pudo preparar la vista previa de la imagen: {error}",
+        french: "Impossible de préparer l’aperçu de l’image : {error}",
+        german: "Die Bildvorschau konnte nicht vorbereitet werden: {error}",
+    },
+    Message {
+        english: "Could not start image decode: {error}",
+        spanish: "No se pudo iniciar la decodificación de la imagen: {error}",
+        french: "Impossible de lancer le décodage de l’image : {error}",
+        german: "Die Bilddekodierung konnte nicht gestartet werden: {error}",
+    },
+    Message {
+        english: "Folder is too large for safe automatic browsing. Browsing only this file. Use Open Folder to browse the rest.",
+        spanish: "La carpeta es demasiado grande para examinarla automáticamente de forma segura. Solo se examina este archivo. Use Abrir carpeta para examinar el resto.",
+        french: "Le dossier est trop volumineux pour une navigation automatique sûre. Navigation limitée à ce fichier. Utilisez Ouvrir un dossier pour parcourir le reste.",
+        german: "Der Ordner ist für sicheres automatisches Durchsuchen zu groß. Nur diese Datei wird angezeigt. Verwenden Sie Ordner öffnen, um den Rest zu durchsuchen.",
+    },
+    Message {
+        english: "Folder browsing is unavailable. Browsing only this file. Use Open Folder to browse the rest.",
+        spanish: "No se puede examinar la carpeta. Solo se examina este archivo. Use Abrir carpeta para examinar el resto.",
+        french: "La navigation dans le dossier est indisponible. Navigation limitée à ce fichier. Utilisez Ouvrir un dossier pour parcourir le reste.",
+        german: "Das Durchsuchen des Ordners ist nicht verfügbar. Nur diese Datei wird angezeigt. Verwenden Sie Ordner öffnen, um den Rest zu durchsuchen.",
+    },
+    Message {
+        english: "The selected image is no longer available. Opening the first image in the folder.",
+        spanish: "La imagen seleccionada ya no está disponible. Se abre la primera imagen de la carpeta.",
+        french: "L’image sélectionnée n’est plus disponible. Ouverture de la première image du dossier.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar. Das erste Bild im Ordner wird geöffnet.",
+    },
+    Message {
+        english: "The selected image is no longer available, and the folder contains no other supported images.",
+        spanish: "La imagen seleccionada ya no está disponible y la carpeta no contiene otras imágenes compatibles.",
+        french: "L’image sélectionnée n’est plus disponible et le dossier ne contient aucune autre image prise en charge.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar, und der Ordner enthält keine anderen unterstützten Bilder.",
+    },
+    Message {
+        english: "The selected image is no longer available. The folder is too large to choose another image safely.",
+        spanish: "La imagen seleccionada ya no está disponible. La carpeta es demasiado grande para elegir otra imagen de forma segura.",
+        french: "L’image sélectionnée n’est plus disponible. Le dossier est trop volumineux pour choisir une autre image en toute sécurité.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar. Der Ordner ist zu groß, um sicher ein anderes Bild auszuwählen.",
+    },
+    Message {
+        english: "The selected image is no longer available. Could not read the folder to choose another image.",
+        spanish: "La imagen seleccionada ya no está disponible. No se pudo leer la carpeta para elegir otra imagen.",
+        french: "L’image sélectionnée n’est plus disponible. Impossible de lire le dossier pour choisir une autre image.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar. Der Ordner konnte nicht gelesen werden, um ein anderes Bild auszuwählen.",
+    },
+    Message {
+        english: "The selected folder contains no supported images",
+        spanish: "La carpeta seleccionada no contiene imágenes compatibles",
+        french: "Le dossier sélectionné ne contient aucune image prise en charge",
+        german: "Der ausgewählte Ordner enthält keine unterstützten Bilder",
+    },
+    Message {
+        english: "The selected folder exceeds safe browsing limits",
+        spanish: "La carpeta seleccionada supera los límites de exploración segura",
+        french: "Le dossier sélectionné dépasse les limites de navigation sûre",
+        german: "Der ausgewählte Ordner überschreitet die Grenzen für sicheres Durchsuchen",
+    },
+    Message {
+        english: "Could not read the selected folder. Try Open Folder again.",
+        spanish: "No se pudo leer la carpeta seleccionada. Vuelva a intentar Abrir carpeta.",
+        french: "Impossible de lire le dossier sélectionné. Réessayez Ouvrir un dossier.",
+        german: "Der ausgewählte Ordner konnte nicht gelesen werden. Versuchen Sie erneut Ordner öffnen.",
+    },
+    Message {
+        english: "Could not restore saved appearance. Using System.",
+        spanish: "No se pudo restaurar la apariencia guardada. Se usa Sistema.",
+        french: "Impossible de restaurer l’apparence enregistrée. Utilisation de Système.",
+        german: "Das gespeicherte Erscheinungsbild konnte nicht wiederhergestellt werden. System wird verwendet.",
+    },
+    Message {
+        english: "Could not restore the saved language. Using System.",
+        spanish: "No se pudo restaurar el idioma guardado. Se usa Sistema.",
+        french: "Impossible de restaurer la langue enregistrée. Utilisation de Système.",
+        german: "Die gespeicherte Sprache konnte nicht wiederhergestellt werden. System wird verwendet.",
+    },
+    Message {
+        english: "Could not restore saved folder sort. Using Latest First.",
+        spanish: "No se pudo restaurar el orden de carpeta guardado. Se usa Más recientes primero.",
+        french: "Impossible de restaurer le tri du dossier enregistré. Utilisation de Plus récents d’abord.",
+        german: "Die gespeicherte Ordnersortierung konnte nicht wiederhergestellt werden. Neueste zuerst wird verwendet.",
+    },
+    Message {
+        english: "Could not restore some saved preferences. Using safe system defaults for them.",
+        spanish: "No se pudieron restaurar algunas preferencias guardadas. Se usan valores predeterminados seguros del sistema.",
+        french: "Impossible de restaurer certaines préférences enregistrées. Utilisation de valeurs système sûres par défaut.",
+        german: "Einige gespeicherte Einstellungen konnten nicht wiederhergestellt werden. Sichere Systemstandards werden verwendet.",
+    },
 ];
 
 #[cfg(test)]
@@ -2485,7 +3163,8 @@ mod tests {
     #[test]
     fn interface_literals_bind_to_the_catalog() {
         // Built at run time so this test does not match its own source.
-        let bare = format!(".{}(\"", "text");
+        let bare = [".text", ".localize", ".fill", "::from_translated_seam"]
+            .map(|call| format!("{call}(\""));
         let source_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
         for entry in std::fs::read_dir(&source_dir).expect("read src") {
@@ -2497,7 +3176,7 @@ mod tests {
             }
             let source = std::fs::read_to_string(&path).expect("read source");
             for (number, line) in source.lines().enumerate() {
-                if line.contains(&bare) {
+                if bare.iter().any(|pattern| line.contains(pattern.as_str())) {
                     offenders.push(format!("{}:{}", path.display(), number + 1));
                 }
             }
@@ -2505,6 +3184,82 @@ mod tests {
         assert!(
             offenders.is_empty(),
             "pass interface literals through tr! so a missing catalog entry fails the build: {offenders:?}"
+        );
+    }
+
+    /// Toast copy that reaches `Language::localize` as a constant or seam value
+    /// rather than a `tr!` literal, so the build cannot check it.
+    #[test]
+    fn toast_sources_passed_by_value_are_cataloged() {
+        use crate::entry_state::{FolderScanDisposition as Scan, folder_scan_user_message};
+        let folder_scan = [
+            Scan::Discard,
+            Scan::InstallScanAt(0),
+            Scan::InstallSelectedOnly,
+            Scan::InstallScanFirstAfterSelectedMissing,
+            Scan::SelectedMissing,
+            Scan::SelectedMissingLimitExceeded,
+            Scan::SelectedMissingScanFailed,
+            Scan::InstallSelectedOnlyLimitExceeded,
+            Scan::InstallSelectedOnlyScanFailed,
+            Scan::OpenFolderEmpty,
+            Scan::OpenFolderLimitExceeded,
+            Scan::OpenFolderFailed,
+            Scan::OpenFolderFirst,
+        ]
+        .into_iter()
+        .filter_map(folder_scan_user_message);
+        let constants = [
+            crate::session::MISSING_IMAGE_STATUS,
+            crate::chrome::RATING_RECOVERY_STATUS,
+            crate::chrome::RATING_DISCOVERY_WRITE_STATUS,
+            crate::chrome::SAVE_RECOVERY_STATUS,
+            crate::crop_state::PREVIEW_RECOVERY_STATUS,
+            crate::pages::edit_blocks_page_step_copy(),
+            crate::theme::appearance_save_failure_message(),
+            crate::folder_sort_preference::save_failure_message(),
+            save_failure_message(),
+        ];
+        let mut checked = 0;
+        for source in folder_scan.chain(constants) {
+            assert!(is_cataloged(source), "uncataloged toast source: {source}");
+            for language in [Language::Spanish, Language::French, Language::German] {
+                assert_ne!(
+                    language.text(source),
+                    source,
+                    "{language:?} copies English: {source}"
+                );
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 18);
+    }
+
+    #[test]
+    fn fill_substitutes_translated_placeholders_once() {
+        assert_eq!(
+            Language::French
+                .fill(tr!("Save failed: {error}"), &[("error", "disk full")])
+                .as_str(),
+            "Échec de l’enregistrement : disk full"
+        );
+        assert_eq!(
+            Language::English
+                .fill(tr!("Save failed: {error}"), &[("error", "{error} {count}")])
+                .as_str(),
+            "Save failed: {error} {count}",
+            "a substituted value is inserted verbatim, never rescanned"
+        );
+        assert_eq!(
+            Language::English
+                .fill(tr!("Save failed: {error}"), &[])
+                .as_str(),
+            "Save failed: {error}",
+            "a missing value stays visible instead of vanishing"
+        );
+        assert_eq!(
+            Language::German.localize(tr!("Close")).into_string(),
+            "Schließen"
         );
     }
 
@@ -2554,6 +3309,37 @@ mod tests {
             assert!(!message.spanish.is_empty());
             assert!(!message.french.is_empty());
             assert!(!message.german.is_empty());
+        }
+    }
+
+    fn placeholders(text: &str) -> Vec<&str> {
+        let mut names: Vec<&str> = text
+            .split('{')
+            .skip(1)
+            .filter_map(|tail| tail.split_once('}').map(|(name, _)| name))
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[test]
+    fn every_translation_keeps_its_source_placeholders_and_is_unique() {
+        let mut sources = std::collections::HashSet::new();
+        for message in MESSAGES {
+            assert!(
+                sources.insert(message.english),
+                "duplicate catalog source: {}",
+                message.english
+            );
+            let expected = placeholders(message.english);
+            for translated in [message.spanish, message.french, message.german] {
+                assert_eq!(
+                    placeholders(translated),
+                    expected,
+                    "placeholder drift in {translated:?} for {:?}",
+                    message.english
+                );
+            }
         }
     }
 

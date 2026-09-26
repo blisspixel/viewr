@@ -5,6 +5,8 @@
 
 use std::path::Path;
 
+use crate::locale::{Language, Localized, tr};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PresentationKind {
     Loaded,
@@ -113,22 +115,21 @@ pub(super) fn user_facing_decode_error(error: impl std::fmt::Display) -> String 
     }
 }
 
-/// One-line status for a failed decode outside the empty-state card.
-#[must_use]
-pub(super) fn decode_failure_status(error: impl std::fmt::Display) -> String {
-    format!("Could not decode: {}", user_facing_decode_error(error))
-}
-
 /// Decode-failure toast copy. The last-good-frame clause is true only when a
 /// previous picture is still on the canvas.
 #[must_use]
-pub(super) fn decode_failure_toast(error: &str, previous_image_visible: bool) -> String {
-    let message = decode_failure_status(error);
-    if previous_image_visible {
-        format!("{message}. The previous image remains visible; Retry is available.")
+pub(super) fn decode_failure_toast(
+    language: Language,
+    error: &str,
+    previous_image_visible: bool,
+) -> Localized {
+    let error = user_facing_decode_error(error);
+    let template = if previous_image_visible {
+        tr!("Could not decode: {error}. The previous image remains visible; Retry is available.")
     } else {
-        format!("{message}. Retry is available.")
-    }
+        tr!("Could not decode: {error}. Retry is available.")
+    };
+    language.fill(template, &[("error", &error)])
 }
 
 pub(super) fn preview_job_matches(
@@ -149,10 +150,11 @@ pub(super) fn preview_job_matches(
 mod tests {
     use super::{
         ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-        decode_failure_status, decode_failure_toast, durable_presentation_error,
+        decode_failure_toast, durable_presentation_error,
         external_edit_pending_after_frame_transition, image_open_in_progress,
         navigation_image_plan, preview_job_matches, user_facing_decode_error,
     };
+    use crate::locale::Language;
     use std::path::Path;
 
     #[test]
@@ -303,16 +305,26 @@ mod tests {
             "truncated"
         );
         assert_eq!(
-            decode_failure_status("could not open image: unsupported core image format"),
-            "Could not decode: unsupported core image format"
+            decode_failure_toast(
+                Language::English,
+                "could not open image: unsupported core image format",
+                false
+            )
+            .as_str(),
+            "Could not decode: unsupported core image format. Retry is available."
         );
         assert_eq!(
-            decode_failure_toast("format error", true),
+            decode_failure_toast(Language::English, "format error", true).as_str(),
             "Could not decode: format error. The previous image remains visible; Retry is available."
         );
         assert_eq!(
-            decode_failure_toast("Could not decode: format error", false),
+            decode_failure_toast(Language::English, "Could not decode: format error", false)
+                .as_str(),
             "Could not decode: format error. Retry is available."
+        );
+        assert_eq!(
+            decode_failure_toast(Language::Spanish, "format error", false).as_str(),
+            "No se pudo decodificar: format error. Puede reintentar."
         );
     }
 

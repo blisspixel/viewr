@@ -49,8 +49,10 @@ makes Spot Heal persistence explicit, provides an opt-in platform association
 guide for PNG, JPEG, and other selected types, accepts repeated fully presented
 images through one bounded serialized Trash queue, and bundles English, Spanish,
 French, and German interface catalogs covering first-run, About, Trash, wait
-copy, rating failures, and chrome including accessible names. Remaining image
-information and some preference copy still uses the documented English fallback.
+copy, rating failures, every top-chrome toast and navigation notice, and chrome
+including accessible names. Some panel copy, file-association guidance, hover
+help, and Image Information value formats still use the documented English
+fallback.
 Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.

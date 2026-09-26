@@ -3824,12 +3824,6 @@ const MESSAGES: &[Message] = &[
         german: "Grünbildschirm-Optik, fast schwarze Fläche, phosphorgrüne Oberfläche, Festbreitenschrift.",
     },
     Message {
-        english: "Photo {position} of {total} in the active folder view, selected",
-        spanish: "Foto {position} de {total} en la vista de carpeta activa, seleccionada",
-        french: "Photo {position} sur {total} dans la vue du dossier active, sélectionnée",
-        german: "Foto {position} von {total} in der aktiven Ordneransicht, ausgewählt",
-    },
-    Message {
         english: "Page {index} of {count}",
         spanish: "Página {index} de {count}",
         french: "Page {index} sur {count}",

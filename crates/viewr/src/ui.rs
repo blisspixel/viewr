@@ -764,25 +764,23 @@ fn render_mosaic_overlay(
             egui::Id::new(("full_image_mosaic", cell.catalog_index)),
             egui::Sense::click(),
         );
-        // The name carries selection until the tile exposes a native selected
-        // state; a toggled button would otherwise read as "pressed".
-        let template = if cell.selected {
-            tr!("Photo {position} of {total} in the active folder view, selected")
-        } else {
-            tr!("Photo {position} of {total} in the active folder view")
-        };
         let label = language
             .fill(
-                template,
+                tr!("Photo {position} of {total} in the active folder view"),
                 &[
                     ("position", &cell.projection_position.to_string()),
                     ("total", &cell.projection_total.to_string()),
                 ],
             )
             .into_string();
-        response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, cell.selected, label.clone())
-        });
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label.clone()));
+        mark_as_list_item(&response, cell.selected);
+        // Left and Right move the collage selection, so keyboard focus follows
+        // it. Otherwise egui's own arrow focus could leave a screen reader on
+        // one photo while Delete acts on another.
+        if cell.selected && !response.has_focus() {
+            response.request_focus();
+        }
         if response.clicked() {
             actions.push(UiAction::OpenMosaicPhoto(cell.catalog_index));
         }
@@ -1874,6 +1872,17 @@ fn top_status_max_width(ui: &egui::Ui) -> f32 {
         TOP_STATUS_MAX_WIDTH
     };
     ui.available_width().min(responsive_limit)
+}
+
+/// Expose one item of a selectable group, such as a collage photo or a folder
+/// preview, as a list item with native selected state. egui reports a selected
+/// button as a pressed toggle, which screen readers announce as "on".
+fn mark_as_list_item(response: &egui::Response, selected: bool) {
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::ListItem);
+        node.clear_toggled();
+        node.set_selected(selected);
+    });
 }
 
 fn mark_as_polite_status(response: &egui::Response) {
@@ -4266,11 +4275,15 @@ fn render_heal_guidance(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeC
     if frame.heal_busy {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(
+            let status = ui.label(
                 RichText::new(frame.text(tr!("Repairing in memory...")))
                     .size(12.0)
                     .color(colors.text),
             );
+            mark_as_polite_status(&status);
+            status
+                .ctx
+                .accesskit_node_builder(status.id, |node| node.set_busy());
         });
     }
     ui.add_space(8.0);
@@ -4449,13 +4462,9 @@ fn render_filmstrip_item(
     };
     let accessibility_label = filmstrip_accessibility_label(language, item);
     response.widget_info(|| {
-        WidgetInfo::selected(
-            WidgetType::Button,
-            ui.is_enabled(),
-            selected,
-            &accessibility_label,
-        )
+        WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &accessibility_label)
     });
+    mark_as_list_item(&response, selected);
     let response = response
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text(&item.name);
@@ -5066,11 +5075,17 @@ fn render_crop_handles(
             .interact(
                 hit_rect,
                 egui::Id::new(("crop_handle", index)),
-                Sense::drag(),
+                // Pointer only. Keyboard users move and resize the crop from
+                // the crop pane, whose name states those keys, so a handle is
+                // neither a Tab stop nor a node that cannot be activated.
+                Sense::DRAG,
             )
             .on_hover_cursor(cursor);
         response.widget_info(|| {
             WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), language.text(name))
+        });
+        response.ctx.accesskit_node_builder(response.id, |node| {
+            node.set_hidden();
         });
         if response.dragged()
             && let Some(pointer) = response.interact_pointer_pos()
@@ -5914,7 +5929,7 @@ mod tests {
     }
 
     #[test]
-    fn full_image_mosaic_exposes_photos_as_selected_buttons_without_filenames() {
+    fn full_image_mosaic_exposes_photos_as_selected_list_items_without_filenames() {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
@@ -5940,33 +5955,38 @@ mod tests {
             target: 8,
             state: MosaicLoadState::Loading,
         });
-        let output = context.run_ui(accessibility_input(), |ui| {
-            let _ = render(ui, &frame);
-        });
-        let update = output
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit update should be generated");
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update should be generated");
         let photo_nodes = update
             .nodes
             .iter()
-            .filter_map(|(_, node)| {
+            .filter(|(_, node)| {
                 node.label()
-                    .filter(|label| label.starts_with("Photo "))
-                    .map(|_| node)
+                    .is_some_and(|label| label.starts_with("Photo "))
             })
             .collect::<Vec<_>>();
         assert_eq!(photo_nodes.len(), 2);
+        let (selected_id, selected) = photo_nodes[0];
         assert_eq!(
-            photo_nodes[0].label(),
-            Some("Photo 5 of 20 in the active folder view, selected")
+            selected.label(),
+            Some("Photo 5 of 20 in the active folder view"),
+            "selection is a state, not part of the name"
         );
+        assert!(selected.is_selected() == Some(true));
+        assert_eq!(photo_nodes[1].1.is_selected(), Some(false));
         assert_eq!(
-            photo_nodes[0].toggled(),
-            Some(egui::accesskit::Toggled::True)
+            update.focus, *selected_id,
+            "keyboard focus stays on the selected photo"
         );
-        assert!(photo_nodes.iter().all(|node| {
-            node.role() == egui::accesskit::Role::Button
+        assert!(photo_nodes.iter().all(|(_, node)| {
+            node.role() == egui::accesskit::Role::ListItem
+                && node.toggled().is_none()
                 && !node.label().unwrap_or_default().contains("current.png")
         }));
         assert!(update.nodes.iter().any(|(_, node)| {
@@ -6204,11 +6224,9 @@ mod tests {
             .iter()
             .find(|node| node.label() == Some("image 1: current.png"))
             .expect("current thumbnail node");
-        assert_eq!(current_thumbnail.role(), egui::accesskit::Role::Button);
-        assert_eq!(
-            current_thumbnail.toggled(),
-            Some(egui::accesskit::Toggled::True)
-        );
+        assert_eq!(current_thumbnail.role(), egui::accesskit::Role::ListItem);
+        assert_eq!(current_thumbnail.is_selected(), Some(true));
+        assert_eq!(current_thumbnail.toggled(), None);
     }
 
     #[test]
@@ -7957,6 +7975,65 @@ mod tests {
                 variant(|frame| frame.load_error = Some("truncated".to_owned())),
             ),
         ]
+    }
+
+    fn accesskit_nodes(frame: &UiFrameOwned) -> Vec<egui::accesskit::Node> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        update
+            .expect("AccessKit update")
+            .nodes
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect()
+    }
+
+    #[test]
+    fn crop_handles_are_pointer_only_and_hidden_from_assistive_technology() {
+        let mut frame = accessibility_test_frame();
+        frame.is_cropping = true;
+        frame.crop_screen = Some([200.0, 150.0, 800.0, 600.0]);
+        frame.crop_uv = Some([0.1, 0.1, 0.9, 0.9]);
+        let nodes = accesskit_nodes(&frame);
+        let handles: Vec<_> = nodes
+            .iter()
+            .filter(|node| {
+                node.label()
+                    .is_some_and(|label| label.starts_with("Resize crop from"))
+            })
+            .collect();
+        assert_eq!(handles.len(), 8);
+        assert!(handles.iter().all(|node| node.is_hidden()));
+        assert!(
+            nodes.iter().any(|node| node
+                .label()
+                .is_some_and(|label| label.starts_with("Crop selection:"))),
+            "the keyboard crop pane still names its move and resize keys"
+        );
+    }
+
+    #[test]
+    fn spot_heal_repair_is_announced_as_busy_status() {
+        let mut frame = accessibility_test_frame();
+        frame.dock.heal_active = true;
+        frame.heal_busy = true;
+        let nodes = accesskit_nodes(&frame);
+        let status = nodes
+            .iter()
+            .find(|node| {
+                node.label() == Some("Repairing in memory...")
+                    || node.value() == Some("Repairing in memory...")
+            })
+            .expect("repair status node");
+        assert!(status.is_busy());
+        assert_eq!(status.live(), Some(egui::accesskit::Live::Polite));
     }
 
     #[test]

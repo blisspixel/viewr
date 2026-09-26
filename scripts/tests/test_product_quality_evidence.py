@@ -1711,6 +1711,89 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             self.assertEqual(evidence.main(["fixture-manifest", str(fixture_root)]), 1)
         self.assertIn("refusing to replace", error.getvalue())
 
+    def test_rollup_command_prints_an_observation_the_gate_parses_back_exactly(
+        self,
+    ) -> None:
+        platform = "linux"
+        for session in evidence.PERFORMANCE_SESSIONS[platform]:
+            self.write_performance_report(
+                session, platform, MAIN_SHA256, DECODER_SHA256
+            )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(
+                evidence.main(
+                    [
+                        "rollup",
+                        str(self.directory),
+                        "--platform",
+                        platform,
+                        "--viewr-sha256",
+                        MAIN_SHA256,
+                        "--viewr-decode-sha256",
+                        DECODER_SHA256,
+                    ]
+                ),
+                0,
+            )
+        observation = output.getvalue().strip()
+        seen: set[str] = set()
+        summaries = [
+            evidence._validate_performance_report(
+                self.directory / "performance" / f"{session}.json",
+                session,
+                evidence.PERFORMANCE_HOST_PLATFORMS[platform],
+                {"viewr": MAIN_SHA256, "viewr-decode": DECODER_SHA256},
+                seen,
+                set(),
+            )
+            for session in evidence.PERFORMANCE_SESSIONS[platform]
+        ]
+        recorded = evidence._validate_performance_observation(
+            self.directory / "linux.md",
+            platform,
+            {"PQ-VS-04": evidence.Result("Pass", observation)},
+        )
+        self.assertEqual(recorded, evidence.performance_rollup(summaries))
+        self.assertNotIn("e-", observation.lower().replace("decode", ""))
+
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(
+                evidence.main(
+                    [
+                        "rollup",
+                        str(self.directory),
+                        "--platform",
+                        platform,
+                        "--viewr-sha256",
+                        "0" * 64,
+                        "--viewr-decode-sha256",
+                        DECODER_SHA256,
+                    ]
+                ),
+                1,
+            )
+        self.assertTrue(error.getvalue(), "a digest mismatch is reported, not printed")
+
+    def test_performance_numbers_never_use_exponent_notation(self) -> None:
+        rollup = {
+            label: 0.00001
+            if label not in {"idle redraws", "file count", "cache count"}
+            else 1
+            for label in evidence.PERFORMANCE_PATTERNS
+        }
+        text = evidence.format_performance_observation(
+            "windows",
+            rollup,
+            {"viewr": MAIN_SHA256, "viewr-decode": DECODER_SHA256},
+        )
+        self.assertIn("window ready: 0.00001 ms", text)
+        for label, pattern in evidence.PERFORMANCE_PATTERNS.items():
+            match = pattern.search(text)
+            self.assertIsNotNone(match, label)
+            self.assertEqual(evidence._performance_value(match), rollup[label])
+
     def test_main_reports_success_and_failure(self) -> None:
         path = self.write_record("windows")
         output = io.StringIO()

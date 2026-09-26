@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import decimal
 import hashlib
 import hmac
 import json
@@ -1695,47 +1696,7 @@ def verify_performance_reports(
         summaries[record.platform] = platform_summaries
 
     for record in records:
-        rollup = {
-            "window ready": max(
-                float(summary["window_ready_ms"])
-                for summary in summaries[record.platform]
-            ),
-            "first pixel": max(
-                float(summary["first_pixel_ms"])
-                for summary in summaries[record.platform]
-            ),
-            "navigation": max(
-                float(summary["navigation_max_ms"])
-                for summary in summaries[record.platform]
-            ),
-            "idle redraws": max(
-                int(summary["idle_redraws"]) for summary in summaries[record.platform]
-            ),
-            "small RSS": max(
-                float(summary["small_rss_mib"])
-                for summary in summaries[record.platform]
-            ),
-            "large RSS": max(
-                float(summary["large_rss_mib"])
-                for summary in summaries[record.platform]
-            ),
-            "folder growth": max(
-                float(summary["folder_growth_mib"])
-                for summary in summaries[record.platform]
-            ),
-            "file count": min(
-                int(summary["large_folder_images"])
-                for summary in summaries[record.platform]
-            ),
-            "cache count": min(
-                int(summary["cache_stress_entries"])
-                for summary in summaries[record.platform]
-            ),
-            "cache MiB": min(
-                float(summary["cache_stress_mib"])
-                for summary in summaries[record.platform]
-            ),
-        }
+        rollup = performance_rollup(summaries[record.platform])
         recorded = _validate_performance_observation(
             record.path, record.platform, record.results
         )
@@ -1743,6 +1704,100 @@ def verify_performance_reports(
             raise EvidenceError(
                 f"{record.path}: PQ-VS-04 rollup does not match session reports"
             )
+
+
+def performance_rollup(
+    summaries: Sequence[Mapping[str, int | float]],
+) -> dict[str, float]:
+    """Worst case across one platform's session summaries, as PQ-VS-04 records it."""
+    return {
+        "window ready": max(float(summary["window_ready_ms"]) for summary in summaries),
+        "first pixel": max(float(summary["first_pixel_ms"]) for summary in summaries),
+        "navigation": max(float(summary["navigation_max_ms"]) for summary in summaries),
+        "idle redraws": max(int(summary["idle_redraws"]) for summary in summaries),
+        "small RSS": max(float(summary["small_rss_mib"]) for summary in summaries),
+        "large RSS": max(float(summary["large_rss_mib"]) for summary in summaries),
+        "folder growth": max(
+            float(summary["folder_growth_mib"]) for summary in summaries
+        ),
+        "file count": min(int(summary["large_folder_images"]) for summary in summaries),
+        "cache count": min(
+            int(summary["cache_stress_entries"]) for summary in summaries
+        ),
+        "cache MiB": min(float(summary["cache_stress_mib"]) for summary in summaries),
+    }
+
+
+def format_performance_observation(
+    platform: str,
+    rollup: Mapping[str, float],
+    executable_sha256: Mapping[str, str],
+) -> str:
+    """Render the PQ-VS-04 observation that the gate parses back exactly.
+
+    Values keep every digit of the report, without exponent notation, so the
+    recorded rollup equals the recomputed one.
+    """
+
+    def number(label: str) -> str:
+        return format(decimal.Decimal(repr(float(rollup[label]))).normalize(), "f")
+
+    def integer(label: str) -> str:
+        return str(int(rollup[label]))
+
+    reports = ", ".join(
+        f"performance/{session}.json" for session in PERFORMANCE_SESSIONS[platform]
+    )
+    return (
+        f"window ready: {number('window ready')} ms; "
+        f"first pixel: {number('first pixel')} ms; "
+        f"navigation: {number('navigation')} ms; "
+        f"idle redraws: {integer('idle redraws')}; "
+        f"small RSS: {number('small RSS')} MiB; "
+        f"large RSS: {number('large RSS')} MiB; "
+        f"folder growth: {number('folder growth')} MiB; "
+        f"file count: {integer('file count')} files; "
+        f"cache count: {integer('cache count')} entries; "
+        f"cache MiB: {number('cache MiB')} MiB; "
+        f"viewr sha256: {executable_sha256['viewr']}; "
+        f"viewr-decode sha256: {executable_sha256['viewr-decode']}. "
+        f"Reports: {reports}."
+    )
+
+
+def local_performance_rollup(
+    evidence_root: Path,
+    platform: str,
+    executable_sha256: Mapping[str, str],
+) -> str:
+    """Validate one platform's retained reports offline and print its rollup.
+
+    This runs the same report checks as the gate, bound to the given
+    executable digests, so a report problem is found on the machine that
+    produced it rather than after every platform is complete.
+    """
+    report_root = _require_directory(
+        evidence_root / "performance",
+        "performance report directory",
+        root=evidence_root,
+        direct_child=True,
+    )
+    seen_run_signatures: set[str] = set()
+    seen_display_identities: set[str] = set()
+    summaries = [
+        _validate_performance_report(
+            report_root / f"{session}.json",
+            session,
+            PERFORMANCE_HOST_PLATFORMS[platform],
+            executable_sha256,
+            seen_run_signatures,
+            seen_display_identities,
+        )
+        for session in PERFORMANCE_SESSIONS[platform]
+    ]
+    return format_performance_observation(
+        platform, performance_rollup(summaries), executable_sha256
+    )
 
 
 def _load_run_metadata(run_id: int) -> dict[str, object]:
@@ -1972,13 +2027,41 @@ def _parser() -> argparse.ArgumentParser:
         "fixture-manifest", help="checksum a newly generated fixture directory"
     )
     fixtures.add_argument("directory", type=Path)
+    rollup = subparsers.add_parser(
+        "rollup",
+        help="validate one platform's performance reports and print its PQ-VS-04 line",
+    )
+    rollup.add_argument("directory", type=Path)
+    rollup.add_argument(
+        "--platform", required=True, choices=sorted(PERFORMANCE_SESSIONS)
+    )
+    rollup.add_argument("--viewr-sha256", required=True, type=_sha256_argument)
+    rollup.add_argument("--viewr-decode-sha256", required=True, type=_sha256_argument)
     return parser
+
+
+def _sha256_argument(value: str) -> str:
+    if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise argparse.ArgumentTypeError("expected a lowercase SHA-256 digest")
+    return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the evidence validator."""
     args = _parser().parse_args(argv)
     try:
+        if args.command == "rollup":
+            print(
+                local_performance_rollup(
+                    args.directory,
+                    args.platform,
+                    {
+                        "viewr": args.viewr_sha256,
+                        "viewr-decode": args.viewr_decode_sha256,
+                    },
+                )
+            )
+            return 0
         if args.command == "fixture-manifest":
             digest = write_fixture_checksums(args.directory)
             print(f"product-quality fixture manifest created: {digest}")

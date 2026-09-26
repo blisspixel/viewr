@@ -93,6 +93,10 @@ Sources reviewed 2026-07-29.
   during a rating write waits until the write settles before it re-applies the
   filter, so the selection follows the final rating. Filter choices remain
   available so selecting All images can cancel discovery.
+- Folder navigation continues while a rating write runs. The write is bound to
+  its own path and verified source, and no neighbor decode, cached decode, or
+  navigation may read that path until the write settles. If recovery fails, the
+  file is marked unreadable in the folder even when the view has moved on.
 - Fit Image to View moves to the primary modifier plus `0`. Actual Size moves to
   the primary modifier plus `1`. Both remain visible in View.
 - Edit > Rating exposes Unrated and 1 through 5 for discovery and pointer or

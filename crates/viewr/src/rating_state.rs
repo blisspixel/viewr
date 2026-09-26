@@ -79,6 +79,42 @@ pub(crate) const fn rating_write_target_is_current(
     selected_matches && presented_matches
 }
 
+/// What a settled rating write does to the view. Browsing may have moved on
+/// while the write ran, so the written file can be on screen, selected, both,
+/// or neither.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SettledWriteView {
+    /// The written file is on screen and selected: adopt the settled source and
+    /// reload its details.
+    AdoptPresented,
+    /// The written file stays on screen while another image loads: adopt the
+    /// settled source and leave details to the incoming image.
+    AdoptBehindIncoming,
+    /// The written file was selected again while its write ran, and that load
+    /// began from the file or cache before the write settled. It restarts from
+    /// the settled file.
+    ReloadSelected,
+    /// Browsing moved on: only the folder's record of the file changes.
+    FolderOnly,
+}
+
+#[must_use]
+pub(crate) const fn settled_write_view(
+    presented_is_written: bool,
+    selected_is_written: bool,
+    selected_load_pending: bool,
+) -> SettledWriteView {
+    if selected_is_written && selected_load_pending {
+        SettledWriteView::ReloadSelected
+    } else if presented_is_written && selected_is_written {
+        SettledWriteView::AdoptPresented
+    } else if presented_is_written {
+        SettledWriteView::AdoptBehindIncoming
+    } else {
+        SettledWriteView::FolderOnly
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RatingDiscoveryTransition {
     Apply,
@@ -474,5 +510,41 @@ mod tests {
                 RatingCloseDisposition::StayOpen
             );
         }
+    }
+
+    #[test]
+    fn a_settled_write_never_leaves_a_pre_write_load_of_its_file_running() {
+        use super::{SettledWriteView, settled_write_view};
+        // Selected again while the write ran, with or without the old frame
+        // still on screen: the load may hold the pre-write source.
+        for presented in [false, true] {
+            assert_eq!(
+                settled_write_view(presented, true, true),
+                SettledWriteView::ReloadSelected
+            );
+        }
+        assert_eq!(
+            settled_write_view(true, true, false),
+            SettledWriteView::AdoptPresented
+        );
+        assert_eq!(
+            settled_write_view(true, false, true),
+            SettledWriteView::AdoptBehindIncoming
+        );
+        assert_eq!(
+            settled_write_view(true, false, false),
+            SettledWriteView::AdoptBehindIncoming
+        );
+        for pending in [false, true] {
+            assert_eq!(
+                settled_write_view(false, false, pending),
+                SettledWriteView::FolderOnly
+            );
+        }
+        assert_eq!(
+            settled_write_view(false, true, false),
+            SettledWriteView::FolderOnly,
+            "a settled presentation of the written file already verified its source"
+        );
     }
 }

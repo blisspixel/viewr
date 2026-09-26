@@ -47,8 +47,8 @@ use crate::curation_state::{
     single_trash_result_message,
 };
 use crate::current_work::{
-    ActiveModeAllowance, BlockedAction, CurrentWork, blocked_action_message, browse_work_blocker,
-    crop_work, curation_action_preflight, curation_work, current_work_blocker,
+    ActiveModeAllowance, BlockedAction, BrowseTarget, CurrentWork, blocked_action_message,
+    browse_work_blocker, crop_work, curation_action_preflight, curation_work, current_work_blocker,
     image_preparation_work, spot_heal_source_blocker, spot_heal_work,
     trash_submission_work_blocker,
 };
@@ -88,11 +88,11 @@ use crate::presentation::{
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
-    RatingRecoveryTransition, RatingWriteTerminal, auxiliary_disconnect_message,
+    RatingRecoveryTransition, RatingWriteTerminal, SettledWriteView, auxiliary_disconnect_message,
     next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
     rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
     rating_recovery_blocker, rating_write_failure_message, rating_write_target_is_current,
-    reconcile_rating_write,
+    reconcile_rating_write, settled_write_view,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
@@ -2934,6 +2934,12 @@ impl App {
             std::mem::take(&mut self.close_after_rating_write),
             terminal_error,
         );
+        let presented_is_written = self.session.presented_path.as_ref() == Some(&worker.path);
+        let view = settled_write_view(
+            presented_is_written,
+            self.session.selected_path.as_ref() == Some(&worker.path),
+            self.session.is_loading() || self.preview_job.is_some(),
+        );
         match result {
             Ok(verified) => {
                 self.remove_prefetched_image(&worker.path);
@@ -2943,15 +2949,22 @@ impl App {
                         playlist.set_scan_provenance(&worker.path, Some(provenance));
                     }
                 }
-                if self.session.presented_path.as_ref() == Some(&worker.path) {
+                if presented_is_written {
                     self.presented_rating = next_presented_rating(
                         self.presented_rating,
                         PresentedRatingTransition::Replace(verified.state),
                     );
                     self.current_source = Some(Arc::new(verified.source));
                     self.current_rating_capability = RatingWriteCapability::WritableJpeg;
-                    self.start_coherence_watch();
-                    self.start_auxiliary_load(&worker.path);
+                }
+                match view {
+                    SettledWriteView::AdoptPresented => {
+                        self.start_coherence_watch();
+                        self.start_auxiliary_load(&worker.path);
+                    }
+                    // The incoming image starts its own watch and details.
+                    SettledWriteView::AdoptBehindIncoming => self.stop_coherence_watch(),
+                    SettledWriteView::ReloadSelected | SettledWriteView::FolderOnly => {}
                 }
                 match worker.assignment {
                     RatingAssignment::Clear => {
@@ -2972,6 +2985,12 @@ impl App {
                         self.rating_recovery_unsettled,
                         RatingRecoveryTransition::MarkUnsettled,
                     );
+                    // Browsing may have moved on and retained the old decode;
+                    // the file's state is unknown wherever the view now is.
+                    self.remove_prefetched_image(&worker.path);
+                    if let Some(playlist) = self.playlist.as_mut() {
+                        playlist.set_rating(&worker.path, RatingState::Unreadable);
+                    }
                     if self.session.presented_path.as_ref() == Some(&worker.path) {
                         self.current_source = None;
                         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
@@ -2980,15 +2999,18 @@ impl App {
                             self.presented_rating,
                             PresentedRatingTransition::Replace(RatingState::Unreadable),
                         );
-                        if let Some(playlist) = self.playlist.as_mut() {
-                            playlist.set_rating(&worker.path, RatingState::Unreadable);
-                        }
                     }
                 }
                 self.show_status_toast(Localized::from_translated_seam(
                     rating_write_failure_message(self.language, error),
                 ));
             }
+        }
+        if view == SettledWriteView::ReloadSelected {
+            // The pending load read the file or a cached decode before the
+            // write settled, so it restarts from the settled file.
+            self.remove_prefetched_image(&worker.path);
+            self.spawn_refreshed_image_load(worker.path.clone());
         }
         self.kick_prefetch();
         self.request_redraw();
@@ -3786,7 +3808,8 @@ impl App {
             self.leave_full_image_mosaic();
             return;
         }
-        if self.block_browse_while_busy() {
+        // The collage may decode the file a rating write is replacing.
+        if self.block_browse_while_busy(BrowseTarget::RatingWriteTarget) {
             return;
         }
         let Some(playlist) = self.playlist.as_ref() else {
@@ -4498,11 +4521,23 @@ impl App {
 
     fn go_to_index(&mut self, new_index: usize) {
         self.cancel_open_with_check();
-        if self.block_browse_while_busy() {
+        if self.block_browse_while_busy(self.browse_target(new_index)) {
             return;
         }
         self.toast.dismiss_navigation_notice();
         self.go_to_index_ready(new_index);
+    }
+
+    fn browse_target(&self, index: usize) -> BrowseTarget {
+        BrowseTarget::for_image(
+            self.playlist
+                .as_ref()
+                .and_then(|playlist| playlist.files.get(index))
+                .map(PathBuf::as_path),
+            self.rating_write_worker
+                .as_ref()
+                .map(|worker| worker.path.as_path()),
+        )
     }
 
     /// Navigate after a caller has completed its own mutation preflight.
@@ -4584,7 +4619,11 @@ impl App {
         if !neighbor_decode_may_start(self.session.is_loading(), self.mosaic.is_active()) {
             return;
         }
-        let blocked = self.pending_source_removal_paths();
+        let mut blocked = self.pending_source_removal_paths();
+        // A neighbor decode must not race a rating write's atomic replacement.
+        if let Some(worker) = self.rating_write_worker.as_ref() {
+            blocked.insert(worker.path.clone());
+        }
         let Some(playlist) = &self.playlist else {
             return;
         };
@@ -4997,8 +5036,10 @@ impl App {
         self.block_action_with_mode_allowance(action, ActiveModeAllowance::SpotHeal)
     }
 
-    fn block_browse_while_busy(&mut self) -> bool {
-        if let Some(blocker) = browse_work_blocker(self.active_work(ActiveModeAllowance::None)) {
+    fn block_browse_while_busy(&mut self, target: BrowseTarget) -> bool {
+        if let Some(blocker) =
+            browse_work_blocker(self.active_work(ActiveModeAllowance::None), target)
+        {
             self.refuse_blocked_action(BlockedAction::Browse, blocker);
             true
         } else {

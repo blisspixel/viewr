@@ -298,6 +298,10 @@ and unsupported containers, remain visibly read-only.
   fills only entries that are still loading, so a scan that observed the previous
   value cannot replace a value written while it ran. Filter controls remain
   available during discovery so the user can cancel it by showing all images.
+- Browsing continues while a rating write finishes, so rate then advance never
+  waits for the file to be replaced. Only a request that would decode the file
+  being written waits for it: returning to that image, or opening the full-image
+  collage. Other commands still wait for the write to settle.
   When no image matches the filter, Escape or folder-navigation keys restore All
   images instead of doing nothing.
 - One canonical folder catalog in the selected session order owns Trash and Undo

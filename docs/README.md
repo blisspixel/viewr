@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.6.4
+- [Install and update](INSTALL.md): current source builds, current v0.6.5
   one-command installers, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
@@ -37,7 +37,10 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.6.4 release notes](releases/v0.6.4.md): the current shipped-feedback
+- [v0.6.5 release notes](releases/v0.6.5.md): the current shipped-feedback
+  patch for page identity, substitution notices, and rating scope in the top
+  status.
+- [v0.6.4 release notes](releases/v0.6.4.md): the shipped-feedback
   patch for network storage, O(1) playlist indexing, and responsive culling.
 - [v0.6.3 release notes](releases/v0.6.3.md): the shipped-feedback
   patch for remaining recovery copy and Image Information.

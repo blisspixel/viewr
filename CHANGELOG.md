@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.6.5 - 2026-09-25
 
 ### Playtest feedback
 

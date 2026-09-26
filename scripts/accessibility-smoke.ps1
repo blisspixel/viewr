@@ -669,13 +669,14 @@ function Wait-ForSelectionState {
         [string]$Name,
         [Parameter(Mandatory)]
         [bool]$Selected,
-        [switch]$Prefix
+        [switch]$Prefix,
+        [System.Windows.Automation.ControlType]$ControlType = (
+            [System.Windows.Automation.ControlType]::RadioButton
+        )
     )
 
     return Wait-ForResult -Description "'$Name' selected state $Selected" -Probe {
-        $element = Get-Element -Name $Name -Prefix:$Prefix -ControlType (
-            [System.Windows.Automation.ControlType]::RadioButton
-        )
+        $element = Get-Element -Name $Name -Prefix:$Prefix -ControlType $ControlType
         if ($null -ne $element -and (Get-SelectionState -Element $element) -eq $Selected) {
             return $element
         }
@@ -1495,16 +1496,23 @@ try {
     Wait-ForElement -Name "Collapse folder previews" -ControlType (
         [System.Windows.Automation.ControlType]::Button
     ) | Out-Null
-    Wait-ForElement -Name "image 1: first.png" -ControlType (
-        [System.Windows.Automation.ControlType]::Button
-    ) | Out-Null
-    $secondThumbnail = Wait-ForElement -Name "image 2: second.png" -ControlType (
-        [System.Windows.Automation.ControlType]::Button
-    )
-    Activate-Element -Element $secondThumbnail
+    # Folder previews are list items with native selected state, so a screen
+    # reader hears which image is current rather than a pressed toggle.
+    $listItem = [System.Windows.Automation.ControlType]::ListItem
+    Wait-ForSelectionState -Name "image 1: first.png" -Selected $true -ControlType $listItem |
+        Out-Null
+    $secondThumbnail = Wait-ForSelectionState `
+        -Name "image 2: second.png" `
+        -Selected $false `
+        -ControlType $listItem
+    Select-Element -Element $secondThumbnail
     Wait-ForElement -Name "2 / 2" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
+    Wait-ForSelectionState -Name "image 2: second.png" -Selected $true -ControlType $listItem |
+        Out-Null
+    Wait-ForSelectionState -Name "image 1: first.png" -Selected $false -ControlType $listItem |
+        Out-Null
 
     Stop-TestApplication
     Add-Type -AssemblyName PresentationCore

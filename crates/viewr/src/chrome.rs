@@ -3,7 +3,7 @@
 //! The event loop owns every mutable fact. This module projects those facts into
 //! immutable control state so egui and native accessibility remain thin adapters.
 
-use crate::locale::Language;
+use crate::locale::{Language, tr};
 /// Logical height reserved for the persistent menu and image status bar.
 pub const TOP_BAR_HEIGHT: f32 = 40.0;
 /// Logical width of the collapsed tools rail.
@@ -636,6 +636,12 @@ pub(crate) struct ChromeViewModel {
 }
 
 impl ChromeViewModel {
+    /// Interface language the projection was built for.
+    #[must_use]
+    pub(crate) const fn language(self) -> Language {
+        self.input.language
+    }
+
     #[must_use]
     pub fn new(input: ChromeInput) -> Self {
         Self {
@@ -1074,23 +1080,80 @@ pub(crate) fn rating_filter_label(
     }
 }
 
-pub(crate) fn appearance_menu_label(preference: crate::theme::Preference) -> String {
-    format!("Appearance: {}", preference.name())
+pub(crate) fn appearance_menu_label(
+    language: Language,
+    preference: crate::theme::Preference,
+) -> String {
+    language
+        .fill(
+            tr!("Appearance: {name}"),
+            &[("name", language.text(preference.name()))],
+        )
+        .into_string()
+}
+
+/// Translated chooser description. The English source copy lives in `theme`,
+/// whose public API stays language-neutral.
+fn appearance_description(
+    language: Language,
+    preference: crate::theme::Preference,
+    current_system_mode: Option<crate::theme::Mode>,
+) -> String {
+    use crate::theme::{Mode, Preference};
+    match (preference, current_system_mode) {
+        (Preference::System, Some(mode @ (Mode::Light | Mode::Dark))) => language
+            .fill(
+                tr!("Follows your operating system. Currently {mode}."),
+                &[("mode", language.text(mode.name()))],
+            )
+            .into_string(),
+        (Preference::System, Some(Mode::Console) | None) => language
+            .text(tr!(
+                "Follows your operating system's Light or Dark setting."
+            ))
+            .to_owned(),
+        (Preference::Light, _) => language
+            .text(tr!(
+                "Bright neutral chrome, light window frame, soft-white canvas."
+            ))
+            .to_owned(),
+        (Preference::Dark, _) => language
+            .text(tr!(
+                "Low-glare charcoal chrome, dark window frame, deep-ink canvas."
+            ))
+            .to_owned(),
+        (Preference::Console, _) => language
+            .text(tr!(
+                "Green-screen look, near-black canvas, phosphor-green chrome, monospaced type."
+            ))
+            .to_owned(),
+    }
 }
 
 pub(crate) fn appearance_choices(
+    language: Language,
     current: crate::theme::Preference,
     resolved: crate::theme::Mode,
 ) -> Vec<AppearanceChoiceView> {
     let current_system_mode = (current == crate::theme::Preference::System).then_some(resolved);
     crate::theme::Preference::ALL
         .into_iter()
-        .map(|preference| AppearanceChoiceView {
-            preference,
-            label: preference.name(),
-            description: preference.description(current_system_mode),
-            selected: current == preference,
-            accessibility_label: preference.accessible_label(current_system_mode),
+        .map(|preference| {
+            let label = language.text(preference.name());
+            let description = appearance_description(language, preference, current_system_mode);
+            let accessibility_label = language
+                .fill(
+                    tr!("{label}: {value}"),
+                    &[("label", label), ("value", &description)],
+                )
+                .into_string();
+            AppearanceChoiceView {
+                preference,
+                label,
+                description,
+                selected: current == preference,
+                accessibility_label,
+            }
         })
         .collect()
 }
@@ -1923,7 +1986,7 @@ mod tests {
             assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
         }
         for preference in crate::theme::Preference::ALL {
-            let choices = appearance_choices(preference, crate::theme::Mode::Dark);
+            let choices = appearance_choices(EN, preference, crate::theme::Mode::Dark);
             assert_eq!(choices.len(), 4);
             assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
             assert!(choices.iter().all(|choice| !choice.description.is_empty()));

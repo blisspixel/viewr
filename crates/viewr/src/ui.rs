@@ -84,12 +84,18 @@ const TOP_METADATA_GAP: f32 = 8.0;
 /// spacing the menu titles beside it use.
 const TOP_METADATA_SPACING: f32 = 2.0;
 
-const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
+const OPEN_FILE_SCOPE_HELP: &str = tr!(
+    "Open one image. When access allows, viewr also browses supported images in its folder for this session."
+);
 const OPEN_FOLDER_SCOPE_HELP: &str =
-    "Choose a folder explicitly and browse its supported images for this session.";
-const OPEN_WITH_HELP: &str = "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost.";
+    tr!("Choose a folder explicitly and browse its supported images for this session.");
+const OPEN_WITH_HELP: &str = tr!(
+    "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost."
+);
 const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.";
-const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
+const APPEARANCE_SCOPE_HELP: &str = tr!(
+    "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately."
+);
 const EXTERNAL_EDIT_BADGE: &str = "External F5";
 const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
 const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMINDER;
@@ -678,7 +684,7 @@ fn render_background(
     colors: ChromeColors,
 ) {
     if let Some(mosaic) = frame.mosaic.as_ref() {
-        render_mosaic_overlay(ui, actions, mosaic, colors);
+        render_mosaic_overlay(ui, actions, mosaic, colors, frame.language);
         if let Some(toast) = &frame.toast {
             render_toast(ui, toast, frame);
         }
@@ -745,6 +751,7 @@ fn render_mosaic_overlay(
     actions: &mut Vec<UiAction>,
     mosaic: &MosaicUiState,
     colors: ChromeColors,
+    language: Language,
 ) {
     let painter = ui.painter();
     for cell in &mosaic.cells {
@@ -757,13 +764,22 @@ fn render_mosaic_overlay(
             egui::Id::new(("full_image_mosaic", cell.catalog_index)),
             egui::Sense::click(),
         );
-        let mut label = format!(
-            "Photo {} of {} in the active folder view",
-            cell.projection_position, cell.projection_total
-        );
-        if cell.selected {
-            label.push_str(", selected");
-        }
+        // The name carries selection until the tile exposes a native selected
+        // state; a toggled button would otherwise read as "pressed".
+        let template = if cell.selected {
+            tr!("Photo {position} of {total} in the active folder view, selected")
+        } else {
+            tr!("Photo {position} of {total} in the active folder view")
+        };
+        let label = language
+            .fill(
+                template,
+                &[
+                    ("position", &cell.projection_position.to_string()),
+                    ("total", &cell.projection_total.to_string()),
+                ],
+            )
+            .into_string();
         response.widget_info(|| {
             WidgetInfo::selected(WidgetType::Button, true, cell.selected, label.clone())
         });
@@ -782,7 +798,7 @@ fn render_mosaic_overlay(
         }
     }
 
-    let (status, accessible_status) = mosaic_status(mosaic);
+    let (status, accessible_status) = mosaic_status(language, mosaic);
     egui::Area::new("full_image_mosaic_status".into())
         .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -14.0])
         .order(egui::Order::Foreground)
@@ -794,9 +810,14 @@ fn render_mosaic_overlay(
                 .inner_margin(egui::Margin::symmetric(12, 7))
                 .show(ui, |ui| {
                     let response = ui.label(
-                        RichText::new(format!(
-                            "{status}  |  Left/Right select  |  Down/Enter opens  |  Page Up/Down groups  |  Esc returns"
-                        ))
+                        RichText::new(
+                            language
+                                .fill(
+                                    tr!("{status}  |  Left/Right select  |  Down/Enter opens  |  Page Up/Down groups  |  Esc returns"),
+                                    &[("status", &status)],
+                                )
+                                .into_string(),
+                        )
                             .size(12.5)
                             .color(colors.text),
                     );
@@ -808,28 +829,33 @@ fn render_mosaic_overlay(
         });
 }
 
-fn mosaic_status(mosaic: &MosaicUiState) -> (String, String) {
-    let status = match mosaic.state {
-        MosaicLoadState::Loading => format!(
-            "Full-image collage  {} of {} photos ready",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::MemoryLimited => format!(
-            "Full-image collage  {} of {} photos fit the 256 MiB memory limit",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::DisplayLimited => format!(
-            "Full-image collage  {} of {} photos meet full-image display limits",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::Incomplete => format!(
-            "Full-image collage  {} of {} photos available",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::Ready => format!("Full-image collage  {} photos", mosaic.ready),
+fn mosaic_status(language: Language, mosaic: &MosaicUiState) -> (String, String) {
+    let template = match mosaic.state {
+        MosaicLoadState::Loading => tr!("Full-image collage  {ready} of {target} photos ready"),
+        MosaicLoadState::MemoryLimited => {
+            tr!("Full-image collage  {ready} of {target} photos fit the 256 MiB memory limit")
+        }
+        MosaicLoadState::DisplayLimited => {
+            tr!("Full-image collage  {ready} of {target} photos meet full-image display limits")
+        }
+        MosaicLoadState::Incomplete => {
+            tr!("Full-image collage  {ready} of {target} photos available")
+        }
+        MosaicLoadState::Ready => tr!("Full-image collage  {ready} photos"),
     };
+    let status = language
+        .fill(
+            template,
+            &[
+                ("ready", &mosaic.ready.to_string()),
+                ("target", &mosaic.target.to_string()),
+            ],
+        )
+        .into_string();
     let accessible = if mosaic.state == MosaicLoadState::Loading {
-        "Full-image collage loading complete photos".to_owned()
+        language
+            .text(tr!("Full-image collage loading complete photos"))
+            .to_owned()
     } else {
         status.clone()
     };
@@ -847,7 +873,8 @@ fn render_context_menu(
         return;
     };
     let mut close = false;
-    egui::Window::new("Quick Tools")
+    egui::Window::new(frame.text(tr!("Quick Tools")))
+        .id(egui::Id::new("quick_tools"))
         .fixed_pos(Pos2::new(pos[0], pos[1]))
         .constrain_to(ui.ctx().content_rect())
         .title_bar(false)
@@ -871,7 +898,7 @@ fn render_context_menu(
                 ui.separator();
                 let mut radius = frame.heal_brush_radius;
                 ui.label(
-                    RichText::new("Heal Brush Radius")
+                    RichText::new(frame.text(tr!("Heal Brush Radius")))
                         .size(11.5)
                         .color(colors.muted),
                 );
@@ -886,14 +913,18 @@ fn render_context_menu(
                     WidgetInfo::slider(
                         ui.is_enabled() && adjust_enabled,
                         f64::from(radius),
-                        "Heal brush radius",
+                        frame.text(tr!("Heal brush radius")),
                     )
                 });
                 if response.changed() {
                     actions.push(UiAction::SetHealBrushRadius(radius));
                 }
                 let mut feather = frame.heal_feather_percent;
-                ui.label(RichText::new("Heal Feather").size(11.5).color(colors.muted));
+                ui.label(
+                    RichText::new(frame.text(tr!("Heal Feather")))
+                        .size(11.5)
+                        .color(colors.muted),
+                );
                 let response = ui.add_enabled(
                     adjust_enabled,
                     egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT)
@@ -903,7 +934,7 @@ fn render_context_menu(
                     WidgetInfo::slider(
                         ui.is_enabled() && adjust_enabled,
                         f64::from(feather),
-                        "Heal feather",
+                        frame.text(tr!("Heal feather")),
                     )
                 });
                 if response.changed() {
@@ -915,11 +946,18 @@ fn render_context_menu(
             let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
             open_with
                 .widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, "Open With..."));
-            if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
+            if open_with
+                .on_hover_text(frame.text(OPEN_WITH_HELP))
+                .clicked()
+            {
                 actions.push(UiAction::OpenWith);
                 close = true;
             }
-            ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
+            ui.label(
+                RichText::new(frame.text(OPEN_WITH_HELP))
+                    .size(11.0)
+                    .color(colors.muted),
+            );
         });
 
     if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
@@ -1508,7 +1546,7 @@ fn file_menu(
                     egui::Button::new(frame.text(tr!("Open File...")))
                         .shortcut_text(format!("{PRIMARY_MODIFIER}+O")),
                 )
-                .on_hover_text(OPEN_FILE_SCOPE_HELP);
+                .on_hover_text(frame.text(OPEN_FILE_SCOPE_HELP));
             if open_file.clicked() {
                 actions.push(UiAction::Open);
                 ui.close();
@@ -1519,7 +1557,7 @@ fn file_menu(
                     egui::Button::new(frame.text(tr!("Open Folder...")))
                         .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+O")),
                 )
-                .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+                .on_hover_text(frame.text(OPEN_FOLDER_SCOPE_HELP));
             if open_folder.clicked() {
                 actions.push(UiAction::OpenFolder);
                 ui.close();
@@ -1539,7 +1577,7 @@ fn file_menu(
                     chrome.is_enabled(ChromeControl::OpenWith),
                     egui::Button::new(frame.text(tr!("Open With..."))),
                 )
-                .on_hover_text(OPEN_WITH_HELP);
+                .on_hover_text(frame.text(OPEN_WITH_HELP));
             if open_with.clicked() {
                 actions.push(UiAction::OpenWith);
                 ui.close();
@@ -1562,7 +1600,9 @@ fn file_menu(
             }
             if ui
                 .button(frame.text(tr!("Default Image Viewer...")))
-                .on_hover_text("Choose whether PNG, JPEG, or other image types open with viewr.")
+                .on_hover_text(frame.text(tr!(
+                    "Choose whether PNG, JPEG, or other image types open with viewr."
+                )))
                 .clicked()
             {
                 actions.push(UiAction::ShowFileAssociations);
@@ -1947,9 +1987,15 @@ fn view_menu(
                 background_menu(ui, actions, frame.background_override, frame.language);
             });
             ui.menu_button(
-                crate::chrome::appearance_menu_label(frame.theme_preference),
+                crate::chrome::appearance_menu_label(frame.language, frame.theme_preference),
                 |ui| {
-                    appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
+                    appearance_menu(
+                        ui,
+                        actions,
+                        frame.language,
+                        frame.theme_preference,
+                        frame.theme_mode,
+                    );
                 },
             );
         },
@@ -1963,9 +2009,9 @@ fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     });
     ui.separator();
     ui.label(
-        RichText::new(
-            "Latest First uses file modification time. The selection becomes the default for future folders and launches. This viewr build does not receive the file manager's current sort when an image opens.",
-        )
+        RichText::new(frame.text(tr!(
+            "Latest First uses file modification time. The selection becomes the default for future folders and launches. This viewr build does not receive the file manager's current sort when an image opens."
+        )))
         .size(11.0)
         .color(chrome_colors(ui).muted),
     );
@@ -2003,7 +2049,8 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
     if ui
         .add_enabled(
             enabled,
-            egui::Button::new("Fit Image to View").shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
+            egui::Button::new(chrome.language().text(tr!("Fit Image to View")))
+                .shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
         )
         .clicked()
     {
@@ -2013,7 +2060,8 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
     if ui
         .add_enabled(
             enabled,
-            egui::Button::new("Actual Size").shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
+            egui::Button::new(chrome.language().text(tr!("Actual Size")))
+                .shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
         )
         .clicked()
     {
@@ -2021,14 +2069,20 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
         ui.close();
     }
     if ui
-        .add_enabled(enabled, egui::Button::new("Zoom In").shortcut_text("+"))
+        .add_enabled(
+            enabled,
+            egui::Button::new(chrome.language().text(tr!("Zoom In"))).shortcut_text("+"),
+        )
         .clicked()
     {
         actions.push(UiAction::ZoomIn);
         ui.close();
     }
     if ui
-        .add_enabled(enabled, egui::Button::new("Zoom Out").shortcut_text("-"))
+        .add_enabled(
+            enabled,
+            egui::Button::new(chrome.language().text(tr!("Zoom Out"))).shortcut_text("-"),
+        )
         .clicked()
     {
         actions.push(UiAction::ZoomOut);
@@ -2123,7 +2177,15 @@ fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeVie
                     .selected(choice.selected)
                     .min_size(Vec2::new(ui.available_width(), 0.0)),
             )
-            .on_hover_text(format!("Toggle {} ({})", choice.label, choice.shortcut));
+            .on_hover_text(
+                chrome
+                    .language()
+                    .fill(
+                        tr!("Toggle {panel} ({shortcut})"),
+                        &[("panel", choice.label), ("shortcut", choice.shortcut)],
+                    )
+                    .into_string(),
+            );
         response.ctx.accesskit_node_builder(response.id, |node| {
             node.set_keyboard_shortcut(choice.shortcut);
         });
@@ -2217,6 +2279,7 @@ fn background_menu(
 fn appearance_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
+    language: Language,
     current: crate::theme::Preference,
     resolved: crate::theme::Mode,
 ) {
@@ -2226,14 +2289,14 @@ fn appearance_menu(
     ui.set_width(MENU_WIDTH);
     ui.add(
         egui::Label::new(
-            RichText::new(APPEARANCE_SCOPE_HELP)
+            RichText::new(language.text(APPEARANCE_SCOPE_HELP))
                 .size(11.5)
                 .color(colors.muted),
         )
         .wrap(),
     );
     ui.separator();
-    for choice in crate::chrome::appearance_choices(current, resolved) {
+    for choice in crate::chrome::appearance_choices(language, current, resolved) {
         let mut label = LayoutJob::default();
         label.wrap.max_width = TEXT_WIDTH;
         label.append(
@@ -2289,7 +2352,9 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.set_min_width(180.0);
             if ui
                 .button(frame.text(tr!("Get latest release...")))
-                .on_hover_text("Open the latest official GitHub release. No background check.")
+                .on_hover_text(frame.text(tr!(
+                    "Open the latest official GitHub release. No background check."
+                )))
                 .clicked()
             {
                 actions.push(UiAction::ShowUpdate);
@@ -2331,7 +2396,7 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                                 .color(colors.text),
                         );
                         ui.label(
-                            RichText::new("A private, local-first image viewer")
+                            RichText::new(frame.text(tr!("A private, local-first image viewer")))
                                 .size(13.0)
                                 .color(colors.muted),
                         );
@@ -2343,37 +2408,41 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.label(
-                                RichText::new("No network access")
+                                RichText::new(frame.text(tr!("No network access")))
                                     .color(colors.text)
                                     .strong(),
                             );
-                            ui.label("No telemetry, accounts, cloud sync, or background indexing.");
-                            ui.label(
-                                "Photos and edits stay local unless you explicitly save a copy.",
-                            );
+                            ui.label(frame.text(tr!(
+                                "No telemetry, accounts, cloud sync, or background indexing."
+                            )));
+                            ui.label(frame.text(tr!(
+                                "Photos and edits stay local unless you explicitly save a copy."
+                            )));
                         });
                     ui.add_space(8.0);
                     egui::Grid::new("about_build_details")
                         .num_columns(2)
                         .spacing(Vec2::new(16.0, 4.0))
                         .show(ui, |ui| {
-                            ui.label(RichText::new("Version").color(colors.muted));
+                            ui.label(RichText::new(frame.text(tr!("Version"))).color(colors.muted));
                             ui.label(env!("CARGO_PKG_VERSION"));
                             ui.end_row();
-                            ui.label(RichText::new("Platform").color(colors.muted));
+                            ui.label(
+                                RichText::new(frame.text(tr!("Platform"))).color(colors.muted),
+                            );
                             ui.label(format!(
                                 "{} / {}",
                                 std::env::consts::OS,
                                 std::env::consts::ARCH
                             ));
                             ui.end_row();
-                            ui.label(RichText::new("License").color(colors.muted));
+                            ui.label(RichText::new(frame.text(tr!("License"))).color(colors.muted));
                             ui.label(env!("CARGO_PKG_LICENSE"));
                             ui.end_row();
                         });
                     ui.add_space(10.0);
                     ui.label(
-                        RichText::new("Shortcuts")
+                        RichText::new(frame.text(tr!("Shortcuts")))
                             .color(colors.muted)
                             .small()
                             .strong(),
@@ -2392,7 +2461,7 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.",
+            frame.text(tr!("About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.")),
         )
     });
     if close_clicked || response.should_close() {
@@ -2545,7 +2614,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.",
+            frame.text(tr!("Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.")),
         )
     });
     if close_clicked || response.should_close() {
@@ -2634,7 +2703,9 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Preferences. Default folder sort and opt-in default image viewer settings.",
+            frame.text(tr!(
+                "Preferences. Default folder sort and opt-in default image viewer settings."
+            )),
         )
     });
     if close_clicked || response.should_close() {
@@ -2705,27 +2776,27 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                         );
                         ui.label(
                             RichText::new(
-                                "viewr never changes file associations during installation or startup.",
+                                frame.text(tr!("viewr never changes file associations during installation or startup.")),
                             )
                             .size(13.0)
                             .color(colors.text),
                         );
                         ui.label(
                             RichText::new(
-                                "Defaults are selected per file type. Start with PNG and JPEG, then add only the formats you want viewr to open.",
+                                frame.text(tr!("Defaults are selected per file type. Start with PNG and JPEG, then add only the formats you want viewr to open.")),
                             )
                             .size(13.0)
                             .color(colors.muted),
                         );
                         ui.label(
                             RichText::new(
-                                "This viewr build receives the selected file, but not the file manager's current folder sort. Use View > Folder Sort for Latest First or Name.",
+                                frame.text(tr!("This viewr build receives the selected file, but not the file manager's current folder sort. Use View > Folder Sort for Latest First or Name.")),
                             )
                             .size(13.0)
                             .color(colors.muted),
                         );
                         ui.add_space(12.0);
-                        render_platform_file_association_steps(ui, colors, &mut close_clicked);
+                        render_platform_file_association_steps(ui, colors, frame.language, &mut close_clicked);
                     });
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2739,7 +2810,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Default image viewer. File associations change only after an explicit operating-system choice.",
+            frame.text(tr!("Default image viewer. File associations change only after an explicit operating-system choice.")),
         )
     });
     if close_clicked || response.should_close() {
@@ -2750,14 +2821,13 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
 fn render_platform_file_association_steps(
     ui: &mut egui::Ui,
     colors: ChromeColors,
+    language: Language,
     _close_clicked: &mut bool,
 ) {
     #[cfg(target_os = "windows")]
     {
         ui.label(
-            RichText::new(
-                "In Windows Default Apps, search for .png, .jpg, and .jpeg, then choose viewr for each type. If viewr is not listed, use a file's Open with menu, choose another app, browse to viewr.exe, and select Always.",
-            )
+            RichText::new(language.text(tr!("In Windows Default Apps, search for .png, .jpg, and .jpeg, then choose viewr for each type. If viewr is not listed, use a file's Open with menu, choose another app, browse to viewr.exe, and select Always.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2765,7 +2835,7 @@ fn render_platform_file_association_steps(
         if ui
             .add(
                 egui::Button::new(
-                    RichText::new("Open Windows Default Apps")
+                    RichText::new(language.text(tr!("Open Windows Default Apps")))
                         .strong()
                         .color(colors.accent_ink),
                 )
@@ -2783,9 +2853,7 @@ fn render_platform_file_association_steps(
     {
         const COMMANDS: &str = "xdg-mime default com.github.blisspixel.viewr.desktop image/png\nxdg-mime default com.github.blisspixel.viewr.desktop image/jpeg";
         ui.label(
-            RichText::new(
-                "Use your desktop's file properties or Default Applications screen to choose viewr for PNG and JPEG. The viewr installer registers the desktop entry but does not change a default.",
-            )
+            RichText::new(language.text(tr!("Use your desktop's file properties or Default Applications screen to choose viewr for PNG and JPEG. The viewr installer registers the desktop entry but does not change a default.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2796,16 +2864,17 @@ fn render_platform_file_association_steps(
                 .size(12.0)
                 .color(colors.muted),
         );
-        if ui.button("Copy PNG/JPEG commands").clicked() {
+        if ui
+            .button(language.text(tr!("Copy PNG/JPEG commands")))
+            .clicked()
+        {
             ui.ctx().copy_text(COMMANDS.to_owned());
         }
     }
     #[cfg(target_os = "macos")]
     {
         ui.label(
-            RichText::new(
-                "For a viewr app bundle, select a PNG in Finder, choose File > Get Info, choose viewr under Open with, then select Change All. Repeat with a JPEG. Portable command-line builds are not app bundles and cannot appear as a Finder default.",
-            )
+            RichText::new(language.text(tr!("For a viewr app bundle, select a PNG in Finder, choose File > Get Info, choose viewr under Open with, then select Change All. Repeat with a JPEG. Portable command-line builds are not app bundles and cannot appear as a Finder default.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2813,9 +2882,7 @@ fn render_platform_file_association_steps(
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
         ui.label(
-            RichText::new(
-                "Use the operating system's default applications settings to choose viewr for PNG and JPEG.",
-            )
+            RichText::new(language.text(tr!("Use the operating system's default applications settings to choose viewr for PNG and JPEG.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2888,7 +2955,7 @@ fn render_save_overwrite_confirmation(
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.",
+            frame.text(tr!("Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.")),
         )
     });
     if confirm_clicked {
@@ -2904,12 +2971,20 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
     };
     let colors = chrome_colors(ui);
     let (title, confirm) = match assignment {
-        crate::ratings::RatingAssignment::Clear => {
-            ("Clear this rating?".to_owned(), "Clear rating")
-        }
-        crate::ratings::RatingAssignment::Set(rating) => {
-            (format!("Save rating {} of 5?", rating.get()), "Save rating")
-        }
+        crate::ratings::RatingAssignment::Clear => (
+            frame.text(tr!("Clear this rating?")).to_owned(),
+            frame.text(tr!("Clear rating")),
+        ),
+        crate::ratings::RatingAssignment::Set(rating) => (
+            frame
+                .language
+                .fill(
+                    tr!("Save rating {rating} of 5?"),
+                    &[("rating", &rating.get().to_string())],
+                )
+                .into_string(),
+            frame.text(tr!("Save rating")),
+        ),
     };
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
@@ -2936,16 +3011,16 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
             ui.heading(RichText::new(&title).size(25.0).color(colors.text));
             ui.add_space(10.0);
             ui.label(
-                RichText::new(
-                    "Ratings are written into this image file and may be visible to other apps.",
-                )
+                RichText::new(frame.text(tr!(
+                    "Ratings are written into this image file and may be visible to other apps."
+                )))
                 .size(13.5)
                 .color(colors.text),
             );
             ui.label(
-                RichText::new(
-                    "viewr updates embedded metadata in the source JPEG. It does not create a database or sidecar.",
-                )
+                RichText::new(frame.text(tr!(
+                    "viewr updates embedded metadata in the source JPEG. It does not create a database or sidecar."
+                )))
                 .size(12.5)
                 .color(colors.muted),
             );
@@ -2954,7 +3029,7 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                 if ui.button(confirm).clicked() {
                     confirm_clicked = true;
                 }
-                let cancel = ui.button("Cancel");
+                let cancel = ui.button(frame.text(tr!("Cancel")));
                 if focus_cancel {
                     cancel.request_focus();
                 }
@@ -2967,9 +3042,13 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            format!(
-                "{title}. Ratings are written into this image file and may be visible to other apps."
-            ),
+            frame
+                .language
+                .fill(
+                    tr!("{title}. Ratings are written into this image file and may be visible to other apps."),
+                    &[("title", &title)],
+                )
+                .into_string(),
         )
     });
     if confirm_clicked {
@@ -3013,7 +3092,13 @@ fn render_filtered_empty_state(
                 .inner_margin(egui::Margin::symmetric(28, 24))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        let heading = format!("No images are rated {} or higher.", minimum.get());
+                        let heading = frame
+                            .language
+                            .fill(
+                                tr!("No images are rated {rating} or higher."),
+                                &[("rating", &minimum.get().to_string())],
+                            )
+                            .into_string();
                         let heading_response =
                             ui.heading(RichText::new(&heading).size(20.0).color(colors.text));
                         heading_response
@@ -3021,19 +3106,37 @@ fn render_filtered_empty_state(
                         mark_as_polite_status(&heading_response);
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new(format!(
-                                "{} images remain loaded in this folder.",
-                                frame.rating.folder_count
-                            ))
+                            RichText::new(if frame.rating.folder_count == 1 {
+                                frame
+                                    .text(tr!("1 image remains loaded in this folder."))
+                                    .to_owned()
+                            } else {
+                                frame
+                                    .language
+                                    .fill(
+                                        tr!("{count} images remain loaded in this folder."),
+                                        &[("count", &frame.rating.folder_count.to_string())],
+                                    )
+                                    .into_string()
+                            })
                             .size(13.0)
                             .color(colors.muted),
                         );
                         ui.add_space(16.0);
                         let show_all = ui
-                            .add(egui::Button::new("Show all images").shortcut_text("Esc"))
-                            .on_hover_text("Esc or Left/Right also shows all images");
+                            .add(
+                                egui::Button::new(frame.text(tr!("Show all images")))
+                                    .shortcut_text("Esc"),
+                            )
+                            .on_hover_text(
+                                frame.text(tr!("Esc or Left/Right also shows all images")),
+                            );
                         show_all.widget_info(|| {
-                            WidgetInfo::labeled(WidgetType::Button, true, "Show all images")
+                            WidgetInfo::labeled(
+                                WidgetType::Button,
+                                true,
+                                frame.text(tr!("Show all images")),
+                            )
                         });
                         show_all.ctx.accesskit_node_builder(show_all.id, |node| {
                             node.set_keyboard_shortcut("Esc");
@@ -3044,7 +3147,11 @@ fn render_filtered_empty_state(
                     });
                 });
             card.response.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Panel, true, "No images match rating filter")
+                WidgetInfo::labeled(
+                    WidgetType::Panel,
+                    true,
+                    frame.text(tr!("No images match rating filter")),
+                )
             });
         });
 }
@@ -3158,7 +3265,7 @@ fn render_empty_state_actions(
                 chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new(frame.text(tr!("Open File"))).min_size(Vec2::new(116.0, 36.0)),
             )
-            .on_hover_text(OPEN_FILE_SCOPE_HELP);
+            .on_hover_text(frame.text(OPEN_FILE_SCOPE_HELP));
         if open_file.clicked() {
             actions.push(UiAction::Open);
         }
@@ -3167,7 +3274,7 @@ fn render_empty_state_actions(
                 chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new(frame.text(tr!("Open Folder"))).min_size(Vec2::new(116.0, 36.0)),
             )
-            .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+            .on_hover_text(frame.text(OPEN_FOLDER_SCOPE_HELP));
         if open_folder.clicked() {
             actions.push(UiAction::OpenFolder);
         }
@@ -3808,7 +3915,9 @@ fn render_tools_panel(
                         let heal_tip = if frame.heal_supported {
                             frame.text(tr!("Spot heal (J)"))
                         } else {
-                            "Spot heal is unavailable for images larger than the GPU texture limit"
+                            frame.text(tr!(
+                                "Spot heal is unavailable for images larger than the GPU texture limit"
+                            ))
                         };
                         let heal = chrome.heal_control();
                         ui.add_enabled_ui(heal.enabled, |ui| {
@@ -4009,7 +4118,7 @@ fn render_heal_panel(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("SPOT HEAL")
+                    RichText::new(frame.text(tr!("Spot Heal")).to_uppercase())
                         .size(11.0)
                         .color(colors.accent)
                         .strong(),
@@ -4019,7 +4128,7 @@ fn render_heal_panel(
                     if ui
                         .add_enabled(
                             heal.enabled,
-                            egui::Button::new("Done")
+                            egui::Button::new(frame.text(tr!("Done")))
                                 .shortcut_text("Esc")
                                 .selected(heal.selected),
                         )
@@ -4032,9 +4141,11 @@ fn render_heal_panel(
             ui.add_space(8.0);
             ui.add(
                 egui::Label::new(
-                    RichText::new("Paint over a small blemish, then release to repair it.")
-                        .size(12.5)
-                        .color(colors.text),
+                    RichText::new(frame.text(tr!(
+                        "Paint over a small blemish, then release to repair it."
+                    )))
+                    .size(12.5)
+                    .color(colors.text),
                 )
                 .wrap(),
             );
@@ -4052,7 +4163,11 @@ fn render_heal_controls(
     colors: ChromeColors,
 ) {
     let mut radius = frame.heal_brush_radius;
-    ui.label(RichText::new("Brush radius").size(11.5).color(colors.muted));
+    ui.label(
+        RichText::new(frame.text(tr!("Brush radius")))
+            .size(11.5)
+            .color(colors.muted),
+    );
     let slider = egui::Slider::new(
         &mut radius,
         crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
@@ -4064,7 +4179,7 @@ fn render_heal_controls(
         WidgetInfo::slider(
             ui.is_enabled() && adjust_enabled,
             f64::from(radius),
-            "Brush radius",
+            frame.text(tr!("Brush radius")),
         )
     });
     if response.changed() {
@@ -4073,17 +4188,21 @@ fn render_heal_controls(
 
     ui.add_space(10.0);
     let mut feather = frame.heal_feather_percent;
-    ui.label(RichText::new("Feather").size(11.5).color(colors.muted));
+    ui.label(
+        RichText::new(frame.text(tr!("Feather")))
+            .size(11.5)
+            .color(colors.muted),
+    );
     let feather_slider =
         egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT).suffix("%");
     let response = ui
         .add_enabled(adjust_enabled, feather_slider)
-        .on_hover_text("Softens the repair edge outward from the painted area");
+        .on_hover_text(frame.text(tr!("Softens the repair edge outward from the painted area")));
     response.widget_info(|| {
         WidgetInfo::slider(
             ui.is_enabled() && adjust_enabled,
             f64::from(feather),
-            "Feather",
+            frame.text(tr!("Feather")),
         )
     });
     if response.changed() {
@@ -4092,15 +4211,26 @@ fn render_heal_controls(
 
     ui.add_space(12.0);
     let source_label = frame.heal_source.map_or_else(
-        || "Refresh source".to_owned(),
-        |(index, count)| format!("Source {} of {count}", index + 1),
+        || frame.text(tr!("Refresh source")).to_owned(),
+        |(index, count)| {
+            frame
+                .language
+                .fill(
+                    tr!("Source {index} of {count}"),
+                    &[
+                        ("index", &(index + 1).to_string()),
+                        ("count", &count.to_string()),
+                    ],
+                )
+                .into_string()
+        },
     );
     if ui
         .add_enabled(
             chrome.is_enabled(ChromeControl::HealRefreshSource),
             egui::Button::new(source_label).shortcut_text("/"),
         )
-        .on_hover_text("Try the next ranked clean source patch")
+        .on_hover_text(frame.text(tr!("Try the next ranked clean source patch")))
         .clicked()
     {
         actions.push(UiAction::RefreshHealSource);
@@ -4111,7 +4241,8 @@ fn render_heal_controls(
         if ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::UndoEdit),
-                egui::Button::new("Undo").shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
+                egui::Button::new(frame.text(tr!("Undo")))
+                    .shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
             )
             .clicked()
         {
@@ -4120,7 +4251,8 @@ fn render_heal_controls(
         if ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::RedoEdit),
-                egui::Button::new("Redo").shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
+                egui::Button::new(frame.text(tr!("Redo")))
+                    .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
             )
             .clicked()
         {
@@ -4135,7 +4267,7 @@ fn render_heal_guidance(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeC
         ui.horizontal(|ui| {
             ui.spinner();
             ui.label(
-                RichText::new("Repairing in memory...")
+                RichText::new(frame.text(tr!("Repairing in memory...")))
                     .size(12.0)
                     .color(colors.text),
             );
@@ -4144,9 +4276,11 @@ fn render_heal_guidance(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeC
     ui.add_space(8.0);
     ui.add(
         egui::Label::new(
-            RichText::new("The original file stays untouched. Use Save As to keep the edit.")
-                .size(11.0)
-                .color(colors.muted),
+            RichText::new(frame.text(tr!(
+                "The original file stays untouched. Use Save As to keep the edit."
+            )))
+            .size(11.0)
+            .color(colors.muted),
         )
         .wrap(),
     );
@@ -4276,8 +4410,16 @@ fn render_filmstrip(
                         crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
                     };
                     let label = position.map_or_else(
-                        || "Folder previews".to_owned(),
-                        |(index, total)| format!("Folder previews  {index} of {total}"),
+                        || frame.text(tr!("Folder previews")).to_owned(),
+                        |(index, total)| {
+                            frame
+                                .language
+                                .fill(
+                                    tr!("Folder previews  {index} of {total}"),
+                                    &[("index", &index.to_string()), ("total", &total.to_string())],
+                                )
+                                .into_string()
+                        },
                     );
                     ui.label(RichText::new(label).size(12.0).color(colors.muted));
                 });
@@ -4437,9 +4579,11 @@ fn render_crop_toolbar(
                             if ui
                                 .add_enabled(
                                     frame.crop_ratio != crate::crop::CropRatio::Free,
-                                    egui::Button::new("Swap").shortcut_text("X"),
+                                    egui::Button::new(frame.text(tr!("Swap"))).shortcut_text("X"),
                                 )
-                                .on_hover_text("Swap the crop between landscape and portrait")
+                                .on_hover_text(frame.text(tr!(
+                                    "Swap the crop between landscape and portrait"
+                                )))
                                 .clicked()
                             {
                                 actions.push(UiAction::SwapCropRatio);
@@ -4465,14 +4609,18 @@ fn render_crop_toolbar(
                         ui.separator();
                         ui.label(
                             RichText::new(
-                                "Arrows move  |  Shift+Arrows resize  |  Ctrl fine-tunes",
+                                frame.text(tr!(
+                                    "Arrows move  |  Shift+Arrows resize  |  Ctrl fine-tunes"
+                                )),
                             )
                             .size(11.0)
                             .color(colors.muted),
                         );
                         ui.label(
                             RichText::new(
-                                "Drag to redraw  |  X swaps aspect  |  Enter applies  |  Esc cancels",
+                                frame.text(tr!(
+                                    "Drag to redraw  |  X swaps aspect  |  Enter applies  |  Esc cancels"
+                                )),
                             )
                                 .size(11.0)
                                 .color(colors.muted),
@@ -4482,17 +4630,35 @@ fn render_crop_toolbar(
         });
 }
 
+fn crop_ratio_menu_label(frame: &UiFrameOwned) -> String {
+    let ratio = match frame.crop_ratio {
+        crate::crop::CropRatio::Free => frame.text(tr!("Free")).to_owned(),
+        crate::crop::CropRatio::Original => frame.text(tr!("Original")).to_owned(),
+        fixed @ crate::crop::CropRatio::Fixed { .. } => fixed.label(),
+    };
+    frame
+        .language
+        .fill(tr!("Aspect: {ratio}"), &[("ratio", &ratio)])
+        .into_string()
+}
+
 fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<UiAction>) {
     let colors = chrome_colors(ui);
-    let label = format!("Aspect: {}", frame.crop_ratio.label());
+    let label = crop_ratio_menu_label(frame);
     ui.menu_button(label, |ui| {
         ui.set_min_width(292.0);
         let mut current = frame.crop_ratio;
 
         for (ratio, label) in [
-            (crate::crop::CropRatio::Free, "Free"),
-            (crate::crop::CropRatio::Original, "Original"),
-            (crate::crop::CropRatio::SQUARE, "1:1  Square"),
+            (crate::crop::CropRatio::Free, frame.text(tr!("Free"))),
+            (
+                crate::crop::CropRatio::Original,
+                frame.text(tr!("Original")),
+            ),
+            (
+                crate::crop::CropRatio::SQUARE,
+                frame.text(tr!("1:1  Square")),
+            ),
         ] {
             if ui.selectable_value(&mut current, ratio, label).clicked() {
                 actions.push(UiAction::SetCropRatio(current));
@@ -4501,7 +4667,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         }
 
         ui.separator();
-        ui.label(RichText::new("Landscape").size(11.0).color(colors.muted));
+        ui.label(
+            RichText::new(frame.text(tr!("Landscape")))
+                .size(11.0)
+                .color(colors.muted),
+        );
         ui.horizontal(|ui| {
             for (ratio, label) in [
                 (crate::crop::CropRatio::THREE_TWO, "3:2"),
@@ -4517,7 +4687,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
             }
         });
 
-        ui.label(RichText::new("Portrait").size(11.0).color(colors.muted));
+        ui.label(
+            RichText::new(frame.text(tr!("Portrait")))
+                .size(11.0)
+                .color(colors.muted),
+        );
         ui.horizontal(|ui| {
             for (ratio, label) in [
                 (crate::crop::CropRatio::TWO_THREE, "2:3"),
@@ -4534,7 +4708,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         });
 
         ui.separator();
-        ui.label(RichText::new("Custom ratio").size(11.0).color(colors.muted));
+        ui.label(
+            RichText::new(frame.text(tr!("Custom ratio")))
+                .size(11.0)
+                .color(colors.muted),
+        );
         let (mut custom_width, mut custom_height) = frame.custom_crop_ratio;
         ui.horizontal(|ui| {
             ui.label("W");
@@ -4544,7 +4722,7 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
                         .range(1..=999)
                         .speed(1),
                 )
-                .on_hover_text("Custom ratio width")
+                .on_hover_text(frame.text(tr!("Custom ratio width")))
                 .changed();
             ui.label(":  H");
             let height_changed = ui
@@ -4553,12 +4731,12 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
                         .range(1..=999)
                         .speed(1),
                 )
-                .on_hover_text("Custom ratio height")
+                .on_hover_text(frame.text(tr!("Custom ratio height")))
                 .changed();
             if width_changed || height_changed {
                 actions.push(UiAction::SetCustomCropRatio(custom_width, custom_height));
             }
-            if ui.button("Use").clicked() {
+            if ui.button(frame.text(tr!("Use"))).clicked() {
                 actions.push(UiAction::SetCustomCropRatio(custom_width, custom_height));
                 actions.push(UiAction::SetCropRatio(crate::crop::CropRatio::fixed(
                     custom_width,
@@ -4611,12 +4789,13 @@ fn render_crop_selection(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut 
             );
         }
 
-        render_crop_handles(ui, &painter, rect, actions);
+        render_crop_handles(ui, &painter, rect, frame.language, actions);
         if let (Some((image_width, image_height)), Some(crop_uv)) = (frame.img_size, frame.crop_uv)
         {
             render_crop_dimensions_and_move(
                 ui,
                 &painter,
+                frame.language,
                 CropMoveOverlay {
                     rect,
                     image_viewport,
@@ -4644,6 +4823,7 @@ struct CropMoveOverlay {
 fn render_crop_dimensions_and_move(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
+    language: Language,
     overlay: CropMoveOverlay,
     actions: &mut Vec<UiAction>,
 ) {
@@ -4736,24 +4916,42 @@ fn render_crop_dimensions_and_move(
         }
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
     }
-    let accessibility_label =
-        crop_accessibility_label((pixel_x, pixel_y, pixel_width, pixel_height), can_drag);
+    let accessibility_label = crop_accessibility_label(
+        language,
+        (pixel_x, pixel_y, pixel_width, pixel_height),
+        can_drag,
+    );
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::Panel, ui.is_enabled(), &accessibility_label)
     });
 }
 
-fn crop_accessibility_label(bounds: (u32, u32, u32, u32), can_drag: bool) -> String {
+fn crop_accessibility_label(
+    language: Language,
+    bounds: (u32, u32, u32, u32),
+    can_drag: bool,
+) -> String {
     let (pixel_x, pixel_y, pixel_width, pixel_height) = bounds;
-    let controls = if can_drag {
-        "Drag inside to move. Arrow keys move; Shift plus Arrow keys resize."
+    let template = if can_drag {
+        tr!(
+            "Crop selection: {width} by {height} output pixels, source starts at x {x}, y {y}. Drag inside to move. Arrow keys move; Shift plus Arrow keys resize."
+        )
     } else {
-        "Arrow keys move; Shift plus Arrow keys resize."
+        tr!(
+            "Crop selection: {width} by {height} output pixels, source starts at x {x}, y {y}. Arrow keys move; Shift plus Arrow keys resize."
+        )
     };
-    format!(
-        "Crop selection: {pixel_width} by {pixel_height} output pixels, source starts at x \
-         {pixel_x}, y {pixel_y}. {controls}"
-    )
+    language
+        .fill(
+            template,
+            &[
+                ("width", &pixel_width.to_string()),
+                ("height", &pixel_height.to_string()),
+                ("x", &pixel_x.to_string()),
+                ("y", &pixel_y.to_string()),
+            ],
+        )
+        .into_string()
 }
 
 fn crop_pixel_bounds(
@@ -4777,18 +4975,51 @@ fn render_crop_handles(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
     rect: Rect,
+    language: Language,
     actions: &mut Vec<UiAction>,
 ) {
     let colors = chrome_colors(ui);
     let centers = [
-        (rect.left_top(), CursorIcon::ResizeNwSe, "top left"),
-        (rect.center_top(), CursorIcon::ResizeVertical, "top"),
-        (rect.right_top(), CursorIcon::ResizeNeSw, "top right"),
-        (rect.right_center(), CursorIcon::ResizeHorizontal, "right"),
-        (rect.right_bottom(), CursorIcon::ResizeNwSe, "bottom right"),
-        (rect.center_bottom(), CursorIcon::ResizeVertical, "bottom"),
-        (rect.left_bottom(), CursorIcon::ResizeNeSw, "bottom left"),
-        (rect.left_center(), CursorIcon::ResizeHorizontal, "left"),
+        (
+            rect.left_top(),
+            CursorIcon::ResizeNwSe,
+            tr!("Resize crop from top left"),
+        ),
+        (
+            rect.center_top(),
+            CursorIcon::ResizeVertical,
+            tr!("Resize crop from top"),
+        ),
+        (
+            rect.right_top(),
+            CursorIcon::ResizeNeSw,
+            tr!("Resize crop from top right"),
+        ),
+        (
+            rect.right_center(),
+            CursorIcon::ResizeHorizontal,
+            tr!("Resize crop from right"),
+        ),
+        (
+            rect.right_bottom(),
+            CursorIcon::ResizeNwSe,
+            tr!("Resize crop from bottom right"),
+        ),
+        (
+            rect.center_bottom(),
+            CursorIcon::ResizeVertical,
+            tr!("Resize crop from bottom"),
+        ),
+        (
+            rect.left_bottom(),
+            CursorIcon::ResizeNeSw,
+            tr!("Resize crop from bottom left"),
+        ),
+        (
+            rect.left_center(),
+            CursorIcon::ResizeHorizontal,
+            tr!("Resize crop from left"),
+        ),
     ];
     for (index, (center, cursor, name)) in centers.into_iter().enumerate() {
         let visual = Rect::from_center_size(center, Vec2::splat(8.0));
@@ -4808,11 +5039,7 @@ fn render_crop_handles(
             )
             .on_hover_cursor(cursor);
         response.widget_info(|| {
-            WidgetInfo::labeled(
-                WidgetType::Button,
-                ui.is_enabled(),
-                format!("Resize crop from {name}"),
-            )
+            WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), language.text(name))
         });
         if response.dragged()
             && let Some(pointer) = response.interact_pointer_pos()
@@ -5606,7 +5833,10 @@ mod tests {
             (crate::theme::Preference::Dark, "Appearance: Dark"),
             (crate::theme::Preference::Console, "Appearance: Console"),
         ] {
-            assert_eq!(crate::chrome::appearance_menu_label(preference), expected);
+            assert_eq!(
+                crate::chrome::appearance_menu_label(Language::English, preference),
+                expected
+            );
         }
     }
 
@@ -5721,14 +5951,14 @@ mod tests {
             target: 12,
             state: MosaicLoadState::Loading,
         };
-        let (first_visible, first_accessible) = mosaic_status(&mosaic);
+        let (first_visible, first_accessible) = mosaic_status(Language::English, &mosaic);
         mosaic.ready = 11;
-        let (later_visible, later_accessible) = mosaic_status(&mosaic);
+        let (later_visible, later_accessible) = mosaic_status(Language::English, &mosaic);
         assert_ne!(first_visible, later_visible);
         assert_eq!(first_accessible, later_accessible);
 
         mosaic.state = MosaicLoadState::MemoryLimited;
-        let (_, terminal_accessible) = mosaic_status(&mosaic);
+        let (_, terminal_accessible) = mosaic_status(Language::English, &mosaic);
         assert_eq!(
             terminal_accessible,
             "Full-image collage  11 of 12 photos fit the 256 MiB memory limit"
@@ -8033,6 +8263,7 @@ mod tests {
             appearance_menu(
                 ui,
                 &mut actions,
+                Language::English,
                 crate::theme::Preference::System,
                 crate::theme::Mode::Dark,
             );

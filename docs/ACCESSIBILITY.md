@@ -54,9 +54,12 @@ The minimum contract is:
   work is identified as preview preparation rather than a new file open. Loading,
   failure, and preview-preparation labels use polite AccessKit live-region
   semantics; long target text remains bounded and discoverable when visually
-  elided. Completed or failed rating-write toasts are polite because they are the
-  outcome source. `Saving rating...` and ordinary transient toasts remain semantic
-  but non-live, so a coexisting visual toast is not a second announcement source.
+  elided. Rating-request outcomes, including completion, refusal, and failure,
+  are polite because they are the outcome source. The sender marks that kind
+  when it raises the message, so announcement never depends on wording and is
+  identical in every catalog language. `Saving rating...` and ordinary transient
+  toasts remain semantic but non-live, so a coexisting visual toast is not a
+  second announcement source.
 - The empty state exposes drop, file-versus-folder session scope, and the
   local-only privacy line as visible text, followed by separately named Open File
   and Open Folder actions. Opening and failure headings name the selected file.

@@ -236,6 +236,25 @@ pub(crate) enum UiAction {
     PermanentDelete,
 }
 
+/// How a chrome outcome message reaches assistive technology.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ToastAnnouncement {
+    /// Visible only; screen readers find it by review, not by announcement.
+    #[default]
+    Visual,
+    /// Announced politely because it is the only feedback for an action the
+    /// user just requested. The sender chooses the kind; it is never inferred
+    /// from wording, so every catalog language announces the same messages.
+    PoliteStatus,
+}
+
+/// Transient chrome message and how it is announced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ToastView {
+    pub text: String,
+    pub announcement: ToastAnnouncement,
+}
+
 /// Owned frame inputs for drawing chrome.
 #[allow(clippy::struct_excessive_bools)] // independent UI mode bits for one frame
 pub(crate) struct UiFrameOwned {
@@ -351,7 +370,7 @@ pub(crate) struct UiFrameOwned {
     /// Physical display pixels per source-image pixel (`1.0` = actual size).
     pub pixel_scale: f32,
     /// Transient toast message (trash undo hint, etc.).
-    pub toast: Option<String>,
+    pub toast: Option<ToastView>,
     /// Transient full-image mosaic geometry and status.
     pub mosaic: Option<MosaicUiState>,
     /// Neighbor filmstrip entries.
@@ -653,8 +672,8 @@ fn render_background(
 ) {
     if let Some(mosaic) = frame.mosaic.as_ref() {
         render_mosaic_overlay(ui, actions, mosaic, colors);
-        if let Some(msg) = &frame.toast {
-            render_toast(ui, msg, frame);
+        if let Some(toast) = &frame.toast {
+            render_toast(ui, toast, frame);
         }
         return;
     }
@@ -665,9 +684,9 @@ fn render_background(
     if rating_filter_is_empty(frame) {
         render_filtered_empty_state(ui, actions, frame);
         if frame.dock.immersive
-            && let Some(msg) = &frame.toast
+            && let Some(toast) = &frame.toast
         {
-            render_toast(ui, msg, frame);
+            render_toast(ui, toast, frame);
         }
         return;
     }
@@ -675,9 +694,9 @@ fn render_background(
     if !frame.dock.has_image {
         render_empty_state(ui, actions, frame, chrome);
         if frame.dock.immersive
-            && let Some(msg) = &frame.toast
+            && let Some(toast) = &frame.toast
         {
-            render_toast(ui, msg, frame);
+            render_toast(ui, toast, frame);
         }
         return;
     }
@@ -702,9 +721,9 @@ fn render_background(
     }
 
     if frame.dock.immersive
-        && let Some(msg) = &frame.toast
+        && let Some(toast) = &frame.toast
     {
-        render_toast(ui, msg, frame);
+        render_toast(ui, toast, frame);
     }
 
     if frame.is_cropping {
@@ -1098,8 +1117,8 @@ fn render_top_operation_status(
             ) {
                 add_status(ui, &status);
             }
-            if let Some(toast) = frame.toast.as_deref() {
-                add_top_toast(ui, toast, colors);
+            if let Some(toast) = frame.toast.as_ref() {
+                add_top_toast(ui, &toast.text, toast.announcement, colors);
             }
         }
     } else if frame.dock.has_image && frame.is_opening {
@@ -1146,12 +1165,13 @@ fn render_top_operation_status(
     } else if frame.folder_scan_busy && frame.dock.has_image {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, frame.text(tr!("Reading folder...")));
-    } else if let Some(toast) = frame.toast.as_deref() {
-        add_top_toast(ui, toast, colors);
+    } else if let Some(toast) = frame.toast.as_ref() {
+        add_top_toast(ui, &toast.text, toast.announcement, colors);
     } else if frame.has_unsaved_pixel_edits {
         add_top_toast(
             ui,
             frame.text(tr!("Edited pixels are in memory. Save As writes a copy.")),
+            ToastAnnouncement::Visual,
             colors,
         );
     }
@@ -1630,7 +1650,12 @@ fn add_top_status(ui: &mut egui::Ui, status: &str, colors: ChromeColors) {
     });
 }
 
-fn add_top_toast(ui: &mut egui::Ui, message: &str, colors: ChromeColors) {
+fn add_top_toast(
+    ui: &mut egui::Ui,
+    message: &str,
+    announcement: ToastAnnouncement,
+    colors: ChromeColors,
+) {
     let max_width = top_status_max_width(ui);
     ui.scope(|ui| {
         ui.set_max_width(max_width);
@@ -1639,7 +1664,7 @@ fn add_top_toast(ui: &mut egui::Ui, message: &str, colors: ChromeColors) {
                 .truncate()
                 .show_tooltip_when_elided(true),
         );
-        if rating_toast_is_status(message) {
+        if announcement == ToastAnnouncement::PoliteStatus {
             mark_as_polite_status(&response);
         }
     });
@@ -4176,7 +4201,7 @@ fn filmstrip_accessibility_label(item: &FilmstripItem) -> String {
     format!("image {}: {}", item.position, item.name)
 }
 
-fn render_toast(ui: &mut egui::Ui, msg: &str, frame: &UiFrameOwned) {
+fn render_toast(ui: &mut egui::Ui, toast: &ToastView, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let image_viewport = image_viewport_rect(ui.ctx(), frame);
     Area::new("toast".into())
@@ -4195,22 +4220,15 @@ fn render_toast(ui: &mut egui::Ui, msg: &str, frame: &UiFrameOwned) {
                 .stroke(Stroke::new(1.0, colors.accent))
                 .inner_margin(egui::Margin::symmetric(14, 8))
                 .show(ui, |ui| {
-                    let response = ui.label(RichText::new(msg).size(13.0).color(colors.text));
-                    if !frame.rating.write_busy && rating_toast_is_status(msg) {
+                    let response =
+                        ui.label(RichText::new(&toast.text).size(13.0).color(colors.text));
+                    if !frame.rating.write_busy
+                        && toast.announcement == ToastAnnouncement::PoliteStatus
+                    {
                         mark_as_polite_status(&response);
                     }
                 });
         });
-}
-
-fn rating_toast_is_status(message: &str) -> bool {
-    !matches!(
-        message,
-        "Saving rating..." | "Finishing the rating update before closing..."
-    ) && (message.contains("rating")
-        || message.contains("Rating")
-        || message
-            == "viewr could not verify this image's source safely. The file was not changed.")
 }
 
 fn render_crop_overlay(
@@ -4671,8 +4689,16 @@ mod tests {
         UiFrameOwned, actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
         chrome_colors_for, context_tool_button, crop_pixel_bounds, folder_sort_menu,
         image_open_status, menu_tool_button, mosaic_status, panels_menu, rating_filter_menu,
-        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
+        rating_menu, render, retry_open_label, undo_trash_menu_item,
     };
+    use super::{ToastAnnouncement, ToastView};
+
+    fn visual_toast(text: &str) -> ToastView {
+        ToastView {
+            text: text.to_owned(),
+            announcement: ToastAnnouncement::Visual,
+        }
+    }
 
     fn relative_luminance(color: egui::Color32) -> f64 {
         fn linear(channel: u8) -> f64 {
@@ -5553,7 +5579,9 @@ mod tests {
         let mut failed = accessibility_test_frame();
         failed.selected_file_name = Some("target.png".to_owned());
         failed.load_error = Some("Could not decode this image".to_owned());
-        failed.toast = Some("Could not display image: adapter rejected upload".to_owned());
+        failed.toast = Some(visual_toast(
+            "Could not display image: adapter rejected upload",
+        ));
         let failed_output = failed_context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &failed);
         });
@@ -6230,17 +6258,13 @@ mod tests {
 
     #[test]
     fn rating_outcome_toast_is_polite_while_ordinary_toast_stays_non_live() {
-        assert!(rating_toast_is_status("Rating 4 of 5 saved."));
-        assert!(rating_toast_is_status(
-            "Could not save the rating safely. The previous rating is unchanged."
-        ));
-        assert!(!rating_toast_is_status("Saving rating..."));
-        assert!(!rating_toast_is_status("Saved copy · EXIF retained"));
-
         let rating_context = egui::Context::default();
         rating_context.enable_accesskit();
         let mut rating_frame = accessibility_test_frame();
-        rating_frame.toast = Some("Rating 4 of 5 saved.".to_owned());
+        rating_frame.toast = Some(ToastView {
+            text: "Rating 4 of 5 saved.".to_owned(),
+            announcement: ToastAnnouncement::PoliteStatus,
+        });
         let rating_output = rating_context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &rating_frame);
         });
@@ -6256,7 +6280,7 @@ mod tests {
         let ordinary_context = egui::Context::default();
         ordinary_context.enable_accesskit();
         let mut ordinary_frame = accessibility_test_frame();
-        ordinary_frame.toast = Some("Saved copy · EXIF retained".to_owned());
+        ordinary_frame.toast = Some(visual_toast("Saved copy · EXIF retained"));
         let ordinary_output = ordinary_context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &ordinary_frame);
         });
@@ -6275,7 +6299,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.toast = Some("Moved to Trash. Undo with U.".to_owned());
+        frame.toast = Some(visual_toast("Moved to Trash. Undo with U."));
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
@@ -7625,7 +7649,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.toast = Some(NOTICE.to_owned());
+        frame.toast = Some(visual_toast(NOTICE));
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });

@@ -106,6 +106,7 @@ use crate::session::{
 use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
+use crate::ui::{ToastAnnouncement, ToastView};
 use crate::work_currency::{loaded_work_is_current, presented_work_is_current};
 
 /// Start viewr: create the event loop and run the application to completion.
@@ -955,17 +956,20 @@ const TOAST_DURATION: Duration = Duration::from_secs(3);
 #[derive(Debug, Default)]
 struct StatusToast {
     message: Option<String>,
+    announcement: ToastAnnouncement,
     until: Option<Instant>,
 }
 
 impl StatusToast {
-    fn show(&mut self, message: impl Into<String>, now: Instant) {
+    fn show(&mut self, message: impl Into<String>, announcement: ToastAnnouncement, now: Instant) {
         self.message = Some(message.into());
+        self.announcement = announcement;
         self.until = Some(now + TOAST_DURATION);
     }
 
     fn show_until_navigation(&mut self, message: impl Into<String>) {
         self.message = Some(message.into());
+        self.announcement = ToastAnnouncement::Visual;
         self.until = None;
     }
 
@@ -977,12 +981,19 @@ impl StatusToast {
 
     fn dismiss_navigation_notice(&mut self) {
         if self.until.is_none() {
-            self.message = None;
+            *self = Self::default();
         }
     }
 
     fn message(&self) -> Option<&str> {
         self.message.as_deref()
+    }
+
+    fn view(&self) -> Option<ToastView> {
+        self.message.as_ref().map(|text| ToastView {
+            text: text.clone(),
+            announcement: self.announcement,
+        })
     }
 
     const fn deadline(&self) -> Option<Instant> {
@@ -2668,22 +2679,22 @@ impl App {
 
     fn request_rating_assignment(&mut self, assignment: RatingAssignment) {
         if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
-            self.show_toast(message);
+            self.show_status_toast(message);
             return;
         }
         if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
-            self.show_toast(message);
+            self.show_status_toast(message);
             return;
         }
         let Some(path) = self.session.presented_path.clone() else {
-            self.show_toast("Open an image before assigning a rating");
+            self.show_status_toast("Open an image before assigning a rating");
             return;
         };
         if self.session.selected_path.as_ref() != Some(&path) || self.current_source.is_none() {
-            self.show_toast("Wait for the selected image to finish loading");
+            self.show_status_toast("Wait for the selected image to finish loading");
             return;
         }
         if assignment.expected_state() == self.presented_rating {
@@ -2692,25 +2703,25 @@ impl App {
         match self.current_rating_capability {
             RatingWriteCapability::WritableJpeg => {}
             RatingWriteCapability::ReadOnlyFormat => {
-                self.show_toast(
+                self.show_status_toast(
                     "This image's rating is read-only in viewr. The file was not changed.",
                 );
                 return;
             }
             RatingWriteCapability::UnsupportedMetadata => {
-                self.show_toast(
+                self.show_status_toast(
                     "This image has unsupported rating metadata. The file was not changed.",
                 );
                 return;
             }
             RatingWriteCapability::UnsafeSource => {
-                self.show_toast(
+                self.show_status_toast(
                     "viewr could not verify this image's source safely. The file was not changed.",
                 );
                 return;
             }
             RatingWriteCapability::ObservationFailed => {
-                self.show_toast(
+                self.show_status_toast(
                     "The rating could not be read. Close and reopen viewr before changing this file.",
                 );
                 return;
@@ -2741,25 +2752,25 @@ impl App {
 
     fn start_rating_write(&mut self, pending: &PendingRatingWrite) -> bool {
         if let Some(message) = rating_write_discovery_blocker(self.rating_scan_worker.is_some()) {
-            self.show_toast(message);
+            self.show_status_toast(message);
             return false;
         }
         if self.block_action_while_busy(BlockedAction::ChangeRating) {
             return false;
         }
         if let Some(message) = rating_recovery_blocker(self.rating_recovery_unsettled) {
-            self.show_toast(message);
+            self.show_status_toast(message);
             return false;
         }
         if !rating_write_target_is_current(
             self.session.selected_path.as_ref() == Some(&pending.path),
             self.session.presented_path.as_ref() == Some(&pending.path),
         ) {
-            self.show_toast("The selected image changed before the rating could be saved");
+            self.show_status_toast("The selected image changed before the rating could be saved");
             return false;
         }
         let Some(source) = self.current_source.clone() else {
-            self.show_toast("Wait for the selected image to finish loading");
+            self.show_status_toast("Wait for the selected image to finish loading");
             return false;
         };
         let path = pending.path.clone();
@@ -2784,7 +2795,9 @@ impl App {
             self.show_toast("Saving rating...");
             true
         } else {
-            self.show_toast("Could not save the rating safely. The previous rating is unchanged.");
+            self.show_status_toast(
+                "Could not save the rating safely. The previous rating is unchanged.",
+            );
             false
         }
     }
@@ -2832,9 +2845,9 @@ impl App {
                     self.start_auxiliary_load(&worker.path);
                 }
                 match worker.assignment {
-                    RatingAssignment::Clear => self.show_toast("Rating cleared."),
+                    RatingAssignment::Clear => self.show_status_toast("Rating cleared."),
                     RatingAssignment::Set(rating) => {
-                        self.show_toast(format!("Rating {} of 5 saved.", rating.get()));
+                        self.show_status_toast(format!("Rating {} of 5 saved.", rating.get()));
                     }
                 }
             }
@@ -2858,7 +2871,7 @@ impl App {
                         }
                     }
                 }
-                self.show_toast(rating_write_failure_message(self.language, error));
+                self.show_status_toast(rating_write_failure_message(self.language, error));
             }
         }
         self.kick_prefetch();
@@ -2942,7 +2955,7 @@ impl App {
             if let Some(playlist) = self.playlist.as_mut() {
                 playlist.show_all();
             }
-            self.show_toast("Could not finish reading folder ratings. Showing all images.");
+            self.show_status_toast("Could not finish reading folder ratings. Showing all images.");
         }
     }
 
@@ -2969,7 +2982,7 @@ impl App {
             if let Some(playlist) = self.playlist.as_mut() {
                 playlist.show_all();
             }
-            self.show_toast("Could not finish reading folder ratings. Showing all images.");
+            self.show_status_toast("Could not finish reading folder ratings. Showing all images.");
             return;
         };
         let selection = if let Some(playlist) = self.playlist.as_mut() {
@@ -4811,7 +4824,19 @@ impl App {
     }
 
     fn show_toast(&mut self, msg: impl Into<String>) {
-        self.toast.show(msg, Instant::now());
+        self.present_toast(msg, ToastAnnouncement::Visual);
+    }
+
+    /// Show an outcome that assistive technology announces politely. Use it
+    /// for results of an action the user just requested whose only feedback is
+    /// this message, such as a rating write, so the announcement follows the
+    /// message kind rather than its wording in any one language.
+    fn show_status_toast(&mut self, msg: impl Into<String>) {
+        self.present_toast(msg, ToastAnnouncement::PoliteStatus);
+    }
+
+    fn present_toast(&mut self, msg: impl Into<String>, announcement: ToastAnnouncement) {
+        self.toast.show(msg, announcement, Instant::now());
         if let Some(r) = self.renderer.as_ref() {
             r.window().request_redraw();
         }
@@ -6160,7 +6185,7 @@ impl App {
                 self.cancel_pending_image_load();
                 self.session.selected_path = None;
                 self.invalidate_displayed_image();
-                self.show_toast(
+                self.show_status_toast(
                     "The selected image is no longer available, and no remaining image matches the rating filter.",
                 );
             }
@@ -6492,7 +6517,7 @@ impl App {
 
     fn cancel_rating_disclosure_for_source_change(&mut self) {
         if cancel_pending_rating_for_source_change(&mut self.pending_rating_write) {
-            self.show_toast(
+            self.show_status_toast(
                 "Pending rating change canceled because the active image was reopened or changed.",
             );
         }
@@ -7956,7 +7981,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.poll_thumbnails();
                 let filmstrip = self.filmstrip_entries();
-                let toast = self.toast.message().map(str::to_owned);
+                let toast = self.toast.view();
                 let preview_kind = self.preview_job.as_ref().map(|job| job.context().kind);
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
@@ -8751,7 +8776,11 @@ mod test {
     fn timed_toast_expires_but_survives_navigation_dismissal() {
         let start = Instant::now();
         let mut toast = StatusToast::default();
-        toast.show("Moved to Trash. Undo with U.", start);
+        toast.show(
+            "Moved to Trash. Undo with U.",
+            ToastAnnouncement::Visual,
+            start,
+        );
 
         toast.dismiss_navigation_notice();
         assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
@@ -8768,11 +8797,16 @@ mod test {
     fn navigation_notice_outlives_timers_until_navigation() {
         let start = Instant::now();
         let mut toast = StatusToast::default();
-        toast.show("Rating saved", start);
+        toast.show("Rating saved", ToastAnnouncement::PoliteStatus, start);
         toast.show_until_navigation(
             "The selected image is no longer available. Opening the first image in the folder.",
         );
         assert_eq!(toast.deadline(), None);
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::Visual),
+            "a notice must not inherit the replaced message's announcement"
+        );
 
         toast.expire(start + Duration::from_mins(10));
         assert_eq!(
@@ -8791,12 +8825,52 @@ mod test {
         let start = Instant::now();
         let mut toast = StatusToast::default();
         toast.show_until_navigation("Browsing only this file.");
-        toast.show("Moved to Trash. Undo with U.", start);
+        toast.show(
+            "Moved to Trash. Undo with U.",
+            ToastAnnouncement::Visual,
+            start,
+        );
 
         toast.dismiss_navigation_notice();
         assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
         toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
         assert_eq!(toast.message(), None);
+    }
+
+    #[test]
+    fn status_announcement_travels_with_its_message_and_clears_on_expiry() {
+        let start = Instant::now();
+        let mut toast = StatusToast::default();
+        assert_eq!(toast.view(), None);
+
+        toast.show(
+            "Calificación 4 de 5 guardada.",
+            ToastAnnouncement::PoliteStatus,
+            start,
+        );
+        assert_eq!(
+            toast.view(),
+            Some(ToastView {
+                text: "Calificación 4 de 5 guardada.".to_owned(),
+                announcement: ToastAnnouncement::PoliteStatus,
+            }),
+            "announcement follows the sender's kind, not English wording"
+        );
+
+        toast.show("Saved copy", ToastAnnouncement::Visual, start);
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::Visual)
+        );
+
+        toast.show("Rating cleared.", ToastAnnouncement::PoliteStatus, start);
+        toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
+        assert_eq!(toast.view(), None);
+        toast.show_until_navigation("Browsing only this file.");
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::Visual)
+        );
     }
 
     #[test]

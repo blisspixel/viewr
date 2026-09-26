@@ -657,6 +657,9 @@ struct ModalFocus {
 /// Record the focus a modal displaces when it opens and give it back when the
 /// last modal closes. A modal replaced by another keeps the original return
 /// target, so focus returns where the user was before the first one opened.
+/// Focus returns only to a control that was drawn while the modal was open. A
+/// menu item that opened the modal has closed with its menu, and focus on a
+/// control that is not drawn names an accessibility node that does not exist.
 fn sync_modal_focus(ctx: &egui::Context, active: Option<ModalKind>) {
     let state_id = egui::Id::new(MODAL_FOCUS_STATE);
     let focused = ctx.memory(egui::Memory::focused);
@@ -682,8 +685,23 @@ fn sync_modal_focus(ctx: &egui::Context, active: Option<ModalKind>) {
             (None, None) => None,
         }
     });
-    if let Some(previous) = restore {
+    if let Some(previous) = restore.filter(|previous| ctx.read_response(*previous).is_some()) {
         ctx.memory_mut(|memory| memory.request_focus(previous));
+    }
+}
+
+/// Keep an accessibility update's focus on a node that the update contains.
+///
+/// AccessKit refuses a tree whose focus names a missing node, and an attached
+/// screen reader turns that refusal into a crash. egui reports its focus memory
+/// unchecked, and focus can name a control that this frame did not draw, so
+/// such focus falls back to the tree root.
+pub(crate) fn settle_accessibility_focus(update: &mut egui::accesskit::TreeUpdate) {
+    let Some(root) = update.tree.as_ref().map(|tree| tree.root) else {
+        return;
+    };
+    if !update.nodes.iter().any(|(id, _)| *id == update.focus) {
+        update.focus = root;
     }
 }
 
@@ -8132,6 +8150,14 @@ mod tests {
         use super::{ModalKind, claim_initial_modal_focus, sync_modal_focus};
         let context = egui::Context::default();
         let before = egui::Id::new("control before the modal");
+        let _ = context.run_ui(accessibility_input(), |ui| {
+            let _ = ui.push_id(before, |ui| ui.button("Before"));
+            ui.interact(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(8.0)),
+                before,
+                egui::Sense::click(),
+            );
+        });
         context.memory_mut(|memory| memory.request_focus(before));
 
         sync_modal_focus(&context, Some(ModalKind::About));
@@ -8152,6 +8178,88 @@ mod tests {
             "focus returns to where it was before the first modal opened"
         );
         assert!(!claim_initial_modal_focus(&context));
+    }
+
+    /// Closing a modal opened from a menu item must not leave focus on the
+    /// closed item: AccessKit adapters reject focus on a node that is not in
+    /// the tree, and on Windows that rejection crashed viewr under a screen
+    /// reader.
+    #[test]
+    fn closing_a_modal_opened_from_a_menu_never_focuses_a_missing_node() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        let focus_is_in_tree = |update: &egui::accesskit::TreeUpdate| {
+            update.nodes.iter().any(|(id, _)| *id == update.focus)
+        };
+        let opener = context.run_ui(accessibility_input(), |ui| {
+            let response = ui.button("Preferences...");
+            response.request_focus();
+            let _ = render(ui, &frame);
+        });
+        assert!(focus_is_in_tree(
+            &opener
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update")
+        ));
+        frame.show_preferences = true;
+        for show_file_associations in [false, true, false] {
+            frame.show_file_associations = show_file_associations;
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            assert!(focus_is_in_tree(
+                &output
+                    .platform_output
+                    .accesskit_update
+                    .expect("AccessKit update")
+            ));
+        }
+        frame.show_preferences = false;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update");
+            assert!(
+                focus_is_in_tree(&update),
+                "focus returned to the closed menu item"
+            );
+        }
+    }
+
+    #[test]
+    fn accessibility_focus_on_a_missing_node_falls_back_to_the_root() {
+        use egui::accesskit::{Node, NodeId, Role, Tree, TreeId, TreeUpdate};
+        let root = NodeId(1);
+        let mut update = TreeUpdate {
+            nodes: vec![
+                (root, Node::new(Role::Window)),
+                (NodeId(2), Node::new(Role::Button)),
+            ],
+            tree: Some(Tree::new(root)),
+            tree_id: TreeId::ROOT,
+            focus: NodeId(99),
+        };
+        super::settle_accessibility_focus(&mut update);
+        assert_eq!(update.focus, root);
+
+        update.focus = NodeId(2);
+        super::settle_accessibility_focus(&mut update);
+        assert_eq!(update.focus, NodeId(2), "focus on a present node is kept");
+
+        update.tree = None;
+        update.focus = NodeId(99);
+        super::settle_accessibility_focus(&mut update);
+        assert_eq!(
+            update.focus,
+            NodeId(99),
+            "an incremental update is judged against a tree it does not carry"
+        );
     }
 
     #[test]

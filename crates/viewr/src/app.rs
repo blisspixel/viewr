@@ -292,6 +292,7 @@ fn run_internal(
         ),
         prefetch_sources: HashMap::new(),
         prefetch_schedule: prefetch::PrefetchSchedule::default(),
+        navigation_heading: prefetch::Heading::default(),
         event_proxy,
         performance_probe,
         startup_failure: None,
@@ -1199,6 +1200,8 @@ struct App {
     prefetch_sources: HashMap<PathBuf, Arc<crate::fs::ImageSource>>,
     /// Bounded owners, generations, cancellation, and terminal prefetch state.
     prefetch_schedule: prefetch::PrefetchSchedule,
+    /// Direction of the latest folder step; neighbor decode leads this way.
+    navigation_heading: prefetch::Heading,
     /// Wakes the event loop when background work finishes before a window exists.
     event_proxy: EventLoopProxy<UserEvent>,
     /// Explicit developer/CI performance probe; absent from normal launches.
@@ -1594,6 +1597,28 @@ impl App {
 
     fn insert_prefetched_image(&mut self, path: PathBuf, loaded: LoadedImage) -> bool {
         let retained = self.prefetch.insert(path.clone(), loaded.image);
+        if retained {
+            self.prefetch_sources.insert(path, loaded.source);
+        }
+        let prefetch = &self.prefetch;
+        self.prefetch_sources
+            .retain(|cached_path, _| prefetch.contains(cached_path));
+        retained
+    }
+
+    /// Cache a speculative neighbor decode by its rank in the current window,
+    /// so a far decode never evicts a nearer one under byte pressure.
+    fn insert_ranked_neighbor(&mut self, path: PathBuf, loaded: LoadedImage) -> bool {
+        let window = self.playlist.as_ref().map_or_else(Vec::new, |playlist| {
+            playlist.visible_neighbor_paths(
+                self.navigation_heading,
+                prefetch::NEIGHBORS_AHEAD,
+                prefetch::NEIGHBORS_BEHIND,
+            )
+        });
+        let retained = self
+            .prefetch
+            .insert_ranked(path.clone(), loaded.image, &window);
         if retained {
             self.prefetch_sources.insert(path, loaded.source);
         }
@@ -4493,6 +4518,9 @@ impl App {
         if playlist.files.is_empty() || new_index >= playlist.files.len() {
             return;
         }
+        if let Some(heading) = prefetch::Heading::between(playlist.index, new_index) {
+            self.navigation_heading = heading;
+        }
         let next_path = playlist.files[new_index].clone();
         let Some(current_path) = playlist.files.get(playlist.index) else {
             return;
@@ -4568,7 +4596,11 @@ impl App {
                 .filter(|path| self.session.presented_path.as_deref() != Some(path.as_path()))
                 .collect()
         } else {
-            playlist.visible_neighbor_paths(3)
+            playlist.visible_neighbor_paths(
+                self.navigation_heading,
+                prefetch::NEIGHBORS_AHEAD,
+                prefetch::NEIGHBORS_BEHIND,
+            )
         };
         let candidate_paths = exclude_blocked_neighbors(candidate_paths, &blocked);
         let mut keep_paths: HashSet<&Path> = candidate_paths.iter().map(PathBuf::as_path).collect();
@@ -4645,7 +4677,7 @@ impl App {
                         let retained = if self.mosaic.is_active() {
                             self.insert_mosaic_image_if_fits(path.clone(), image)
                         } else {
-                            self.insert_prefetched_image(path.clone(), image)
+                            self.insert_ranked_neighbor(path.clone(), image)
                         };
                         if !retained {
                             if self.mosaic.is_active() {

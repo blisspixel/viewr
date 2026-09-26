@@ -342,23 +342,39 @@ impl Playlist {
             .collect()
     }
 
-    pub(crate) fn visible_neighbor_paths(&self, radius: usize) -> Vec<PathBuf> {
-        if let Some(position) = self.visible_position() {
-            return crate::prefetch::neighbor_indices(position, self.visible_indices.len(), radius)
-                .into_iter()
-                .map(|visible| self.files[self.visible_indices[visible]].clone())
-                .collect();
-        }
-        let insertion = self
-            .visible_indices
-            .partition_point(|index| *index < self.index);
-        let start = insertion.saturating_sub(radius);
-        let end = insertion
-            .saturating_add(radius)
-            .min(self.visible_indices.len());
-        self.visible_indices[start..end]
-            .iter()
-            .map(|index| self.files[*index].clone())
+    /// Visible neighbors to decode ahead of navigation, in priority order.
+    ///
+    /// When the selection is outside the filter, the matching entries on each
+    /// side of its catalog position are its neighbors: `Next` lands on the one
+    /// after it and `Previous` on the one before it.
+    pub(crate) fn visible_neighbor_paths(
+        &self,
+        heading: crate::prefetch::Heading,
+        ahead: usize,
+        behind: usize,
+    ) -> Vec<PathBuf> {
+        use crate::prefetch::Heading;
+        let len = self.visible_indices.len();
+        let visible = if let Some(position) = self.visible_position() {
+            crate::prefetch::neighbor_indices(position, len, heading, ahead, behind)
+        } else {
+            let insertion = self
+                .visible_indices
+                .partition_point(|index| *index < self.index);
+            let (forward, backward) = match heading {
+                Heading::Forward => (ahead, behind),
+                Heading::Backward => (behind, ahead),
+            };
+            let after = (insertion..len).take(forward);
+            let before = (0..insertion).rev().take(backward);
+            match heading {
+                Heading::Forward => after.chain(before).collect(),
+                Heading::Backward => before.chain(after).collect(),
+            }
+        };
+        visible
+            .into_iter()
+            .map(|position| self.files[self.visible_indices[position]].clone())
             .collect()
     }
 
@@ -638,6 +654,7 @@ pub(crate) enum ScanPurpose {
 mod tests {
     use super::*;
     use crate::ephemeral::TempWorkspace;
+    use crate::prefetch::Heading;
     use crate::ratings::Rating;
 
     fn path(index: usize) -> PathBuf {
@@ -733,7 +750,10 @@ mod tests {
         assert!(playlist.outside_filter());
         assert_eq!(playlist.navigation_target(1), Some(4));
         assert_eq!(playlist.navigation_target(-1), Some(4));
-        assert_eq!(playlist.visible_neighbor_paths(2), [path(4)]);
+        assert_eq!(
+            playlist.visible_neighbor_paths(Heading::Forward, 2, 2),
+            [path(4)]
+        );
 
         let mut after_last_match = rated_playlist(4);
         after_last_match.set_filter(RatingFilter::AtLeast(Rating::new(4).unwrap()));
@@ -804,7 +824,10 @@ mod tests {
         let mut playlist = rated_playlist(2);
         playlist.set_filter(RatingFilter::AtLeast(Rating::new(3).unwrap()));
         assert_eq!(playlist.visible_indices, [2, 4, 6]);
-        assert_eq!(playlist.visible_neighbor_paths(2), [path(4), path(6)]);
+        assert_eq!(
+            playlist.visible_neighbor_paths(Heading::Forward, 2, 2),
+            [path(4), path(6)]
+        );
         assert_eq!(playlist.visible_catalog_range(), [2, 4, 6]);
         assert_eq!(playlist.visible_position_for_catalog_index(2), Some(0));
         assert_eq!(playlist.visible_position_for_catalog_index(4), Some(1));
@@ -1071,7 +1094,11 @@ mod tests {
         assert!(!playlist.select(0));
         assert!(!playlist.set_rating(PathBuf::from("missing.jpg").as_path(), RatingState::Unrated));
         assert!(playlist.visible_catalog_range().is_empty());
-        assert!(playlist.visible_neighbor_paths(4).is_empty());
+        assert!(
+            playlist
+                .visible_neighbor_paths(Heading::Forward, 4, 4)
+                .is_empty()
+        );
     }
 
     #[test]

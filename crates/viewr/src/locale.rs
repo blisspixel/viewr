@@ -487,6 +487,12 @@ struct Message {
 
 const MESSAGES: &[Message] = &[
     Message {
+        english: "Open the File menu",
+        spanish: "Abrir el menú Archivo",
+        french: "Ouvrir le menu Fichier",
+        german: "Menü Datei öffnen",
+    },
+    Message {
         english: "File",
         spanish: "Archivo",
         french: "Fichier",

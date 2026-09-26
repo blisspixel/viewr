@@ -15,6 +15,7 @@ pub use crate::chrome::{
 };
 pub(crate) use crate::chrome::{RATING_RECOVERY_STATUS, SAVE_RECOVERY_STATUS};
 use crate::locale::{Language, tr};
+use crate::shortcuts::{TopMenu, menu_access_keys};
 use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::text::LayoutJob;
 use egui::{
@@ -1211,13 +1212,19 @@ fn render_top_menu(
         .frame(menu_frame(colors))
         .show(ui, |ui| {
             configure_top_menu_widgets(ui, colors);
+            let requested = requested_top_menu(ui, frame.language);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                file_menu(ui, actions, frame, chrome);
-                edit_menu(ui, actions, frame, chrome);
-                view_menu(ui, actions, frame, chrome);
-                tools_menu(ui, actions, frame, chrome);
-                help_menu(ui, actions, frame);
+                let menus = [
+                    (TopMenu::File, file_menu(ui, actions, frame, chrome)),
+                    (TopMenu::Edit, edit_menu(ui, actions, frame, chrome)),
+                    (TopMenu::View, view_menu(ui, actions, frame, chrome)),
+                    (TopMenu::Tools, tools_menu(ui, actions, frame, chrome)),
+                    (TopMenu::Help, help_menu(ui, actions, frame)),
+                ];
+                if let Some((_, button)) = menus.iter().find(|(menu, _)| Some(*menu) == requested) {
+                    open_top_menu(button);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // The reading strip owns its own separation instead of
                     // inheriting whatever spacing the menu titles need.
@@ -1230,6 +1237,38 @@ fn render_top_menu(
                 });
             });
         });
+}
+
+/// Keyboard access to the menu bar: F10 opens File, and on Windows and Linux
+/// Alt plus a menu's access letter opens that menu. macOS reserves Option
+/// for typing characters and reaches its menus through the system instead.
+/// A disabled menu bar, behind a modal, never consumes the keys.
+fn requested_top_menu(ui: &egui::Ui, language: crate::locale::Language) -> Option<TopMenu> {
+    if !ui.is_enabled() {
+        return None;
+    }
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F10) {
+            return Some(TopMenu::File);
+        }
+        if cfg!(target_os = "macos") {
+            return None;
+        }
+        menu_access_keys(language)
+            .into_iter()
+            .find_map(|(menu, letter)| {
+                let key = egui::Key::from_name(&letter.to_ascii_uppercase().to_string())?;
+                input.consume_key(egui::Modifiers::ALT, key).then_some(menu)
+            })
+    })
+}
+
+/// Open a top-level menu from the keyboard and give its title focus, so arrow
+/// keys and Escape continue from the menu the user asked for.
+fn open_top_menu(button: &egui::Response) {
+    egui::Popup::open_id(&button.ctx, egui::Popup::default_response_id(button));
+    button.request_focus();
+    button.ctx.request_repaint();
 }
 
 fn render_top_operation_status(
@@ -1646,7 +1685,7 @@ fn file_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("File")))
@@ -1723,30 +1762,40 @@ fn file_menu(
                 ui.close();
             }
             ui.separator();
-            if ui
-                .add_enabled(
-                    chrome.is_enabled(ChromeControl::MoveToTrash),
-                    egui::Button::new(frame.text(tr!("Move to Trash"))).shortcut_text("Delete"),
-                )
-                .clicked()
-            {
-                actions.push(UiAction::Trash);
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    chrome.is_enabled(ChromeControl::PermanentDelete),
-                    egui::Button::new(frame.text(tr!("Permanently Delete...")))
-                        .shortcut_text("Shift+Delete"),
-                )
-                .clicked()
-            {
-                actions.push(UiAction::PermanentDelete);
-                ui.close();
-            }
-            undo_trash_menu_item(ui, actions, chrome);
+            removal_menu_items(ui, actions, frame, chrome);
         },
-    );
+    )
+    .response
+}
+
+fn removal_menu_items(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
+    if ui
+        .add_enabled(
+            chrome.is_enabled(ChromeControl::MoveToTrash),
+            egui::Button::new(frame.text(tr!("Move to Trash"))).shortcut_text("Delete"),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::Trash);
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            chrome.is_enabled(ChromeControl::PermanentDelete),
+            egui::Button::new(frame.text(tr!("Permanently Delete...")))
+                .shortcut_text("Shift+Delete"),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::PermanentDelete);
+        ui.close();
+    }
+    undo_trash_menu_item(ui, actions, chrome);
 }
 
 fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1769,7 +1818,7 @@ fn edit_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("Edit")))
@@ -1842,7 +1891,8 @@ fn edit_menu(
                 ui.menu_button(label, |ui| rating_menu(ui, actions, chrome));
             });
         },
-    );
+    )
+    .response
 }
 
 fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1884,7 +1934,7 @@ fn tools_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("Tools")))
@@ -1904,7 +1954,8 @@ fn tools_menu(
                 ui.close();
             }
         },
-    );
+    )
+    .response
 }
 
 fn spot_heal_menu_items(
@@ -2062,7 +2113,7 @@ fn view_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("View")))
@@ -2124,7 +2175,8 @@ fn view_menu(
                 },
             );
         },
-    );
+    )
+    .response
 }
 
 fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -2467,7 +2519,11 @@ fn appearance_menu(
     }
 }
 
-fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn help_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("Help")))
@@ -2491,7 +2547,8 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
                 ui.close();
             }
         },
-    );
+    )
+    .response
 }
 
 fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -5899,6 +5956,80 @@ mod tests {
         assert_eq!(
             frame.chrome_view_model().rating_menu_label(),
             "Rating: Unreadable"
+        );
+    }
+
+    /// Labels in the accessibility tree after `key` is pressed and the next
+    /// frame is drawn.
+    fn labels_after_key(
+        frame: &UiFrameOwned,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    ) -> Vec<String> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let _ = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, frame);
+        });
+        let mut pressed = accessibility_input();
+        pressed.modifiers = modifiers;
+        pressed.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        });
+        let _ = context.run_ui(pressed, |ui| {
+            let _ = render(ui, frame);
+        });
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, frame);
+        });
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn f10_and_alt_letters_open_the_top_menus_from_the_keyboard() {
+        let frame = accessibility_test_frame();
+        let closed = labels_after_key(&frame, egui::Key::Z, egui::Modifiers::NONE);
+        assert!(!closed.iter().any(|label| label.starts_with("Open File...")));
+
+        let file = labels_after_key(&frame, egui::Key::F10, egui::Modifiers::NONE);
+        assert!(
+            file.iter().any(|label| label.starts_with("Open File...")),
+            "F10 opens File"
+        );
+
+        if !cfg!(target_os = "macos") {
+            let view = labels_after_key(&frame, egui::Key::V, egui::Modifiers::ALT);
+            assert!(
+                view.iter()
+                    .any(|label| label.starts_with("Fit Image to View")),
+                "Alt+V opens View"
+            );
+            let help = labels_after_key(&frame, egui::Key::H, egui::Modifiers::ALT);
+            assert!(
+                help.iter().any(|label| label.starts_with("About viewr")),
+                "Alt+H opens Help"
+            );
+        }
+
+        let mut modal = accessibility_test_frame();
+        modal.show_about = true;
+        let behind_modal = labels_after_key(&modal, egui::Key::F10, egui::Modifiers::NONE);
+        assert!(
+            !behind_modal
+                .iter()
+                .any(|label| label.starts_with("Open File...")),
+            "a modal keeps the menu bar closed"
         );
     }
 

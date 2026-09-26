@@ -22,6 +22,12 @@ The minimum contract is:
   named radio group. The chosen bundled catalog applies without restarting.
   Catalog review covers visible copy, accessible names, shortcuts, focus,
   accented glyphs, truncation, and live-region grammar on each native platform.
+- The menu bar is reachable from the keyboard. `F10` opens File, and on Windows
+  and Linux `Alt` plus a menu's access letter opens that menu: the first letter
+  of the visible title that no earlier menu uses (English `F`, `E`, `V`, `T`,
+  `H`; French Aide takes `I` because Affichage has `A`). Arrow keys move
+  through the open menu and Escape closes it. macOS reserves Option for typing
+  and reaches menus through the system. A modal keeps the menu bar closed.
 - The GPU-painted picture is exposed as one image element covering the image
   viewport, named by the presented file's basename and described by its pixel
   size. It takes no input, so pointer and keyboard control stay with the canvas.

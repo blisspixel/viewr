@@ -6,7 +6,57 @@
 //! way, so the surface a first-time user reads is translated rather than
 //! falling back to English one string at a time.
 
-use crate::locale::Language;
+use crate::locale::{Language, tr};
+
+/// Top-level menus in menu-bar order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TopMenu {
+    File,
+    Edit,
+    View,
+    Tools,
+    Help,
+}
+
+impl TopMenu {
+    /// Every top-level menu in menu-bar order.
+    pub(crate) const ALL: [Self; 5] = [Self::File, Self::Edit, Self::View, Self::Tools, Self::Help];
+
+    /// Cataloged English title.
+    #[must_use]
+    pub(crate) fn source(self) -> &'static str {
+        match self {
+            Self::File => tr!("File"),
+            Self::Edit => tr!("Edit"),
+            Self::View => tr!("View"),
+            Self::Tools => tr!("Tools"),
+            Self::Help => tr!("Help"),
+        }
+    }
+}
+
+/// Alt access letters for the top-level menus in `language`.
+///
+/// Each menu takes the first ASCII letter of its visible title that no earlier
+/// menu has taken, so every letter is unique and belongs to the name the user
+/// reads. Letters are lowercase. A title with no free letter gets none.
+#[must_use]
+pub(crate) fn menu_access_keys(language: Language) -> Vec<(TopMenu, char)> {
+    let mut taken = Vec::new();
+    TopMenu::ALL
+        .into_iter()
+        .filter_map(|menu| {
+            let letter = language
+                .text(menu.source())
+                .chars()
+                .filter(char::is_ascii_alphabetic)
+                .map(|letter| letter.to_ascii_lowercase())
+                .find(|letter| !taken.contains(letter))?;
+            taken.push(letter);
+            Some((menu, letter))
+        })
+        .collect()
+}
 
 /// How the empty-state card should speak.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +125,10 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             ShortcutSpec {
                 keys: "{primary}+Shift+S",
                 action: "Save As",
+            },
+            ShortcutSpec {
+                keys: "F10",
+                action: "Open the File menu",
             },
         ],
     },
@@ -452,5 +506,45 @@ mod tests {
         assert_eq!(bounded_wide.chars().count(), MAX_EMPTY_ERROR_CHARS + 3);
         assert!(bounded_wide.ends_with("..."));
         assert!(!bounded_wide.contains('\n'));
+    }
+
+    #[test]
+    fn every_language_gives_each_top_menu_a_unique_letter_from_its_title() {
+        use super::{TopMenu, menu_access_keys};
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            let keys = menu_access_keys(language);
+            assert_eq!(keys.len(), TopMenu::ALL.len(), "{language:?}");
+            for (index, (menu, letter)) in keys.iter().enumerate() {
+                assert_eq!(*menu, TopMenu::ALL[index], "menu-bar order");
+                assert!(
+                    language
+                        .text(menu.source())
+                        .to_ascii_lowercase()
+                        .contains(*letter),
+                    "{language:?} {menu:?} letter {letter} is not in its title"
+                );
+                assert!(
+                    keys[..index].iter().all(|(_, earlier)| earlier != letter),
+                    "{language:?} reuses {letter}"
+                );
+            }
+        }
+        let english: Vec<char> = menu_access_keys(Language::English)
+            .into_iter()
+            .map(|(_, letter)| letter)
+            .collect();
+        assert_eq!(english, ['f', 'e', 'v', 't', 'h']);
+        let french = menu_access_keys(Language::French);
+        assert_eq!(french[2], (TopMenu::View, 'a'));
+        assert_eq!(
+            french[4],
+            (TopMenu::Help, 'i'),
+            "Aide yields A to Affichage"
+        );
     }
 }

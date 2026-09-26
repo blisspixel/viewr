@@ -6,7 +6,7 @@ LICENSE.
 
 ## License summary
 
-- Apache-2.0 (Apache License 2.0): 282 packages
+- Apache-2.0 (Apache License 2.0): 280 packages
 - MIT (MIT License): 87 packages
 - Unicode-3.0 (Unicode License v3): 19 packages
 - BSD-3-Clause (BSD 3-Clause "New" or "Revised" License): 9 packages
@@ -6422,14 +6422,12 @@ used_by:
   ab_glyph 0.2.32
   ab_glyph_rasterizer 0.1.10
   accesskit 0.24.1
-  accesskit_atspi_common 0.18.1
-  accesskit_consumer 0.35.0
-  accesskit_consumer 0.36.0
+  accesskit_atspi_common 0.19.1
   accesskit_consumer 0.38.0
   accesskit_macos 0.26.3
-  accesskit_unix 0.21.1
-  accesskit_windows 0.32.1
-  accesskit_winit 0.32.2
+  accesskit_unix 0.22.1
+  accesskit_windows 0.34.0
+  accesskit_winit 0.33.2
   allocator-api2 0.2.21
   anyhow 1.0.104
   arboard 3.6.1

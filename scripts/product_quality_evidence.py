@@ -1776,6 +1776,7 @@ def local_performance_rollup(
     executable digests, so a report problem is found on the machine that
     produced it rather than after every platform is complete.
     """
+    evidence_root = _require_directory(evidence_root, "evidence directory")
     report_root = _require_directory(
         evidence_root / "performance",
         "performance report directory",

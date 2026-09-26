@@ -14,6 +14,7 @@ use image::metadata::Orientation;
 
 use crate::decode::{ColorNormalizer, DecodedImage, SourceImage};
 use crate::error::Error;
+use crate::locale::{Language, tr};
 
 const MAX_PAGE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_PAGES: usize = 1_000;
@@ -285,25 +286,32 @@ impl PageCursor {
     }
 
     #[must_use]
-    pub(crate) fn position_copy(&self) -> String {
-        format!(
-            "{} {} of {}",
-            self.kind().noun(),
-            self.index.saturating_add(1),
-            self.count()
-        )
+    pub(crate) fn position_copy(&self, language: Language) -> String {
+        let template = match self.kind() {
+            PageKind::Tiff => tr!("Page {index} of {count}"),
+            PageKind::Ico => tr!("Icon {index} of {count}"),
+        };
+        language
+            .fill(
+                template,
+                &[
+                    ("index", &self.index.saturating_add(1).to_string()),
+                    ("count", &self.count().to_string()),
+                ],
+            )
+            .into_string()
     }
 
     /// Visible identity. ICO also reports the current pixel size.
     #[must_use]
-    pub(crate) fn visible_copy(&self) -> String {
+    pub(crate) fn visible_copy(&self, language: Language) -> String {
         match self.kind() {
-            PageKind::Tiff => self.position_copy(),
+            PageKind::Tiff => self.position_copy(language),
             PageKind::Ico => {
                 let image = self.current_image();
                 format!(
                     "{} · {}×{}",
-                    self.position_copy(),
+                    self.position_copy(language),
                     image.width,
                     image.height
                 )
@@ -312,14 +320,18 @@ impl PageCursor {
     }
 
     #[must_use]
-    pub(crate) fn accessibility_copy(&self) -> String {
+    pub(crate) fn accessibility_copy(&self, language: Language) -> String {
         let image = self.current_image();
-        format!(
-            "{}, {} by {}",
-            self.position_copy(),
-            image.width,
-            image.height
-        )
+        language
+            .fill(
+                tr!("{position}, {width} by {height}"),
+                &[
+                    ("position", &self.position_copy(language)),
+                    ("width", &image.width.to_string()),
+                    ("height", &image.height.to_string()),
+                ],
+            )
+            .into_string()
     }
 }
 
@@ -757,8 +769,13 @@ mod tests {
         let mut cursor = PageCursor::new(pages);
         cursor.select_matching(3, 2);
         assert_eq!(cursor.index(), 1);
-        assert_eq!(cursor.position_copy(), "Page 2 of 2");
-        assert!(cursor.accessibility_copy().contains("3 by 2"));
+        assert_eq!(cursor.position_copy(Language::English), "Page 2 of 2");
+        assert!(
+            cursor
+                .accessibility_copy(Language::English)
+                .contains("3 by 2")
+        );
+        assert_eq!(cursor.position_copy(Language::German), "Seite 2 von 2");
         assert!(cursor.can_step(-1));
         assert!(!cursor.can_step(1));
         assert!(cursor.step(-1));
@@ -799,8 +816,15 @@ mod tests {
 
         let mut cursor = PageCursor::new(pages);
         cursor.select_matching(32, 32);
-        assert_eq!(cursor.position_copy(), "Icon 2 of 2");
-        assert_eq!(cursor.visible_copy(), "Icon 2 of 2 · 32×32");
+        assert_eq!(cursor.position_copy(Language::English), "Icon 2 of 2");
+        assert_eq!(
+            cursor.visible_copy(Language::English),
+            "Icon 2 of 2 · 32×32"
+        );
+        assert_eq!(
+            cursor.visible_copy(Language::French),
+            "Icône 2 sur 2 · 32×32"
+        );
         assert!(cursor.step(-1));
         assert_eq!(cursor.current_image().width, 16);
     }

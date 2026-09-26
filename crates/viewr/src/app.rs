@@ -8325,8 +8325,8 @@ impl ApplicationHandler<UserEvent> for App {
                     noun: cursor.kind().noun(),
                     can_previous: cursor.can_step(-1),
                     can_next: cursor.can_step(1),
-                    visible_label: cursor.visible_copy(),
-                    accessibility_label: cursor.accessibility_copy(),
+                    visible_label: cursor.visible_copy(self.language),
+                    accessibility_label: cursor.accessibility_copy(self.language),
                 });
                 let details = self.image_details.clone();
                 let color_profile = self.current_image.as_ref().map(|image| image.color_profile);

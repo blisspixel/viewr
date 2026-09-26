@@ -28,9 +28,10 @@ wait sentences, rating write failures, and the dock, rating, and Undo Trash copy
 the chrome projection produces, including its accessible names, crop and Save As
 recovery, reload wait reasons, edit-presentation failures, Image Information,
 folder sort, top-chrome busy status, Update, Save As overwrite confirmation,
-and every top-chrome toast and navigation notice. Remaining file-association
-guidance, some panel copy, and some hover help still use the explicit English
-fallback. Technical detail that an operating system or decoder supplies, such
+every top-chrome toast and navigation notice, every dialog, panel, and crop
+and collage control with their accessible names, and the appearance chooser.
+Image Information value formats, such as decimal separators and the `MP`
+unit, are not yet localized. Technical detail that an operating system or decoder supplies, such
 as the text after "Save failed:", is inserted untranslated into a translated
 sentence. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called
@@ -56,6 +57,13 @@ of by review:
   proves its own coverage. An English literal or an ad hoc `format!` passed to
   a toast fails to compile. `fill` substitutes each `{name}` once, never
   rescans an inserted value, and leaves an unknown placeholder visible.
+- `ui::every_rendered_text_and_accessible_name_comes_from_the_catalog` renders
+  the main view, empty state, every dialog, the filtered empty state, Spot
+  Heal, crop, and a load failure in a test-only pseudo language that brackets
+  every cataloged string. Any visible text or accessible name without the
+  brackets fails, except the data exceptions that test names explicitly:
+  numbers with universal units, fixture filenames, native language names, the
+  product and license names, and platform commands.
 - `locale::toast_sources_passed_by_value_are_cataloged` covers the constants
   and folder-scan notices that reach `localize` as values, and
   `locale::every_translation_keeps_its_source_placeholders_and_is_unique`

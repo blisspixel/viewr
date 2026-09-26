@@ -17,6 +17,10 @@ pub(crate) enum Language {
     Spanish,
     French,
     German,
+    /// Test-only language that brackets every cataloged string, so a rendered
+    /// interface can prove that no visible text bypassed the catalog.
+    #[cfg(test)]
+    Pseudo,
 }
 
 impl Language {
@@ -32,8 +36,31 @@ impl Language {
             Self::Spanish => message.spanish,
             Self::French => message.french,
             Self::German => message.german,
+            #[cfg(test)]
+            Self::Pseudo => pseudo_text(message.english),
         }
     }
+}
+
+/// Opening and closing marks of the test-only pseudo language.
+#[cfg(test)]
+pub(crate) const PSEUDO_MARKS: (char, char) = ('\u{27E6}', '\u{27E7}');
+
+/// Bracketed pseudo translation, created once per source and kept for the
+/// life of the test process so it can be returned as `&'static str`.
+#[cfg(test)]
+fn pseudo_text(english: &'static str) -> &'static str {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, &'static str>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.entry(english).or_insert_with(|| {
+        let (open, close) = PSEUDO_MARKS;
+        Box::leak(format!("{open}{english}{close}").into_boxed_str())
+    })
 }
 
 /// User-visible text already resolved for one language.
@@ -2466,8 +2493,8 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Used for future folders, launches, Folder Previews, and full-image collage groups. The file you open stays selected.",
-        spanish: "Se usa para carpetas futuras, inicios, vistas previas de carpeta y grupos de collage de imagen completa. El archivo que abre permanece seleccionado.",
-        french: "Utilisé pour les dossiers futurs, les lancements, les aperçus de dossier et les groupes de collage d’image complète. Le fichier que vous ouvrez reste sélectionné.",
+        spanish: "Se usa para carpetas futuras, inicios, vistas previas de carpeta y grupos de collage de imágenes completas. El archivo que abre permanece seleccionado.",
+        french: "Utilisé pour les dossiers futurs, les lancements, les aperçus de dossier et les groupes de mosaïque d’images complètes. Le fichier que vous ouvrez reste sélectionné.",
         german: "Gilt für künftige Ordner, Starts, Ordnervorschauen und Collage-Gruppen. Die geöffnete Datei bleibt ausgewählt.",
     },
     Message {
@@ -3253,13 +3280,13 @@ const MESSAGES: &[Message] = &[
     Message {
         english: "Heal Feather",
         spanish: "Difuminado de la corrección",
-        french: "Fondu de la correction",
+        french: "Contour progressif de la correction",
         german: "Randweichheit der Reparatur",
     },
     Message {
         english: "Heal feather",
         spanish: "Difuminado de la corrección",
-        french: "Fondu de la correction",
+        french: "Contour progressif de la correction",
         german: "Randweichheit der Reparatur",
     },
     Message {
@@ -3374,7 +3401,7 @@ const MESSAGES: &[Message] = &[
         english: "Preferences. Default folder sort and opt-in default image viewer settings.",
         spanish: "Preferencias. Orden de carpeta predeterminado y configuración opcional del visor de imágenes predeterminado.",
         french: "Préférences. Tri par défaut des dossiers et réglages facultatifs de la visionneuse d’images par défaut.",
-        german: "Einstellungen. Standard-Ordnersortierung und optionale Einstellungen für den Standard-Bildbetrachter.",
+        german: "Einstellungen. Standard-Ordnersortierung und optionale Einstellungen für die Standard-Bildanzeige.",
     },
     Message {
         english: "viewr never changes file associations during installation or startup.",
@@ -3398,13 +3425,13 @@ const MESSAGES: &[Message] = &[
         english: "Default image viewer. File associations change only after an explicit operating-system choice.",
         spanish: "Visor de imágenes predeterminado. Las asociaciones de archivos solo cambian tras una elección explícita en el sistema operativo.",
         french: "Visionneuse d’images par défaut. Les associations de fichiers ne changent qu’après un choix explicite dans le système d’exploitation.",
-        german: "Standard-Bildbetrachter. Dateizuordnungen ändern sich nur nach einer ausdrücklichen Auswahl im Betriebssystem.",
+        german: "Standard-Bildanzeige. Dateizuordnungen ändern sich nur nach einer ausdrücklichen Auswahl im Betriebssystem.",
     },
     Message {
         english: "In Windows Default Apps, search for .png, .jpg, and .jpeg, then choose viewr for each type. If viewr is not listed, use a file's Open with menu, choose another app, browse to viewr.exe, and select Always.",
         spanish: "En Aplicaciones predeterminadas de Windows, busque .png, .jpg y .jpeg y elija viewr para cada tipo. Si viewr no aparece, use el menú Abrir con de un archivo, elija otra aplicación, busque viewr.exe y seleccione Siempre.",
-        french: "Dans Applications par défaut de Windows, recherchez .png, .jpg et .jpeg, puis choisissez viewr pour chaque type. Si viewr n’apparaît pas, utilisez le menu Ouvrir avec d’un fichier, choisissez une autre application, accédez à viewr.exe et sélectionnez Toujours.",
-        german: "Suchen Sie unter Windows-Standard-Apps nach .png, .jpg und .jpeg und wählen Sie für jeden Typ viewr. Wird viewr nicht aufgeführt, verwenden Sie im Menü Öffnen mit einer Datei eine andere App, navigieren Sie zu viewr.exe und wählen Sie Immer.",
+        french: "Dans les paramètres Applications par défaut de Windows, recherchez .png, .jpg et .jpeg, puis choisissez viewr pour chaque type. Si viewr n’apparaît pas, utilisez le menu Ouvrir avec d’un fichier, choisissez une autre application, accédez à viewr.exe et sélectionnez Toujours.",
+        german: "Suchen Sie in Windows unter Standard-Apps nach .png, .jpg und .jpeg und wählen Sie für jeden Typ viewr. Wird viewr nicht aufgeführt, öffnen Sie für eine Datei das Menü Öffnen mit, wählen Sie Andere App auswählen, navigieren Sie zu viewr.exe und wählen Sie Immer.",
     },
     Message {
         english: "Open Windows Default Apps",
@@ -3487,7 +3514,7 @@ const MESSAGES: &[Message] = &[
     Message {
         english: "No images are rated {rating} or higher.",
         spanish: "Ninguna imagen tiene una valoración de {rating} o más.",
-        french: "Aucune image n’a une note de {rating} ou plus.",
+        french: "Aucune image n’a une note égale ou supérieure à {rating}.",
         german: "Kein Bild ist mit {rating} oder höher bewertet.",
     },
     Message {
@@ -3547,7 +3574,7 @@ const MESSAGES: &[Message] = &[
     Message {
         english: "Feather",
         spanish: "Difuminado",
-        french: "Fondu",
+        french: "Contour progressif",
         german: "Randweichheit",
     },
     Message {
@@ -3570,7 +3597,7 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Try the next ranked clean source patch",
-        spanish: "Probar el siguiente parche de origen limpio de la clasificación",
+        spanish: "Probar la siguiente zona de origen limpia de la clasificación",
         french: "Essayer le prochain échantillon source propre du classement",
         german: "Nächsten sauberen Quellbereich der Rangfolge versuchen",
     },
@@ -3608,7 +3635,7 @@ const MESSAGES: &[Message] = &[
         english: "Arrows move  |  Shift+Arrows resize  |  Ctrl fine-tunes",
         spanish: "Flechas mueven  |  Shift+Flechas redimensionan  |  Ctrl ajusta con precisión",
         french: "Flèches déplacent  |  Shift+Flèches redimensionnent  |  Ctrl affine",
-        german: "Pfeile verschieben  |  Shift+Pfeile ändern die Größe  |  Ctrl verfeinert",
+        german: "Pfeiltasten verschieben  |  Shift+Pfeiltasten ändern die Größe  |  Ctrl verfeinert",
     },
     Message {
         english: "Drag to redraw  |  X swaps aspect  |  Enter applies  |  Esc cancels",
@@ -3692,49 +3719,49 @@ const MESSAGES: &[Message] = &[
         english: "Resize crop from top left",
         spanish: "Redimensionar el recorte desde la esquina superior izquierda",
         french: "Redimensionner le recadrage depuis le coin supérieur gauche",
-        german: "Zuschnitt von oben links ändern",
+        german: "Zuschnittgröße von oben links ändern",
     },
     Message {
         english: "Resize crop from top",
         spanish: "Redimensionar el recorte desde arriba",
         french: "Redimensionner le recadrage depuis le haut",
-        german: "Zuschnitt von oben ändern",
+        german: "Zuschnittgröße von oben ändern",
     },
     Message {
         english: "Resize crop from top right",
         spanish: "Redimensionar el recorte desde la esquina superior derecha",
         french: "Redimensionner le recadrage depuis le coin supérieur droit",
-        german: "Zuschnitt von oben rechts ändern",
+        german: "Zuschnittgröße von oben rechts ändern",
     },
     Message {
         english: "Resize crop from right",
         spanish: "Redimensionar el recorte desde la derecha",
         french: "Redimensionner le recadrage depuis la droite",
-        german: "Zuschnitt von rechts ändern",
+        german: "Zuschnittgröße von rechts ändern",
     },
     Message {
         english: "Resize crop from bottom right",
         spanish: "Redimensionar el recorte desde la esquina inferior derecha",
         french: "Redimensionner le recadrage depuis le coin inférieur droit",
-        german: "Zuschnitt von unten rechts ändern",
+        german: "Zuschnittgröße von unten rechts ändern",
     },
     Message {
         english: "Resize crop from bottom",
         spanish: "Redimensionar el recorte desde abajo",
         french: "Redimensionner le recadrage depuis le bas",
-        german: "Zuschnitt von unten ändern",
+        german: "Zuschnittgröße von unten ändern",
     },
     Message {
         english: "Resize crop from bottom left",
         spanish: "Redimensionar el recorte desde la esquina inferior izquierda",
         french: "Redimensionner le recadrage depuis le coin inférieur gauche",
-        german: "Zuschnitt von unten links ändern",
+        german: "Zuschnittgröße von unten links ändern",
     },
     Message {
         english: "Resize crop from left",
         spanish: "Redimensionar el recorte desde la izquierda",
         french: "Redimensionner le recadrage depuis la gauche",
-        german: "Zuschnitt von links ändern",
+        german: "Zuschnittgröße von links ändern",
     },
     Message {
         english: "Folder previews",
@@ -3768,7 +3795,7 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Follows your operating system. Currently {mode}.",
-        spanish: "Sigue al sistema operativo. Actualmente, {mode}.",
+        spanish: "Sigue la configuración de su sistema operativo. Actualmente: {mode}.",
         french: "Suit votre système d’exploitation. Actuellement : {mode}.",
         german: "Folgt Ihrem Betriebssystem. Derzeit {mode}.",
     },
@@ -3801,6 +3828,36 @@ const MESSAGES: &[Message] = &[
         spanish: "Foto {position} de {total} en la vista de carpeta activa, seleccionada",
         french: "Photo {position} sur {total} dans la vue du dossier active, sélectionnée",
         german: "Foto {position} von {total} in der aktiven Ordneransicht, ausgewählt",
+    },
+    Message {
+        english: "Page {index} of {count}",
+        spanish: "Página {index} de {count}",
+        french: "Page {index} sur {count}",
+        german: "Seite {index} von {count}",
+    },
+    Message {
+        english: "Icon {index} of {count}",
+        spanish: "Icono {index} de {count}",
+        french: "Icône {index} sur {count}",
+        german: "Symbol {index} von {count}",
+    },
+    Message {
+        english: "{position}, {width} by {height}",
+        spanish: "{position}, {width} por {height}",
+        french: "{position}, {width} sur {height}",
+        german: "{position}, {width} mal {height}",
+    },
+    Message {
+        english: "{index} of {total}",
+        spanish: "{index} de {total}",
+        french: "{index} sur {total}",
+        german: "{index} von {total}",
+    },
+    Message {
+        english: "image {position}: {name}",
+        spanish: "imagen {position}: {name}",
+        french: "image {position} : {name}",
+        german: "Bild {position}: {name}",
     },
 ];
 

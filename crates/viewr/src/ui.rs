@@ -4369,7 +4369,7 @@ fn render_filmstrip(
                             };
                             if let Some((index, total)) = position {
                                 ui.label(
-                                    RichText::new(format!("{index} of {total}"))
+                                    RichText::new(position_of_total(frame.language, index, total))
                                         .size(11.0)
                                         .color(colors.muted),
                                 );
@@ -4388,7 +4388,13 @@ fn render_filmstrip(
                                     ui.horizontal_centered(|ui| {
                                         ui.spacing_mut().item_spacing.x = 8.0;
                                         for item in &frame.filmstrip {
-                                            render_filmstrip_item(ui, actions, item, current);
+                                            render_filmstrip_item(
+                                                ui,
+                                                actions,
+                                                frame.language,
+                                                item,
+                                                current,
+                                            );
                                         }
                                     });
                                 },
@@ -4409,19 +4415,11 @@ fn render_filmstrip(
                         crate::ratings::RatingFilter::All => frame.playlist_pos,
                         crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
                     };
-                    let label = position.map_or_else(
-                        || frame.text(tr!("Folder previews")).to_owned(),
-                        |(index, total)| {
-                            frame
-                                .language
-                                .fill(
-                                    tr!("Folder previews  {index} of {total}"),
-                                    &[("index", &index.to_string()), ("total", &total.to_string())],
-                                )
-                                .into_string()
-                        },
+                    ui.label(
+                        RichText::new(filmstrip_heading(frame.language, position))
+                            .size(12.0)
+                            .color(colors.muted),
                     );
-                    ui.label(RichText::new(label).size(12.0).color(colors.muted));
                 });
             }
         });
@@ -4430,6 +4428,7 @@ fn render_filmstrip(
 fn render_filmstrip_item(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
+    language: Language,
     item: &FilmstripItem,
     current: Option<usize>,
 ) {
@@ -4448,7 +4447,7 @@ fn render_filmstrip_item(
     } else {
         colors.panel
     };
-    let accessibility_label = filmstrip_accessibility_label(item);
+    let accessibility_label = filmstrip_accessibility_label(language, item);
     response.widget_info(|| {
         WidgetInfo::selected(
             WidgetType::Button,
@@ -4501,8 +4500,40 @@ fn render_filmstrip_item(
     }
 }
 
-fn filmstrip_accessibility_label(item: &FilmstripItem) -> String {
-    format!("image {}: {}", item.position, item.name)
+fn filmstrip_heading(language: Language, position: Option<(usize, usize)>) -> String {
+    position.map_or_else(
+        || language.text(tr!("Folder previews")).to_owned(),
+        |(index, total)| {
+            language
+                .fill(
+                    tr!("Folder previews  {index} of {total}"),
+                    &[("index", &index.to_string()), ("total", &total.to_string())],
+                )
+                .into_string()
+        },
+    )
+}
+
+/// Compact one-based position such as "3 of 12".
+fn position_of_total(language: Language, index: usize, total: usize) -> String {
+    language
+        .fill(
+            tr!("{index} of {total}"),
+            &[("index", &index.to_string()), ("total", &total.to_string())],
+        )
+        .into_string()
+}
+
+fn filmstrip_accessibility_label(language: Language, item: &FilmstripItem) -> String {
+    language
+        .fill(
+            tr!("image {position}: {name}"),
+            &[
+                ("position", &item.position.to_string()),
+                ("name", &item.name),
+            ],
+        )
+        .into_string()
 }
 
 fn render_toast(ui: &mut egui::Ui, toast: &ToastView, frame: &UiFrameOwned) {
@@ -5082,6 +5113,7 @@ mod tests {
         top_toast_max_width, undo_trash_menu_item,
     };
     use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
+    use crate::locale::tr;
 
     fn visual_toast(text: &str) -> ToastView {
         ToastView {
@@ -5243,7 +5275,7 @@ mod tests {
         };
 
         assert_eq!(
-            super::filmstrip_accessibility_label(&item),
+            super::filmstrip_accessibility_label(Language::English, &item),
             "image 2: rated.jpg"
         );
         assert_eq!(item.index, 8);
@@ -7769,6 +7801,178 @@ mod tests {
                 .iter()
                 .any(|action| matches!(action, UiAction::StepSequence(1))),
             "clicking the strip step must request the next page"
+        );
+    }
+
+    /// Text the pseudo language cannot mark because it is data rather than
+    /// copy: numbers with universal units, fixture filenames, native language
+    /// names, the product and license names, and platform commands. Every
+    /// entry here is a deliberate exception that LOCALIZATION.md permits.
+    fn is_uncataloged_data(text: &str) -> bool {
+        const NAMES: [&str; 8] = [
+            "current.png",
+            "viewr",
+            "Esc",
+            "Apache-2.0",
+            "English",
+            "Español",
+            "Français",
+            "Deutsch",
+        ];
+        const UNITS: [&str; 2] = ["px", "MP"];
+        NAMES.contains(&text)
+            || text.starts_with(std::env::consts::OS)
+            || text.starts_with("xdg-mime ")
+            || text.split_whitespace().all(|token| {
+                UNITS.contains(&token)
+                    || !token
+                        .chars()
+                        .any(|character| character.is_ascii_alphabetic())
+            })
+    }
+
+    fn untranslated_texts(frame: &UiFrameOwned) -> Vec<String> {
+        let (open, _) = crate::locale::PSEUDO_MARKS;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update");
+        let mut offenders: Vec<String> = update
+            .nodes
+            .iter()
+            // A text run is one wrapped line of its labelled parent, which is
+            // checked whole.
+            .filter(|(_, node)| node.role() != egui::accesskit::Role::TextRun)
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .filter(|text| !text.contains(open) && !is_uncataloged_data(text))
+            .map(str::to_owned)
+            .collect();
+        offenders.sort();
+        offenders.dedup();
+        offenders
+    }
+
+    /// Every interface state the pseudo-language test renders, by name.
+    fn pseudo_language_scenarios() -> Vec<(&'static str, UiFrameOwned)> {
+        fn variant(mutate: impl FnOnce(&mut UiFrameOwned)) -> UiFrameOwned {
+            let mut frame = accessibility_test_frame();
+            frame.language = Language::Pseudo;
+            mutate(&mut frame);
+            frame
+        }
+        fn without_image(frame: &mut UiFrameOwned) {
+            frame.dock.has_image = false;
+            frame.file_path = None;
+            frame.playlist_pos = None;
+        }
+        let at_least_four =
+            crate::ratings::RatingFilter::AtLeast(crate::ratings::Rating::new(4).expect("rating"));
+        vec![
+            (
+                "image with panels",
+                variant(|frame| {
+                    frame.dock.show_tools = true;
+                    frame.dock.show_filmstrip = true;
+                    frame.dock.show_image_info = true;
+                    let position = Language::Pseudo
+                        .fill(
+                            tr!("Page {index} of {count}"),
+                            &[("index", "2"), ("count", "3")],
+                        )
+                        .into_string();
+                    frame.pages = Some(PageUiInfo {
+                        index: 1,
+                        count: 3,
+                        noun: "Page",
+                        can_previous: true,
+                        can_next: true,
+                        accessibility_label: Language::Pseudo
+                            .fill(
+                                tr!("{position}, {width} by {height}"),
+                                &[("position", &position), ("width", "800"), ("height", "600")],
+                            )
+                            .into_string(),
+                        visible_label: position,
+                    });
+                }),
+            ),
+            ("empty state", variant(without_image)),
+            ("about", variant(|frame| frame.show_about = true)),
+            ("update", variant(|frame| frame.show_update = true)),
+            (
+                "preferences",
+                variant(|frame| frame.show_preferences = true),
+            ),
+            (
+                "default viewer",
+                variant(|frame| frame.show_file_associations = true),
+            ),
+            (
+                "save overwrite",
+                variant(|frame| frame.save_overwrite_pending = true),
+            ),
+            (
+                "rating disclosure",
+                variant(|frame| {
+                    frame.rating.pending_disclosure = Some(crate::ratings::RatingAssignment::Set(
+                        crate::ratings::Rating::new(4).expect("rating"),
+                    ));
+                }),
+            ),
+            (
+                "filtered empty",
+                variant(|frame| {
+                    without_image(frame);
+                    frame.rating.filter = at_least_four;
+                    frame.rating.match_count = 0;
+                    frame.rating.visible_position = None;
+                    frame.rating.folder_count = 12;
+                    frame.filmstrip.clear();
+                }),
+            ),
+            (
+                "spot heal",
+                variant(|frame| {
+                    frame.dock.heal_active = true;
+                    frame.heal_supported = true;
+                }),
+            ),
+            (
+                "crop",
+                variant(|frame| {
+                    frame.is_cropping = true;
+                    frame.crop_screen = Some([200.0, 150.0, 800.0, 600.0]);
+                    frame.crop_uv = Some([0.1, 0.1, 0.9, 0.9]);
+                }),
+            ),
+            (
+                "load failure",
+                variant(|frame| frame.load_error = Some("truncated".to_owned())),
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_rendered_text_and_accessible_name_comes_from_the_catalog() {
+        let scenarios = pseudo_language_scenarios();
+        let mut failures = Vec::new();
+        for (name, frame) in &scenarios {
+            let offenders = untranslated_texts(frame);
+            if !offenders.is_empty() {
+                failures.push(format!("{name}: {offenders:?}"));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "visible text or accessible names bypassed the catalog:\n{}",
+            failures.join("\n")
         );
     }
 

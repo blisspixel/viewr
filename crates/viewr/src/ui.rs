@@ -102,8 +102,7 @@ const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMI
 pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
-const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
-const SAVE_OVERWRITE_FOCUS_STATE: &str = "save_overwrite_focus_initialized";
+const MODAL_FOCUS_STATE: &str = "modal_focus_state";
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub(crate) enum UiAction {
@@ -617,6 +616,103 @@ pub(crate) const fn preferences_modal_action_allowed(action: &UiAction) -> bool 
     )
 }
 
+/// The modal that owns input this frame, in the same priority as rendering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModalKind {
+    SaveOverwrite,
+    RatingDisclosure,
+    Update,
+    About,
+    Preferences,
+    FileAssociations,
+}
+
+fn active_modal(frame: &UiFrameOwned) -> Option<ModalKind> {
+    if frame.save_overwrite_pending {
+        Some(ModalKind::SaveOverwrite)
+    } else if frame.rating.pending_disclosure.is_some() {
+        Some(ModalKind::RatingDisclosure)
+    } else if frame.show_update {
+        Some(ModalKind::Update)
+    } else if frame.show_about {
+        Some(ModalKind::About)
+    } else if frame.show_preferences {
+        Some(ModalKind::Preferences)
+    } else if frame.show_file_associations {
+        Some(ModalKind::FileAssociations)
+    } else {
+        None
+    }
+}
+
+/// Keyboard focus ownership for the open modal: which modal it is, whether
+/// its default control has taken focus, and what had focus before it opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModalFocus {
+    kind: ModalKind,
+    claimed: bool,
+    previous: Option<egui::Id>,
+}
+
+/// Record the focus a modal displaces when it opens and give it back when the
+/// last modal closes. A modal replaced by another keeps the original return
+/// target, so focus returns where the user was before the first one opened.
+fn sync_modal_focus(ctx: &egui::Context, active: Option<ModalKind>) {
+    let state_id = egui::Id::new(MODAL_FOCUS_STATE);
+    let focused = ctx.memory(egui::Memory::focused);
+    let restore = ctx.data_mut(|data| {
+        let state = data.get_temp::<ModalFocus>(state_id);
+        match (active, state) {
+            (Some(kind), Some(state)) if state.kind == kind => None,
+            (Some(kind), state) => {
+                data.insert_temp(
+                    state_id,
+                    ModalFocus {
+                        kind,
+                        claimed: false,
+                        previous: state.map_or(focused, |state| state.previous),
+                    },
+                );
+                None
+            }
+            (None, Some(state)) => {
+                data.remove::<ModalFocus>(state_id);
+                state.previous
+            }
+            (None, None) => None,
+        }
+    });
+    if let Some(previous) = restore {
+        ctx.memory_mut(|memory| memory.request_focus(previous));
+    }
+}
+
+/// True exactly once per opened modal, when its default control should take
+/// keyboard focus.
+fn claim_initial_modal_focus(ctx: &egui::Context) -> bool {
+    let state_id = egui::Id::new(MODAL_FOCUS_STATE);
+    ctx.data_mut(|data| {
+        let Some(mut state) = data.get_temp::<ModalFocus>(state_id) else {
+            return false;
+        };
+        if state.claimed {
+            return false;
+        }
+        state.claimed = true;
+        data.insert_temp(state_id, state);
+        true
+    })
+}
+
+/// egui names a modal as a window; assistive technology needs a modal dialog,
+/// which Windows announces as opened and which confines virtual navigation.
+fn mark_as_modal_dialog(response: &egui::Response) {
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Dialog);
+        node.set_modal();
+    });
+}
+
 fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> Vec<UiAction> {
     if frame.save_overwrite_pending {
         actions.retain(save_overwrite_action_allowed);
@@ -640,12 +736,9 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     apply_chrome_theme(ui.ctx(), frame.theme_mode);
     let colors = chrome_colors(ui);
     let chrome = frame.chrome_view_model();
-    let modal_active = frame.save_overwrite_pending
-        || frame.rating.pending_disclosure.is_some()
-        || frame.show_update
-        || frame.show_about
-        || frame.show_preferences
-        || frame.show_file_associations;
+    let active_modal = active_modal(frame);
+    let modal_active = active_modal.is_some();
+    sync_modal_focus(ui.ctx(), active_modal);
 
     ui.add_enabled_ui(!modal_active, |ui| {
         render_background(ui, &mut actions, frame, chrome, colors);
@@ -664,15 +757,6 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     } else if frame.show_file_associations {
         render_file_associations(ui, &mut actions, frame);
     }
-    ui.ctx().data_mut(|data| {
-        if !frame.save_overwrite_pending {
-            data.remove_temp::<bool>(egui::Id::new(SAVE_OVERWRITE_FOCUS_STATE));
-        }
-        if frame.rating.pending_disclosure.is_none() {
-            data.remove_temp::<bool>(egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE));
-        }
-    });
-
     actions_owned_by_modal(actions, frame)
 }
 
@@ -2381,6 +2465,7 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
 fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("about_viewr"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2410,45 +2495,7 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                                 .color(colors.muted),
                         );
                     });
-                    ui.add_space(8.0);
-                    Frame::new()
-                        .fill(colors.raised)
-                        .corner_radius(CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(frame.text(tr!("No network access")))
-                                    .color(colors.text)
-                                    .strong(),
-                            );
-                            ui.label(frame.text(tr!(
-                                "No telemetry, accounts, cloud sync, or background indexing."
-                            )));
-                            ui.label(frame.text(tr!(
-                                "Photos and edits stay local unless you explicitly save a copy."
-                            )));
-                        });
-                    ui.add_space(8.0);
-                    egui::Grid::new("about_build_details")
-                        .num_columns(2)
-                        .spacing(Vec2::new(16.0, 4.0))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(frame.text(tr!("Version"))).color(colors.muted));
-                            ui.label(env!("CARGO_PKG_VERSION"));
-                            ui.end_row();
-                            ui.label(
-                                RichText::new(frame.text(tr!("Platform"))).color(colors.muted),
-                            );
-                            ui.label(format!(
-                                "{} / {}",
-                                std::env::consts::OS,
-                                std::env::consts::ARCH
-                            ));
-                            ui.end_row();
-                            ui.label(RichText::new(frame.text(tr!("License"))).color(colors.muted));
-                            ui.label(env!("CARGO_PKG_LICENSE"));
-                            ui.end_row();
-                        });
+                    render_about_facts(ui, frame, colors);
                     ui.add_space(10.0);
                     ui.label(
                         RichText::new(frame.text(tr!("Shortcuts")))
@@ -2461,7 +2508,11 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                 });
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(frame.text(tr!("Close"))).clicked() {
+                let close = ui.button(frame.text(tr!("Close")));
+                if focus_close {
+                    close.request_focus();
+                }
+                if close.clicked() {
                     close_clicked = true;
                 }
             });
@@ -2473,9 +2524,51 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
             frame.text(tr!("About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseAbout);
     }
+}
+
+/// Privacy promises and build facts shown in About.
+fn render_about_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    ui.add_space(8.0);
+    Frame::new()
+        .fill(colors.raised)
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(frame.text(tr!("No network access")))
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.label(frame.text(tr!(
+                "No telemetry, accounts, cloud sync, or background indexing."
+            )));
+            ui.label(frame.text(tr!(
+                "Photos and edits stay local unless you explicitly save a copy."
+            )));
+        });
+    ui.add_space(8.0);
+    egui::Grid::new("about_build_details")
+        .num_columns(2)
+        .spacing(Vec2::new(16.0, 4.0))
+        .show(ui, |ui| {
+            ui.label(RichText::new(frame.text(tr!("Version"))).color(colors.muted));
+            ui.label(env!("CARGO_PKG_VERSION"));
+            ui.end_row();
+            ui.label(RichText::new(frame.text(tr!("Platform"))).color(colors.muted));
+            ui.label(format!(
+                "{} / {}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            ));
+            ui.end_row();
+            ui.label(RichText::new(frame.text(tr!("License"))).color(colors.muted));
+            ui.label(env!("CARGO_PKG_LICENSE"));
+            ui.end_row();
+        });
 }
 
 fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors, frame: &UiFrameOwned) {
@@ -2587,6 +2680,7 @@ fn render_update_body(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeCol
 fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("update_viewr"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2613,7 +2707,11 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
                 }
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(frame.text(tr!("Close"))).clicked() {
+                    let close = ui.button(frame.text(tr!("Close")));
+                    if focus_close {
+                        close.request_focus();
+                    }
+                    if close.clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2626,6 +2724,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
             frame.text(tr!("Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseUpdate);
     }
@@ -2634,6 +2733,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
 fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("preferences"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2703,7 +2803,11 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
             }
             ui.add_space(14.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(frame.text(tr!("Close"))).clicked() {
+                let close = ui.button(frame.text(tr!("Close")));
+                if focus_close {
+                    close.request_focus();
+                }
+                if close.clicked() {
                     close_clicked = true;
                 }
             });
@@ -2717,6 +2821,7 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
             )),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::ClosePreferences);
     }
@@ -2760,6 +2865,7 @@ fn render_language_preferences(
 fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("file_associations"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2809,7 +2915,11 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                     });
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(frame.text(tr!("Close"))).clicked() {
+                    let close = ui.button(frame.text(tr!("Close")));
+                    if focus_close {
+                        close.request_focus();
+                    }
+                    if close.clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2822,6 +2932,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
             frame.text(tr!("Default image viewer. File associations change only after an explicit operating-system choice.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseFileAssociations);
     }
@@ -2906,15 +3017,7 @@ fn render_save_overwrite_confirmation(
     let colors = chrome_colors(ui);
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
-    let focus_state_id = egui::Id::new(SAVE_OVERWRITE_FOCUS_STATE);
-    let focus_cancel = ui.ctx().data_mut(|data| {
-        if data.get_temp::<bool>(focus_state_id).unwrap_or(false) {
-            false
-        } else {
-            data.insert_temp(focus_state_id, true);
-            true
-        }
-    });
+    let focus_cancel = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("save_overwrite_confirmation"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2967,6 +3070,7 @@ fn render_save_overwrite_confirmation(
             frame.text(tr!("Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if confirm_clicked {
         actions.push(UiAction::ConfirmSaveOverwrite);
     } else if cancel_clicked || response.should_close() {
@@ -2997,15 +3101,7 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
     };
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
-    let focus_state_id = egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE);
-    let focus_cancel = ui.ctx().data_mut(|data| {
-        if data.get_temp::<bool>(focus_state_id).unwrap_or(false) {
-            false
-        } else {
-            data.insert_temp(focus_state_id, true);
-            true
-        }
-    });
+    let focus_cancel = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("rating_write_disclosure"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -3060,6 +3156,7 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                 .into_string(),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if confirm_clicked {
         actions.push(UiAction::ConfirmRatingDisclosure);
     } else if cancel_clicked || response.should_close() {
@@ -7993,6 +8090,79 @@ mod tests {
             .into_iter()
             .map(|(_, node)| node)
             .collect()
+    }
+
+    #[test]
+    fn modal_focus_is_claimed_once_and_returned_where_the_user_was() {
+        use super::{ModalKind, claim_initial_modal_focus, sync_modal_focus};
+        let context = egui::Context::default();
+        let before = egui::Id::new("control before the modal");
+        context.memory_mut(|memory| memory.request_focus(before));
+
+        sync_modal_focus(&context, Some(ModalKind::About));
+        assert!(claim_initial_modal_focus(&context));
+        assert!(!claim_initial_modal_focus(&context), "claimed exactly once");
+
+        sync_modal_focus(&context, Some(ModalKind::Update));
+        assert!(
+            claim_initial_modal_focus(&context),
+            "a replacing modal takes focus for its own default control"
+        );
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("inside")));
+
+        sync_modal_focus(&context, None);
+        assert_eq!(
+            context.memory(egui::Memory::focused),
+            Some(before),
+            "focus returns to where it was before the first modal opened"
+        );
+        assert!(!claim_initial_modal_focus(&context));
+    }
+
+    #[test]
+    fn every_modal_is_a_modal_dialog_and_about_focuses_close() {
+        let mut scenarios = pseudo_language_scenarios();
+        scenarios.retain(|(name, _)| {
+            matches!(
+                *name,
+                "about"
+                    | "update"
+                    | "preferences"
+                    | "default viewer"
+                    | "save overwrite"
+                    | "rating disclosure"
+            )
+        });
+        assert_eq!(scenarios.len(), 6);
+        for (name, mut frame) in scenarios {
+            frame.language = Language::English;
+            let nodes = accesskit_nodes(&frame);
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node.role() == egui::accesskit::Role::Dialog && node.is_modal()),
+                "{name} is not exposed as a modal dialog"
+            );
+        }
+
+        let mut frame = accessibility_test_frame();
+        frame.show_about = true;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update");
+        let focused = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .map(|(_, node)| node);
+        assert_eq!(focused.and_then(|node| node.label()), Some("Close"));
     }
 
     #[test]

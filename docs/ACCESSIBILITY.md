@@ -96,6 +96,11 @@ The minimum contract is:
   resolved palette meets the same automated AA contrast floor. Normal missing
   state is quiet; abnormal startup fallback announces `Could not restore saved
   appearance. Using System.` once through the semantic status surface.
+- Interface scale follows the operating-system display scale. egui's built-in
+  keyboard zoom is disabled, so the modifier with `+`, `-`, and `0` acts only on
+  the image, as documented. viewr does not yet follow the separate
+  operating-system text-size or high-contrast settings; that gap is tracked in
+  the roadmap and must be closed or recorded as an exception in the v0.7 matrix.
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape. It exposes the
   grouped shortcut catalog, including `[` / `]`, `F5`, `T` `G` `I`, Space-to-fit,

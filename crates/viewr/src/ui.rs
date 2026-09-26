@@ -733,6 +733,7 @@ fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> V
 /// Render the UI overlays and return a list of actions triggered by the user.
 pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let mut actions = Vec::new();
+    reserve_zoom_keys_for_the_image(ui.ctx());
     apply_chrome_theme(ui.ctx(), frame.theme_mode);
     let colors = chrome_colors(ui);
     let chrome = frame.chrome_view_model();
@@ -758,6 +759,16 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
         render_file_associations(ui, &mut actions, frame);
     }
     actions_owned_by_modal(actions, frame)
+}
+
+/// egui's built-in interface zoom answers the modifier plus `+`, `-`, and `0`,
+/// which viewr documents as image zoom, and `0` as Fit. Leaving it on made those
+/// keys also rescale the chrome, a hidden state no menu could undo. Interface
+/// scale follows the operating system display scale instead.
+fn reserve_zoom_keys_for_the_image(ctx: &egui::Context) {
+    if ctx.options(|options| options.zoom_with_keyboard) {
+        ctx.options_mut(|options| options.zoom_with_keyboard = false);
+    }
 }
 
 fn render_background(
@@ -8090,6 +8101,30 @@ mod tests {
             .into_iter()
             .map(|(_, node)| node)
             .collect()
+    }
+
+    #[test]
+    fn zoom_shortcuts_rescale_the_image_not_the_interface() {
+        let context = egui::Context::default();
+        let mut input = accessibility_input();
+        input.events = vec![egui::Event::Key {
+            key: egui::Key::Plus,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }];
+        let frame = accessibility_test_frame();
+        for _ in 0..3 {
+            let _ = context.run_ui(input.clone(), |ui| {
+                let _ = render(ui, &frame);
+            });
+        }
+        assert!(!context.options(|options| options.zoom_with_keyboard));
+        assert!(
+            (context.zoom_factor() - 1.0).abs() < f32::EPSILON,
+            "the interface kept its operating-system scale"
+        );
     }
 
     #[test]

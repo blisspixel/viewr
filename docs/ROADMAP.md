@@ -286,6 +286,10 @@ code but still owes its representative-hardware evidence.
 - [ ] Complete Narrator, VoiceOver, and Orca acceptance using
   `docs/ACCESSIBILITY.md`, including crop, reload, animation, errors, and busy
   states.
+- [ ] Before the v0.7 candidate, follow the operating-system high-contrast and
+  text-size settings (Windows contrast themes and text size, macOS Increase
+  Contrast, GNOME text scaling), or record an approved exception. Interface
+  scale already follows the display scale.
 - [x] Publish [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0)
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.

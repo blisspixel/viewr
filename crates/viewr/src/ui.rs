@@ -4283,7 +4283,7 @@ fn render_heal_guidance(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeC
             mark_as_polite_status(&status);
             status
                 .ctx
-                .accesskit_node_builder(status.id, |node| node.set_busy());
+                .accesskit_node_builder(status.id, egui::accesskit::Node::set_busy);
         });
     }
     ui.add_space(8.0);

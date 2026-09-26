@@ -1136,6 +1136,10 @@ try {
     Wait-ForElement -Name "first.png" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
+    # The GPU canvas is exposed as an image named by the presented file.
+    Wait-ForElement -Name "first.png" -ControlType (
+        [System.Windows.Automation.ControlType]::Image
+    ) | Out-Null
     Wait-ForElement -Name "1 × 1" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null

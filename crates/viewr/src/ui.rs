@@ -103,6 +103,8 @@ pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
 const MODAL_FOCUS_STATE: &str = "modal_focus_state";
+/// Stable identity of the accessibility node that stands for the image canvas.
+const IMAGE_CANVAS_NODE: &str = "viewr image canvas";
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub(crate) enum UiAction {
@@ -828,6 +830,7 @@ fn render_background(
     }
 
     render_context_menu(ui, actions, frame, chrome, colors);
+    expose_image_canvas(ui.ctx(), frame);
 
     if let Some(side) = chrome.dock.image_info {
         render_image_info_panel(ui, actions, frame, side);
@@ -4914,6 +4917,32 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
     });
 }
 
+/// The picture is painted by the GPU canvas, outside egui, so without this node
+/// a screen reader finds menus and panels but no image. The node covers the
+/// image viewport, is named by the presented file, and describes its pixel
+/// size. It takes no input, so pointer and keyboard handling stay with the
+/// canvas.
+fn expose_image_canvas(ctx: &egui::Context, frame: &UiFrameOwned) {
+    let Some(path) = frame.file_path.as_deref() else {
+        return;
+    };
+    let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
+    let viewport = image_viewport_rect(ctx, frame);
+    ctx.accesskit_node_builder(egui::Id::new(IMAGE_CANVAS_NODE), |node| {
+        node.set_role(egui::accesskit::Role::Image);
+        node.set_label(name);
+        if let Some((width, height)) = frame.img_size {
+            node.set_description(format!("{width} × {height}"));
+        }
+        node.set_bounds(egui::accesskit::Rect {
+            x0: viewport.min.x.into(),
+            y0: viewport.min.y.into(),
+            x1: viewport.max.x.into(),
+            y1: viewport.max.y.into(),
+        });
+    });
+}
+
 fn image_viewport_rect(ctx: &egui::Context, frame: &UiFrameOwned) -> Rect {
     frame.image_viewport.map_or_else(
         || ctx.content_rect(),
@@ -8101,6 +8130,41 @@ mod tests {
                 variant(|frame| frame.load_error = Some("truncated".to_owned())),
             ),
         ]
+    }
+
+    #[test]
+    fn the_image_canvas_is_an_image_node_named_by_the_presented_file() {
+        let frame = accessibility_test_frame();
+        let nodes = accesskit_nodes(&frame);
+        let images: Vec<_> = nodes
+            .iter()
+            .filter(|node| node.role() == egui::accesskit::Role::Image)
+            .collect();
+        assert_eq!(images.len(), 1, "exactly one image node");
+        let image = images[0];
+        assert_eq!(
+            image.label(),
+            Some("current.png"),
+            "basename only, never a path"
+        );
+        assert_eq!(image.description(), Some("1920 × 1080"));
+        let bounds = image.bounds().expect("image bounds");
+        assert!(bounds.width() > 0.0 && bounds.height() > 0.0);
+        assert!(
+            !image.supports_action(egui::accesskit::Action::Click)
+                && !image.supports_action(egui::accesskit::Action::Focus),
+            "the canvas keeps pointer and keyboard input"
+        );
+
+        let mut empty = accessibility_test_frame();
+        empty.dock.has_image = false;
+        empty.file_path = None;
+        assert!(
+            accesskit_nodes(&empty)
+                .iter()
+                .all(|node| node.role() != egui::accesskit::Role::Image),
+            "no image node without an image"
+        );
     }
 
     fn accesskit_nodes(frame: &UiFrameOwned) -> Vec<egui::accesskit::Node> {

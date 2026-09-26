@@ -22,6 +22,9 @@ The minimum contract is:
   named radio group. The chosen bundled catalog applies without restarting.
   Catalog review covers visible copy, accessible names, shortcuts, focus,
   accented glyphs, truncation, and live-region grammar on each native platform.
+- The GPU-painted picture is exposed as one image element covering the image
+  viewport, named by the presented file's basename and described by its pixel
+  size. It takes no input, so pointer and keyboard control stay with the canvas.
 - Custom-painted tools, disclosure controls, and previews are actionable buttons
   with descriptive names and selected or expanded state where applicable.
 - Tools, Folder Previews, and Image Information expose their visible state. Their

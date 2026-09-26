@@ -56,6 +56,7 @@ mod save_state;
 pub mod session;
 mod shortcuts;
 mod startup;
+mod system_accessibility;
 pub mod theme;
 pub mod thumbs;
 /// The main user interface module built with egui.

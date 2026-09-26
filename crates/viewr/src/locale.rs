@@ -487,6 +487,12 @@ struct Message {
 
 const MESSAGES: &[Message] = &[
     Message {
+        english: "High Contrast",
+        spanish: "Alto contraste",
+        french: "Contraste élevé",
+        german: "Hoher Kontrast",
+    },
+    Message {
         english: "Open the File menu",
         spanish: "Abrir el menú Archivo",
         french: "Ouvrir le menu Fichier",

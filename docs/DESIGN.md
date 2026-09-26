@@ -162,7 +162,23 @@ disappears. This spec is the converged result of two rounds of design critique
 - Every appearance owns a complete token set for panel, raised and pressed
   surfaces, borders, primary and secondary text, active state, and text on the
   active state. Standard widgets and custom-painted controls use the same tokens.
-  Contrast tests enforce WCAG AA for all three resolved palettes.
+  Contrast tests enforce WCAG AA for the Light, Dark, and Console palettes,
+  including secondary text such as menu shortcut hints.
+- While Appearance is System and the operating system asks for more contrast
+  (a Windows contrast theme, macOS Increase Contrast, or the desktop portal's
+  high-contrast preference on Linux), viewr resolves to a high-contrast palette:
+  white on black on a dark theme, black on white on a light one. Its text,
+  controls, and outlines meet WCAG AAA (7:1). An explicit Light, Dark, or
+  Console choice stays the user's choice. The setting is read again when the
+  window regains focus or the operating-system theme changes, and is never
+  stored.
+- The interface follows the operating-system text size (Windows Text size, the
+  GNOME text scaling factor through the desktop portal) from 100 to 225 percent
+  on top of the display scale. Image pixels and image zoom are unaffected. The
+  enlargement is limited to what keeps at least the 640 by 480 point layout
+  available, so larger text never pushes a menu or control out of reach; it
+  grows to the requested size as the window grows. macOS has no system-wide text
+  size for AppKit apps, so there the display scale alone applies.
 - The default image background follows the resolved appearance. Dark uses deep
   ink `#0B0E14`; light uses `#F4F5F7` rather than pure white so bright photos
   retain an edge; Console uses `#010502`. View also offers explicit black,

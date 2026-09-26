@@ -791,7 +791,8 @@ polish.
 
 - **No remote-service client exists.** No HTTP, TLS, telemetry, or update client is
   linked, and CI enforces the dependency policy (see `PRIVACY.md`). Linux's generic
-  D-Bus code is restricted to the AccessKit/AT-SPI path; startup permits Unix-domain
+  D-Bus code is restricted to the AccessKit/AT-SPI path and viewr's reviewed
+  desktop-portal OpenURI and read-only Settings calls; startup permits Unix-domain
   socket creation only and denies io_uring before application threads. Worker
   seccomp and enclosing OS package profiles add stricter boundaries.
 - **C-backed decoding is process-isolated.** The daemon receives one versioned

@@ -102,14 +102,25 @@ The minimum contract is:
   Each semantic name includes its visible outcome, System reports its effective
   Light or Dark mode while active, and the visible scope text distinguishes app
   appearance from image pixels and independent background overrides. Every
-  resolved palette meets the same automated AA contrast floor. Normal missing
+  resolved palette meets the automated AA contrast floor, including secondary
+  text such as menu shortcut hints. Normal missing
   state is quiet; abnormal startup fallback announces `Could not restore saved
   appearance. Using System.` once through the semantic status surface.
 - Interface scale follows the operating-system display scale. egui's built-in
   keyboard zoom is disabled, so the modifier with `+`, `-`, and `0` acts only on
-  the image, as documented. viewr does not yet follow the separate
-  operating-system text-size or high-contrast settings; that gap is tracked in
-  the roadmap and must be closed or recorded as an exception in the v0.7 matrix.
+  the image, as documented.
+- viewr follows the operating-system high-contrast setting (Windows contrast
+  themes, macOS Increase Contrast, and the desktop portal's high-contrast
+  preference on Linux) while Appearance is System. It resolves to a white on
+  black or black on white palette, matching the operating-system light or dark
+  theme, whose text, controls, and outlines meet WCAG AAA (7:1). An explicit
+  Light, Dark, or Console choice is kept.
+- viewr follows the operating-system text size (Windows Text size and the GNOME
+  text scaling factor through the desktop portal) from 100 to 225 percent. The
+  enlargement never shrinks the available layout below the 640 by 480 point
+  minimum it is verified at, so every menu and control stays reachable; a larger
+  window shows the full requested size. macOS has no system-wide text size for
+  AppKit apps. Both settings are read again when the window regains focus.
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape. It exposes the
   grouped shortcut catalog, including `[` / `]`, `F5`, `T` `G` `I`, Space-to-fit,
@@ -246,6 +257,8 @@ Run the same workflow on every platform:
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
 | Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape; save the result with Save As | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, the in-memory and Save As boundary stays textual, the saved copy contains the repair, and the pointer-only brush overlay is not the sole source of state |
 | Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
+| High contrast | With Appearance on System, turn on a Windows contrast theme, macOS Increase Contrast, or GNOME High Contrast, return to viewr, then turn it off; repeat with Appearance on Dark | viewr switches to the high-contrast palette on returning to the window and back when it is turned off; menus, shortcut hints, focus rings, selected previews, and outlines stay legible; System reports High Contrast while active; an explicit Dark choice is unchanged |
+| Text size | Set Windows Text size or GNOME Large Text to its largest value, return to viewr at the 640 by 480 minimum and then maximized | At the minimum window every menu and control remains reachable; maximized, the interface grows toward the requested size; image zoom and pixels are unchanged; setting 100 percent restores the normal size |
 | Language | In File > Preferences select System, English, Spanish, French, and German; restart after each explicit choice; repeat at 100%, 150%, and 200% scale | Exactly one language is selected, primary cataloged surfaces change immediately, the choice survives restart, accented glyphs render, shortcuts remain stable, focus does not move unexpectedly, and uncataloged copy falls back to readable English |
 | Ratings | On disposable JPEG copies, use Edit > Rating and `0` through `5`; confirm and cancel the first-write disclosure; apply All, 3+, 4+, and 5+ filters; navigate into and recover from no matches; then restart | Rating and filter radio state, shortcut ownership, current rating, filtered position, outside-filter state, write outcome, and Show all images are announced without color or star-glyph dependence; Cancel initially owns modal focus; unsupported files remain untouched; the embedded rating survives restart |
 | Update | Open Help > Get latest release; read its contents without activating the release action; close with its button and Escape | A modal named Update viewr exposes the running version, no-automatic-check behavior, browser handoff boundary, and one clearly named Get latest release button; background controls cannot activate and focus returns predictably |

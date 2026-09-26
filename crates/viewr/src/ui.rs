@@ -1115,12 +1115,16 @@ fn context_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Respon
 fn apply_chrome_theme(ctx: &egui::Context, mode: crate::theme::Mode) {
     let colors = chrome_colors_for(mode);
     ctx.data_mut(|data| data.insert_temp(egui::Id::new("viewr_chrome_colors"), colors));
-    let mut visuals = if mode == crate::theme::Mode::Light {
+    let mut visuals = if mode.is_light() {
         egui::Visuals::light()
     } else {
         egui::Visuals::dark()
     };
     visuals.override_text_color = Some(colors.text);
+    // egui fades secondary text such as menu shortcut hints from the text
+    // color, which fell below the contrast floor. Use the palette's muted
+    // color, which is held to the same floor as primary text.
+    visuals.weak_text_color = Some(colors.muted);
     visuals.panel_fill = colors.panel;
     visuals.window_fill = colors.panel;
     visuals.extreme_bg_color = colors.panel;
@@ -6116,17 +6120,68 @@ mod tests {
     }
 
     #[test]
-    fn chrome_text_and_controls_meet_wcag_aa_contrast() {
-        for mode in [
-            crate::theme::Mode::Light,
-            crate::theme::Mode::Dark,
-            crate::theme::Mode::Console,
-        ] {
+    fn secondary_text_such_as_shortcut_hints_meets_the_contrast_floor() {
+        for mode in crate::theme::Mode::ALL {
+            let context = egui::Context::default();
+            super::apply_chrome_theme(&context, mode);
             let colors = chrome_colors_for(mode);
-            assert!(contrast_ratio(colors.text, colors.panel) >= 4.5);
-            assert!(contrast_ratio(colors.muted, colors.panel) >= 4.5);
-            assert!(contrast_ratio(colors.accent, colors.panel) >= 4.5);
-            assert!(contrast_ratio(colors.accent_ink, colors.accent) >= 4.5);
+            // Color32 is premultiplied: composite over the panel as drawn.
+            let weak = context.style_of(context.theme()).visuals.weak_text_color();
+            let cover = 255 - u32::from(weak.a());
+            let over = |top: u8, under: u8| {
+                let value = u32::from(top) + (u32::from(under) * cover + 127) / 255;
+                u8::try_from(value.min(255)).unwrap_or(u8::MAX)
+            };
+            let weak = egui::Color32::from_rgb(
+                over(weak.r(), colors.panel.r()),
+                over(weak.g(), colors.panel.g()),
+                over(weak.b(), colors.panel.b()),
+            );
+            let floor = if matches!(
+                mode,
+                crate::theme::Mode::HighContrastDark | crate::theme::Mode::HighContrastLight
+            ) {
+                7.0
+            } else {
+                4.5
+            };
+            let ratio = contrast_ratio(weak, colors.panel);
+            assert!(ratio >= floor, "{mode:?} weak text {ratio:.2} < {floor}");
+        }
+    }
+
+    #[test]
+    fn chrome_text_and_controls_meet_wcag_aa_contrast() {
+        for mode in crate::theme::Mode::ALL {
+            // High-contrast modes answer an operating-system request, so they
+            // meet AAA; the others meet AA.
+            let floor = if matches!(
+                mode,
+                crate::theme::Mode::HighContrastDark | crate::theme::Mode::HighContrastLight
+            ) {
+                7.0
+            } else {
+                4.5
+            };
+            let colors = chrome_colors_for(mode);
+            for (name, ratio) in [
+                ("text", contrast_ratio(colors.text, colors.panel)),
+                ("muted", contrast_ratio(colors.muted, colors.panel)),
+                ("accent", contrast_ratio(colors.accent, colors.panel)),
+                (
+                    "accent ink",
+                    contrast_ratio(colors.accent_ink, colors.accent),
+                ),
+                ("text on raised", contrast_ratio(colors.text, colors.raised)),
+                ("text on active", contrast_ratio(colors.text, colors.active)),
+            ] {
+                assert!(ratio >= floor, "{mode:?} {name} {ratio:.2} < {floor}");
+            }
+            if floor > 4.5 {
+                // Control outlines must be visible without relying on fills.
+                let border = contrast_ratio(colors.border, colors.panel);
+                assert!(border >= floor, "{mode:?} border {border:.2}");
+            }
         }
     }
 

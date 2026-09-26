@@ -1094,7 +1094,13 @@ fn appearance_description(
 ) -> String {
     use crate::theme::{Mode, Preference};
     match (preference, current_system_mode) {
-        (Preference::System, Some(mode @ (Mode::Light | Mode::Dark))) => language
+        (
+            Preference::System,
+            Some(
+                mode
+                @ (Mode::Light | Mode::Dark | Mode::HighContrastDark | Mode::HighContrastLight),
+            ),
+        ) => language
             .fill(
                 tr!("Follows your operating system. Currently {mode}."),
                 &[("mode", language.text(mode.name()))],

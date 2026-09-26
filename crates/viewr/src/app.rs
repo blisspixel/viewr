@@ -216,6 +216,8 @@ fn run_internal(
         close_after_rating_write: false,
         rating_recovery_unsettled: false,
         current_rating_capability: RatingWriteCapability::UnsafeSource,
+        system_accessibility: crate::system_accessibility::SystemAccessibility::default(),
+        accessibility_query: None,
         presented_rating: RatingState::Loading,
         transform: Transform::default(),
         custom_crop_ratio: (3, 5),
@@ -691,6 +693,12 @@ enum WorkerPoll<T> {
     Disconnected,
 }
 
+fn read_system_accessibility() -> crate::system_accessibility::SystemAccessibility {
+    crate::system_accessibility::SystemAccessibility::from_reading(
+        crate::display_probe::read_system_accessibility(),
+    )
+}
+
 fn poll_worker<T>(receiver: &Receiver<T>) -> WorkerPoll<T> {
     match receiver.try_recv() {
         Ok(result) => WorkerPoll::Ready(result),
@@ -1075,6 +1083,10 @@ struct App {
     rating_recovery_unsettled: bool,
     /// Write capability associated with the currently presented source.
     current_rating_capability: RatingWriteCapability,
+    /// Operating-system high contrast and text size applied to the interface.
+    system_accessibility: crate::system_accessibility::SystemAccessibility,
+    /// A background read of those settings, when the read can block.
+    accessibility_query: Option<Receiver<crate::system_accessibility::SystemAccessibility>>,
     /// Rating associated with the last source whose pixels were presented.
     presented_rating: RatingState,
     transform: Transform,
@@ -3732,11 +3744,87 @@ impl App {
         }
     }
 
+    /// Re-read the operating system's high-contrast and text-size settings.
+    /// Reads that can block run on a background thread, one at a time, so a
+    /// slow or missing desktop portal never delays a frame.
+    fn refresh_system_accessibility(&mut self) {
+        if !crate::display_probe::SYSTEM_ACCESSIBILITY_READ_BLOCKS {
+            self.apply_system_accessibility(read_system_accessibility());
+            return;
+        }
+        if self.accessibility_query.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        let event_proxy = self.event_proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("viewr-accessibility-settings".into())
+            .spawn(move || {
+                let _ = sender.send(read_system_accessibility());
+                let _ = event_proxy.send_event(UserEvent::Wake);
+            });
+        match spawned {
+            Ok(_) => self.accessibility_query = Some(receiver),
+            Err(error) => {
+                log::warn!("accessibility settings read could not start: {error}");
+            }
+        }
+    }
+
+    fn poll_system_accessibility(&mut self) {
+        let Some(receiver) = self.accessibility_query.as_ref() else {
+            return;
+        };
+        match poll_worker(receiver) {
+            WorkerPoll::Pending => {}
+            WorkerPoll::Ready(settings) => {
+                self.accessibility_query = None;
+                self.apply_system_accessibility(settings);
+            }
+            WorkerPoll::Disconnected => self.accessibility_query = None,
+        }
+    }
+
+    fn apply_system_accessibility(
+        &mut self,
+        settings: crate::system_accessibility::SystemAccessibility,
+    ) {
+        if settings == self.system_accessibility {
+            return;
+        }
+        self.system_accessibility = settings;
+        if let Some(renderer) = self.renderer.as_mut() {
+            let mode = self
+                .theme_preference
+                .resolve(renderer.window().theme(), settings.high_contrast);
+            renderer.set_mode(mode);
+            renderer.window().request_redraw();
+        }
+        self.apply_interface_scale();
+    }
+
+    /// Apply the operating-system text size as far as the window has room.
+    fn apply_interface_scale(&mut self) {
+        let requested = self.system_accessibility.text_scale;
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let window = renderer
+            .window()
+            .inner_size()
+            .to_logical::<f64>(renderer.window().scale_factor());
+        renderer.set_interface_scale(crate::system_accessibility::effective_interface_scale(
+            requested,
+            (window.width, window.height),
+            crate::startup::MINIMUM_WINDOW_SIZE,
+        ));
+    }
+
     fn viewport_insets(&self) -> crate::view::ViewportInsets {
         let scale_factor = self
             .renderer
             .as_ref()
-            .map_or(1.0, |renderer| renderer.window().scale_factor());
+            .map_or(1.0, Renderer::ui_scale_factor);
         crate::chrome::viewport_insets(
             crate::chrome::DockViewModel::new(self.dock_input()).layout(scale_factor),
         )
@@ -5253,7 +5341,7 @@ impl App {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        let scale = renderer.window().scale_factor() as f32;
+        let scale = renderer.ui_scale_factor() as f32;
         if !scale.is_finite() || scale <= 0.0 {
             return;
         }
@@ -5292,7 +5380,7 @@ impl App {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        let scale = renderer.window().scale_factor() as f32;
+        let scale = renderer.ui_scale_factor() as f32;
         let Some(image_size) = renderer.image_size() else {
             return;
         };
@@ -7567,7 +7655,9 @@ impl ApplicationHandler<UserEvent> for App {
             }
         };
 
-        let mode = self.theme_preference.resolve(window.theme());
+        let mode = self
+            .theme_preference
+            .resolve(window.theme(), self.system_accessibility.high_contrast);
         let max_base_pixels = if self.performance_probe.is_some() {
             crate::gpu::PERFORMANCE_PROBE_GPU_BASE_PIXELS
         } else {
@@ -7585,6 +7675,7 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 renderer.init_accessibility(event_loop, self.event_proxy.clone());
                 self.renderer = Some(renderer);
+                self.refresh_system_accessibility();
                 self.observe_current_display();
                 if let Some(image) = self.current_image.as_ref() {
                     let image = Arc::clone(image);
@@ -7738,6 +7829,7 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods.state();
             }
+            WindowEvent::Focused(true) => self.refresh_system_accessibility(),
             WindowEvent::Focused(false) => {
                 self.mouse_left_down = false;
                 self.space_held = false;
@@ -7829,7 +7921,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 let scale = self
                                     .renderer
                                     .as_ref()
-                                    .map_or(1.0, |renderer| renderer.window().scale_factor());
+                                    .map_or(1.0, Renderer::ui_scale_factor);
                                 if scale.is_finite() && scale > 0.0 {
                                     self.context_menu_pos = Some([
                                         (self.cursor_pos.0 / scale) as f32,
@@ -8227,14 +8319,23 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.resize(size.width, size.height);
                     renderer.window().request_redraw();
                 }
+                self.apply_interface_scale();
                 self.observe_current_display();
             }
-            WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. } => {
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.apply_interface_scale();
+                self.observe_current_display();
+            }
+            WindowEvent::Moved(_) => {
                 self.observe_current_display();
             }
             WindowEvent::ThemeChanged(theme) => {
+                self.refresh_system_accessibility();
                 if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.set_mode(self.theme_preference.resolve(Some(theme)));
+                    renderer.set_mode(
+                        self.theme_preference
+                            .resolve(Some(theme), self.system_accessibility.high_contrast),
+                    );
                     renderer.window().request_redraw();
                 }
             }
@@ -8250,7 +8351,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let scale_factor = self
                     .renderer
                     .as_ref()
-                    .map_or(1.0, |renderer| renderer.window().scale_factor());
+                    .map_or(1.0, Renderer::ui_scale_factor);
                 let (heal_stroke_screen, heal_cursor_screen, heal_brush_screen_radius) =
                     self.heal_overlay_geometry(scale_factor);
                 let crop_screen = self
@@ -8393,6 +8494,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.renderer
                         .as_ref()
                         .and_then(|renderer| renderer.window().theme()),
+                    self.system_accessibility.high_contrast,
                 );
                 let zoom_t = self.transform.zoom;
                 let offset_x = self.transform.offset_x;
@@ -8665,7 +8767,10 @@ impl ApplicationHandler<UserEvent> for App {
                             let save_error = crate::theme::save_preference(preference).err();
                             if let Some(renderer) = self.renderer.as_mut() {
                                 renderer.window().set_theme(preference.window_theme());
-                                let mode = preference.resolve(renderer.window().theme());
+                                let mode = preference.resolve(
+                                    renderer.window().theme(),
+                                    self.system_accessibility.high_contrast,
+                                );
                                 renderer.set_mode(mode);
                                 renderer.window().request_redraw();
                             }
@@ -8918,6 +9023,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.finish_open_with_check();
         self.poll_coherence_watch();
+        self.poll_system_accessibility();
         self.poll_rating_write(event_loop);
         self.poll_rating_discovery();
         self.poll_curation_result(event_loop);

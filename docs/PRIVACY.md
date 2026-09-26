@@ -102,8 +102,9 @@ A promise you can verify beats a promise you have to trust.
    client appears. Windows and macOS use AccessKit's platform adapters with default
    features disabled. Linux's upstream AccessKit/AT-SPI adapter needs a generic
    D-Bus implementation; cargo-deny permits that implementation and its process
-   helper only behind the reviewed AccessKit dependency path and viewr's
-   OpenURI Open With chooser. Before logging,
+   helper only behind the reviewed AccessKit dependency path, viewr's
+   OpenURI Open With chooser, and viewr's read-only desktop-portal Settings
+   query for the high-contrast and text-size settings. Before logging,
    workers, GUI initialization, or application threads, Linux rejects configured
    D-Bus addresses that are not `unix:` transports, installs `no_new_privs`, denies
    non-Unix socket families and io_uring with seccomp, mirrors those denials onto

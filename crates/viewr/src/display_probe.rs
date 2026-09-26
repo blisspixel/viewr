@@ -1,11 +1,16 @@
-//! Thin platform fetch of display ICC bytes and Advanced Color facts.
-#![allow(unsafe_code)] // DisplayConfig, GetICMProfile, and libX11 property reads
+//! Thin platform fetch of display ICC bytes, Advanced Color facts, and the
+//! accessibility display settings (high contrast and text size).
+#![allow(unsafe_code)]
+// DisplayConfig, GetICMProfile, libX11 property reads, and
+// the high-contrast and text-size reads
 //!
-//! Policy and admission live in `display_state`. This module only asks the
-//! operating system for a file or a color-management flag. It never builds a
+//! Policy and admission live in `display_state` and `system_accessibility`.
+//! This module only asks the operating system for a file, a color-management
+//! flag, or an accessibility setting. It never builds a
 //! transform or writes pixels.
 
 use crate::display_state::{DisplayHints, MonitorIdentity};
+use crate::system_accessibility::SystemAccessibilityReading;
 
 /// Refresh host color-management facts that can change when the window moves.
 #[must_use]
@@ -383,6 +388,135 @@ fn x11_root_icc_profile(window: Option<&winit::window::Window>) -> Option<Vec<u8
     }
     unsafe { libc::dlclose(x11) };
     profile
+}
+
+/// Whether reading the accessibility display settings can block, so the
+/// caller must run it off the UI thread. Only the Linux portal call can.
+pub(crate) const SYSTEM_ACCESSIBILITY_READ_BLOCKS: bool = cfg!(target_os = "linux");
+
+/// Read the operating system's high-contrast and text-size settings.
+///
+/// Values are raw and untrusted; `system_accessibility` validates them. A
+/// platform without a setting, or a failed read, reports `None` for it.
+#[must_use]
+pub(crate) fn read_system_accessibility() -> SystemAccessibilityReading {
+    #[cfg(windows)]
+    {
+        SystemAccessibilityReading {
+            high_contrast: windows_high_contrast(),
+            text_scale: windows_text_scale_percent()
+                .map(crate::system_accessibility::text_scale_from_percent),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // macOS has no system-wide text size for AppKit apps; the display
+        // scale already applies. Increase Contrast is the contrast setting.
+        let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
+        SystemAccessibilityReading {
+            high_contrast: Some(workspace.accessibilityDisplayShouldIncreaseContrast()),
+            text_scale: None,
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_portal_accessibility().unwrap_or_default()
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        SystemAccessibilityReading::default()
+    }
+}
+
+/// Ask Windows whether a contrast theme is active.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_high_contrast() -> Option<bool> {
+    use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETHIGHCONTRAST, SystemParametersInfoW};
+
+    let size = u32::try_from(std::mem::size_of::<HIGHCONTRASTW>()).ok()?;
+    let mut contrast = HIGHCONTRASTW {
+        cbSize: size,
+        dwFlags: 0,
+        lpszDefaultScheme: std::ptr::null_mut(),
+    };
+    // Safety: `contrast` is a live, correctly sized HIGHCONTRASTW whose size is
+    // passed in both `cbSize` and `uiParam`; no update flags are requested.
+    let succeeded =
+        unsafe { SystemParametersInfoW(SPI_GETHIGHCONTRAST, size, (&raw mut contrast).cast(), 0) }
+            != 0;
+    succeeded.then_some(contrast.dwFlags & HCF_HIGHCONTRASTON != 0)
+}
+
+/// Read Settings > Accessibility > Text size, stored as a whole percentage.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_text_scale_percent() -> Option<u32> {
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+
+    let key = wide_nul("Software\\Microsoft\\Accessibility")?;
+    let value_name = wide_nul("TextScaleFactor")?;
+    let mut value = 0_u32;
+    let mut size = u32::try_from(std::mem::size_of::<u32>()).ok()?;
+    // Safety: the key and value names are NUL-terminated UTF-16 buffers that
+    // outlive the call, `RRF_RT_REG_DWORD` restricts the result to a DWORD, and
+    // `value` with its byte `size` is the only output buffer.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value_name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &raw mut size,
+        )
+    };
+    (status == ERROR_SUCCESS).then_some(value)
+}
+
+/// Read the desktop portal's contrast preference and, where the desktop
+/// exposes it, the GNOME text scaling factor. The session bus is local IPC.
+#[cfg(target_os = "linux")]
+fn linux_portal_accessibility() -> Option<SystemAccessibilityReading> {
+    use zbus::zvariant::OwnedValue;
+
+    let connection = zbus::blocking::connection::Builder::session()
+        .ok()?
+        .method_timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok()?;
+    let proxy = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings",
+    )
+    .ok()?;
+    let read = |namespace: &str, key: &str| -> Option<OwnedValue> {
+        proxy
+            .call::<_, _, OwnedValue>("ReadOne", &(namespace, key))
+            .ok()
+            .or_else(|| {
+                // Portal versions before ReadOne wrap the value in a variant.
+                let outer: OwnedValue = proxy.call("Read", &(namespace, key)).ok()?;
+                match zbus::zvariant::Value::from(outer) {
+                    zbus::zvariant::Value::Value(inner) => OwnedValue::try_from(*inner).ok(),
+                    value => OwnedValue::try_from(value).ok(),
+                }
+            })
+    };
+    let high_contrast = read("org.freedesktop.appearance", "contrast")
+        .and_then(|value| u32::try_from(value).ok())
+        .map(crate::system_accessibility::portal_contrast_is_high);
+    let text_scale = read("org.gnome.desktop.interface", "text-scaling-factor")
+        .and_then(|value| f64::try_from(value).ok());
+    Some(SystemAccessibilityReading {
+        high_contrast,
+        text_scale,
+    })
 }
 
 #[cfg(test)]

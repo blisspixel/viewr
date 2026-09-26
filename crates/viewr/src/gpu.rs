@@ -604,6 +604,22 @@ impl Renderer {
         self.clear = palette_to_color(theme::palette_for(mode));
     }
 
+    /// Scale the interface by the operating-system text size on top of the
+    /// display scale. Image pixels and image zoom are unaffected.
+    pub fn set_interface_scale(&mut self, scale: f32) {
+        if (self.egui_ctx.zoom_factor() - scale).abs() > f32::EPSILON {
+            self.egui_ctx.set_zoom_factor(scale);
+        }
+    }
+
+    /// Physical pixels per interface point: the display scale times the
+    /// interface scale. Every conversion between chrome coordinates and window
+    /// pixels uses this, so chrome, pointer hits, and the image viewport agree.
+    #[must_use]
+    pub fn ui_scale_factor(&self) -> f64 {
+        self.window.scale_factor() * f64::from(self.egui_ctx.zoom_factor())
+    }
+
     /// Resize the surface. Dimensions are clamped to `1..=max_dim` so
     /// configuration never fails when the window is minimized or larger than the
     /// GPU's maximum texture size.
@@ -682,7 +698,7 @@ impl Renderer {
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
-            pixels_per_point: self.window.scale_factor() as f32,
+            pixels_per_point: full_output.pixels_per_point,
         };
 
         let mut encoder = self

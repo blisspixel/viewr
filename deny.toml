@@ -158,7 +158,7 @@ deny = [
     { crate = "native-tls" },
     { crate = "openssl" },
     { crate = "openssl-sys" },
-    { crate = "zbus", wrappers = ["accesskit_unix", "atspi-common", "atspi-proxies", "viewr"], reason = "generic D-Bus transport is allowed only for Linux AccessKit/AT-SPI and the reviewed OpenURI Open With chooser" },
+    { crate = "zbus", wrappers = ["accesskit_unix", "atspi-common", "atspi-proxies", "viewr"], reason = "generic D-Bus transport is allowed only for Linux AccessKit/AT-SPI, the reviewed OpenURI Open With chooser, and the reviewed portal Settings read of high contrast and text size" },
     { crate = "async-process", wrappers = ["zbus"], reason = "process helper is allowed only inside the confined D-Bus transport" },
 ]
 

@@ -70,6 +70,11 @@ const PRIMARY_MODIFIER: &str = "Ctrl";
 
 const TOP_STATUS_MAX_WIDTH: f32 = 220.0;
 const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
+/// Smallest filename slice kept legible when a status needs the strip.
+const TOP_FILE_NAME_MIN_WIDTH: f32 = 120.0;
+const TOP_PAGE_STEP_WIDTH: f32 = 16.0;
+const TOP_PAGE_PREVIOUS_GLYPH: &str = "\u{23F4}";
+const TOP_PAGE_NEXT_GLYPH: &str = "\u{23F5}";
 const TOP_METADATA_GAP: f32 = 8.0;
 /// Extra separation egui adds between the top-bar reading items.
 ///
@@ -1063,9 +1068,17 @@ fn render_top_menu(
                     // The reading strip owns its own separation instead of
                     // inheriting whatever spacing the menu titles need.
                     ui.spacing_mut().item_spacing.x = TOP_METADATA_SPACING;
-                    render_top_operation_status(ui, actions, frame, chrome, colors);
+                    let budget = top_status_budget(
+                        ui.available_width(),
+                        top_metadata_reserve(ui, frame, chrome),
+                        ui.ctx().content_rect().width(),
+                    );
+                    ui.scope(|ui| {
+                        ui.set_max_width(budget);
+                        render_top_operation_status(ui, actions, frame, chrome, colors);
+                    });
                     render_top_rating_position(ui, frame, colors);
-                    render_top_page_position(ui, frame, colors);
+                    render_top_page_position(ui, actions, frame, colors);
                     render_top_image_facts(ui, frame, chrome, colors);
                 });
             });
@@ -1225,11 +1238,24 @@ fn add_top_status_with_external_edit(
 }
 
 fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    if let Some(label) = top_rating_position_label(frame) {
+        Frame::new()
+            .fill(colors.raised)
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.label(RichText::new(label).size(12.5).color(colors.muted));
+            });
+        ui.add_space(TOP_METADATA_GAP);
+    }
+}
+
+fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
     let displayed_position = match frame.rating.filter {
         crate::ratings::RatingFilter::All => frame.playlist_pos,
         crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
     };
-    let label = if let Some((index, total)) = displayed_position {
+    if let Some((index, total)) = displayed_position {
         Some(match frame.rating.filter {
             crate::ratings::RatingFilter::All => format!("{index} / {total}"),
             crate::ratings::RatingFilter::AtLeast(minimum) => format!(
@@ -1247,38 +1273,117 @@ fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: C
         ))
     } else {
         None
-    };
-    if let Some(label) = label {
-        Frame::new()
-            .fill(colors.raised)
-            .corner_radius(CornerRadius::same(6))
-            .inner_margin(egui::Margin::symmetric(8, 3))
-            .show(ui, |ui| {
-                ui.label(RichText::new(label).size(12.5).color(colors.muted));
-            });
-        ui.add_space(TOP_METADATA_GAP);
     }
 }
 
 /// Keep TIFF page and ICO icon identity beside the folder position so a
 /// multi-page file never reads as a single still image.
-fn render_top_page_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+fn render_top_page_position(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
     let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) else {
         return;
     };
+    let (previous_name, next_name) = sequence_step_names(pages);
     Frame::new()
         .fill(colors.raised)
         .corner_radius(CornerRadius::same(6))
-        .inner_margin(egui::Margin::symmetric(8, 3))
+        .inner_margin(egui::Margin::symmetric(4, 1))
         .show(ui, |ui| {
+            // The parent strip lays out right to left, so the next step is
+            // added first to appear on the right.
+            ui.spacing_mut().item_spacing.x = 2.0;
+            render_sequence_step_button(
+                ui,
+                actions,
+                strip_step_button(TOP_PAGE_NEXT_GLYPH, colors),
+                frame.text(next_name),
+                "]",
+                pages.can_next,
+                1,
+            );
             ui.label(
                 RichText::new(&pages.visible_label)
                     .size(12.5)
                     .color(colors.muted),
             )
             .on_hover_text(&pages.accessibility_label);
+            render_sequence_step_button(
+                ui,
+                actions,
+                strip_step_button(TOP_PAGE_PREVIOUS_GLYPH, colors),
+                frame.text(previous_name),
+                "[",
+                pages.can_previous,
+                -1,
+            );
         });
     ui.add_space(TOP_METADATA_GAP);
+}
+
+fn strip_step_button(glyph: &'static str, colors: ChromeColors) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(glyph).size(14.0).color(colors.text))
+        .frame(false)
+        .min_size(Vec2::new(TOP_PAGE_STEP_WIDTH, 20.0))
+}
+
+/// Width the top strip needs to the left of the operation status: the
+/// metadata pills, which never shrink, plus the smaller of the filename or
+/// its minimum legible slice. The status may use whatever remains, so a long
+/// explanation is shown whole whenever the window has room for it.
+fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewModel) -> f32 {
+    let measure = |text: &str, size: f32| {
+        ui.painter()
+            .layout_no_wrap(
+                text.to_owned(),
+                egui::FontId::proportional(size),
+                Color32::WHITE,
+            )
+            .size()
+            .x
+    };
+    let pill = |text: &str| measure(text, 12.5) + 16.0 + TOP_METADATA_GAP + TOP_METADATA_SPACING;
+    let mut reserve = 0.0;
+    if let Some(label) = top_rating_position_label(frame) {
+        reserve += pill(&label);
+    }
+    if let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) {
+        reserve += pill(&pages.visible_label) + 2.0 * (TOP_PAGE_STEP_WIDTH + 2.0);
+    }
+    if !frame.dock.has_image {
+        return reserve;
+    }
+    reserve += pill(&chrome.rating_menu_label());
+    if is_compact_width(ui.ctx().content_rect().width()) {
+        return reserve;
+    }
+    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5) + TOP_METADATA_GAP;
+    if let Some((width, height)) = frame.img_size {
+        reserve += measure(&format!("{width} × {height}"), 12.5) + TOP_METADATA_GAP;
+    }
+    if let Some(path) = frame.file_path.as_ref() {
+        let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
+        reserve += measure(&name, 13.5).min(TOP_FILE_NAME_MIN_WIDTH) + TOP_METADATA_GAP;
+    }
+    reserve
+}
+
+/// Width granted to the operation-status group in the top strip. Compact
+/// windows leave the group unconstrained because each status item keeps its
+/// own compact cap. Wider windows grant everything the metadata does not need,
+/// never less than the standard allocation.
+fn top_status_budget(available: f32, reserve: f32, content_width: f32) -> f32 {
+    if is_compact_width(content_width) {
+        return available;
+    }
+    (available - reserve).max(available.min(TOP_STATUS_MAX_WIDTH))
+}
+
+fn is_compact_width(content_width: f32) -> bool {
+    content_width < 720.0
 }
 
 fn render_top_image_facts(
@@ -1670,13 +1775,15 @@ fn add_top_toast(
     });
 }
 
+/// Each status item in a compact window keeps a fixed cap. Otherwise it fills
+/// the allocation the strip granted through `top_status_budget`, eliding only
+/// what still does not fit.
 fn top_status_max_width(ui: &egui::Ui) -> f32 {
-    let responsive_limit = if ui.ctx().content_rect().width() < 720.0 {
-        TOP_STATUS_COMPACT_MAX_WIDTH
+    if is_compact_width(ui.ctx().content_rect().width()) {
+        ui.available_width().min(TOP_STATUS_COMPACT_MAX_WIDTH)
     } else {
-        TOP_STATUS_MAX_WIDTH
-    };
-    ui.available_width().min(responsive_limit)
+        ui.available_width()
+    }
 }
 
 fn mark_as_polite_status(response: &egui::Response) {
@@ -3154,7 +3261,7 @@ fn render_animation_controls(
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Previous")),
+            panel_step_button(frame.text(tr!("Previous"))),
             frame.text(tr!("Previous frame")),
             "[",
             animation.can_previous,
@@ -3163,7 +3270,7 @@ fn render_animation_controls(
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Next")),
+            panel_step_button(frame.text(tr!("Next"))),
             frame.text(tr!("Next frame")),
             "]",
             animation.can_next,
@@ -3196,14 +3303,11 @@ fn render_page_controls(
     };
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let (previous_name, next_name) = match pages.noun {
-            "Icon" => (tr!("Previous Icon"), tr!("Next Icon")),
-            _ => (tr!("Previous page"), tr!("Next page")),
-        };
+        let (previous_name, next_name) = sequence_step_names(pages);
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Previous")),
+            panel_step_button(frame.text(tr!("Previous"))),
             frame.text(previous_name),
             "[",
             pages.can_previous,
@@ -3212,7 +3316,7 @@ fn render_page_controls(
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Next")),
+            panel_step_button(frame.text(tr!("Next"))),
             frame.text(next_name),
             "]",
             pages.can_next,
@@ -3230,20 +3334,28 @@ fn render_page_controls(
     });
 }
 
+fn sequence_step_names(pages: &PageUiInfo) -> (&'static str, &'static str) {
+    match pages.noun {
+        "Icon" => (tr!("Previous Icon"), tr!("Next Icon")),
+        _ => (tr!("Previous page"), tr!("Next page")),
+    }
+}
+
+fn panel_step_button(label: &str) -> egui::Button<'_> {
+    egui::Button::new(label).min_size(Vec2::new(72.0, 36.0))
+}
+
 fn render_sequence_step_button(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
-    label: &str,
+    button: egui::Button<'_>,
     accessible_name: &str,
     shortcut: &str,
     enabled: bool,
     delta: isize,
 ) {
     let response = ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(label).min_size(Vec2::new(72.0, 36.0)),
-        )
+        .add_enabled(enabled, button)
         .on_hover_text(format!("{accessible_name} ({shortcut})"));
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible_name));
     response.ctx.accesskit_node_builder(response.id, |node| {
@@ -4685,13 +4797,14 @@ mod tests {
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
         EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
         MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS,
-        PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction,
-        UiFrameOwned, actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
-        chrome_colors_for, context_tool_button, crop_pixel_bounds, folder_sort_menu,
-        image_open_status, menu_tool_button, mosaic_status, panels_menu, rating_filter_menu,
-        rating_menu, render, retry_open_label, undo_trash_menu_item,
+        PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH,
+        TOP_STATUS_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
+        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
+        crop_pixel_bounds, folder_sort_menu, image_open_status, menu_tool_button, mosaic_status,
+        panels_menu, rating_filter_menu, rating_menu, render, retry_open_label, top_status_budget,
+        undo_trash_menu_item,
     };
-    use super::{ToastAnnouncement, ToastView};
+    use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
 
     fn visual_toast(text: &str) -> ToastView {
         ToastView {
@@ -7099,6 +7212,193 @@ mod tests {
             visible_label: "Icon 4 of 4 · 256×256".into(),
         });
         assert!(top_bar_bounds_for(&frame, 1_200.0, "Icon 4 of 4 · 256×256").is_some());
+    }
+
+    #[test]
+    fn status_budget_grants_wide_windows_the_space_metadata_leaves() {
+        assert!((top_status_budget(900.0, 400.0, 1_270.0) - 500.0).abs() < f32::EPSILON);
+        assert!(
+            (top_status_budget(900.0, 850.0, 1_270.0) - TOP_STATUS_MAX_WIDTH).abs() < f32::EPSILON,
+            "crowded wide strips keep the standard allocation"
+        );
+        assert!((top_status_budget(150.0, 850.0, 1_270.0) - 150.0).abs() < f32::EPSILON);
+        assert!(
+            (top_status_budget(500.0, 100.0, 640.0) - 500.0).abs() < f32::EPSILON,
+            "compact windows cap each status item instead of the group"
+        );
+    }
+
+    fn page_frame(can_previous: bool, can_next: bool) -> UiFrameOwned {
+        let mut frame = accessibility_test_frame();
+        frame.dock.show_tools = false;
+        frame.dock.show_filmstrip = false;
+        frame.dock.show_image_info = false;
+        frame.pages = Some(PageUiInfo {
+            index: 1,
+            count: 3,
+            noun: "Page",
+            can_previous,
+            can_next,
+            accessibility_label: "Page 2 of 3, 800 by 600".into(),
+            visible_label: "Page 2 of 3".into(),
+        });
+        frame
+    }
+
+    fn top_bar_node(
+        update: &egui::accesskit::TreeUpdate,
+        label: &str,
+    ) -> Option<egui::accesskit::Node> {
+        update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.label() == Some(label)
+                    && node
+                        .bounds()
+                        .is_some_and(|bounds| bounds.y1 <= f64::from(TOP_BAR_HEIGHT))
+            })
+            .cloned()
+    }
+
+    #[test]
+    fn long_navigation_notice_is_shown_whole_in_a_wide_strip() {
+        const NOTICE: &str =
+            "The selected image is no longer available. Opening the first image in the folder.";
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(NOTICE));
+        let mut input = accessibility_input();
+        input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::Vec2::new(1_270.0, 750.0),
+        ));
+        let mut notice_width = 0.0;
+        let output = context.run_ui(input, |ui| {
+            notice_width = ui
+                .painter()
+                .layout_no_wrap(
+                    NOTICE.to_owned(),
+                    egui::FontId::proportional(12.5),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x;
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        let notice = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.value() == Some(NOTICE))
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("navigation notice in the top strip");
+        assert!(
+            notice.x1 - notice.x0 + 0.5 >= f64::from(notice_width),
+            "notice elided at 1270 px: {notice:?} narrower than {notice_width}"
+        );
+        assert!(notice.x1 <= 1_270.0 && notice.y1 <= f64::from(TOP_BAR_HEIGHT));
+        for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated"] {
+            let other = update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.value() == Some(value) || node.label() == Some(value))
+                .and_then(egui::accesskit::Node::bounds)
+                .unwrap_or_else(|| panic!("{value} stays in the strip beside the notice"));
+            assert!(
+                other.x1 <= notice.x0 || other.x0 >= notice.x1,
+                "{value} overlaps the notice: {other:?} vs {notice:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn page_chip_offers_named_steps_that_follow_page_availability() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = page_frame(false, true);
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        for glyph in [TOP_PAGE_PREVIOUS_GLYPH, TOP_PAGE_NEXT_GLYPH] {
+            assert!(
+                context
+                    .fonts_mut(|fonts| fonts.has_glyphs(&egui::FontId::proportional(14.0), glyph)),
+                "bundled chrome font must draw {glyph:?}"
+            );
+            assert!(
+                context.fonts_mut(|fonts| fonts.has_glyphs(&egui::FontId::monospace(14.0), glyph)),
+                "Console appearance font must draw {glyph:?}"
+            );
+        }
+        let previous = top_bar_node(&update, "Previous page").expect("previous step in strip");
+        let next = top_bar_node(&update, "Next page").expect("next step in strip");
+        assert_eq!(previous.role(), egui::accesskit::Role::Button);
+        assert!(previous.is_disabled(), "first page has no previous step");
+        assert!(!next.is_disabled());
+        assert_eq!(previous.keyboard_shortcut(), Some("["));
+        assert_eq!(next.keyboard_shortcut(), Some("]"));
+        let label = top_bar_bounds_for(&frame, 1_200.0, "Page 2 of 3").expect("page identity");
+        let previous = previous.bounds().expect("previous bounds");
+        let next = next.bounds().expect("next bounds");
+        assert!(
+            previous.x1 <= f64::from(label.min.x) && next.x0 >= f64::from(label.max.x),
+            "steps must flank the identity: {previous:?} {label:?} {next:?}"
+        );
+    }
+
+    #[test]
+    fn clicking_the_strip_next_step_turns_the_page() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = page_frame(true, true);
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        let bounds = top_bar_node(&update, "Next page")
+            .and_then(|node| node.bounds())
+            .expect("next step bounds");
+        let center = egui::pos2(
+            f64::midpoint(bounds.x0, bounds.x1) as f32,
+            f64::midpoint(bounds.y0, bounds.y1) as f32,
+        );
+        let mut actions = Vec::new();
+        for pressed in [true, false] {
+            let mut input = accessibility_input();
+            input.events = vec![
+                egui::Event::PointerMoved(center),
+                egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            let _ = context.run_ui(input, |ui| {
+                actions.extend(render(ui, &frame));
+            });
+        }
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::StepSequence(1))),
+            "clicking the strip step must request the next page"
+        );
     }
 
     #[test]

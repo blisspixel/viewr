@@ -101,8 +101,9 @@ The minimum contract is:
 - Animation exposes current frame, frame count, and pause/resume state.
   Previous frame and Next frame are named buttons with `[` and `]`.
 - Multi-page TIFF and ICO expose current page or icon identity, count, and
-  dimensions. Previous and Next are named buttons with `[` and `]`. Documents
-  never auto-play.
+  dimensions. Previous and Next are named buttons with `[` and `]`, both in
+  Image Information and beside the top-status identity, and each is disabled
+  at its end of the document. Documents never auto-play.
 - Reload and Retry remain reachable and expose progress or failure as semantic
   text without clearing the last good image.
 - Open With is reachable from both File and the image right-click

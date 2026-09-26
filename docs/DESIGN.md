@@ -53,7 +53,11 @@ disappears. This spec is the converged result of two rounds of design critique
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
   spacing. Long names truncate with the full value available as a tooltip. Routine
   three-second outcomes, including Move to Trash, use this status area instead of
-  covering the image. Immersive fullscreen and the full-image collage have no top
+  covering the image. In windows at least 720px wide the status receives all
+  the width the metadata chips and a legible filename slice do not need, so a
+  sticky explanation such as a missing-image substitution reads whole whenever
+  the window has room; compact windows keep a fixed status allocation. Immersive
+  fullscreen and the full-image collage have no top
   chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`
   shows a 64px docked panel containing only high-frequency image operations:
@@ -428,7 +432,9 @@ and unsupported containers, remain visibly read-only.
   Information and View expose Previous/Next with `[` and `]`. TIFF identity is
   Page N of M. ICO identity is Icon N of M plus pixel size, starting on the
   already-presented largest still. The top status shows the same identity beside
-  the folder position at every window width. An in-progress crop or Spot Heal refuses a
+  the folder position at every window width, flanked by previous and next step
+  buttons that disable at the first and last page, so a page turn is
+  discoverable without the shortcut. An in-progress crop or Spot Heal refuses a
   page change instead of destroying the edit. A dimension change refits.
 
 ### Spot Heal

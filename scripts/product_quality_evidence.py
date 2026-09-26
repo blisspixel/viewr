@@ -29,7 +29,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = REPOSITORY_ROOT / "docs" / "PRODUCT-QUALITY.md"
 REPOSITORY = "blisspixel/viewr"
 WORKFLOW_NAME = "Release artifacts"
-EVIDENCE_VERSION = "0.6.1"
+# Evidence binds to the candidate, and a candidate embeds the workspace version.
+EVIDENCE_VERSION = release_artifact.workspace_version(REPOSITORY_ROOT)
 EVIDENCE_DIRECTORY = f"v{EVIDENCE_VERSION}"
 PLATFORM_TARGETS = {
     "windows": ("x86_64-pc-windows-msvc",),

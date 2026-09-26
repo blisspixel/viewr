@@ -152,7 +152,7 @@ production environment.
    before beginning v0.7 work:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.1
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.5
    ```
 
 2. On a feature branch, make the single version transition described in

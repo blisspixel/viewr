@@ -2568,7 +2568,7 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "viewr could not verify this image's source safely. The file was not changed.",
-        spanish: "viewr no pudo verificar de forma segura el origen de esta imagen. El archivo no cambió.",
+        spanish: "viewr no pudo verificar de forma segura el origen de esta imagen. El archivo no se modificó.",
         french: "viewr n’a pas pu vérifier la source de cette image en toute sécurité. Le fichier n’a pas été modifié.",
         german: "viewr konnte die Quelle dieses Bildes nicht sicher prüfen. Die Datei wurde nicht geändert.",
     },
@@ -2640,9 +2640,9 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Source changed on disk. Press F5 before Open With",
-        spanish: "El origen cambió en el disco. Pulse F5 antes de Abrir con",
-        french: "La source a changé sur le disque. Appuyez sur F5 avant Ouvrir avec",
-        german: "Die Quelle wurde auf dem Datenträger geändert. Drücken Sie F5 vor Öffnen mit",
+        spanish: "El origen cambió en el disco. Pulse F5 antes de usar Abrir con",
+        french: "La source a changé sur le disque. Appuyez sur F5 avant d’utiliser Ouvrir avec",
+        german: "Die Quelle wurde auf dem Datenträger geändert. Drücken Sie F5, bevor Sie Öffnen mit verwenden",
     },
     Message {
         english: "Open With is unavailable for this linked or unsupported source",
@@ -2652,7 +2652,7 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Source opened in another app. Changes reload when that is safe",
-        spanish: "Origen abierto en otra aplicación. Los cambios se vuelven a cargar cuando es seguro",
+        spanish: "Origen abierto en otra aplicación. Los cambios se vuelven a cargar cuando sea seguro",
         french: "Source ouverte dans une autre application. Les modifications se rechargent lorsque c’est sans risque",
         german: "Quelle in einer anderen App geöffnet. Änderungen werden neu geladen, sobald das sicher ist",
     },
@@ -2726,7 +2726,7 @@ const MESSAGES: &[Message] = &[
         english: "Spot-heal stroke is too long; use shorter strokes",
         spanish: "El trazo de corrección puntual es demasiado largo; use trazos más cortos",
         french: "Le tracé de correction ponctuelle est trop long ; utilisez des tracés plus courts",
-        german: "Der Reparaturstrich ist zu lang; verwenden Sie kürzere Striche",
+        german: "Der Strich für die Bereichsreparatur ist zu lang; verwenden Sie kürzere Striche",
     },
     Message {
         english: "Spot heal stopped unexpectedly",
@@ -2736,13 +2736,13 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Undid spot heal",
-        spanish: "Corrección puntual deshecha",
+        spanish: "Se deshizo la corrección puntual",
         french: "Correction ponctuelle annulée",
         german: "Bereichsreparatur rückgängig gemacht",
     },
     Message {
         english: "Redid spot heal",
-        spanish: "Corrección puntual rehecha",
+        spanish: "Se rehízo la corrección puntual",
         french: "Correction ponctuelle rétablie",
         german: "Bereichsreparatur wiederhergestellt",
     },
@@ -2760,15 +2760,15 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Could not start Trash restore. Undo receipts are unchanged; retry with U.",
-        spanish: "No se pudo iniciar la restauración desde la papelera. Los recibos para deshacer no cambiaron; reintente con U.",
+        spanish: "No se pudo iniciar la restauración desde la papelera. Los comprobantes para deshacer no cambiaron; reintente con U.",
         french: "Impossible de lancer la restauration depuis la corbeille. Les reçus d’annulation sont inchangés ; réessayez avec U.",
-        german: "Die Wiederherstellung aus dem Papierkorb konnte nicht gestartet werden. Die Belege zum Rückgängigmachen bleiben unverändert; versuchen Sie es erneut mit U.",
+        german: "Die Wiederherstellung aus dem Papierkorb konnte nicht gestartet werden. Die Rückgängig-Belege bleiben unverändert; versuchen Sie es erneut mit U.",
     },
     Message {
         english: "Pending Save As overwrite canceled because the active image selection changed.",
         spanish: "Se canceló la sobrescritura pendiente de Guardar como porque cambió la imagen seleccionada.",
-        french: "Remplacement en attente par Enregistrer sous annulé, car l’image sélectionnée a changé.",
-        german: "Ausstehendes Überschreiben durch Speichern unter abgebrochen, weil sich die Bildauswahl geändert hat.",
+        french: "Le remplacement en attente via Enregistrer sous a été annulé, car l’image sélectionnée a changé.",
+        german: "Das ausstehende Überschreiben durch Speichern unter wurde abgebrochen, weil sich die Bildauswahl geändert hat.",
     },
     Message {
         english: "Pending rating change canceled because the active image was reopened or changed.",
@@ -2780,7 +2780,7 @@ const MESSAGES: &[Message] = &[
         english: "Save canceled. No file was changed.",
         spanish: "Guardado cancelado. No se modificó ningún archivo.",
         french: "Enregistrement annulé. Aucun fichier n’a été modifié.",
-        german: "Speichern abgebrochen. Keine Datei wurde geändert.",
+        german: "Speichern abgebrochen. Es wurde keine Datei geändert.",
     },
     Message {
         english: "Saving copy in the background",
@@ -2815,13 +2815,13 @@ const MESSAGES: &[Message] = &[
     Message {
         english: "Finishing Save As before closing...",
         spanish: "Terminando Guardar como antes de cerrar...",
-        french: "Finalisation d’Enregistrer sous avant la fermeture...",
+        french: "Finalisation de l’opération Enregistrer sous avant la fermeture...",
         german: "Speichern unter wird vor dem Schließen abgeschlossen...",
     },
     Message {
         english: "Finishing Save As and the file operation before closing...",
         spanish: "Terminando Guardar como y la operación de archivo antes de cerrar...",
-        french: "Finalisation d’Enregistrer sous et de l’opération sur le fichier avant la fermeture...",
+        french: "Finalisation de l’opération Enregistrer sous et de l’opération sur le fichier avant la fermeture...",
         german: "Speichern unter und der Dateivorgang werden vor dem Schließen abgeschlossen...",
     },
     Message {
@@ -2880,9 +2880,9 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Could not continue moving files to Trash. 1 queued file was not moved.",
-        spanish: "No se pudieron seguir moviendo archivos a la papelera. 1 archivo en cola no se movió.",
-        french: "Impossible de continuer la mise à la corbeille. 1 fichier en attente n’a pas été déplacé.",
-        german: "Das Verschieben in den Papierkorb konnte nicht fortgesetzt werden. 1 Datei in der Warteschlange wurde nicht verschoben.",
+        spanish: "No se pudieron seguir moviendo archivos a la papelera. Un archivo en cola no se movió.",
+        french: "Impossible de continuer la mise à la corbeille. Un fichier en attente n’a pas été déplacé.",
+        german: "Das Verschieben in den Papierkorb konnte nicht fortgesetzt werden. Eine Datei in der Warteschlange wurde nicht verschoben.",
     },
     Message {
         english: "Could not continue moving files to Trash. {count} queued files were not moved.",
@@ -2892,9 +2892,9 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "{failure} 1 queued file was not sent to Trash.",
-        spanish: "{failure} 1 archivo en cola no se envió a la papelera.",
-        french: "{failure} 1 fichier en attente n’a pas été mis à la corbeille.",
-        german: "{failure} 1 Datei in der Warteschlange wurde nicht in den Papierkorb verschoben.",
+        spanish: "{failure} Un archivo en cola no se envió a la papelera.",
+        french: "{failure} Un fichier en attente n’a pas été mis à la corbeille.",
+        german: "{failure} Eine Datei in der Warteschlange wurde nicht in den Papierkorb verschoben.",
     },
     Message {
         english: "{failure} {count} queued files were not sent to Trash.",
@@ -2940,15 +2940,15 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Could not decode: {error}. The previous image remains visible; Retry is available.",
-        spanish: "No se pudo decodificar: {error}. La imagen anterior sigue visible; puede reintentar.",
-        french: "Impossible de décoder : {error}. L’image précédente reste visible ; Réessayer est disponible.",
-        german: "Dekodierung nicht möglich: {error}. Das vorherige Bild bleibt sichtbar; Erneut versuchen ist verfügbar.",
+        spanish: "No se pudo decodificar: {error}. La imagen anterior sigue visible; puede usar Reintentar.",
+        french: "Impossible de décoder : {error}. L’image précédente reste visible ; vous pouvez utiliser Réessayer.",
+        german: "Dekodierung nicht möglich: {error}. Das vorherige Bild bleibt sichtbar; Sie können „Erneut versuchen“ verwenden.",
     },
     Message {
         english: "Could not decode: {error}. Retry is available.",
-        spanish: "No se pudo decodificar: {error}. Puede reintentar.",
-        french: "Impossible de décoder : {error}. Réessayer est disponible.",
-        german: "Dekodierung nicht möglich: {error}. Erneut versuchen ist verfügbar.",
+        spanish: "No se pudo decodificar: {error}. Puede usar Reintentar.",
+        french: "Impossible de décoder : {error}. Vous pouvez utiliser Réessayer.",
+        german: "Dekodierung nicht möglich: {error}. Sie können „Erneut versuchen“ verwenden.",
     },
     Message {
         english: "Heal source {index} of {count}",
@@ -2977,7 +2977,7 @@ const MESSAGES: &[Message] = &[
     Message {
         english: "EXIF retained",
         spanish: "EXIF conservado",
-        french: "EXIF conservées",
+        french: "Données EXIF conservées",
         german: "EXIF beibehalten",
     },
     Message {
@@ -2995,14 +2995,14 @@ const MESSAGES: &[Message] = &[
     Message {
         english: "Saved copies will keep camera metadata (session only)",
         spanish: "Las copias guardadas conservarán los metadatos de la cámara (solo en esta sesión)",
-        french: "Les copies enregistrées conserveront les métadonnées de l’appareil photo (session uniquement)",
-        german: "Gespeicherte Kopien behalten die Kameradaten (nur in dieser Sitzung)",
+        french: "Les copies enregistrées conserveront les métadonnées de l’appareil (session uniquement)",
+        german: "Gespeicherte Kopien behalten die Kamerametadaten (nur in dieser Sitzung)",
     },
     Message {
         english: "Saved copies will strip camera metadata (default)",
         spanish: "Las copias guardadas eliminarán los metadatos de la cámara (predeterminado)",
-        french: "Les copies enregistrées supprimeront les métadonnées de l’appareil photo (par défaut)",
-        german: "Gespeicherte Kopien entfernen die Kameradaten (Standard)",
+        french: "Les copies enregistrées supprimeront les métadonnées de l’appareil (par défaut)",
+        german: "Gespeicherte Kopien entfernen die Kamerametadaten (Standard)",
     },
     Message {
         english: "Finish or discard the current edit before changing pages.",
@@ -3072,13 +3072,13 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Folder is too large for safe automatic browsing. Browsing only this file. Use Open Folder to browse the rest.",
-        spanish: "La carpeta es demasiado grande para examinarla automáticamente de forma segura. Solo se examina este archivo. Use Abrir carpeta para examinar el resto.",
+        spanish: "La carpeta es demasiado grande para examinarla automáticamente de forma segura. Solo se muestra este archivo. Use Abrir carpeta para examinar el resto.",
         french: "Le dossier est trop volumineux pour une navigation automatique sûre. Navigation limitée à ce fichier. Utilisez Ouvrir un dossier pour parcourir le reste.",
         german: "Der Ordner ist für sicheres automatisches Durchsuchen zu groß. Nur diese Datei wird angezeigt. Verwenden Sie Ordner öffnen, um den Rest zu durchsuchen.",
     },
     Message {
         english: "Folder browsing is unavailable. Browsing only this file. Use Open Folder to browse the rest.",
-        spanish: "No se puede examinar la carpeta. Solo se examina este archivo. Use Abrir carpeta para examinar el resto.",
+        spanish: "No se puede examinar la carpeta. Solo se muestra este archivo. Use Abrir carpeta para examinar el resto.",
         french: "La navigation dans le dossier est indisponible. Navigation limitée à ce fichier. Utilisez Ouvrir un dossier pour parcourir le reste.",
         german: "Das Durchsuchen des Ordners ist nicht verfügbar. Nur diese Datei wird angezeigt. Verwenden Sie Ordner öffnen, um den Rest zu durchsuchen.",
     },
@@ -3120,26 +3120,26 @@ const MESSAGES: &[Message] = &[
     },
     Message {
         english: "Could not read the selected folder. Try Open Folder again.",
-        spanish: "No se pudo leer la carpeta seleccionada. Vuelva a intentar Abrir carpeta.",
-        french: "Impossible de lire le dossier sélectionné. Réessayez Ouvrir un dossier.",
-        german: "Der ausgewählte Ordner konnte nicht gelesen werden. Versuchen Sie erneut Ordner öffnen.",
+        spanish: "No se pudo leer la carpeta seleccionada. Vuelva a intentarlo con Abrir carpeta.",
+        french: "Impossible de lire le dossier sélectionné. Réessayez avec Ouvrir un dossier.",
+        german: "Der ausgewählte Ordner konnte nicht gelesen werden. Versuchen Sie es erneut mit Ordner öffnen.",
     },
     Message {
         english: "Could not restore saved appearance. Using System.",
         spanish: "No se pudo restaurar la apariencia guardada. Se usa Sistema.",
-        french: "Impossible de restaurer l’apparence enregistrée. Utilisation de Système.",
+        french: "Impossible de restaurer l’apparence enregistrée. Utilisation du réglage Système.",
         german: "Das gespeicherte Erscheinungsbild konnte nicht wiederhergestellt werden. System wird verwendet.",
     },
     Message {
         english: "Could not restore the saved language. Using System.",
         spanish: "No se pudo restaurar el idioma guardado. Se usa Sistema.",
-        french: "Impossible de restaurer la langue enregistrée. Utilisation de Système.",
+        french: "Impossible de restaurer la langue enregistrée. Utilisation du réglage Système.",
         german: "Die gespeicherte Sprache konnte nicht wiederhergestellt werden. System wird verwendet.",
     },
     Message {
         english: "Could not restore saved folder sort. Using Latest First.",
         spanish: "No se pudo restaurar el orden de carpeta guardado. Se usa Más recientes primero.",
-        french: "Impossible de restaurer le tri du dossier enregistré. Utilisation de Plus récents d’abord.",
+        french: "Impossible de restaurer le tri du dossier enregistré. Utilisation du tri Plus récents d’abord.",
         german: "Die gespeicherte Ordnersortierung konnte nicht wiederhergestellt werden. Neueste zuerst wird verwendet.",
     },
     Message {
@@ -3147,6 +3147,18 @@ const MESSAGES: &[Message] = &[
         spanish: "No se pudieron restaurar algunas preferencias guardadas. Se usan valores predeterminados seguros del sistema.",
         french: "Impossible de restaurer certaines préférences enregistrées. Utilisation de valeurs système sûres par défaut.",
         german: "Einige gespeicherte Einstellungen konnten nicht wiederhergestellt werden. Sichere Systemstandards werden verwendet.",
+    },
+    Message {
+        english: "The image decoder stopped unexpectedly",
+        spanish: "El decodificador de imágenes se detuvo inesperadamente",
+        french: "Le décodeur d’images s’est arrêté de façon inattendue",
+        german: "Der Bilddecoder wurde unerwartet beendet",
+    },
+    Message {
+        english: "The image could not be decoded",
+        spanish: "No se pudo decodificar la imagen",
+        french: "L’image n’a pas pu être décodée",
+        german: "Das Bild konnte nicht dekodiert werden",
     },
 ];
 
@@ -3211,6 +3223,7 @@ mod tests {
         .filter_map(folder_scan_user_message);
         let constants = [
             crate::session::MISSING_IMAGE_STATUS,
+            crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS,
             crate::chrome::RATING_RECOVERY_STATUS,
             crate::chrome::RATING_DISCOVERY_WRITE_STATUS,
             crate::chrome::SAVE_RECOVERY_STATUS,
@@ -3232,7 +3245,7 @@ mod tests {
             }
             checked += 1;
         }
-        assert_eq!(checked, 18);
+        assert_eq!(checked, 19);
     }
 
     #[test]
@@ -3260,6 +3273,13 @@ mod tests {
         assert_eq!(
             Language::German.localize(tr!("Close")).into_string(),
             "Schließen"
+        );
+        assert_eq!(
+            Language::English
+                .fill(tr!("Save failed: {error}"), &[("error", "} { }{ {")])
+                .as_str(),
+            "Save failed: } { }{ {",
+            "unpaired braces in a value neither panic nor change"
         );
     }
 

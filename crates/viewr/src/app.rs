@@ -2200,7 +2200,11 @@ impl App {
             return;
         }
         self.preview_load_retry_blocked = true;
-        self.session.load_error = Some(crate::ui::PREVIEW_RECOVERY_STATUS.to_owned());
+        self.session.load_error = Some(
+            self.language
+                .text(crate::ui::PREVIEW_RECOVERY_STATUS)
+                .to_owned(),
+        );
         self.show_toast(self.language.localize(crate::ui::PREVIEW_RECOVERY_STATUS));
     }
 
@@ -6324,7 +6328,8 @@ impl App {
     }
 
     fn handle_missing_selected_path(&mut self, path: PathBuf) {
-        self.session.set_selected_missing();
+        self.session
+            .set_selected_missing(self.language.text(crate::session::MISSING_IMAGE_STATUS));
         self.show_toast(self.language.localize(crate::session::MISSING_IMAGE_STATUS));
 
         let old_index = self
@@ -6648,7 +6653,10 @@ impl App {
             WorkerPoll::Ready(completion) => completion,
             WorkerPoll::Disconnected => {
                 self.session.receiver = None;
-                let message = crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS.to_owned();
+                let message = self
+                    .language
+                    .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS)
+                    .to_owned();
                 self.session.load_error = Some(message.clone());
                 log::error!("foreground image result channel disconnected");
                 if self.current_image.is_some() {
@@ -6683,7 +6691,7 @@ impl App {
                     ForegroundLoadFailureDisposition::Other(error) => {
                         self.session.selected_missing = false;
                         log::error!("decode failed");
-                        let message = user_facing_decode_error(error);
+                        let message = user_facing_decode_error(self.language, error);
                         self.session.load_error = Some(message.clone());
                         if self.current_image.is_some() {
                             self.show_toast(decode_failure_toast(self.language, &message, true));

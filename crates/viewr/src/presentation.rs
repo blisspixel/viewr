@@ -97,7 +97,10 @@ const DECODE_ERROR_PREFIXES: &[&str] = &[
 
 /// Strip stacked decoder prefixes so the empty card can show one human sentence.
 #[must_use]
-pub(super) fn user_facing_decode_error(error: impl std::fmt::Display) -> String {
+pub(super) fn user_facing_decode_error(
+    language: Language,
+    error: impl std::fmt::Display,
+) -> String {
     let raw = error.to_string();
     let mut current = raw.lines().next().unwrap_or(&raw).trim();
     while let Some(next) = DECODE_ERROR_PREFIXES.iter().find_map(|prefix| {
@@ -109,7 +112,9 @@ pub(super) fn user_facing_decode_error(error: impl std::fmt::Display) -> String 
         current = next;
     }
     if current.is_empty() {
-        "The image could not be decoded".to_owned()
+        language
+            .text(tr!("The image could not be decoded"))
+            .to_owned()
     } else {
         current.to_owned()
     }
@@ -123,7 +128,7 @@ pub(super) fn decode_failure_toast(
     error: &str,
     previous_image_visible: bool,
 ) -> Localized {
-    let error = user_facing_decode_error(error);
+    let error = user_facing_decode_error(language, error);
     let template = if previous_image_visible {
         tr!("Could not decode: {error}. The previous image remains visible; Retry is available.")
     } else {
@@ -300,6 +305,7 @@ mod tests {
     fn decode_failure_toast_mentions_a_previous_image_only_when_one_is_visible() {
         assert_eq!(
             user_facing_decode_error(
+                Language::English,
                 "Could not decode: could not open image: open/decode failed: truncated"
             ),
             "truncated"
@@ -324,7 +330,7 @@ mod tests {
         );
         assert_eq!(
             decode_failure_toast(Language::Spanish, "format error", false).as_str(),
-            "No se pudo decodificar: format error. Puede reintentar."
+            "No se pudo decodificar: format error. Puede usar Reintentar."
         );
     }
 

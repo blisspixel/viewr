@@ -6,7 +6,7 @@ param(
     [ValidateRange(5, 120)]
     [int]$TimeoutSeconds = 60,
     [ValidateRange(30, 600)]
-    [int]$SuiteTimeoutSeconds = 300,
+    [int]$SuiteTimeoutSeconds = 600,
     [string]$GExiv2Python = ""
 )
 

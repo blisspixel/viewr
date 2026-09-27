@@ -4801,6 +4801,7 @@ impl App {
             let destination = prefetch_destination(
                 self.session.selected_path.as_deref(),
                 self.session.is_loading() || self.session.load_error.is_some(),
+                self.mosaic.is_active(),
                 path_in_playlist,
                 &path,
             );

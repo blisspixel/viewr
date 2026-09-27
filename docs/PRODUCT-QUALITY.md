@@ -43,7 +43,7 @@ feel, mixed-DPI layout, or multi-monitor behavior on real hardware.
 | Kind | What it proves | What it does not prove |
 | --- | --- | --- |
 | Covered policy and UI tests | Copy, shortcut identity, empty/opening/error states, About overflow, contrast tokens | Pointer feel, real type rendering at 150% or 200% scale, monitor-move smoothness |
-| Windows UI Automation smoke | Native first-run scope, Open File/Folder, About window and shortcut text, Close, and Up/Right/Down through twelve synthetic 6000 by 4000 photos | Speech quality, peak collage memory use, or non-Windows first-run |
+| Windows UI Automation smoke | Native first-run scope, Open File/Folder, About window and shortcut text, Close, and Up/Right/Down, Page Up/Down, Enter, and Escape through twelve synthetic 6000 by 4000 photos plus a thirteenth small photo | Speech quality, peak collage memory use, or non-Windows first-run |
 | Performance probe in [PERFORMANCE.md](PERFORMANCE.md) | Startup, navigation, idle redraw, and memory budgets on the CI runner | Representative-GPU latency |
 | This matrix on retained candidate archives | The v0.6 gate | Nothing until every required platform row is recorded |
 

@@ -6,11 +6,54 @@
 //! textures.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::decode::DecodedImage;
+use crate::error::Error;
 use crate::view::PhysicalViewport;
 
 /// Maximum number of complete photos admitted to one collage group.
 pub(crate) const MAX_IMAGES: usize = 12;
+/// Bound the current full decode and all transient collage display images.
+pub(crate) const MAX_CACHE_BYTES: usize = 640 * 1024 * 1024;
+/// A collage tile needs display detail, not a second full-resolution decode.
+const MAX_DISPLAY_PIXELS: u64 = 4 * 1024 * 1024;
+const MAX_DISPLAY_EDGE: u32 = 4096;
+
+/// Largest display image each remaining slot may retain while all slots fit.
+#[must_use]
+pub(crate) fn display_pixel_budget(current_bytes: usize, remaining_slots: usize) -> u64 {
+    if remaining_slots == 0 {
+        return MAX_DISPLAY_PIXELS;
+    }
+    let bytes_per_slot = MAX_CACHE_BYTES
+        .saturating_sub(current_bytes)
+        .checked_div(remaining_slots)
+        .unwrap_or(0);
+    u64::try_from(bytes_per_slot / 4)
+        .unwrap_or(u64::MAX)
+        .clamp(1, MAX_DISPLAY_PIXELS)
+}
+
+/// Preserve the complete frame at a bounded display resolution off the UI thread.
+pub(crate) fn prepare_display_image(
+    image: Arc<DecodedImage>,
+    max_pixels: u64,
+    is_cancelled: impl Fn() -> bool,
+) -> Result<Option<Arc<DecodedImage>>, Error> {
+    if is_cancelled() {
+        return Ok(None);
+    }
+    let Some(spec) =
+        crate::gpu_image::preview_spec((image.width, image.height), MAX_DISPLAY_EDGE, max_pixels)
+    else {
+        return Ok(Some(image));
+    };
+    Ok(
+        crate::gpu_image::prepare_image_preview(&image, spec, is_cancelled)?
+            .map(|preview| Arc::new(preview.into_decoded_image(image.color_profile))),
+    )
+}
 
 /// One page in the active playlist projection.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -398,6 +441,60 @@ fn bounded_gap(viewport: PhysicalViewport, count: usize, requested: u32) -> u32 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::WorkingColorEncoding;
+    use crate::decode::ColorProfileStatus;
+    use crate::prefetch::PrefetchCache;
+
+    fn large_photo() -> Arc<DecodedImage> {
+        Arc::new(DecodedImage {
+            rgba: [180, 90, 30, 255].repeat(600 * 400),
+            width: 600,
+            height: 400,
+            color_profile: ColorProfileStatus::TaggedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        })
+    }
+
+    #[test]
+    fn twelve_complete_display_images_fit_where_full_decodes_do_not() {
+        let full = large_photo();
+        let per_photo_pixels = 10_000;
+        let cache_bytes = 12 * per_photo_pixels * 4;
+        assert!(full.rgba.len() > cache_bytes);
+        let mut cache = PrefetchCache::with_limits(MAX_IMAGES, cache_bytes);
+        for slot in 0..MAX_IMAGES {
+            let displayed =
+                prepare_display_image(Arc::clone(&full), per_photo_pixels as u64, || false)
+                    .unwrap()
+                    .unwrap();
+            assert!(
+                u64::from(displayed.width) * u64::from(displayed.height) <= per_photo_pixels as u64
+            );
+            assert!((f64::from(displayed.width) / f64::from(displayed.height) - 1.5).abs() < 0.01);
+            assert_eq!(displayed.color_profile, full.color_profile);
+            assert_eq!(&displayed.rgba[..4], &[180, 90, 30, 255]);
+            assert!(cache.insert_if_fits(PathBuf::from(format!("{slot}.png")), displayed));
+        }
+        assert_eq!(cache.len(), MAX_IMAGES);
+        assert_eq!((full.width, full.height), (600, 400));
+        assert!(
+            prepare_display_image(full, per_photo_pixels as u64, || true)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn collage_budget_reserves_room_for_every_slot_after_the_largest_current_decode() {
+        let current_bytes = usize::try_from(viewr_protocol::MAX_RGBA_BYTES).unwrap();
+        let pixels = display_pixel_budget(current_bytes, MAX_IMAGES - 1);
+        assert!(pixels > 0);
+        assert!(pixels <= MAX_DISPLAY_PIXELS);
+        assert!(
+            current_bytes + (MAX_IMAGES - 1) * usize::try_from(pixels).unwrap() * 4
+                <= MAX_CACHE_BYTES
+        );
+    }
 
     fn projection() -> Vec<usize> {
         (0..30).map(|index| index * 2).collect()

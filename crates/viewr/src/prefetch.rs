@@ -169,6 +169,49 @@ impl PrefetchSchedule {
         })
     }
 
+    /// Decode a collage slot and retain only its bounded display image.
+    pub(crate) fn request_collage<N, S>(
+        &mut self,
+        path: PathBuf,
+        max_pixels: u64,
+        notify: N,
+        schedule: S,
+    ) -> bool
+    where
+        N: FnOnce() + Send + 'static,
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
+    {
+        self.request_with(path, notify, schedule, move |path, cancellation| {
+            collage_decode(
+                DecodedImage::load_background_if_current(path, cancellation, 0),
+                max_pixels,
+                cancellation,
+            )
+        })
+    }
+
+    /// Decode a collage slot only from the file identity admitted by scanning.
+    pub(crate) fn request_collage_scanned<N, S>(
+        &mut self,
+        path: PathBuf,
+        provenance: crate::fs::ScanProvenance,
+        max_pixels: u64,
+        notify: N,
+        schedule: S,
+    ) -> bool
+    where
+        N: FnOnce() + Send + 'static,
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
+    {
+        self.request_with(path, notify, schedule, move |path, cancellation| {
+            collage_decode(
+                DecodedImage::load_scanned_background_if_current(path, provenance, cancellation, 0),
+                max_pixels,
+                cancellation,
+            )
+        })
+    }
+
     fn request_with<N, S, W>(&mut self, path: PathBuf, notify: N, schedule: S, worker: W) -> bool
     where
         N: FnOnce() + Send + 'static,
@@ -295,6 +338,25 @@ impl PrefetchSchedule {
     pub(crate) fn is_idle(&self) -> bool {
         self.active.is_empty()
     }
+}
+
+fn collage_decode(
+    result: Result<Option<LoadedImage>, crate::error::Error>,
+    max_pixels: u64,
+    cancellation: &AtomicU64,
+) -> PrefetchResult {
+    let Some(mut loaded) = result.map_err(|_| PrefetchFailure::Decode)? else {
+        return Ok(None);
+    };
+    let image = crate::mosaic::prepare_display_image(loaded.image, max_pixels, || {
+        cancellation.load(Ordering::Acquire) != 0
+    })
+    .map_err(|_| PrefetchFailure::Decode)?;
+    let Some(image) = image else {
+        return Ok(None);
+    };
+    loaded.image = image;
+    Ok(Some(loaded))
 }
 
 /// Where a completed speculative decode may apply.
@@ -961,6 +1023,33 @@ mod tests {
             PrefetchFailure::WorkerDisconnected.diagnostic_name(),
             "worker disconnected"
         );
+    }
+
+    #[test]
+    fn collage_request_retains_a_display_image_and_leaves_full_decode_available() {
+        let workspace = crate::ephemeral::TempWorkspace::new("collage-prefetch").unwrap();
+        let path = workspace.path().join("large.png");
+        image::RgbaImage::from_pixel(1200, 800, image::Rgba([40, 90, 180, 255]))
+            .save(&path)
+            .unwrap();
+        let mut schedule = PrefetchSchedule::default();
+        assert!(schedule.request_collage(
+            path.clone(),
+            100_000,
+            || {},
+            |task| {
+                task();
+                true
+            }
+        ));
+        let completion = schedule.poll().into_completions().pop().unwrap();
+        let (completed_path, result, _) = completion.into_parts();
+        assert_eq!(completed_path, path);
+        let displayed = result.unwrap().unwrap();
+        assert!(u64::from(displayed.image.width) * u64::from(displayed.image.height) <= 100_000);
+        assert_eq!(&displayed.image.rgba[..4], &[40, 90, 180, 255]);
+        let full = DecodedImage::load(&path).unwrap();
+        assert_eq!((full.width, full.height), (1200, 800));
     }
 
     #[test]

@@ -3941,34 +3941,27 @@ impl App {
     }
 
     fn install_mosaic_page(&mut self, page: crate::mosaic::MosaicPage) {
-        let Some(playlist) = self.playlist.as_ref() else {
+        if self.playlist.is_none() {
             return;
-        };
-        let retained_paths: HashSet<PathBuf> = page
-            .indices
-            .iter()
-            .filter_map(|index| playlist.files.get(*index).cloned())
-            .collect();
+        }
         let current_bytes = self
             .current_image
             .as_ref()
             .map_or(0, |image| image.rgba.len());
-        let neighbor_budget = prefetch::DEFAULT_MAX_BYTES.saturating_sub(current_bytes);
+        let neighbor_budget = crate::mosaic::MAX_CACHE_BYTES.saturating_sub(current_bytes);
 
         self.prefetch_schedule.reset();
-        self.prefetch.retain(|path| retained_paths.contains(path));
+        self.prefetch.clear();
+        self.prefetch_sources.clear();
         self.prefetch
             .set_limits(crate::mosaic::MAX_IMAGES, neighbor_budget);
-        let prefetch = &self.prefetch;
-        self.prefetch_sources
-            .retain(|path, _| prefetch.contains(path));
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.set_mosaic_slot_count(page.indices.len());
         }
         self.mosaic = MosaicView {
             uploaded_paths: vec![None; page.indices.len()],
             page: Some(page),
-            memory_limited: current_bytes >= prefetch::DEFAULT_MAX_BYTES,
+            memory_limited: current_bytes >= crate::mosaic::MAX_CACHE_BYTES,
             display_limited: false,
             unavailable_paths: HashSet::new(),
         };
@@ -4009,6 +4002,8 @@ impl App {
 
     fn clear_full_image_mosaic(&mut self) {
         self.prefetch_schedule.reset();
+        self.prefetch.clear();
+        self.prefetch_sources.clear();
         self.prefetch
             .set_limits(prefetch::DEFAULT_CAPACITY, prefetch::DEFAULT_MAX_BYTES);
         self.mosaic = MosaicView::default();
@@ -4188,7 +4183,7 @@ impl App {
     }
 
     fn open_mosaic_photo(&mut self, index: usize) {
-        let Some(path) = self.mosaic.page.as_ref().and_then(|page| {
+        let ready = self.mosaic.page.as_ref().and_then(|page| {
             page.indices
                 .iter()
                 .position(|candidate| *candidate == index)
@@ -4199,22 +4194,12 @@ impl App {
                         .and_then(Option::as_ref)
                         .is_some()
                 })
-                .and_then(|_| self.playlist.as_ref()?.files.get(index).cloned())
-        }) else {
+                .and_then(|_| self.playlist.as_ref()?.files.get(index))
+        });
+        if ready.is_none() {
             return;
-        };
-        let reserved = (self.session.presented_path.as_deref() != Some(path.as_path()))
-            .then(|| self.take_prefetched_image(&path))
-            .flatten();
-        self.clear_full_image_mosaic();
-        if let Some(loaded) = reserved
-            && !self.insert_prefetched_image(path.clone(), loaded)
-        {
-            log::warn!(
-                "full-image mosaic selection could not retain {} for navigation",
-                prefetch::privacy_safe_file_name(&path)
-            );
         }
+        self.clear_full_image_mosaic();
         self.go_to_index(index);
     }
 
@@ -4737,7 +4722,16 @@ impl App {
                 prefetch::NEIGHBORS_BEHIND,
             )
         };
+        let collage_slots = self.mosaic.is_active().then_some(candidate_paths.len());
         let candidate_paths = exclude_blocked_neighbors(candidate_paths, &blocked);
+        let collage_pixels = collage_slots.map(|slots| {
+            crate::mosaic::display_pixel_budget(
+                self.current_image
+                    .as_ref()
+                    .map_or(0, |image| image.rgba.len()),
+                slots,
+            )
+        });
         let mut keep_paths: HashSet<&Path> = candidate_paths.iter().map(PathBuf::as_path).collect();
         if let Some(selected) = self.session.selected_path.as_deref() {
             keep_paths.insert(selected);
@@ -4762,19 +4756,31 @@ impl App {
             let notify = move || {
                 let _ = event_proxy.send_event(UserEvent::Wake);
             };
-            let _ = if let Some(provenance) = provenance {
-                self.prefetch_schedule.request_scanned(
+            let _ = match (provenance, collage_pixels) {
+                (Some(provenance), Some(pixels)) => self.prefetch_schedule.request_collage_scanned(
+                    path,
+                    provenance,
+                    pixels,
+                    notify,
+                    crate::decode::schedule_background_decode,
+                ),
+                (None, Some(pixels)) => self.prefetch_schedule.request_collage(
+                    path,
+                    pixels,
+                    notify,
+                    crate::decode::schedule_background_decode,
+                ),
+                (Some(provenance), None) => self.prefetch_schedule.request_scanned(
                     path,
                     provenance,
                     notify,
                     crate::decode::schedule_background_decode,
-                )
-            } else {
-                self.prefetch_schedule.request(
+                ),
+                (None, None) => self.prefetch_schedule.request(
                     path,
                     notify,
                     crate::decode::schedule_background_decode,
-                )
+                ),
             };
         }
     }

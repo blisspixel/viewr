@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Full-image collage
+
+- Large camera photos no longer leave a 12-photo collage with only one visible
+  image because their full decodes exhaust the cache. Each collage slot now gets
+  a complete, color-correct display image sized for the available memory. Opening
+  a selected photo still loads its full-resolution source.
+
 ## 0.6.5 - 2026-09-25
 
 ### Playtest feedback

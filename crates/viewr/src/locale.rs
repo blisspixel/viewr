@@ -3236,10 +3236,10 @@ const MESSAGES: &[Message] = &[
         german: "Collage vollständiger Bilder  {ready} von {target} Fotos bereit",
     },
     Message {
-        english: "Full-image collage  {ready} of {target} photos fit the 256 MiB memory limit",
-        spanish: "Collage de imágenes completas  {ready} de {target} fotos caben en el límite de memoria de 256 MiB",
-        french: "Mosaïque d’images complètes  {ready} photos sur {target} tiennent dans la limite de mémoire de 256 Mio",
-        german: "Collage vollständiger Bilder  {ready} von {target} Fotos passen in das Speicherlimit von 256 MiB",
+        english: "Full-image collage  {ready} of {target} photos fit the 640 MiB memory limit",
+        spanish: "Collage de imágenes completas  {ready} de {target} fotos caben en el límite de memoria de 640 MiB",
+        french: "Mosaïque d’images complètes  {ready} photos sur {target} tiennent dans la limite de mémoire de 640 Mio",
+        german: "Collage vollständiger Bilder  {ready} von {target} Fotos passen in das Speicherlimit von 640 MiB",
     },
     Message {
         english: "Full-image collage  {ready} of {target} photos meet full-image display limits",

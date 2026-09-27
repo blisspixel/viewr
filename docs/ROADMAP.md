@@ -620,9 +620,10 @@ broad feature category. They prove and refine the accumulated viewer.
   path, never the thumbnail generator. Actual aspect ratios drive dense justified
   rows with narrow gutters instead of equal blank cells. Group navigation, Up and
   Down hierarchy, keyboard and native accessibility selection, exact-current
-  texture reuse, and a 256 MiB aggregate current plus neighbor decode budget are
-  covered. When the full group cannot fit, fewer complete photos reflow and the
-  interface states the limit instead of substituting reduced thumbnails.
+  texture reuse, and a 640 MiB aggregate current plus bounded collage display
+  image budget are covered. Opening a selected photo loads its full-resolution
+  source. When the full group still cannot fit, fewer complete photos reflow and
+  the interface states the limit.
 - [ ] Close remaining evidence-backed layout, spacing, copy, loading, empty, error,
   recovery, and diagnostic issues without adding decorative controls or unrelated
   features.

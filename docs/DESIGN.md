@@ -78,8 +78,9 @@ disappears. This spec is the converged result of two rounds of design critique
   with up to 12 complete, uncropped photos from the active rating projection.
   Actual photo aspect ratios determine justified row breaks and tile sizes, so a
   3:4 photo occupies a 3:4 tile and narrow gutters replace equal-cell letterbox
-  space. It uses ordinary full decoded images and the native color and mipmapped
-  GPU path. It does not call the thumbnail generator, crop photos, show filename
+  space. It prepares complete, aspect-preserving display images for large photos
+  and uses the native color and mipmapped GPU path. It does not call the thumbnail
+  generator, crop photos, show filename
   cards, or retain album state. Left and Right select a ready photo. Down, Enter,
   or click opens it in single-photo view. Page Up and Page Down move between
   groups. Delete stays in the group. Escape returns without changing the
@@ -87,9 +88,9 @@ disappears. This spec is the converged result of two rounds of design critique
   Complete
   photos reflow as they become ready. Tile-local scaling may enlarge a complete
   small source to its aspect-ratio tile; the single-photo 100 percent Fit cap is
-  unchanged. When the 256 MiB current plus neighbor
-  decoded-image budget cannot admit the full group, the status says how many fit
-  safely.
+  unchanged. Opening a selected photo loads its full-resolution source. The
+  current full decode and collage display images share a 640 MiB transient cache
+  budget. If admission still fails, the status says how many fit safely.
 - Image Information: an optional 304px panel contains file facts and the explicit
   export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
   risk-category presence without displaying raw sensitive values, and states that

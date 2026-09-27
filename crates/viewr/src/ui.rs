@@ -948,7 +948,7 @@ fn mosaic_status(language: Language, mosaic: &MosaicUiState) -> (String, String)
     let template = match mosaic.state {
         MosaicLoadState::Loading => tr!("Full-image collage  {ready} of {target} photos ready"),
         MosaicLoadState::MemoryLimited => {
-            tr!("Full-image collage  {ready} of {target} photos fit the 256 MiB memory limit")
+            tr!("Full-image collage  {ready} of {target} photos fit the 640 MiB memory limit")
         }
         MosaicLoadState::DisplayLimited => {
             tr!("Full-image collage  {ready} of {target} photos meet full-image display limits")
@@ -6354,7 +6354,7 @@ mod tests {
         let (_, terminal_accessible) = mosaic_status(Language::English, &mosaic);
         assert_eq!(
             terminal_accessible,
-            "Full-image collage  11 of 12 photos fit the 256 MiB memory limit"
+            "Full-image collage  11 of 12 photos fit the 640 MiB memory limit"
         );
     }
 

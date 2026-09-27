@@ -20,9 +20,22 @@ pub enum Mode {
     Dark,
     /// Black and phosphor-green terminal-inspired appearance.
     Console,
+    /// Operating-system high contrast on a dark theme: white on black.
+    HighContrastDark,
+    /// Operating-system high contrast on a light theme: black on white.
+    HighContrastLight,
 }
 
 impl Mode {
+    /// Every resolved appearance, so palette checks cannot skip one.
+    pub const ALL: [Self; 5] = [
+        Self::Light,
+        Self::Dark,
+        Self::Console,
+        Self::HighContrastDark,
+        Self::HighContrastLight,
+    ];
+
     /// Stable user-facing name for a resolved appearance.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -30,7 +43,14 @@ impl Mode {
             Self::Light => "Light",
             Self::Dark => "Dark",
             Self::Console => "Console",
+            Self::HighContrastDark | Self::HighContrastLight => "High Contrast",
         }
+    }
+
+    /// Whether this mode uses light chrome and a light window frame.
+    #[must_use]
+    pub const fn is_light(self) -> bool {
+        matches!(self, Self::Light | Self::HighContrastLight)
     }
 
     /// Convert winit's reported OS theme into a viewr [`Mode`].
@@ -189,7 +209,12 @@ impl Preference {
     pub fn description(self, current_system_mode: Option<Mode>) -> String {
         match self {
             Self::System => match current_system_mode {
-                Some(mode @ (Mode::Light | Mode::Dark)) => {
+                Some(
+                    mode @ (Mode::Light
+                    | Mode::Dark
+                    | Mode::HighContrastDark
+                    | Mode::HighContrastLight),
+                ) => {
                     format!("Follows your operating system. Currently {}.", mode.name())
                 }
                 Some(Mode::Console) | None => {
@@ -226,10 +251,18 @@ impl Preference {
         }
     }
 
-    /// Resolve this preference against the currently reported OS theme.
+    /// Resolve this preference against the currently reported OS theme and
+    /// the operating system's high-contrast setting.
+    ///
+    /// High contrast applies while the preference follows the system. An
+    /// explicit Light, Dark, or Console choice stays the user's choice.
     #[must_use]
-    pub fn resolve(self, system_theme: Option<winit::window::Theme>) -> Mode {
+    pub fn resolve(self, system_theme: Option<winit::window::Theme>, high_contrast: bool) -> Mode {
         match self {
+            Self::System if high_contrast => match system_theme {
+                Some(winit::window::Theme::Light) => Mode::HighContrastLight,
+                Some(winit::window::Theme::Dark) | None => Mode::HighContrastDark,
+            },
             Self::System => Mode::from_winit_or_dark(system_theme),
             Self::Light => Mode::Light,
             Self::Dark => Mode::Dark,
@@ -300,6 +333,12 @@ pub fn palette_for(mode: Mode) -> Palette {
         Mode::Console => Palette {
             background: [1.0 / 255.0, 5.0 / 255.0, 2.0 / 255.0, 1.0],
         },
+        Mode::HighContrastDark => Palette {
+            background: [0.0, 0.0, 0.0, 1.0],
+        },
+        Mode::HighContrastLight => Palette {
+            background: [1.0, 1.0, 1.0, 1.0],
+        },
     }
 }
 
@@ -336,6 +375,28 @@ pub const fn chrome_palette_for(mode: Mode) -> ChromePalette {
             raised: [0x0B, 0x1B, 0x0F, 0xFF],
             active: [0x12, 0x35, 0x1A, 0xFF],
             border: [0x23, 0x60, 0x2F, 0xFF],
+        },
+        // High-contrast palettes keep every text pairing at WCAG AAA (7:1) and
+        // draw full-strength outlines, so controls do not rely on subtle fills.
+        Mode::HighContrastDark => ChromePalette {
+            accent: [0xFF, 0xFF, 0x00, 0xFF],
+            accent_ink: [0x00, 0x00, 0x00, 0xFF],
+            text: [0xFF, 0xFF, 0xFF, 0xFF],
+            muted: [0xE0, 0xE0, 0xE0, 0xFF],
+            panel: [0x00, 0x00, 0x00, 0xFF],
+            raised: [0x1C, 0x1C, 0x1C, 0xFF],
+            active: [0x33, 0x33, 0x33, 0xFF],
+            border: [0xFF, 0xFF, 0xFF, 0xFF],
+        },
+        Mode::HighContrastLight => ChromePalette {
+            accent: [0x00, 0x00, 0x9F, 0xFF],
+            accent_ink: [0xFF, 0xFF, 0xFF, 0xFF],
+            text: [0x00, 0x00, 0x00, 0xFF],
+            muted: [0x26, 0x26, 0x26, 0xFF],
+            panel: [0xFF, 0xFF, 0xFF, 0xFF],
+            raised: [0xE6, 0xE6, 0xE6, 0xFF],
+            active: [0xCC, 0xCC, 0xCC, 0xFF],
+            border: [0x00, 0x00, 0x00, 0xFF],
         },
     }
 }
@@ -501,9 +562,15 @@ mod tests {
         use winit::window::Theme;
         assert_eq!(Mode::from_winit(Theme::Light), Mode::Light);
         assert_eq!(Mode::from_winit(Theme::Dark), Mode::Dark);
-        assert_eq!(Preference::System.resolve(Some(Theme::Light)), Mode::Light);
-        assert_eq!(Preference::Dark.resolve(Some(Theme::Light)), Mode::Dark);
-        assert_eq!(Preference::Console.resolve(None), Mode::Console);
+        assert_eq!(
+            Preference::System.resolve(Some(Theme::Light), false),
+            Mode::Light
+        );
+        assert_eq!(
+            Preference::Dark.resolve(Some(Theme::Light), false),
+            Mode::Dark
+        );
+        assert_eq!(Preference::Console.resolve(None, false), Mode::Console);
         assert_eq!(Preference::System.window_theme(), None);
         assert_eq!(Preference::Light.window_theme(), Some(Theme::Light));
         assert_eq!(Preference::Console.window_theme(), Some(Theme::Dark));
@@ -512,7 +579,56 @@ mod tests {
     #[test]
     fn system_falls_back_to_dark_when_unknown() {
         assert_eq!(Mode::from_winit_or_dark(None), Mode::Dark);
-        assert_eq!(Preference::System.resolve(None), Mode::Dark);
+        assert_eq!(Preference::System.resolve(None, false), Mode::Dark);
+    }
+
+    #[test]
+    fn system_high_contrast_follows_the_os_theme_and_explicit_choices_stay() {
+        use winit::window::Theme;
+        assert_eq!(
+            Preference::System.resolve(Some(Theme::Dark), true),
+            Mode::HighContrastDark
+        );
+        assert_eq!(
+            Preference::System.resolve(Some(Theme::Light), true),
+            Mode::HighContrastLight
+        );
+        assert_eq!(
+            Preference::System.resolve(None, true),
+            Mode::HighContrastDark
+        );
+        for (preference, mode) in [
+            (Preference::Light, Mode::Light),
+            (Preference::Dark, Mode::Dark),
+            (Preference::Console, Mode::Console),
+        ] {
+            assert_eq!(preference.resolve(Some(Theme::Dark), true), mode);
+        }
+        assert!(Mode::HighContrastLight.is_light() && Mode::Light.is_light());
+        assert!(!Mode::HighContrastDark.is_light() && !Mode::Console.is_light());
+        assert_eq!(
+            chrome_palette_for(Mode::HighContrastDark).panel,
+            [0, 0, 0, 0xFF]
+        );
+        assert_eq!(
+            chrome_palette_for(Mode::HighContrastLight).panel,
+            [0xFF, 0xFF, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn every_mode_is_listed_in_all() {
+        for mode in Mode::ALL {
+            // Adding a mode breaks this match until it is also added to ALL.
+            match mode {
+                Mode::Light
+                | Mode::Dark
+                | Mode::Console
+                | Mode::HighContrastDark
+                | Mode::HighContrastLight => {}
+            }
+        }
+        assert_eq!(Mode::ALL.len(), 5);
     }
 
     #[test]

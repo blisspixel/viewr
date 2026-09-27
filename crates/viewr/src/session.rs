@@ -117,9 +117,11 @@ impl Session {
     }
 
     /// Record a confirmed missing selection while retaining any presented frame.
-    pub fn set_selected_missing(&mut self) {
+    /// `status` is `MISSING_IMAGE_STATUS` already resolved for the interface
+    /// language, because this state is shown as-is on the empty-state card.
+    pub fn set_selected_missing(&mut self, status: &str) {
         self.receiver = None;
-        self.load_error = Some(MISSING_IMAGE_STATUS.to_owned());
+        self.load_error = Some(status.to_owned());
         self.selected_missing = true;
     }
 
@@ -229,7 +231,7 @@ mod tests {
     #[test]
     fn missing_selection_status_and_retry_plan_are_explicit() {
         let mut session = Session::default();
-        session.set_selected_missing();
+        session.set_selected_missing(MISSING_IMAGE_STATUS);
 
         assert!(session.selected_missing);
         assert_eq!(session.load_error.as_deref(), Some(MISSING_IMAGE_STATUS));

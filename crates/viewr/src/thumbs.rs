@@ -284,10 +284,16 @@ fn resize_decoded(decoded: crate::decode::DecodedImage) -> ThumbnailResult {
     if decoded.width == 0 || decoded.height == 0 {
         return Err(ThumbnailFailure::EmptyImage);
     }
-    let img = image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba)
-        .ok_or(ThumbnailFailure::InvalidRgbaBuffer)?;
-
+    let expected = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+    if u64::try_from(decoded.rgba.len()).ok() != Some(expected) {
+        return Err(ThumbnailFailure::InvalidRgbaBuffer);
+    }
     let (width, height) = fit_size(decoded.width, decoded.height, THUMB_EDGE);
+    let factor = box_reduction_factor(decoded.width, decoded.height, width, height);
+    let (reduced_width, reduced_height, reduced) =
+        box_reduce(decoded.rgba, decoded.width, decoded.height, factor);
+    let img = image::RgbaImage::from_raw(reduced_width, reduced_height, reduced)
+        .ok_or(ThumbnailFailure::InvalidRgbaBuffer)?;
     let resized =
         image::imageops::resize(&img, width, height, image::imageops::FilterType::Triangle);
     ThumbRgba::new(
@@ -296,6 +302,52 @@ fn resize_decoded(decoded: crate::decode::DecodedImage) -> ThumbnailResult {
         resized.into_raw(),
         decoded.working_color,
     )
+}
+
+/// Integer block size for the cheap first reduction of a thumbnail source.
+///
+/// Filtering a full photo straight to a preview costs a third of the preview's
+/// work. Averaging whole blocks first leaves at least twice the target size in
+/// each direction, so the final filter still has real detail to resample.
+#[must_use]
+fn box_reduction_factor(width: u32, height: u32, target_width: u32, target_height: u32) -> u32 {
+    let horizontal = width / target_width.max(1).saturating_mul(2);
+    let vertical = height / target_height.max(1).saturating_mul(2);
+    horizontal.min(vertical).max(1)
+}
+
+/// Average `factor` by `factor` blocks of straight RGBA. Rows and columns past
+/// the last whole block are dropped, at most `factor - 1` source pixels. A
+/// factor of one returns the pixels unchanged.
+fn box_reduce(rgba: Vec<u8>, width: u32, height: u32, factor: u32) -> (u32, u32, Vec<u8>) {
+    if factor <= 1 {
+        return (width, height, rgba);
+    }
+    let out_width = width / factor;
+    let out_height = height / factor;
+    let stride = width as usize * 4;
+    let block = factor as usize;
+    let area = factor * factor;
+    let mut sums = vec![0_u32; out_width as usize * 4];
+    let mut out = Vec::with_capacity(out_width as usize * out_height as usize * 4);
+    for out_row in 0..out_height as usize {
+        sums.fill(0);
+        for row in rgba.chunks_exact(stride).skip(out_row * block).take(block) {
+            for (sum, run) in sums.chunks_exact_mut(4).zip(row.chunks_exact(block * 4)) {
+                for pixel in run.chunks_exact(4) {
+                    sum[0] += u32::from(pixel[0]);
+                    sum[1] += u32::from(pixel[1]);
+                    sum[2] += u32::from(pixel[2]);
+                    sum[3] += u32::from(pixel[3]);
+                }
+            }
+        }
+        out.extend(
+            sums.iter()
+                .map(|total| u8::try_from((total + area / 2) / area).unwrap_or(u8::MAX)),
+        );
+    }
+    (out_width, out_height, out)
 }
 
 /// Scale `(w, h)` to fit inside a square of `edge` while preserving aspect ratio.
@@ -330,7 +382,8 @@ mod tests {
 
     use super::{
         MAX_ACTIVE_THUMBNAILS, THUMB_EDGE, ThumbRgba, ThumbnailCompletion, ThumbnailFailure,
-        ThumbnailSchedule, fit_size, generate_thumb, resize_decoded,
+        ThumbnailSchedule, box_reduce, box_reduction_factor, fit_size, generate_thumb,
+        resize_decoded,
     };
 
     fn valid_thumbnail() -> ThumbRgba {
@@ -665,5 +718,98 @@ mod tests {
                 ..
             }] if completed_path == &path
         ));
+    }
+
+    #[test]
+    fn block_reduction_averages_whole_blocks_and_drops_only_the_remainder() {
+        // 5 x 3 source, factor 2: two output columns, one output row. The fifth
+        // column and third row are the dropped remainder.
+        let mut rgba = Vec::new();
+        for row in 0..3_u8 {
+            for column in 0..5_u8 {
+                rgba.extend([column * 10, row * 20, 255, 128 + column]);
+            }
+        }
+        let (width, height, out) = box_reduce(rgba.clone(), 5, 3, 2);
+        assert_eq!((width, height), (2, 1));
+        // Block one averages columns 0 and 1 of rows 0 and 1.
+        assert_eq!(&out[..4], &[5, 10, 255, 129]);
+        // Block two averages columns 2 and 3; alpha 130.5 rounds up to 131.
+        assert_eq!(&out[4..], &[25, 10, 255, 131]);
+
+        let (width, height, same) = box_reduce(rgba.clone(), 5, 3, 1);
+        assert_eq!((width, height, same), (5, 3, rgba));
+
+        let uniform = [7_u8, 70, 170, 200].repeat(12 * 9);
+        let (_, _, reduced) = box_reduce(uniform, 12, 9, 3);
+        assert!(
+            reduced
+                .chunks_exact(4)
+                .all(|pixel| pixel == [7, 70, 170, 200])
+        );
+    }
+
+    #[test]
+    fn block_reduction_keeps_at_least_twice_the_preview_size() {
+        let (target_width, target_height) = fit_size(4000, 3000, THUMB_EDGE);
+        let factor = box_reduction_factor(4000, 3000, target_width, target_height);
+        assert!(factor > 1, "a camera photo is reduced before filtering");
+        assert!(4000 / factor >= target_width * 2);
+        assert!(3000 / factor >= target_height * 2);
+        assert_eq!(
+            box_reduction_factor(100, 80, 72, 58),
+            1,
+            "small sources are filtered directly"
+        );
+        assert_eq!(
+            box_reduction_factor(10_000, 10, 72, 1),
+            5,
+            "the narrow side bounds the factor"
+        );
+    }
+
+    #[test]
+    fn a_reduced_preview_matches_a_direct_resample() {
+        let (width, height) = (1600_u32, 1200_u32);
+        let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+        for y in 0..height {
+            for x in 0..width {
+                rgba.extend([
+                    u8::try_from(x * 255 / width).unwrap(),
+                    u8::try_from(y * 255 / height).unwrap(),
+                    u8::try_from((x + y) % 256).unwrap_or(0),
+                    255,
+                ]);
+            }
+        }
+        let source = image::RgbaImage::from_raw(width, height, rgba.clone()).unwrap();
+        let (target_width, target_height) = fit_size(width, height, THUMB_EDGE);
+        let direct = image::imageops::resize(
+            &source,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Triangle,
+        );
+        let reduced = resize_decoded(crate::decode::DecodedImage {
+            rgba,
+            width,
+            height,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        })
+        .unwrap();
+        assert_eq!(
+            (reduced.width, reduced.height),
+            (target_width, target_height)
+        );
+        // Smooth gradients: the two paths agree closely on red and green.
+        let worst = reduced
+            .rgba
+            .chunks_exact(4)
+            .zip(direct.as_raw().chunks_exact(4))
+            .flat_map(|(a, b)| (0..2).map(move |channel| a[channel].abs_diff(b[channel])))
+            .max()
+            .unwrap();
+        assert!(worst <= 3, "reduced preview drifted by {worst}");
     }
 }

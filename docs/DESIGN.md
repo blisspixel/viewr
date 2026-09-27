@@ -53,7 +53,12 @@ disappears. This spec is the converged result of two rounds of design critique
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
   spacing. Long names truncate with the full value available as a tooltip. Routine
   three-second outcomes, including Move to Trash, use this status area instead of
-  covering the image. Immersive fullscreen and the full-image collage have no top
+  covering the image. Each status item keeps a fixed allocation, except that in
+  windows at least 720px wide the outcome or navigation notice, always drawn
+  last, receives all the width the metadata chips and a 120px filename slice do
+  not need. A sticky explanation such as a missing-image substitution therefore
+  reads whole whenever the window has room. Immersive
+  fullscreen and the full-image collage have no top
   chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`
   shows a 64px docked panel containing only high-frequency image operations:
@@ -73,8 +78,9 @@ disappears. This spec is the converged result of two rounds of design critique
   with up to 12 complete, uncropped photos from the active rating projection.
   Actual photo aspect ratios determine justified row breaks and tile sizes, so a
   3:4 photo occupies a 3:4 tile and narrow gutters replace equal-cell letterbox
-  space. It uses ordinary full decoded images and the native color and mipmapped
-  GPU path. It does not call the thumbnail generator, crop photos, show filename
+  space. It prepares complete, aspect-preserving display images for large photos
+  and uses the native color and mipmapped GPU path. It does not call the thumbnail
+  generator, crop photos, show filename
   cards, or retain album state. Left and Right select a ready photo. Down, Enter,
   or click opens it in single-photo view. Page Up and Page Down move between
   groups. Delete stays in the group. Escape returns without changing the
@@ -82,9 +88,9 @@ disappears. This spec is the converged result of two rounds of design critique
   Complete
   photos reflow as they become ready. Tile-local scaling may enlarge a complete
   small source to its aspect-ratio tile; the single-photo 100 percent Fit cap is
-  unchanged. When the 256 MiB current plus neighbor
-  decoded-image budget cannot admit the full group, the status says how many fit
-  safely.
+  unchanged. Opening a selected photo loads its full-resolution source. The
+  current full decode and collage display images share a 640 MiB transient cache
+  budget. If admission still fails, the status says how many fit safely.
 - Image Information: an optional 304px panel contains file facts and the explicit
   export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
   risk-category presence without displaying raw sensitive values, and states that
@@ -157,7 +163,23 @@ disappears. This spec is the converged result of two rounds of design critique
 - Every appearance owns a complete token set for panel, raised and pressed
   surfaces, borders, primary and secondary text, active state, and text on the
   active state. Standard widgets and custom-painted controls use the same tokens.
-  Contrast tests enforce WCAG AA for all three resolved palettes.
+  Contrast tests enforce WCAG AA for the Light, Dark, and Console palettes,
+  including secondary text such as menu shortcut hints.
+- While Appearance is System and the operating system asks for more contrast
+  (a Windows contrast theme, macOS Increase Contrast, or the desktop portal's
+  high-contrast preference on Linux), viewr resolves to a high-contrast palette:
+  white on black on a dark theme, black on white on a light one. Its text,
+  controls, and outlines meet WCAG AAA (7:1). An explicit Light, Dark, or
+  Console choice stays the user's choice. The setting is read again when the
+  window regains focus or the operating-system theme changes, and is never
+  stored.
+- The interface follows the operating-system text size (Windows Text size, the
+  GNOME text scaling factor through the desktop portal) from 100 to 225 percent
+  on top of the display scale. Image pixels and image zoom are unaffected. The
+  enlargement is limited to what keeps at least the 640 by 480 point layout
+  available, so larger text never pushes a menu or control out of reach; it
+  grows to the requested size as the window grows. macOS has no system-wide text
+  size for AppKit apps, so there the display scale alone applies.
 - The default image background follows the resolved appearance. Dark uses deep
   ink `#0B0E14`; light uses `#F4F5F7` rather than pure white so bright photos
   retain an edge; Console uses `#010502`. View also offers explicit black,
@@ -289,11 +311,14 @@ and unsupported containers, remain visibly read-only.
   over rating shortcuts.
 - Edit owns rating assignment. View owns the session-only minimum-rating filter.
   The current textual rating and any active filter remain visible outside menus.
-  Rating assignment waits for bounded folder rating discovery to finish. This
-  prevents a scan that observed the previous value from replacing a newly written
-  value in the playlist and status after the source transaction commits. Filter
-  controls remain available during discovery so the user can cancel it by showing
-  all images.
+  Rating assignment does not wait for bounded folder rating discovery. Discovery
+  fills only entries that are still loading, so a scan that observed the previous
+  value cannot replace a value written while it ran. Filter controls remain
+  available during discovery so the user can cancel it by showing all images.
+- Browsing continues while a rating write finishes, so rate then advance never
+  waits for the file to be replaced. Only a request that would decode the file
+  being written waits for it: returning to that image, or opening the full-image
+  collage. Other commands still wait for the write to settle.
   When no image matches the filter, Escape or folder-navigation keys restore All
   images instead of doing nothing.
 - One canonical folder catalog in the selected session order owns Trash and Undo
@@ -428,7 +453,9 @@ and unsupported containers, remain visibly read-only.
   Information and View expose Previous/Next with `[` and `]`. TIFF identity is
   Page N of M. ICO identity is Icon N of M plus pixel size, starting on the
   already-presented largest still. The top status shows the same identity beside
-  the folder position at every window width. An in-progress crop or Spot Heal refuses a
+  the folder position at every window width, flanked by previous and next step
+  buttons that disable at the first and last page, so a page turn is
+  discoverable without the shortcut. An in-progress crop or Spot Heal refuses a
   page change instead of destroying the edit. A dimension change refits.
 
 ### Spot Heal

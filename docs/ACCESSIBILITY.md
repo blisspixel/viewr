@@ -22,15 +22,27 @@ The minimum contract is:
   named radio group. The chosen bundled catalog applies without restarting.
   Catalog review covers visible copy, accessible names, shortcuts, focus,
   accented glyphs, truncation, and live-region grammar on each native platform.
+- The menu bar is reachable from the keyboard. `F10` opens File, and on Windows
+  and Linux `Alt` plus a menu's access letter opens that menu: the first letter
+  of the visible title that no earlier menu uses (English `F`, `E`, `V`, `T`,
+  `H`; French Aide takes `I` because Affichage has `A`). Arrow keys move
+  through the open menu and Escape closes it. macOS reserves Option for typing
+  and reaches menus through the system. A modal keeps the menu bar closed.
+- The GPU-painted picture is exposed as one image element covering the image
+  viewport, named by the presented file's basename and described by its pixel
+  size. It takes no input, so pointer and keyboard control stay with the canvas.
 - Custom-painted tools, disclosure controls, and previews are actionable buttons
   with descriptive names and selected or expanded state where applicable.
 - Tools, Folder Previews, and Image Information expose their visible state. Their
   `T`, `G`, and `I` shortcuts are visible in View > Panels and included in the
   accessible menu names. Tools and Folder Previews also expose collapse and expansion
   actions.
-- Full-Image Collage exposes every ready complete photo as a position-only button,
-  without putting a filename into the grid. Visual and semantic selected state
-  agree. Up enters from single-photo view, Left and Right move selection, Down or
+- Full-Image Collage exposes every ready complete photo as a position-only list
+  item with native selected state, without putting a filename into the grid or
+  selection into the name. Keyboard focus follows the selected photo, so the
+  photo a screen reader announces is the one Delete acts on. Folder Previews
+  thumbnails are exposed the same way. Up enters from single-photo view, Left
+  and Right move selection, Down or
   Enter opens, Page Up and Page Down change groups, and Escape returns. Loading
   and memory-constrained ready counts remain textual.
 - Edit > Rating exposes Unrated and ratings 1 through 5 as a selected radio group
@@ -38,6 +50,15 @@ The minimum contract is:
   minimum ratings 1 through 5 as a separate selected radio group. Current rating,
   active threshold, filtered position, no-match state, and write outcomes are
   textual. The first-write modal focuses Cancel once and blocks background input.
+- Every app-owned modal (About, Update viewr, Preferences, Default Image Viewer,
+  the Save As overwrite confirmation, and the rating disclosure) is exposed as
+  a modal dialog. It takes keyboard focus once when it opens, on Close or on
+  Cancel for the two confirmations, and returns focus to the control that had it
+  before the first modal opened.
+- Crop handles are pointer only and hidden from assistive technology. The crop
+  selection pane states its output size, source origin, and the arrow and Shift
+  plus arrow keys that move and resize it. Spot Heal repair progress is a busy,
+  polite status.
 - View > Folder Sort exposes Latest First and Name as a selected radio group. The
   visible help identifies file modification time, the saved-default scope, and
   the fact that the current viewr association path does not receive the file
@@ -54,9 +75,13 @@ The minimum contract is:
   work is identified as preview preparation rather than a new file open. Loading,
   failure, and preview-preparation labels use polite AccessKit live-region
   semantics; long target text remains bounded and discoverable when visually
-  elided. Completed or failed rating-write toasts are polite because they are the
-  outcome source. `Saving rating...` and ordinary transient toasts remain semantic
-  but non-live, so a coexisting visual toast is not a second announcement source.
+  elided. Rating-request outcomes, including completion, refusal, and failure,
+  are polite because they are the outcome source, and so is every refusal of a
+  requested action by current work or a full Trash queue. The sender marks that kind
+  when it raises the message, so announcement never depends on wording and is
+  identical in every catalog language. `Saving rating...` and ordinary transient
+  toasts remain semantic but non-live, so a coexisting visual toast is not a
+  second announcement source.
 - The empty state exposes drop, file-versus-folder session scope, and the
   local-only privacy line as visible text, followed by separately named Open File
   and Open Folder actions. Opening and failure headings name the selected file.
@@ -77,9 +102,25 @@ The minimum contract is:
   Each semantic name includes its visible outcome, System reports its effective
   Light or Dark mode while active, and the visible scope text distinguishes app
   appearance from image pixels and independent background overrides. Every
-  resolved palette meets the same automated AA contrast floor. Normal missing
+  resolved palette meets the automated AA contrast floor, including secondary
+  text such as menu shortcut hints. Normal missing
   state is quiet; abnormal startup fallback announces `Could not restore saved
   appearance. Using System.` once through the semantic status surface.
+- Interface scale follows the operating-system display scale. egui's built-in
+  keyboard zoom is disabled, so the modifier with `+`, `-`, and `0` acts only on
+  the image, as documented.
+- viewr follows the operating-system high-contrast setting (Windows contrast
+  themes, macOS Increase Contrast, and the desktop portal's high-contrast
+  preference on Linux) while Appearance is System. It resolves to a white on
+  black or black on white palette, matching the operating-system light or dark
+  theme, whose text, controls, and outlines meet WCAG AAA (7:1). An explicit
+  Light, Dark, or Console choice is kept.
+- viewr follows the operating-system text size (Windows Text size and the GNOME
+  text scaling factor through the desktop portal) from 100 to 225 percent. The
+  enlargement never shrinks the available layout below the 640 by 480 point
+  minimum it is verified at, so every menu and control stays reachable; a larger
+  window shows the full requested size. macOS has no system-wide text size for
+  AppKit apps. Both settings are read again when the window regains focus.
 - About is a named modal window, blocks background input, describes the local-only
   privacy contract, and closes with an explicit button or Escape. It exposes the
   grouped shortcut catalog, including `[` / `]`, `F5`, `T` `G` `I`, Space-to-fit,
@@ -97,8 +138,9 @@ The minimum contract is:
 - Animation exposes current frame, frame count, and pause/resume state.
   Previous frame and Next frame are named buttons with `[` and `]`.
 - Multi-page TIFF and ICO expose current page or icon identity, count, and
-  dimensions. Previous and Next are named buttons with `[` and `]`. Documents
-  never auto-play.
+  dimensions. Previous and Next are named buttons with `[` and `]`, both in
+  Image Information and beside the top-status identity, and each is disabled
+  at its end of the document. Documents never auto-play.
 - Reload and Retry remain reachable and expose progress or failure as semantic
   text without clearing the last good image.
 - Open With is reachable from both File and the image right-click
@@ -210,11 +252,13 @@ Run the same workflow on every platform:
 | File gone | Delete the presented file from outside viewr | The last good image stays visible and a polite status says the selected path no longer names that file |
 | Pending sibling gone | Select a sibling and remove it before its first presentation | The stale entry leaves the folder position, the last good frame remains until a surviving image opens, and recovery or Retry is announced once without exposing a path |
 | View | Use Fit, Actual Size, Zoom In, Zoom Out, and Fullscreen | The action and resulting zoom are discoverable; fullscreen does not strand focus |
-| Full-image collage | Enter with Up, View, or `Shift+G`; traverse every ready photo with Left and Right and the screen reader; open with Down and Enter; change groups; Delete the focused ready photo; confirm Shift+Delete of that same photo or cancel; restore with `U`; repeat under a rating filter; cite the dense-layout, bounded-admission, and stable-announcement tests named by PQ-PW-08; leave with Escape | Each complete photo is a named position-only button with selected state and visible focus; filenames are absent; actual aspect-ratio tiles form justified rows with narrow gutters; one stable loading state and the terminal ready or safely fitted count are announced without flooding; group order follows the active projection; Delete and Shift+Delete act on the focused ready photo; `U` restores; open and leave restore coherent single-photo focus |
+| Full-image collage | Enter with Up, View, or `Shift+G`; traverse every ready photo with Left and Right and the screen reader; open with Down and Enter; change groups; Delete the focused ready photo; confirm Shift+Delete of that same photo or cancel; restore with `U`; repeat under a rating filter; cite the dense-layout, bounded-admission, and stable-announcement tests named by PQ-PW-08; leave with Escape | Each complete photo is a named position-only list item with selected state, and keyboard focus stays on the selected photo; filenames are absent; actual aspect-ratio tiles form justified rows with narrow gutters; one stable loading state and the terminal ready or safely fitted count are announced without flooding; group order follows the active projection; Delete and Shift+Delete act on the focused ready photo; `U` restores; open and leave restore coherent single-photo focus |
 | Editing | Rotate, flip, and start crop | Each tool has one descriptive name and the visible result matches the invoked action |
 | Crop | Select landscape, portrait, Original, and custom ratios; swap orientation; move with Arrow keys; resize with Shift plus Arrow keys and every pointer handle; apply with Enter; cancel with Escape; inspect a very small selection and an injected apply failure | Ratio and exact source origin/output size remain available at every positive size; a rotated 16:9 selection remains 16:9 in output; failure restores the exact selection and Enter retry; apply and cancel return focus predictably |
 | Spot Heal | Enter with `J`; change radius and feather; paint a disposable defect; invoke Refresh Source with `/`; Undo and Redo; finish with Escape; save the result with Save As | Every control and busy state is named, source position changes, refresh remains one undo step, edit success follows visible presentation, the in-memory and Save As boundary stays textual, the saved copy contains the repair, and the pointer-only brush overlay is not the sole source of state |
 | Appearance | Read the current preference on the parent View entry and the chooser scope and descriptions; select System, Light, Dark, and Console; then restart | The parent state, each full outcome, and each selected radio state are announced, System reports Light or Dark only while active, native and app chrome agree, the choice survives restart, and Console remains readable with monospaced interface type |
+| High contrast | With Appearance on System, turn on a Windows contrast theme, macOS Increase Contrast, or GNOME High Contrast, return to viewr, then turn it off; repeat with Appearance on Dark | viewr switches to the high-contrast palette on returning to the window and back when it is turned off; menus, shortcut hints, focus rings, selected previews, and outlines stay legible; System reports High Contrast while active; an explicit Dark choice is unchanged |
+| Text size | Set Windows Text size or GNOME Large Text to its largest value, return to viewr at the 640 by 480 minimum and then maximized | At the minimum window every menu and control remains reachable; maximized, the interface grows toward the requested size; image zoom and pixels are unchanged; setting 100 percent restores the normal size |
 | Language | In File > Preferences select System, English, Spanish, French, and German; restart after each explicit choice; repeat at 100%, 150%, and 200% scale | Exactly one language is selected, primary cataloged surfaces change immediately, the choice survives restart, accented glyphs render, shortcuts remain stable, focus does not move unexpectedly, and uncataloged copy falls back to readable English |
 | Ratings | On disposable JPEG copies, use Edit > Rating and `0` through `5`; confirm and cancel the first-write disclosure; apply All, 3+, 4+, and 5+ filters; navigate into and recover from no matches; then restart | Rating and filter radio state, shortcut ownership, current rating, filtered position, outside-filter state, write outcome, and Show all images are announced without color or star-glyph dependence; Cancel initially owns modal focus; unsupported files remain untouched; the embedded rating survives restart |
 | Update | Open Help > Get latest release; read its contents without activating the release action; close with its button and Escape | A modal named Update viewr exposes the running version, no-automatic-check behavior, browser handoff boundary, and one clearly named Get latest release button; background controls cannot activate and focus returns predictably |

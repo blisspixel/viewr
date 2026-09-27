@@ -5,7 +5,7 @@
 //! owner of GPU resources.
 
 use crate::color::{OutputColorTransform, WorkingColorEncoding};
-use crate::decode::DecodedImage;
+use crate::decode::{ColorProfileStatus, DecodedImage};
 use crate::error::Error;
 
 /// Maximum number of RGBA pixels retained in the base GPU image texture.
@@ -33,6 +33,19 @@ pub(crate) struct ImagePreview {
     rgba: Vec<u8>,
     spec: PreviewSpec,
     working_color: WorkingColorEncoding,
+}
+
+impl ImagePreview {
+    /// Retain a prepared display image as decoded pixels for a transient collage.
+    pub(crate) fn into_decoded_image(self, color_profile: ColorProfileStatus) -> DecodedImage {
+        DecodedImage {
+            rgba: self.rgba,
+            width: self.spec.width,
+            height: self.spec.height,
+            color_profile,
+            working_color: self.working_color,
+        }
+    }
 }
 
 pub(crate) struct ImageUpload<'a> {

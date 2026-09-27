@@ -49,8 +49,9 @@ makes Spot Heal persistence explicit, provides an opt-in platform association
 guide for PNG, JPEG, and other selected types, accepts repeated fully presented
 images through one bounded serialized Trash queue, and bundles English, Spanish,
 French, and German interface catalogs covering first-run, About, Trash, wait
-copy, rating failures, and chrome including accessible names. Remaining image
-information and some preference copy still uses the documented English fallback.
+copy, rating failures, every top-chrome toast and navigation notice, and every
+dialog, panel, and control including accessible names, enforced by a
+pseudo-language render test. Image Information value formats remain English.
 Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
@@ -219,7 +220,7 @@ but completed history does not override an open gate here.
 | Security intake and release integrity | Complete | Private vulnerability reporting, Dependabot alerts and security updates, secret scanning, push protection, and immutable releases are enabled. |
 | First public pre-1.0 release | Complete | [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0) is immutable. [Release run 30643016336](https://github.com/blisspixel/viewr/actions/runs/30643016336) published the exact 12-asset set with attestations. Public installer commands use fixed-version release URLs. |
 | First-run failure is observable | Complete | [v0.1.1](https://github.com/blisspixel/viewr/releases/tag/v0.1.1) makes a missing windowing library, a missing session, and a failed GPU surface print an actionable message and exit non-zero, and `doctor` reports window presentation instead of implying it. [Release run 31897338683](https://github.com/blisspixel/viewr/actions/runs/31897338683) published the exact 12-asset set with attestations from `cca11a2`. [v0.1.2](https://github.com/blisspixel/viewr/releases/tag/v0.1.2) then resolved the windowing backend itself and made a session with no Vulkan or OpenGL runtime a named, critical doctor failure. [v0.1.3](https://github.com/blisspixel/viewr/releases/tag/v0.1.3) restored OpenGL presentation by handing the display connection to the graphics instance, and CI now presents a frame through that backend on a virtual X session. An independent playtest of the published v0.1.3 Linux archive then opened a window on a software-Mesa virtual X session with no Vulkan driver, after `doctor` named `libxkbcommon-x11-0`, `libegl1`, and `libegl-mesa0` and stayed red until they were installed. That playtest also found the window opening under a 137px dock, which [v0.1.4](https://github.com/blisspixel/viewr/releases/tag/v0.1.4) fixed by bounding and placing the first window inside its monitor. An independent playtest of the published v0.1.4 Linux archive then measured that window at 1000 by 560 logical pixels at +140+40 on the same 1280 by 800 session, 29 physical pixels clear of the dock, matching the published bound and placement arithmetic. That round found the command line rejecting a folder while `viewr help` promised that a folder opens its first naturally sorted image, which [v0.1.5](https://github.com/blisspixel/viewr/releases/tag/v0.1.5) fixed by classifying every externally supplied path once. |
-| Protected `main` policy | Complete | Seven always-running CI checks, linear history, review, and conversation resolution are required; force pushes and deletion are blocked. |
+| Protected `main` policy | Complete | Seven always-running CI checks, linear history, and conversation resolution are required; force pushes and deletion are blocked. Pull requests do not require an independent approval. |
 | Reliability architecture | Complete | Released as [v0.2.0](https://github.com/blisspixel/viewr/releases/tag/v0.2.0) from [CI run 32153785138](https://github.com/blisspixel/viewr/actions/runs/32153785138), [fuzz run 32153785164](https://github.com/blisspixel/viewr/actions/runs/32153785164), and [release run 32154781070](https://github.com/blisspixel/viewr/actions/runs/32154781070) on commit `1839702`. Every background operation has one bounded event-loop-owned job, stale work cannot mutate a newer selection or edit, failure paths are observable including a decode worker that dies, native glue is limited to five named integration surfaces, race contracts are tested, and owned-logic line coverage is 90.59 percent against an 85 percent floor. |
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
@@ -279,12 +280,17 @@ code but still owes its representative-hardware evidence.
 - [x] Enable private vulnerability reporting, Dependabot alerts and security
   updates, secret scanning, push protection, and immutable releases in the public
   repository.
-- [x] Protect `main` with the seven stable CI checks, linear history, review and
+- [x] Protect `main` with the seven stable CI checks, linear history, and
   conversation resolution, blocked force pushes and deletion, and administrator
   emergency bypass. Path-filtered fuzz remains mandatory in the release workflow.
 - [ ] Complete Narrator, VoiceOver, and Orca acceptance using
   `docs/ACCESSIBILITY.md`, including crop, reload, animation, errors, and busy
   states.
+- [x] Before the v0.7 candidate, follow the operating-system high-contrast and
+  text-size settings (Windows contrast themes and text size, macOS Increase
+  Contrast, GNOME text scaling through the desktop portal).
+  [#98](https://github.com/blisspixel/viewr/issues/98) Target-OS acceptance is
+  part of the Narrator, VoiceOver, and Orca matrices above.
 - [x] Publish [v0.1.0](https://github.com/blisspixel/viewr/releases/tag/v0.1.0)
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
@@ -614,9 +620,10 @@ broad feature category. They prove and refine the accumulated viewer.
   path, never the thumbnail generator. Actual aspect ratios drive dense justified
   rows with narrow gutters instead of equal blank cells. Group navigation, Up and
   Down hierarchy, keyboard and native accessibility selection, exact-current
-  texture reuse, and a 256 MiB aggregate current plus neighbor decode budget are
-  covered. When the full group cannot fit, fewer complete photos reflow and the
-  interface states the limit instead of substituting reduced thumbnails.
+  texture reuse, and a 640 MiB aggregate current plus bounded collage display
+  image budget are covered. Opening a selected photo loads its full-resolution
+  source. When the full group still cannot fit, fewer complete photos reflow and
+  the interface states the limit.
 - [ ] Close remaining evidence-backed layout, spacing, copy, loading, empty, error,
   recovery, and diagnostic issues without adding decorative controls or unrelated
   features.

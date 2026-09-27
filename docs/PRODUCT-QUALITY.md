@@ -61,7 +61,9 @@ runs.
 2. Dispatch `Release artifacts` on `main` once. A branch dispatch repeats CI and
    fuzzing, builds all four target archives, verifies them, generates one
    deterministic synthetic fixture artifact, and retains all five artifacts for
-   30 days without creating a GitHub release:
+   90 days, the public-repository maximum, without creating a GitHub release.
+   The gate downloads the run again, so every record must pass it before the
+   artifacts expire:
 
    ```text
    gh workflow run release.yml --repo blisspixel/viewr --ref main
@@ -237,7 +239,7 @@ and 200% after changing the primary display scale, session label, and filename t
 `windows-150` and `windows-200`:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.6.1/performance/windows-100.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.6.5/performance/windows-100.json
 ```
 
 On macOS, make the built-in Retina display the main display and run once with
@@ -247,7 +249,7 @@ report records a one-way SHA-256 identity, built-in and Retina flags, and measur
 scale for the main display. On Linux, run in the native sessions named below:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.1/performance/<session>.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.5/performance/<session>.json
 ```
 
 Use `linux-wayland` and `linux-x11` in the corresponding native sessions. For the
@@ -258,7 +260,7 @@ required software renderer, use an X11 or Xwayland session with `DISPLAY`, insta
 `glxinfo`, confirm that `glxinfo -B` names Mesa llvmpipe or softpipe, then run:
 
 ```text
-WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.6.1/performance/linux-mesa-software.json
+WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.6.5/performance/linux-mesa-software.json
 ```
 
 The complete committed report set is exactly `windows-100`, `windows-150`,
@@ -282,7 +284,17 @@ cannot close the gate.
 
 ## Recording a result
 
-Create no result file until one platform run is complete. Store a completed run at
+Create no result file in the repository until one platform run is complete. To
+record as you go, start an unfilled record in a working directory outside the
+repository:
+
+```text
+python -B scripts/product_quality_evidence.py prepare <working-directory> --platform <platform>
+```
+
+It fills the fixed metadata, leaves every other value and result empty, and lists
+in a comment the terms each observation must name, so it fails validation until
+real evidence is recorded. It never replaces an existing file. Store a completed run at
 `docs/release-evidence/product-quality/<version>/<platform>.md`, using `windows`,
 `macos`, or `linux` for the platform name. Its first line is
 `# Product quality evidence: <platform>`. A two-column metadata table must contain
@@ -303,11 +315,13 @@ PQ-RC-05 are hard prerequisites: all three records repeat the same exact
 candidate-run observation, and no exception can close them. PQ-VS-04 is also a
 hard prerequisite and cannot close through an exception.
 
-Validate each completed record and then the three-platform gate:
+Validate each completed record and then the three-platform gate. The evidence
+directory, record Version field, and archive names follow the workspace version
+in `Cargo.toml`, which the validator reads directly:
 
 ```text
 python -B scripts/product_quality_evidence.py check <platform-record.md>
-python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.1
+python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.5
 ```
 
 The gate rejects missing or duplicate rows, generic observations, invalid archive

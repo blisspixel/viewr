@@ -15,6 +15,7 @@ pub use crate::chrome::{
 };
 pub(crate) use crate::chrome::{RATING_RECOVERY_STATUS, SAVE_RECOVERY_STATUS};
 use crate::locale::{Language, tr};
+use crate::shortcuts::{TopMenu, menu_access_keys};
 use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::text::LayoutJob;
 use egui::{
@@ -70,6 +71,13 @@ const PRIMARY_MODIFIER: &str = "Ctrl";
 
 const TOP_STATUS_MAX_WIDTH: f32 = 220.0;
 const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
+/// Smallest filename slice kept legible when a status needs the strip.
+const TOP_FILE_NAME_MIN_WIDTH: f32 = 120.0;
+const TOP_PAGE_STEP_WIDTH: f32 = 16.0;
+const TOP_PAGE_STEP_SPACING: f32 = 2.0;
+const TOP_PAGE_STEP_GLYPH_SIZE: f32 = 14.0;
+const TOP_PAGE_PREVIOUS_GLYPH: &str = "\u{23F4}";
+const TOP_PAGE_NEXT_GLYPH: &str = "\u{23F5}";
 const TOP_METADATA_GAP: f32 = 8.0;
 /// Extra separation egui adds between the top-bar reading items.
 ///
@@ -77,20 +85,27 @@ const TOP_METADATA_GAP: f32 = 8.0;
 /// spacing the menu titles beside it use.
 const TOP_METADATA_SPACING: f32 = 2.0;
 
-const OPEN_FILE_SCOPE_HELP: &str = "Open one image. When access allows, viewr also browses supported images in its folder for this session.";
+const OPEN_FILE_SCOPE_HELP: &str = tr!(
+    "Open one image. When access allows, viewr also browses supported images in its folder for this session."
+);
 const OPEN_FOLDER_SCOPE_HELP: &str =
-    "Choose a folder explicitly and browse its supported images for this session.";
-const OPEN_WITH_HELP: &str = "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost.";
+    tr!("Choose a folder explicitly and browse its supported images for this session.");
+const OPEN_WITH_HELP: &str = tr!(
+    "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost."
+);
 const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.";
-const APPEARANCE_SCOPE_HELP: &str = "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately.";
+const APPEARANCE_SCOPE_HELP: &str = tr!(
+    "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately."
+);
 const EXTERNAL_EDIT_BADGE: &str = "External F5";
 const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
 const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMINDER;
 pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
-const RATING_DISCLOSURE_FOCUS_STATE: &str = "rating_write_disclosure_focus_initialized";
-const SAVE_OVERWRITE_FOCUS_STATE: &str = "save_overwrite_focus_initialized";
+const MODAL_FOCUS_STATE: &str = "modal_focus_state";
+/// Stable identity of the accessibility node that stands for the image canvas.
+const IMAGE_CANVAS_NODE: &str = "viewr image canvas";
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub(crate) enum UiAction {
@@ -236,6 +251,25 @@ pub(crate) enum UiAction {
     PermanentDelete,
 }
 
+/// How a chrome outcome message reaches assistive technology.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ToastAnnouncement {
+    /// Visible only; screen readers find it by review, not by announcement.
+    #[default]
+    Visual,
+    /// Announced politely because it is the only feedback for an action the
+    /// user just requested. The sender chooses the kind; it is never inferred
+    /// from wording, so every catalog language announces the same messages.
+    PoliteStatus,
+}
+
+/// Transient chrome message and how it is announced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ToastView {
+    pub text: String,
+    pub announcement: ToastAnnouncement,
+}
+
 /// Owned frame inputs for drawing chrome.
 #[allow(clippy::struct_excessive_bools)] // independent UI mode bits for one frame
 pub(crate) struct UiFrameOwned {
@@ -351,7 +385,7 @@ pub(crate) struct UiFrameOwned {
     /// Physical display pixels per source-image pixel (`1.0` = actual size).
     pub pixel_scale: f32,
     /// Transient toast message (trash undo hint, etc.).
-    pub toast: Option<String>,
+    pub toast: Option<ToastView>,
     /// Transient full-image mosaic geometry and status.
     pub mosaic: Option<MosaicUiState>,
     /// Neighbor filmstrip entries.
@@ -585,6 +619,121 @@ pub(crate) const fn preferences_modal_action_allowed(action: &UiAction) -> bool 
     )
 }
 
+/// The modal that owns input this frame, in the same priority as rendering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModalKind {
+    SaveOverwrite,
+    RatingDisclosure,
+    Update,
+    About,
+    Preferences,
+    FileAssociations,
+}
+
+fn active_modal(frame: &UiFrameOwned) -> Option<ModalKind> {
+    if frame.save_overwrite_pending {
+        Some(ModalKind::SaveOverwrite)
+    } else if frame.rating.pending_disclosure.is_some() {
+        Some(ModalKind::RatingDisclosure)
+    } else if frame.show_update {
+        Some(ModalKind::Update)
+    } else if frame.show_about {
+        Some(ModalKind::About)
+    } else if frame.show_preferences {
+        Some(ModalKind::Preferences)
+    } else if frame.show_file_associations {
+        Some(ModalKind::FileAssociations)
+    } else {
+        None
+    }
+}
+
+/// Keyboard focus ownership for the open modal: which modal it is, whether
+/// its default control has taken focus, and what had focus before it opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModalFocus {
+    kind: ModalKind,
+    claimed: bool,
+    previous: Option<egui::Id>,
+}
+
+/// Record the focus a modal displaces when it opens and give it back when the
+/// last modal closes. A modal replaced by another keeps the original return
+/// target, so focus returns where the user was before the first one opened.
+/// Focus returns only to a control that was drawn while the modal was open. A
+/// menu item that opened the modal has closed with its menu, and focus on a
+/// control that is not drawn names an accessibility node that does not exist.
+fn sync_modal_focus(ctx: &egui::Context, active: Option<ModalKind>) {
+    let state_id = egui::Id::new(MODAL_FOCUS_STATE);
+    let focused = ctx.memory(egui::Memory::focused);
+    let restore = ctx.data_mut(|data| {
+        let state = data.get_temp::<ModalFocus>(state_id);
+        match (active, state) {
+            (Some(kind), Some(state)) if state.kind == kind => None,
+            (Some(kind), state) => {
+                data.insert_temp(
+                    state_id,
+                    ModalFocus {
+                        kind,
+                        claimed: false,
+                        previous: state.map_or(focused, |state| state.previous),
+                    },
+                );
+                None
+            }
+            (None, Some(state)) => {
+                data.remove::<ModalFocus>(state_id);
+                state.previous
+            }
+            (None, None) => None,
+        }
+    });
+    if let Some(previous) = restore.filter(|previous| ctx.read_response(*previous).is_some()) {
+        ctx.memory_mut(|memory| memory.request_focus(previous));
+    }
+}
+
+/// Keep an accessibility update's focus on a node that the update contains.
+///
+/// AccessKit refuses a tree whose focus names a missing node, and an attached
+/// screen reader turns that refusal into a crash. egui reports its focus memory
+/// unchecked, and focus can name a control that this frame did not draw, so
+/// such focus falls back to the tree root.
+pub(crate) fn settle_accessibility_focus(update: &mut egui::accesskit::TreeUpdate) {
+    let Some(root) = update.tree.as_ref().map(|tree| tree.root) else {
+        return;
+    };
+    if !update.nodes.iter().any(|(id, _)| *id == update.focus) {
+        update.focus = root;
+    }
+}
+
+/// True exactly once per opened modal, when its default control should take
+/// keyboard focus.
+fn claim_initial_modal_focus(ctx: &egui::Context) -> bool {
+    let state_id = egui::Id::new(MODAL_FOCUS_STATE);
+    ctx.data_mut(|data| {
+        let Some(mut state) = data.get_temp::<ModalFocus>(state_id) else {
+            return false;
+        };
+        if state.claimed {
+            return false;
+        }
+        state.claimed = true;
+        data.insert_temp(state_id, state);
+        true
+    })
+}
+
+/// egui names a modal as a window; assistive technology needs a modal dialog,
+/// which Windows announces as opened and which confines virtual navigation.
+fn mark_as_modal_dialog(response: &egui::Response) {
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Dialog);
+        node.set_modal();
+    });
+}
+
 fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> Vec<UiAction> {
     if frame.save_overwrite_pending {
         actions.retain(save_overwrite_action_allowed);
@@ -605,15 +754,13 @@ fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> V
 /// Render the UI overlays and return a list of actions triggered by the user.
 pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let mut actions = Vec::new();
+    reserve_zoom_keys_for_the_image(ui.ctx());
     apply_chrome_theme(ui.ctx(), frame.theme_mode);
     let colors = chrome_colors(ui);
     let chrome = frame.chrome_view_model();
-    let modal_active = frame.save_overwrite_pending
-        || frame.rating.pending_disclosure.is_some()
-        || frame.show_update
-        || frame.show_about
-        || frame.show_preferences
-        || frame.show_file_associations;
+    let active_modal = active_modal(frame);
+    let modal_active = active_modal.is_some();
+    sync_modal_focus(ui.ctx(), active_modal);
 
     ui.add_enabled_ui(!modal_active, |ui| {
         render_background(ui, &mut actions, frame, chrome, colors);
@@ -632,16 +779,17 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     } else if frame.show_file_associations {
         render_file_associations(ui, &mut actions, frame);
     }
-    ui.ctx().data_mut(|data| {
-        if !frame.save_overwrite_pending {
-            data.remove_temp::<bool>(egui::Id::new(SAVE_OVERWRITE_FOCUS_STATE));
-        }
-        if frame.rating.pending_disclosure.is_none() {
-            data.remove_temp::<bool>(egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE));
-        }
-    });
-
     actions_owned_by_modal(actions, frame)
+}
+
+/// egui's built-in interface zoom answers the modifier plus `+`, `-`, and `0`,
+/// which viewr documents as image zoom, and `0` as Fit. Leaving it on made those
+/// keys also rescale the chrome, a hidden state no menu could undo. Interface
+/// scale follows the operating system display scale instead.
+fn reserve_zoom_keys_for_the_image(ctx: &egui::Context) {
+    if ctx.options(|options| options.zoom_with_keyboard) {
+        ctx.options_mut(|options| options.zoom_with_keyboard = false);
+    }
 }
 
 fn render_background(
@@ -652,9 +800,9 @@ fn render_background(
     colors: ChromeColors,
 ) {
     if let Some(mosaic) = frame.mosaic.as_ref() {
-        render_mosaic_overlay(ui, actions, mosaic, colors);
-        if let Some(msg) = &frame.toast {
-            render_toast(ui, msg, frame);
+        render_mosaic_overlay(ui, actions, mosaic, colors, frame.language);
+        if let Some(toast) = &frame.toast {
+            render_toast(ui, toast, frame);
         }
         return;
     }
@@ -665,9 +813,9 @@ fn render_background(
     if rating_filter_is_empty(frame) {
         render_filtered_empty_state(ui, actions, frame);
         if frame.dock.immersive
-            && let Some(msg) = &frame.toast
+            && let Some(toast) = &frame.toast
         {
-            render_toast(ui, msg, frame);
+            render_toast(ui, toast, frame);
         }
         return;
     }
@@ -675,14 +823,15 @@ fn render_background(
     if !frame.dock.has_image {
         render_empty_state(ui, actions, frame, chrome);
         if frame.dock.immersive
-            && let Some(msg) = &frame.toast
+            && let Some(toast) = &frame.toast
         {
-            render_toast(ui, msg, frame);
+            render_toast(ui, toast, frame);
         }
         return;
     }
 
     render_context_menu(ui, actions, frame, chrome, colors);
+    expose_image_canvas(ui.ctx(), frame);
 
     if let Some(side) = chrome.dock.image_info {
         render_image_info_panel(ui, actions, frame, side);
@@ -702,9 +851,9 @@ fn render_background(
     }
 
     if frame.dock.immersive
-        && let Some(msg) = &frame.toast
+        && let Some(toast) = &frame.toast
     {
-        render_toast(ui, msg, frame);
+        render_toast(ui, toast, frame);
     }
 
     if frame.is_cropping {
@@ -719,6 +868,7 @@ fn render_mosaic_overlay(
     actions: &mut Vec<UiAction>,
     mosaic: &MosaicUiState,
     colors: ChromeColors,
+    language: Language,
 ) {
     let painter = ui.painter();
     for cell in &mosaic.cells {
@@ -731,16 +881,23 @@ fn render_mosaic_overlay(
             egui::Id::new(("full_image_mosaic", cell.catalog_index)),
             egui::Sense::click(),
         );
-        let mut label = format!(
-            "Photo {} of {} in the active folder view",
-            cell.projection_position, cell.projection_total
-        );
-        if cell.selected {
-            label.push_str(", selected");
+        let label = language
+            .fill(
+                tr!("Photo {position} of {total} in the active folder view"),
+                &[
+                    ("position", &cell.projection_position.to_string()),
+                    ("total", &cell.projection_total.to_string()),
+                ],
+            )
+            .into_string();
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label.clone()));
+        mark_as_list_item(&response, cell.selected);
+        // Left and Right move the collage selection, so keyboard focus follows
+        // it. Otherwise egui's own arrow focus could leave a screen reader on
+        // one photo while Delete acts on another.
+        if cell.selected && !response.has_focus() {
+            response.request_focus();
         }
-        response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, cell.selected, label.clone())
-        });
         if response.clicked() {
             actions.push(UiAction::OpenMosaicPhoto(cell.catalog_index));
         }
@@ -756,7 +913,7 @@ fn render_mosaic_overlay(
         }
     }
 
-    let (status, accessible_status) = mosaic_status(mosaic);
+    let (status, accessible_status) = mosaic_status(language, mosaic);
     egui::Area::new("full_image_mosaic_status".into())
         .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -14.0])
         .order(egui::Order::Foreground)
@@ -768,9 +925,14 @@ fn render_mosaic_overlay(
                 .inner_margin(egui::Margin::symmetric(12, 7))
                 .show(ui, |ui| {
                     let response = ui.label(
-                        RichText::new(format!(
-                            "{status}  |  Left/Right select  |  Down/Enter opens  |  Page Up/Down groups  |  Esc returns"
-                        ))
+                        RichText::new(
+                            language
+                                .fill(
+                                    tr!("{status}  |  Left/Right select  |  Down/Enter opens  |  Page Up/Down groups  |  Esc returns"),
+                                    &[("status", &status)],
+                                )
+                                .into_string(),
+                        )
                             .size(12.5)
                             .color(colors.text),
                     );
@@ -782,28 +944,33 @@ fn render_mosaic_overlay(
         });
 }
 
-fn mosaic_status(mosaic: &MosaicUiState) -> (String, String) {
-    let status = match mosaic.state {
-        MosaicLoadState::Loading => format!(
-            "Full-image collage  {} of {} photos ready",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::MemoryLimited => format!(
-            "Full-image collage  {} of {} photos fit the 256 MiB memory limit",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::DisplayLimited => format!(
-            "Full-image collage  {} of {} photos meet full-image display limits",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::Incomplete => format!(
-            "Full-image collage  {} of {} photos available",
-            mosaic.ready, mosaic.target
-        ),
-        MosaicLoadState::Ready => format!("Full-image collage  {} photos", mosaic.ready),
+fn mosaic_status(language: Language, mosaic: &MosaicUiState) -> (String, String) {
+    let template = match mosaic.state {
+        MosaicLoadState::Loading => tr!("Full-image collage  {ready} of {target} photos ready"),
+        MosaicLoadState::MemoryLimited => {
+            tr!("Full-image collage  {ready} of {target} photos fit the 640 MiB memory limit")
+        }
+        MosaicLoadState::DisplayLimited => {
+            tr!("Full-image collage  {ready} of {target} photos meet full-image display limits")
+        }
+        MosaicLoadState::Incomplete => {
+            tr!("Full-image collage  {ready} of {target} photos available")
+        }
+        MosaicLoadState::Ready => tr!("Full-image collage  {ready} photos"),
     };
+    let status = language
+        .fill(
+            template,
+            &[
+                ("ready", &mosaic.ready.to_string()),
+                ("target", &mosaic.target.to_string()),
+            ],
+        )
+        .into_string();
     let accessible = if mosaic.state == MosaicLoadState::Loading {
-        "Full-image collage loading complete photos".to_owned()
+        language
+            .text(tr!("Full-image collage loading complete photos"))
+            .to_owned()
     } else {
         status.clone()
     };
@@ -821,7 +988,8 @@ fn render_context_menu(
         return;
     };
     let mut close = false;
-    egui::Window::new("Quick Tools")
+    egui::Window::new(frame.text(tr!("Quick Tools")))
+        .id(egui::Id::new("quick_tools"))
         .fixed_pos(Pos2::new(pos[0], pos[1]))
         .constrain_to(ui.ctx().content_rect())
         .title_bar(false)
@@ -845,7 +1013,7 @@ fn render_context_menu(
                 ui.separator();
                 let mut radius = frame.heal_brush_radius;
                 ui.label(
-                    RichText::new("Heal Brush Radius")
+                    RichText::new(frame.text(tr!("Heal Brush Radius")))
                         .size(11.5)
                         .color(colors.muted),
                 );
@@ -860,14 +1028,18 @@ fn render_context_menu(
                     WidgetInfo::slider(
                         ui.is_enabled() && adjust_enabled,
                         f64::from(radius),
-                        "Heal brush radius",
+                        frame.text(tr!("Heal brush radius")),
                     )
                 });
                 if response.changed() {
                     actions.push(UiAction::SetHealBrushRadius(radius));
                 }
                 let mut feather = frame.heal_feather_percent;
-                ui.label(RichText::new("Heal Feather").size(11.5).color(colors.muted));
+                ui.label(
+                    RichText::new(frame.text(tr!("Heal Feather")))
+                        .size(11.5)
+                        .color(colors.muted),
+                );
                 let response = ui.add_enabled(
                     adjust_enabled,
                     egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT)
@@ -877,7 +1049,7 @@ fn render_context_menu(
                     WidgetInfo::slider(
                         ui.is_enabled() && adjust_enabled,
                         f64::from(feather),
-                        "Heal feather",
+                        frame.text(tr!("Heal feather")),
                     )
                 });
                 if response.changed() {
@@ -889,11 +1061,18 @@ fn render_context_menu(
             let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
             open_with
                 .widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, "Open With..."));
-            if open_with.on_hover_text(OPEN_WITH_HELP).clicked() {
+            if open_with
+                .on_hover_text(frame.text(OPEN_WITH_HELP))
+                .clicked()
+            {
                 actions.push(UiAction::OpenWith);
                 close = true;
             }
-            ui.label(RichText::new(OPEN_WITH_HELP).size(11.0).color(colors.muted));
+            ui.label(
+                RichText::new(frame.text(OPEN_WITH_HELP))
+                    .size(11.0)
+                    .color(colors.muted),
+            );
         });
 
     if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
@@ -936,12 +1115,16 @@ fn context_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Respon
 fn apply_chrome_theme(ctx: &egui::Context, mode: crate::theme::Mode) {
     let colors = chrome_colors_for(mode);
     ctx.data_mut(|data| data.insert_temp(egui::Id::new("viewr_chrome_colors"), colors));
-    let mut visuals = if mode == crate::theme::Mode::Light {
+    let mut visuals = if mode.is_light() {
         egui::Visuals::light()
     } else {
         egui::Visuals::dark()
     };
     visuals.override_text_color = Some(colors.text);
+    // egui fades secondary text such as menu shortcut hints from the text
+    // color, which fell below the contrast floor. Use the palette's muted
+    // color, which is held to the same floor as primary text.
+    visuals.weak_text_color = Some(colors.muted);
     visuals.panel_fill = colors.panel;
     visuals.window_fill = colors.panel;
     visuals.extreme_bg_color = colors.panel;
@@ -1033,24 +1216,63 @@ fn render_top_menu(
         .frame(menu_frame(colors))
         .show(ui, |ui| {
             configure_top_menu_widgets(ui, colors);
+            let requested = requested_top_menu(ui, frame.language);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                file_menu(ui, actions, frame, chrome);
-                edit_menu(ui, actions, frame, chrome);
-                view_menu(ui, actions, frame, chrome);
-                tools_menu(ui, actions, frame, chrome);
-                help_menu(ui, actions, frame);
+                let menus = [
+                    (TopMenu::File, file_menu(ui, actions, frame, chrome)),
+                    (TopMenu::Edit, edit_menu(ui, actions, frame, chrome)),
+                    (TopMenu::View, view_menu(ui, actions, frame, chrome)),
+                    (TopMenu::Tools, tools_menu(ui, actions, frame, chrome)),
+                    (TopMenu::Help, help_menu(ui, actions, frame)),
+                ];
+                if let Some((_, button)) = menus.iter().find(|(menu, _)| Some(*menu) == requested) {
+                    open_top_menu(button);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // The reading strip owns its own separation instead of
                     // inheriting whatever spacing the menu titles need.
                     ui.spacing_mut().item_spacing.x = TOP_METADATA_SPACING;
-                    render_top_operation_status(ui, actions, frame, chrome, colors);
+                    let reserve = top_metadata_reserve(ui, frame, chrome);
+                    render_top_operation_status(ui, actions, frame, chrome, colors, reserve);
                     render_top_rating_position(ui, frame, colors);
-                    render_top_page_position(ui, frame, colors);
+                    render_top_page_position(ui, actions, frame, colors);
                     render_top_image_facts(ui, frame, chrome, colors);
                 });
             });
         });
+}
+
+/// Keyboard access to the menu bar: F10 opens File, and on Windows and Linux
+/// Alt plus a menu's access letter opens that menu. macOS reserves Option
+/// for typing characters and reaches its menus through the system instead.
+/// A disabled menu bar, behind a modal, never consumes the keys.
+fn requested_top_menu(ui: &egui::Ui, language: crate::locale::Language) -> Option<TopMenu> {
+    if !ui.is_enabled() {
+        return None;
+    }
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F10) {
+            return Some(TopMenu::File);
+        }
+        if cfg!(target_os = "macos") {
+            return None;
+        }
+        menu_access_keys(language)
+            .into_iter()
+            .find_map(|(menu, letter)| {
+                let key = egui::Key::from_name(&letter.to_ascii_uppercase().to_string())?;
+                input.consume_key(egui::Modifiers::ALT, key).then_some(menu)
+            })
+    })
+}
+
+/// Open a top-level menu from the keyboard and give its title focus, so arrow
+/// keys and Escape continue from the menu the user asked for.
+fn open_top_menu(button: &egui::Response) {
+    egui::Popup::open_id(&button.ctx, egui::Popup::default_response_id(button));
+    button.request_focus();
+    button.ctx.request_repaint();
 }
 
 fn render_top_operation_status(
@@ -1059,9 +1281,13 @@ fn render_top_operation_status(
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
     colors: ChromeColors,
+    metadata_reserve: f32,
 ) {
     let add_status = |ui: &mut egui::Ui, status: &str| {
         add_top_status_with_external_edit(ui, status, frame.external_edit_pending, colors);
+    };
+    let add_toast = |ui: &mut egui::Ui, text: &str, announcement: ToastAnnouncement| {
+        add_top_toast(ui, text, announcement, colors, metadata_reserve);
     };
     if let Some(status) = frame.curation_status.as_deref() {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
@@ -1098,8 +1324,8 @@ fn render_top_operation_status(
             ) {
                 add_status(ui, &status);
             }
-            if let Some(toast) = frame.toast.as_deref() {
-                add_top_toast(ui, toast, colors);
+            if let Some(toast) = frame.toast.as_ref() {
+                add_toast(ui, &toast.text, toast.announcement);
             }
         }
     } else if frame.dock.has_image && frame.is_opening {
@@ -1146,13 +1372,13 @@ fn render_top_operation_status(
     } else if frame.folder_scan_busy && frame.dock.has_image {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, frame.text(tr!("Reading folder...")));
-    } else if let Some(toast) = frame.toast.as_deref() {
-        add_top_toast(ui, toast, colors);
+    } else if let Some(toast) = frame.toast.as_ref() {
+        add_toast(ui, &toast.text, toast.announcement);
     } else if frame.has_unsaved_pixel_edits {
-        add_top_toast(
+        add_toast(
             ui,
             frame.text(tr!("Edited pixels are in memory. Save As writes a copy.")),
-            colors,
+            ToastAnnouncement::Visual,
         );
     }
 }
@@ -1205,11 +1431,24 @@ fn add_top_status_with_external_edit(
 }
 
 fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    if let Some(label) = top_rating_position_label(frame) {
+        Frame::new()
+            .fill(colors.raised)
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.label(RichText::new(label).size(12.5).color(colors.muted));
+            });
+        ui.add_space(TOP_METADATA_GAP);
+    }
+}
+
+fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
     let displayed_position = match frame.rating.filter {
         crate::ratings::RatingFilter::All => frame.playlist_pos,
         crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
     };
-    let label = if let Some((index, total)) = displayed_position {
+    if let Some((index, total)) = displayed_position {
         Some(match frame.rating.filter {
             crate::ratings::RatingFilter::All => format!("{index} / {total}"),
             crate::ratings::RatingFilter::AtLeast(minimum) => format!(
@@ -1227,38 +1466,166 @@ fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: C
         ))
     } else {
         None
-    };
-    if let Some(label) = label {
-        Frame::new()
-            .fill(colors.raised)
-            .corner_radius(CornerRadius::same(6))
-            .inner_margin(egui::Margin::symmetric(8, 3))
-            .show(ui, |ui| {
-                ui.label(RichText::new(label).size(12.5).color(colors.muted));
-            });
-        ui.add_space(TOP_METADATA_GAP);
     }
 }
 
 /// Keep TIFF page and ICO icon identity beside the folder position so a
 /// multi-page file never reads as a single still image.
-fn render_top_page_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+fn render_top_page_position(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    colors: ChromeColors,
+) {
     let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) else {
         return;
     };
+    let (previous_name, next_name) = sequence_step_names(pages);
     Frame::new()
         .fill(colors.raised)
         .corner_radius(CornerRadius::same(6))
-        .inner_margin(egui::Margin::symmetric(8, 3))
+        .inner_margin(egui::Margin::symmetric(4, 1))
         .show(ui, |ui| {
-            ui.label(
-                RichText::new(&pages.visible_label)
-                    .size(12.5)
-                    .color(colors.muted),
-            )
-            .on_hover_text(&pages.accessibility_label);
+            // The strip lays out right to left; the chip reads left to right
+            // so keyboard focus meets Previous before Next, as drawn. A
+            // left-to-right child claims all remaining width unless it is
+            // sized to its content first.
+            let step_width = strip_step_width(ui);
+            let content = Vec2::new(
+                2.0 * (step_width + TOP_PAGE_STEP_SPACING)
+                    + strip_text_width(ui, &pages.visible_label, 12.5),
+                ui.available_height(),
+            );
+            ui.allocate_ui_with_layout(
+                content,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = TOP_PAGE_STEP_SPACING;
+                    render_sequence_step_button(
+                        ui,
+                        actions,
+                        strip_step_button(TOP_PAGE_PREVIOUS_GLYPH, step_width, colors),
+                        frame.text(previous_name),
+                        "[",
+                        pages.can_previous,
+                        -1,
+                    );
+                    ui.label(
+                        RichText::new(&pages.visible_label)
+                            .size(12.5)
+                            .color(colors.muted),
+                    )
+                    .on_hover_text(&pages.accessibility_label);
+                    render_sequence_step_button(
+                        ui,
+                        actions,
+                        strip_step_button(TOP_PAGE_NEXT_GLYPH, step_width, colors),
+                        frame.text(next_name),
+                        "]",
+                        pages.can_next,
+                        1,
+                    );
+                },
+            );
         });
     ui.add_space(TOP_METADATA_GAP);
+}
+
+/// Width of one page step. Each step is sized to exactly this, the wider
+/// glyph plus button padding and never below the minimum hit width, so the
+/// strip reserve and the drawn chip agree in every appearance. A frameless
+/// egui button still keeps its style margin, and Console glyphs are wider.
+fn strip_step_width(ui: &egui::Ui) -> f32 {
+    let glyph = strip_text_width(ui, TOP_PAGE_PREVIOUS_GLYPH, TOP_PAGE_STEP_GLYPH_SIZE).max(
+        strip_text_width(ui, TOP_PAGE_NEXT_GLYPH, TOP_PAGE_STEP_GLYPH_SIZE),
+    );
+    (glyph + 2.0 * ui.spacing().button_padding.x).max(TOP_PAGE_STEP_WIDTH)
+}
+
+fn strip_step_button(
+    glyph: &'static str,
+    width: f32,
+    colors: ChromeColors,
+) -> egui::Button<'static> {
+    egui::Button::new(
+        RichText::new(glyph)
+            .size(TOP_PAGE_STEP_GLYPH_SIZE)
+            .color(colors.text),
+    )
+    .frame(false)
+    .min_size(Vec2::new(width, 20.0))
+}
+
+/// Unwrapped width of strip text in the active body family. Console
+/// appearance draws every text style in the monospace family.
+fn strip_text_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    let family = ui
+        .style()
+        .text_styles
+        .get(&egui::TextStyle::Body)
+        .map_or(egui::FontFamily::Proportional, |font| font.family.clone());
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::new(size, family),
+            Color32::WHITE,
+        )
+        .size()
+        .x
+}
+
+/// Width the top strip needs to the left of the operation status: the
+/// metadata pills, which never shrink, plus the smaller of the filename or
+/// its minimum legible slice. The status may use whatever remains, so a long
+/// explanation is shown whole whenever the window has room for it.
+fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewModel) -> f32 {
+    let measure = |text: &str, size: f32| strip_text_width(ui, text, size);
+    // A chip is its text, its 8px side margins, the strip spacing, and the
+    // reading gap added after it.
+    let chip = |text: &str| measure(text, 12.5) + 16.0 + TOP_METADATA_SPACING + TOP_METADATA_GAP;
+    let mut reserve = 0.0;
+    if let Some(label) = top_rating_position_label(frame) {
+        reserve += chip(&label);
+    }
+    if let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) {
+        // 4px side margins instead of 8, plus two steps with their spacing.
+        reserve +=
+            chip(&pages.visible_label) - 8.0 + 2.0 * (strip_step_width(ui) + TOP_PAGE_STEP_SPACING);
+    }
+    if !frame.dock.has_image {
+        return reserve;
+    }
+    reserve += chip(&chrome.rating_menu_label());
+    if is_compact_width(ui.ctx().content_rect().width()) {
+        return reserve;
+    }
+    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5) + TOP_METADATA_SPACING;
+    if let Some((width, height)) = frame.img_size {
+        reserve +=
+            TOP_METADATA_GAP + measure(&format!("{width} × {height}"), 12.5) + TOP_METADATA_SPACING;
+    }
+    if let Some(path) = frame.file_path.as_ref() {
+        let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
+        reserve += TOP_METADATA_GAP + measure(&name, 13.5).min(TOP_FILE_NAME_MIN_WIDTH);
+    }
+    reserve
+}
+
+/// Width for a toast or navigation notice in the top strip. It is always the
+/// last operation-status item, so in a wide window it may take everything the
+/// metadata to its left does not need, never less than the standard cap that
+/// every other status item keeps. Compact windows keep the compact cap.
+fn top_toast_max_width(available: f32, metadata_reserve: f32, content_width: f32) -> f32 {
+    let floor = if is_compact_width(content_width) {
+        return available.min(TOP_STATUS_COMPACT_MAX_WIDTH);
+    } else {
+        TOP_STATUS_MAX_WIDTH
+    };
+    available.min((available - metadata_reserve).max(floor))
+}
+
+fn is_compact_width(content_width: f32) -> bool {
+    content_width < 720.0
 }
 
 fn render_top_image_facts(
@@ -1322,7 +1689,7 @@ fn file_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("File")))
@@ -1336,7 +1703,7 @@ fn file_menu(
                     egui::Button::new(frame.text(tr!("Open File...")))
                         .shortcut_text(format!("{PRIMARY_MODIFIER}+O")),
                 )
-                .on_hover_text(OPEN_FILE_SCOPE_HELP);
+                .on_hover_text(frame.text(OPEN_FILE_SCOPE_HELP));
             if open_file.clicked() {
                 actions.push(UiAction::Open);
                 ui.close();
@@ -1347,7 +1714,7 @@ fn file_menu(
                     egui::Button::new(frame.text(tr!("Open Folder...")))
                         .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+O")),
                 )
-                .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+                .on_hover_text(frame.text(OPEN_FOLDER_SCOPE_HELP));
             if open_folder.clicked() {
                 actions.push(UiAction::OpenFolder);
                 ui.close();
@@ -1367,7 +1734,7 @@ fn file_menu(
                     chrome.is_enabled(ChromeControl::OpenWith),
                     egui::Button::new(frame.text(tr!("Open With..."))),
                 )
-                .on_hover_text(OPEN_WITH_HELP);
+                .on_hover_text(frame.text(OPEN_WITH_HELP));
             if open_with.clicked() {
                 actions.push(UiAction::OpenWith);
                 ui.close();
@@ -1390,37 +1757,49 @@ fn file_menu(
             }
             if ui
                 .button(frame.text(tr!("Default Image Viewer...")))
-                .on_hover_text("Choose whether PNG, JPEG, or other image types open with viewr.")
+                .on_hover_text(frame.text(tr!(
+                    "Choose whether PNG, JPEG, or other image types open with viewr."
+                )))
                 .clicked()
             {
                 actions.push(UiAction::ShowFileAssociations);
                 ui.close();
             }
             ui.separator();
-            if ui
-                .add_enabled(
-                    chrome.is_enabled(ChromeControl::MoveToTrash),
-                    egui::Button::new(frame.text(tr!("Move to Trash"))).shortcut_text("Delete"),
-                )
-                .clicked()
-            {
-                actions.push(UiAction::Trash);
-                ui.close();
-            }
-            if ui
-                .add_enabled(
-                    chrome.is_enabled(ChromeControl::PermanentDelete),
-                    egui::Button::new(frame.text(tr!("Permanently Delete...")))
-                        .shortcut_text("Shift+Delete"),
-                )
-                .clicked()
-            {
-                actions.push(UiAction::PermanentDelete);
-                ui.close();
-            }
-            undo_trash_menu_item(ui, actions, chrome);
+            removal_menu_items(ui, actions, frame, chrome);
         },
-    );
+    )
+    .response
+}
+
+fn removal_menu_items(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
+    if ui
+        .add_enabled(
+            chrome.is_enabled(ChromeControl::MoveToTrash),
+            egui::Button::new(frame.text(tr!("Move to Trash"))).shortcut_text("Delete"),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::Trash);
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            chrome.is_enabled(ChromeControl::PermanentDelete),
+            egui::Button::new(frame.text(tr!("Permanently Delete...")))
+                .shortcut_text("Shift+Delete"),
+        )
+        .clicked()
+    {
+        actions.push(UiAction::PermanentDelete);
+        ui.close();
+    }
+    undo_trash_menu_item(ui, actions, chrome);
 }
 
 fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1443,7 +1822,7 @@ fn edit_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("Edit")))
@@ -1516,7 +1895,8 @@ fn edit_menu(
                 ui.menu_button(label, |ui| rating_menu(ui, actions, chrome));
             });
         },
-    );
+    )
+    .response
 }
 
 fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
@@ -1558,7 +1938,7 @@ fn tools_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("Tools")))
@@ -1578,7 +1958,8 @@ fn tools_menu(
                 ui.close();
             }
         },
-    );
+    )
+    .response
 }
 
 fn spot_heal_menu_items(
@@ -1630,8 +2011,18 @@ fn add_top_status(ui: &mut egui::Ui, status: &str, colors: ChromeColors) {
     });
 }
 
-fn add_top_toast(ui: &mut egui::Ui, message: &str, colors: ChromeColors) {
-    let max_width = top_status_max_width(ui);
+fn add_top_toast(
+    ui: &mut egui::Ui,
+    message: &str,
+    announcement: ToastAnnouncement,
+    colors: ChromeColors,
+    metadata_reserve: f32,
+) {
+    let max_width = top_toast_max_width(
+        ui.available_width(),
+        metadata_reserve,
+        ui.ctx().content_rect().width(),
+    );
     ui.scope(|ui| {
         ui.set_max_width(max_width);
         let response = ui.add(
@@ -1639,19 +2030,30 @@ fn add_top_toast(ui: &mut egui::Ui, message: &str, colors: ChromeColors) {
                 .truncate()
                 .show_tooltip_when_elided(true),
         );
-        if rating_toast_is_status(message) {
+        if announcement == ToastAnnouncement::PoliteStatus {
             mark_as_polite_status(&response);
         }
     });
 }
 
 fn top_status_max_width(ui: &egui::Ui) -> f32 {
-    let responsive_limit = if ui.ctx().content_rect().width() < 720.0 {
+    let responsive_limit = if is_compact_width(ui.ctx().content_rect().width()) {
         TOP_STATUS_COMPACT_MAX_WIDTH
     } else {
         TOP_STATUS_MAX_WIDTH
     };
     ui.available_width().min(responsive_limit)
+}
+
+/// Expose one item of a selectable group, such as a collage photo or a folder
+/// preview, as a list item with native selected state. egui reports a selected
+/// button as a pressed toggle, which screen readers announce as "on".
+fn mark_as_list_item(response: &egui::Response, selected: bool) {
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::ListItem);
+        node.clear_toggled();
+        node.set_selected(selected);
+    });
 }
 
 fn mark_as_polite_status(response: &egui::Response) {
@@ -1715,7 +2117,7 @@ fn view_menu(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
-) {
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("View")))
@@ -1765,13 +2167,20 @@ fn view_menu(
                 background_menu(ui, actions, frame.background_override, frame.language);
             });
             ui.menu_button(
-                crate::chrome::appearance_menu_label(frame.theme_preference),
+                crate::chrome::appearance_menu_label(frame.language, frame.theme_preference),
                 |ui| {
-                    appearance_menu(ui, actions, frame.theme_preference, frame.theme_mode);
+                    appearance_menu(
+                        ui,
+                        actions,
+                        frame.language,
+                        frame.theme_preference,
+                        frame.theme_mode,
+                    );
                 },
             );
         },
-    );
+    )
+    .response
 }
 
 fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -1781,9 +2190,9 @@ fn folder_sort_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     });
     ui.separator();
     ui.label(
-        RichText::new(
-            "Latest First uses file modification time. The selection becomes the default for future folders and launches. This viewr build does not receive the file manager's current sort when an image opens.",
-        )
+        RichText::new(frame.text(tr!(
+            "Latest First uses file modification time. The selection becomes the default for future folders and launches. This viewr build does not receive the file manager's current sort when an image opens."
+        )))
         .size(11.0)
         .color(chrome_colors(ui).muted),
     );
@@ -1821,7 +2230,8 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
     if ui
         .add_enabled(
             enabled,
-            egui::Button::new("Fit Image to View").shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
+            egui::Button::new(chrome.language().text(tr!("Fit Image to View")))
+                .shortcut_text(format!("{PRIMARY_MODIFIER}+0")),
         )
         .clicked()
     {
@@ -1831,7 +2241,8 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
     if ui
         .add_enabled(
             enabled,
-            egui::Button::new("Actual Size").shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
+            egui::Button::new(chrome.language().text(tr!("Actual Size")))
+                .shortcut_text(format!("{PRIMARY_MODIFIER}+1")),
         )
         .clicked()
     {
@@ -1839,14 +2250,20 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
         ui.close();
     }
     if ui
-        .add_enabled(enabled, egui::Button::new("Zoom In").shortcut_text("+"))
+        .add_enabled(
+            enabled,
+            egui::Button::new(chrome.language().text(tr!("Zoom In"))).shortcut_text("+"),
+        )
         .clicked()
     {
         actions.push(UiAction::ZoomIn);
         ui.close();
     }
     if ui
-        .add_enabled(enabled, egui::Button::new("Zoom Out").shortcut_text("-"))
+        .add_enabled(
+            enabled,
+            egui::Button::new(chrome.language().text(tr!("Zoom Out"))).shortcut_text("-"),
+        )
         .clicked()
     {
         actions.push(UiAction::ZoomOut);
@@ -1941,7 +2358,15 @@ fn panels_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeVie
                     .selected(choice.selected)
                     .min_size(Vec2::new(ui.available_width(), 0.0)),
             )
-            .on_hover_text(format!("Toggle {} ({})", choice.label, choice.shortcut));
+            .on_hover_text(
+                chrome
+                    .language()
+                    .fill(
+                        tr!("Toggle {panel} ({shortcut})"),
+                        &[("panel", choice.label), ("shortcut", choice.shortcut)],
+                    )
+                    .into_string(),
+            );
         response.ctx.accesskit_node_builder(response.id, |node| {
             node.set_keyboard_shortcut(choice.shortcut);
         });
@@ -2035,6 +2460,7 @@ fn background_menu(
 fn appearance_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
+    language: Language,
     current: crate::theme::Preference,
     resolved: crate::theme::Mode,
 ) {
@@ -2044,14 +2470,14 @@ fn appearance_menu(
     ui.set_width(MENU_WIDTH);
     ui.add(
         egui::Label::new(
-            RichText::new(APPEARANCE_SCOPE_HELP)
+            RichText::new(language.text(APPEARANCE_SCOPE_HELP))
                 .size(11.5)
                 .color(colors.muted),
         )
         .wrap(),
     );
     ui.separator();
-    for choice in crate::chrome::appearance_choices(current, resolved) {
+    for choice in crate::chrome::appearance_choices(language, current, resolved) {
         let mut label = LayoutJob::default();
         label.wrap.max_width = TEXT_WIDTH;
         label.append(
@@ -2097,7 +2523,11 @@ fn appearance_menu(
     }
 }
 
-fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+fn help_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+) -> egui::Response {
     let colors = chrome_colors(ui);
     ui.menu_button(
         RichText::new(frame.text(tr!("Help")))
@@ -2107,7 +2537,9 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
             ui.set_min_width(180.0);
             if ui
                 .button(frame.text(tr!("Get latest release...")))
-                .on_hover_text("Open the latest official GitHub release. No background check.")
+                .on_hover_text(frame.text(tr!(
+                    "Open the latest official GitHub release. No background check."
+                )))
                 .clicked()
             {
                 actions.push(UiAction::ShowUpdate);
@@ -2119,12 +2551,14 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwne
                 ui.close();
             }
         },
-    );
+    )
+    .response
 }
 
 fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("about_viewr"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2149,49 +2583,15 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                                 .color(colors.text),
                         );
                         ui.label(
-                            RichText::new("A private, local-first image viewer")
+                            RichText::new(frame.text(tr!("A private, local-first image viewer")))
                                 .size(13.0)
                                 .color(colors.muted),
                         );
                     });
-                    ui.add_space(8.0);
-                    Frame::new()
-                        .fill(colors.raised)
-                        .corner_radius(CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.label(
-                                RichText::new("No network access")
-                                    .color(colors.text)
-                                    .strong(),
-                            );
-                            ui.label("No telemetry, accounts, cloud sync, or background indexing.");
-                            ui.label(
-                                "Photos and edits stay local unless you explicitly save a copy.",
-                            );
-                        });
-                    ui.add_space(8.0);
-                    egui::Grid::new("about_build_details")
-                        .num_columns(2)
-                        .spacing(Vec2::new(16.0, 4.0))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new("Version").color(colors.muted));
-                            ui.label(env!("CARGO_PKG_VERSION"));
-                            ui.end_row();
-                            ui.label(RichText::new("Platform").color(colors.muted));
-                            ui.label(format!(
-                                "{} / {}",
-                                std::env::consts::OS,
-                                std::env::consts::ARCH
-                            ));
-                            ui.end_row();
-                            ui.label(RichText::new("License").color(colors.muted));
-                            ui.label(env!("CARGO_PKG_LICENSE"));
-                            ui.end_row();
-                        });
+                    render_about_facts(ui, frame, colors);
                     ui.add_space(10.0);
                     ui.label(
-                        RichText::new("Shortcuts")
+                        RichText::new(frame.text(tr!("Shortcuts")))
                             .color(colors.muted)
                             .small()
                             .strong(),
@@ -2201,7 +2601,11 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                 });
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(frame.text(tr!("Close"))).clicked() {
+                let close = ui.button(frame.text(tr!("Close")));
+                if focus_close {
+                    close.request_focus();
+                }
+                if close.clicked() {
                     close_clicked = true;
                 }
             });
@@ -2210,12 +2614,54 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.",
+            frame.text(tr!("About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseAbout);
     }
+}
+
+/// Privacy promises and build facts shown in About.
+fn render_about_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) {
+    ui.add_space(8.0);
+    Frame::new()
+        .fill(colors.raised)
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(frame.text(tr!("No network access")))
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.label(frame.text(tr!(
+                "No telemetry, accounts, cloud sync, or background indexing."
+            )));
+            ui.label(frame.text(tr!(
+                "Photos and edits stay local unless you explicitly save a copy."
+            )));
+        });
+    ui.add_space(8.0);
+    egui::Grid::new("about_build_details")
+        .num_columns(2)
+        .spacing(Vec2::new(16.0, 4.0))
+        .show(ui, |ui| {
+            ui.label(RichText::new(frame.text(tr!("Version"))).color(colors.muted));
+            ui.label(env!("CARGO_PKG_VERSION"));
+            ui.end_row();
+            ui.label(RichText::new(frame.text(tr!("Platform"))).color(colors.muted));
+            ui.label(format!(
+                "{} / {}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            ));
+            ui.end_row();
+            ui.label(RichText::new(frame.text(tr!("License"))).color(colors.muted));
+            ui.label(env!("CARGO_PKG_LICENSE"));
+            ui.end_row();
+        });
 }
 
 fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors, frame: &UiFrameOwned) {
@@ -2327,6 +2773,7 @@ fn render_update_body(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeCol
 fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("update_viewr"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2353,7 +2800,11 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
                 }
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(frame.text(tr!("Close"))).clicked() {
+                    let close = ui.button(frame.text(tr!("Close")));
+                    if focus_close {
+                        close.request_focus();
+                    }
+                    if close.clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2363,9 +2814,10 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.",
+            frame.text(tr!("Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseUpdate);
     }
@@ -2374,6 +2826,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
 fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("preferences"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2443,7 +2896,11 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
             }
             ui.add_space(14.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(frame.text(tr!("Close"))).clicked() {
+                let close = ui.button(frame.text(tr!("Close")));
+                if focus_close {
+                    close.request_focus();
+                }
+                if close.clicked() {
                     close_clicked = true;
                 }
             });
@@ -2452,9 +2909,12 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Preferences. Default folder sort and opt-in default image viewer settings.",
+            frame.text(tr!(
+                "Preferences. Default folder sort and opt-in default image viewer settings."
+            )),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::ClosePreferences);
     }
@@ -2498,6 +2958,7 @@ fn render_language_preferences(
 fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("file_associations"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2523,31 +2984,35 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                         );
                         ui.label(
                             RichText::new(
-                                "viewr never changes file associations during installation or startup.",
+                                frame.text(tr!("viewr never changes file associations during installation or startup.")),
                             )
                             .size(13.0)
                             .color(colors.text),
                         );
                         ui.label(
                             RichText::new(
-                                "Defaults are selected per file type. Start with PNG and JPEG, then add only the formats you want viewr to open.",
+                                frame.text(tr!("Defaults are selected per file type. Start with PNG and JPEG, then add only the formats you want viewr to open.")),
                             )
                             .size(13.0)
                             .color(colors.muted),
                         );
                         ui.label(
                             RichText::new(
-                                "This viewr build receives the selected file, but not the file manager's current folder sort. Use View > Folder Sort for Latest First or Name.",
+                                frame.text(tr!("This viewr build receives the selected file, but not the file manager's current folder sort. Use View > Folder Sort for Latest First or Name.")),
                             )
                             .size(13.0)
                             .color(colors.muted),
                         );
                         ui.add_space(12.0);
-                        render_platform_file_association_steps(ui, colors, &mut close_clicked);
+                        render_platform_file_association_steps(ui, colors, frame.language, &mut close_clicked);
                     });
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(frame.text(tr!("Close"))).clicked() {
+                    let close = ui.button(frame.text(tr!("Close")));
+                    if focus_close {
+                        close.request_focus();
+                    }
+                    if close.clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2557,9 +3022,10 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Default image viewer. File associations change only after an explicit operating-system choice.",
+            frame.text(tr!("Default image viewer. File associations change only after an explicit operating-system choice.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseFileAssociations);
     }
@@ -2568,14 +3034,13 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
 fn render_platform_file_association_steps(
     ui: &mut egui::Ui,
     colors: ChromeColors,
+    language: Language,
     _close_clicked: &mut bool,
 ) {
     #[cfg(target_os = "windows")]
     {
         ui.label(
-            RichText::new(
-                "In Windows Default Apps, search for .png, .jpg, and .jpeg, then choose viewr for each type. If viewr is not listed, use a file's Open with menu, choose another app, browse to viewr.exe, and select Always.",
-            )
+            RichText::new(language.text(tr!("In Windows Default Apps, search for .png, .jpg, and .jpeg, then choose viewr for each type. If viewr is not listed, use a file's Open with menu, choose another app, browse to viewr.exe, and select Always.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2583,7 +3048,7 @@ fn render_platform_file_association_steps(
         if ui
             .add(
                 egui::Button::new(
-                    RichText::new("Open Windows Default Apps")
+                    RichText::new(language.text(tr!("Open Windows Default Apps")))
                         .strong()
                         .color(colors.accent_ink),
                 )
@@ -2601,9 +3066,7 @@ fn render_platform_file_association_steps(
     {
         const COMMANDS: &str = "xdg-mime default com.github.blisspixel.viewr.desktop image/png\nxdg-mime default com.github.blisspixel.viewr.desktop image/jpeg";
         ui.label(
-            RichText::new(
-                "Use your desktop's file properties or Default Applications screen to choose viewr for PNG and JPEG. The viewr installer registers the desktop entry but does not change a default.",
-            )
+            RichText::new(language.text(tr!("Use your desktop's file properties or Default Applications screen to choose viewr for PNG and JPEG. The viewr installer registers the desktop entry but does not change a default.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2614,16 +3077,17 @@ fn render_platform_file_association_steps(
                 .size(12.0)
                 .color(colors.muted),
         );
-        if ui.button("Copy PNG/JPEG commands").clicked() {
+        if ui
+            .button(language.text(tr!("Copy PNG/JPEG commands")))
+            .clicked()
+        {
             ui.ctx().copy_text(COMMANDS.to_owned());
         }
     }
     #[cfg(target_os = "macos")]
     {
         ui.label(
-            RichText::new(
-                "For a viewr app bundle, select a PNG in Finder, choose File > Get Info, choose viewr under Open with, then select Change All. Repeat with a JPEG. Portable command-line builds are not app bundles and cannot appear as a Finder default.",
-            )
+            RichText::new(language.text(tr!("For a viewr app bundle, select a PNG in Finder, choose File > Get Info, choose viewr under Open with, then select Change All. Repeat with a JPEG. Portable command-line builds are not app bundles and cannot appear as a Finder default.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2631,9 +3095,7 @@ fn render_platform_file_association_steps(
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
         ui.label(
-            RichText::new(
-                "Use the operating system's default applications settings to choose viewr for PNG and JPEG.",
-            )
+            RichText::new(language.text(tr!("Use the operating system's default applications settings to choose viewr for PNG and JPEG.")))
             .size(13.0)
             .color(colors.text),
         );
@@ -2648,15 +3110,7 @@ fn render_save_overwrite_confirmation(
     let colors = chrome_colors(ui);
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
-    let focus_state_id = egui::Id::new(SAVE_OVERWRITE_FOCUS_STATE);
-    let focus_cancel = ui.ctx().data_mut(|data| {
-        if data.get_temp::<bool>(focus_state_id).unwrap_or(false) {
-            false
-        } else {
-            data.insert_temp(focus_state_id, true);
-            true
-        }
-    });
+    let focus_cancel = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("save_overwrite_confirmation"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2706,9 +3160,10 @@ fn render_save_overwrite_confirmation(
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            "Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.",
+            frame.text(tr!("Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.")),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if confirm_clicked {
         actions.push(UiAction::ConfirmSaveOverwrite);
     } else if cancel_clicked || response.should_close() {
@@ -2722,24 +3177,24 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
     };
     let colors = chrome_colors(ui);
     let (title, confirm) = match assignment {
-        crate::ratings::RatingAssignment::Clear => {
-            ("Clear this rating?".to_owned(), "Clear rating")
-        }
-        crate::ratings::RatingAssignment::Set(rating) => {
-            (format!("Save rating {} of 5?", rating.get()), "Save rating")
-        }
+        crate::ratings::RatingAssignment::Clear => (
+            frame.text(tr!("Clear this rating?")).to_owned(),
+            frame.text(tr!("Clear rating")),
+        ),
+        crate::ratings::RatingAssignment::Set(rating) => (
+            frame
+                .language
+                .fill(
+                    tr!("Save rating {rating} of 5?"),
+                    &[("rating", &rating.get().to_string())],
+                )
+                .into_string(),
+            frame.text(tr!("Save rating")),
+        ),
     };
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
-    let focus_state_id = egui::Id::new(RATING_DISCLOSURE_FOCUS_STATE);
-    let focus_cancel = ui.ctx().data_mut(|data| {
-        if data.get_temp::<bool>(focus_state_id).unwrap_or(false) {
-            false
-        } else {
-            data.insert_temp(focus_state_id, true);
-            true
-        }
-    });
+    let focus_cancel = claim_initial_modal_focus(ui.ctx());
     let response = egui::Modal::new(egui::Id::new("rating_write_disclosure"))
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
@@ -2754,16 +3209,16 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
             ui.heading(RichText::new(&title).size(25.0).color(colors.text));
             ui.add_space(10.0);
             ui.label(
-                RichText::new(
-                    "Ratings are written into this image file and may be visible to other apps.",
-                )
+                RichText::new(frame.text(tr!(
+                    "Ratings are written into this image file and may be visible to other apps."
+                )))
                 .size(13.5)
                 .color(colors.text),
             );
             ui.label(
-                RichText::new(
-                    "viewr updates embedded metadata in the source JPEG. It does not create a database or sidecar.",
-                )
+                RichText::new(frame.text(tr!(
+                    "viewr updates embedded metadata in the source JPEG. It does not create a database or sidecar."
+                )))
                 .size(12.5)
                 .color(colors.muted),
             );
@@ -2772,7 +3227,7 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                 if ui.button(confirm).clicked() {
                     confirm_clicked = true;
                 }
-                let cancel = ui.button("Cancel");
+                let cancel = ui.button(frame.text(tr!("Cancel")));
                 if focus_cancel {
                     cancel.request_focus();
                 }
@@ -2785,11 +3240,16 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
         WidgetInfo::labeled(
             WidgetType::Window,
             true,
-            format!(
-                "{title}. Ratings are written into this image file and may be visible to other apps."
-            ),
+            frame
+                .language
+                .fill(
+                    tr!("{title}. Ratings are written into this image file and may be visible to other apps."),
+                    &[("title", &title)],
+                )
+                .into_string(),
         )
     });
+    mark_as_modal_dialog(&response.response);
     if confirm_clicked {
         actions.push(UiAction::ConfirmRatingDisclosure);
     } else if cancel_clicked || response.should_close() {
@@ -2831,7 +3291,13 @@ fn render_filtered_empty_state(
                 .inner_margin(egui::Margin::symmetric(28, 24))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        let heading = format!("No images are rated {} or higher.", minimum.get());
+                        let heading = frame
+                            .language
+                            .fill(
+                                tr!("No images are rated {rating} or higher."),
+                                &[("rating", &minimum.get().to_string())],
+                            )
+                            .into_string();
                         let heading_response =
                             ui.heading(RichText::new(&heading).size(20.0).color(colors.text));
                         heading_response
@@ -2839,19 +3305,37 @@ fn render_filtered_empty_state(
                         mark_as_polite_status(&heading_response);
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new(format!(
-                                "{} images remain loaded in this folder.",
-                                frame.rating.folder_count
-                            ))
+                            RichText::new(if frame.rating.folder_count == 1 {
+                                frame
+                                    .text(tr!("1 image remains loaded in this folder."))
+                                    .to_owned()
+                            } else {
+                                frame
+                                    .language
+                                    .fill(
+                                        tr!("{count} images remain loaded in this folder."),
+                                        &[("count", &frame.rating.folder_count.to_string())],
+                                    )
+                                    .into_string()
+                            })
                             .size(13.0)
                             .color(colors.muted),
                         );
                         ui.add_space(16.0);
                         let show_all = ui
-                            .add(egui::Button::new("Show all images").shortcut_text("Esc"))
-                            .on_hover_text("Esc or Left/Right also shows all images");
+                            .add(
+                                egui::Button::new(frame.text(tr!("Show all images")))
+                                    .shortcut_text("Esc"),
+                            )
+                            .on_hover_text(
+                                frame.text(tr!("Esc or Left/Right also shows all images")),
+                            );
                         show_all.widget_info(|| {
-                            WidgetInfo::labeled(WidgetType::Button, true, "Show all images")
+                            WidgetInfo::labeled(
+                                WidgetType::Button,
+                                true,
+                                frame.text(tr!("Show all images")),
+                            )
                         });
                         show_all.ctx.accesskit_node_builder(show_all.id, |node| {
                             node.set_keyboard_shortcut("Esc");
@@ -2862,7 +3346,11 @@ fn render_filtered_empty_state(
                     });
                 });
             card.response.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Panel, true, "No images match rating filter")
+                WidgetInfo::labeled(
+                    WidgetType::Panel,
+                    true,
+                    frame.text(tr!("No images match rating filter")),
+                )
             });
         });
 }
@@ -2976,7 +3464,7 @@ fn render_empty_state_actions(
                 chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new(frame.text(tr!("Open File"))).min_size(Vec2::new(116.0, 36.0)),
             )
-            .on_hover_text(OPEN_FILE_SCOPE_HELP);
+            .on_hover_text(frame.text(OPEN_FILE_SCOPE_HELP));
         if open_file.clicked() {
             actions.push(UiAction::Open);
         }
@@ -2985,7 +3473,7 @@ fn render_empty_state_actions(
                 chrome.is_enabled(ChromeControl::OpenSource),
                 egui::Button::new(frame.text(tr!("Open Folder"))).min_size(Vec2::new(116.0, 36.0)),
             )
-            .on_hover_text(OPEN_FOLDER_SCOPE_HELP);
+            .on_hover_text(frame.text(OPEN_FOLDER_SCOPE_HELP));
         if open_folder.clicked() {
             actions.push(UiAction::OpenFolder);
         }
@@ -3129,7 +3617,7 @@ fn render_animation_controls(
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Previous")),
+            panel_step_button(frame.text(tr!("Previous"))),
             frame.text(tr!("Previous frame")),
             "[",
             animation.can_previous,
@@ -3138,7 +3626,7 @@ fn render_animation_controls(
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Next")),
+            panel_step_button(frame.text(tr!("Next"))),
             frame.text(tr!("Next frame")),
             "]",
             animation.can_next,
@@ -3171,14 +3659,11 @@ fn render_page_controls(
     };
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let (previous_name, next_name) = match pages.noun {
-            "Icon" => (tr!("Previous Icon"), tr!("Next Icon")),
-            _ => (tr!("Previous page"), tr!("Next page")),
-        };
+        let (previous_name, next_name) = sequence_step_names(pages);
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Previous")),
+            panel_step_button(frame.text(tr!("Previous"))),
             frame.text(previous_name),
             "[",
             pages.can_previous,
@@ -3187,7 +3672,7 @@ fn render_page_controls(
         render_sequence_step_button(
             ui,
             actions,
-            frame.text(tr!("Next")),
+            panel_step_button(frame.text(tr!("Next"))),
             frame.text(next_name),
             "]",
             pages.can_next,
@@ -3205,20 +3690,28 @@ fn render_page_controls(
     });
 }
 
+fn sequence_step_names(pages: &PageUiInfo) -> (&'static str, &'static str) {
+    match pages.noun {
+        "Icon" => (tr!("Previous Icon"), tr!("Next Icon")),
+        _ => (tr!("Previous page"), tr!("Next page")),
+    }
+}
+
+fn panel_step_button(label: &str) -> egui::Button<'_> {
+    egui::Button::new(label).min_size(Vec2::new(72.0, 36.0))
+}
+
 fn render_sequence_step_button(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
-    label: &str,
+    button: egui::Button<'_>,
     accessible_name: &str,
     shortcut: &str,
     enabled: bool,
     delta: isize,
 ) {
     let response = ui
-        .add_enabled(
-            enabled,
-            egui::Button::new(label).min_size(Vec2::new(72.0, 36.0)),
-        )
+        .add_enabled(enabled, button)
         .on_hover_text(format!("{accessible_name} ({shortcut})"));
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible_name));
     response.ctx.accesskit_node_builder(response.id, |node| {
@@ -3621,7 +4114,9 @@ fn render_tools_panel(
                         let heal_tip = if frame.heal_supported {
                             frame.text(tr!("Spot heal (J)"))
                         } else {
-                            "Spot heal is unavailable for images larger than the GPU texture limit"
+                            frame.text(tr!(
+                                "Spot heal is unavailable for images larger than the GPU texture limit"
+                            ))
                         };
                         let heal = chrome.heal_control();
                         ui.add_enabled_ui(heal.enabled, |ui| {
@@ -3822,7 +4317,7 @@ fn render_heal_panel(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("SPOT HEAL")
+                    RichText::new(frame.text(tr!("Spot Heal")).to_uppercase())
                         .size(11.0)
                         .color(colors.accent)
                         .strong(),
@@ -3832,7 +4327,7 @@ fn render_heal_panel(
                     if ui
                         .add_enabled(
                             heal.enabled,
-                            egui::Button::new("Done")
+                            egui::Button::new(frame.text(tr!("Done")))
                                 .shortcut_text("Esc")
                                 .selected(heal.selected),
                         )
@@ -3845,9 +4340,11 @@ fn render_heal_panel(
             ui.add_space(8.0);
             ui.add(
                 egui::Label::new(
-                    RichText::new("Paint over a small blemish, then release to repair it.")
-                        .size(12.5)
-                        .color(colors.text),
+                    RichText::new(frame.text(tr!(
+                        "Paint over a small blemish, then release to repair it."
+                    )))
+                    .size(12.5)
+                    .color(colors.text),
                 )
                 .wrap(),
             );
@@ -3865,7 +4362,11 @@ fn render_heal_controls(
     colors: ChromeColors,
 ) {
     let mut radius = frame.heal_brush_radius;
-    ui.label(RichText::new("Brush radius").size(11.5).color(colors.muted));
+    ui.label(
+        RichText::new(frame.text(tr!("Brush radius")))
+            .size(11.5)
+            .color(colors.muted),
+    );
     let slider = egui::Slider::new(
         &mut radius,
         crate::heal::MIN_BRUSH_RADIUS..=crate::heal::MAX_BRUSH_RADIUS,
@@ -3877,7 +4378,7 @@ fn render_heal_controls(
         WidgetInfo::slider(
             ui.is_enabled() && adjust_enabled,
             f64::from(radius),
-            "Brush radius",
+            frame.text(tr!("Brush radius")),
         )
     });
     if response.changed() {
@@ -3886,17 +4387,21 @@ fn render_heal_controls(
 
     ui.add_space(10.0);
     let mut feather = frame.heal_feather_percent;
-    ui.label(RichText::new("Feather").size(11.5).color(colors.muted));
+    ui.label(
+        RichText::new(frame.text(tr!("Feather")))
+            .size(11.5)
+            .color(colors.muted),
+    );
     let feather_slider =
         egui::Slider::new(&mut feather, 0..=crate::heal::MAX_FEATHER_PERCENT).suffix("%");
     let response = ui
         .add_enabled(adjust_enabled, feather_slider)
-        .on_hover_text("Softens the repair edge outward from the painted area");
+        .on_hover_text(frame.text(tr!("Softens the repair edge outward from the painted area")));
     response.widget_info(|| {
         WidgetInfo::slider(
             ui.is_enabled() && adjust_enabled,
             f64::from(feather),
-            "Feather",
+            frame.text(tr!("Feather")),
         )
     });
     if response.changed() {
@@ -3905,15 +4410,26 @@ fn render_heal_controls(
 
     ui.add_space(12.0);
     let source_label = frame.heal_source.map_or_else(
-        || "Refresh source".to_owned(),
-        |(index, count)| format!("Source {} of {count}", index + 1),
+        || frame.text(tr!("Refresh source")).to_owned(),
+        |(index, count)| {
+            frame
+                .language
+                .fill(
+                    tr!("Source {index} of {count}"),
+                    &[
+                        ("index", &(index + 1).to_string()),
+                        ("count", &count.to_string()),
+                    ],
+                )
+                .into_string()
+        },
     );
     if ui
         .add_enabled(
             chrome.is_enabled(ChromeControl::HealRefreshSource),
             egui::Button::new(source_label).shortcut_text("/"),
         )
-        .on_hover_text("Try the next ranked clean source patch")
+        .on_hover_text(frame.text(tr!("Try the next ranked clean source patch")))
         .clicked()
     {
         actions.push(UiAction::RefreshHealSource);
@@ -3924,7 +4440,8 @@ fn render_heal_controls(
         if ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::UndoEdit),
-                egui::Button::new("Undo").shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
+                egui::Button::new(frame.text(tr!("Undo")))
+                    .shortcut_text(format!("{PRIMARY_MODIFIER}+Z")),
             )
             .clicked()
         {
@@ -3933,7 +4450,8 @@ fn render_heal_controls(
         if ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::RedoEdit),
-                egui::Button::new("Redo").shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
+                egui::Button::new(frame.text(tr!("Redo")))
+                    .shortcut_text(format!("{PRIMARY_MODIFIER}+Shift+Z")),
             )
             .clicked()
         {
@@ -3947,19 +4465,25 @@ fn render_heal_guidance(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeC
     if frame.heal_busy {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(
-                RichText::new("Repairing in memory...")
+            let status = ui.label(
+                RichText::new(frame.text(tr!("Repairing in memory...")))
                     .size(12.0)
                     .color(colors.text),
             );
+            mark_as_polite_status(&status);
+            status
+                .ctx
+                .accesskit_node_builder(status.id, egui::accesskit::Node::set_busy);
         });
     }
     ui.add_space(8.0);
     ui.add(
         egui::Label::new(
-            RichText::new("The original file stays untouched. Use Save As to keep the edit.")
-                .size(11.0)
-                .color(colors.muted),
+            RichText::new(frame.text(tr!(
+                "The original file stays untouched. Use Save As to keep the edit."
+            )))
+            .size(11.0)
+            .color(colors.muted),
         )
         .wrap(),
     );
@@ -4048,7 +4572,7 @@ fn render_filmstrip(
                             };
                             if let Some((index, total)) = position {
                                 ui.label(
-                                    RichText::new(format!("{index} of {total}"))
+                                    RichText::new(position_of_total(frame.language, index, total))
                                         .size(11.0)
                                         .color(colors.muted),
                                 );
@@ -4067,7 +4591,13 @@ fn render_filmstrip(
                                     ui.horizontal_centered(|ui| {
                                         ui.spacing_mut().item_spacing.x = 8.0;
                                         for item in &frame.filmstrip {
-                                            render_filmstrip_item(ui, actions, item, current);
+                                            render_filmstrip_item(
+                                                ui,
+                                                actions,
+                                                frame.language,
+                                                item,
+                                                current,
+                                            );
                                         }
                                     });
                                 },
@@ -4088,11 +4618,11 @@ fn render_filmstrip(
                         crate::ratings::RatingFilter::All => frame.playlist_pos,
                         crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
                     };
-                    let label = position.map_or_else(
-                        || "Folder previews".to_owned(),
-                        |(index, total)| format!("Folder previews  {index} of {total}"),
+                    ui.label(
+                        RichText::new(filmstrip_heading(frame.language, position))
+                            .size(12.0)
+                            .color(colors.muted),
                     );
-                    ui.label(RichText::new(label).size(12.0).color(colors.muted));
                 });
             }
         });
@@ -4101,6 +4631,7 @@ fn render_filmstrip(
 fn render_filmstrip_item(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
+    language: Language,
     item: &FilmstripItem,
     current: Option<usize>,
 ) {
@@ -4119,15 +4650,11 @@ fn render_filmstrip_item(
     } else {
         colors.panel
     };
-    let accessibility_label = filmstrip_accessibility_label(item);
+    let accessibility_label = filmstrip_accessibility_label(language, item);
     response.widget_info(|| {
-        WidgetInfo::selected(
-            WidgetType::Button,
-            ui.is_enabled(),
-            selected,
-            &accessibility_label,
-        )
+        WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &accessibility_label)
     });
+    mark_as_list_item(&response, selected);
     let response = response
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text(&item.name);
@@ -4172,11 +4699,43 @@ fn render_filmstrip_item(
     }
 }
 
-fn filmstrip_accessibility_label(item: &FilmstripItem) -> String {
-    format!("image {}: {}", item.position, item.name)
+fn filmstrip_heading(language: Language, position: Option<(usize, usize)>) -> String {
+    position.map_or_else(
+        || language.text(tr!("Folder previews")).to_owned(),
+        |(index, total)| {
+            language
+                .fill(
+                    tr!("Folder previews  {index} of {total}"),
+                    &[("index", &index.to_string()), ("total", &total.to_string())],
+                )
+                .into_string()
+        },
+    )
 }
 
-fn render_toast(ui: &mut egui::Ui, msg: &str, frame: &UiFrameOwned) {
+/// Compact one-based position such as "3 of 12".
+fn position_of_total(language: Language, index: usize, total: usize) -> String {
+    language
+        .fill(
+            tr!("{index} of {total}"),
+            &[("index", &index.to_string()), ("total", &total.to_string())],
+        )
+        .into_string()
+}
+
+fn filmstrip_accessibility_label(language: Language, item: &FilmstripItem) -> String {
+    language
+        .fill(
+            tr!("image {position}: {name}"),
+            &[
+                ("position", &item.position.to_string()),
+                ("name", &item.name),
+            ],
+        )
+        .into_string()
+}
+
+fn render_toast(ui: &mut egui::Ui, toast: &ToastView, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let image_viewport = image_viewport_rect(ui.ctx(), frame);
     Area::new("toast".into())
@@ -4195,22 +4754,15 @@ fn render_toast(ui: &mut egui::Ui, msg: &str, frame: &UiFrameOwned) {
                 .stroke(Stroke::new(1.0, colors.accent))
                 .inner_margin(egui::Margin::symmetric(14, 8))
                 .show(ui, |ui| {
-                    let response = ui.label(RichText::new(msg).size(13.0).color(colors.text));
-                    if !frame.rating.write_busy && rating_toast_is_status(msg) {
+                    let response =
+                        ui.label(RichText::new(&toast.text).size(13.0).color(colors.text));
+                    if !frame.rating.write_busy
+                        && toast.announcement == ToastAnnouncement::PoliteStatus
+                    {
                         mark_as_polite_status(&response);
                     }
                 });
         });
-}
-
-fn rating_toast_is_status(message: &str) -> bool {
-    !matches!(
-        message,
-        "Saving rating..." | "Finishing the rating update before closing..."
-    ) && (message.contains("rating")
-        || message.contains("Rating")
-        || message
-            == "viewr could not verify this image's source safely. The file was not changed.")
 }
 
 fn render_crop_overlay(
@@ -4257,9 +4809,11 @@ fn render_crop_toolbar(
                             if ui
                                 .add_enabled(
                                     frame.crop_ratio != crate::crop::CropRatio::Free,
-                                    egui::Button::new("Swap").shortcut_text("X"),
+                                    egui::Button::new(frame.text(tr!("Swap"))).shortcut_text("X"),
                                 )
-                                .on_hover_text("Swap the crop between landscape and portrait")
+                                .on_hover_text(frame.text(tr!(
+                                    "Swap the crop between landscape and portrait"
+                                )))
                                 .clicked()
                             {
                                 actions.push(UiAction::SwapCropRatio);
@@ -4285,14 +4839,18 @@ fn render_crop_toolbar(
                         ui.separator();
                         ui.label(
                             RichText::new(
-                                "Arrows move  |  Shift+Arrows resize  |  Ctrl fine-tunes",
+                                frame.text(tr!(
+                                    "Arrows move  |  Shift+Arrows resize  |  Ctrl fine-tunes"
+                                )),
                             )
                             .size(11.0)
                             .color(colors.muted),
                         );
                         ui.label(
                             RichText::new(
-                                "Drag to redraw  |  X swaps aspect  |  Enter applies  |  Esc cancels",
+                                frame.text(tr!(
+                                    "Drag to redraw  |  X swaps aspect  |  Enter applies  |  Esc cancels"
+                                )),
                             )
                                 .size(11.0)
                                 .color(colors.muted),
@@ -4302,17 +4860,35 @@ fn render_crop_toolbar(
         });
 }
 
+fn crop_ratio_menu_label(frame: &UiFrameOwned) -> String {
+    let ratio = match frame.crop_ratio {
+        crate::crop::CropRatio::Free => frame.text(tr!("Free")).to_owned(),
+        crate::crop::CropRatio::Original => frame.text(tr!("Original")).to_owned(),
+        fixed @ crate::crop::CropRatio::Fixed { .. } => fixed.label(),
+    };
+    frame
+        .language
+        .fill(tr!("Aspect: {ratio}"), &[("ratio", &ratio)])
+        .into_string()
+}
+
 fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<UiAction>) {
     let colors = chrome_colors(ui);
-    let label = format!("Aspect: {}", frame.crop_ratio.label());
+    let label = crop_ratio_menu_label(frame);
     ui.menu_button(label, |ui| {
         ui.set_min_width(292.0);
         let mut current = frame.crop_ratio;
 
         for (ratio, label) in [
-            (crate::crop::CropRatio::Free, "Free"),
-            (crate::crop::CropRatio::Original, "Original"),
-            (crate::crop::CropRatio::SQUARE, "1:1  Square"),
+            (crate::crop::CropRatio::Free, frame.text(tr!("Free"))),
+            (
+                crate::crop::CropRatio::Original,
+                frame.text(tr!("Original")),
+            ),
+            (
+                crate::crop::CropRatio::SQUARE,
+                frame.text(tr!("1:1  Square")),
+            ),
         ] {
             if ui.selectable_value(&mut current, ratio, label).clicked() {
                 actions.push(UiAction::SetCropRatio(current));
@@ -4321,7 +4897,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         }
 
         ui.separator();
-        ui.label(RichText::new("Landscape").size(11.0).color(colors.muted));
+        ui.label(
+            RichText::new(frame.text(tr!("Landscape")))
+                .size(11.0)
+                .color(colors.muted),
+        );
         ui.horizontal(|ui| {
             for (ratio, label) in [
                 (crate::crop::CropRatio::THREE_TWO, "3:2"),
@@ -4337,7 +4917,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
             }
         });
 
-        ui.label(RichText::new("Portrait").size(11.0).color(colors.muted));
+        ui.label(
+            RichText::new(frame.text(tr!("Portrait")))
+                .size(11.0)
+                .color(colors.muted),
+        );
         ui.horizontal(|ui| {
             for (ratio, label) in [
                 (crate::crop::CropRatio::TWO_THREE, "2:3"),
@@ -4354,7 +4938,11 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
         });
 
         ui.separator();
-        ui.label(RichText::new("Custom ratio").size(11.0).color(colors.muted));
+        ui.label(
+            RichText::new(frame.text(tr!("Custom ratio")))
+                .size(11.0)
+                .color(colors.muted),
+        );
         let (mut custom_width, mut custom_height) = frame.custom_crop_ratio;
         ui.horizontal(|ui| {
             ui.label("W");
@@ -4364,7 +4952,7 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
                         .range(1..=999)
                         .speed(1),
                 )
-                .on_hover_text("Custom ratio width")
+                .on_hover_text(frame.text(tr!("Custom ratio width")))
                 .changed();
             ui.label(":  H");
             let height_changed = ui
@@ -4373,12 +4961,12 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
                         .range(1..=999)
                         .speed(1),
                 )
-                .on_hover_text("Custom ratio height")
+                .on_hover_text(frame.text(tr!("Custom ratio height")))
                 .changed();
             if width_changed || height_changed {
                 actions.push(UiAction::SetCustomCropRatio(custom_width, custom_height));
             }
-            if ui.button("Use").clicked() {
+            if ui.button(frame.text(tr!("Use"))).clicked() {
                 actions.push(UiAction::SetCustomCropRatio(custom_width, custom_height));
                 actions.push(UiAction::SetCropRatio(crate::crop::CropRatio::fixed(
                     custom_width,
@@ -4386,6 +4974,32 @@ fn crop_ratio_picker(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut Vec<
                 )));
                 ui.close();
             }
+        });
+    });
+}
+
+/// The picture is painted by the GPU canvas, outside egui, so without this node
+/// a screen reader finds menus and panels but no image. The node covers the
+/// image viewport, is named by the presented file, and describes its pixel
+/// size. It takes no input, so pointer and keyboard handling stay with the
+/// canvas.
+fn expose_image_canvas(ctx: &egui::Context, frame: &UiFrameOwned) {
+    let Some(path) = frame.file_path.as_deref() else {
+        return;
+    };
+    let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
+    let viewport = image_viewport_rect(ctx, frame);
+    ctx.accesskit_node_builder(egui::Id::new(IMAGE_CANVAS_NODE), |node| {
+        node.set_role(egui::accesskit::Role::Image);
+        node.set_label(name);
+        if let Some((width, height)) = frame.img_size {
+            node.set_description(format!("{width} × {height}"));
+        }
+        node.set_bounds(egui::accesskit::Rect {
+            x0: viewport.min.x.into(),
+            y0: viewport.min.y.into(),
+            x1: viewport.max.x.into(),
+            y1: viewport.max.y.into(),
         });
     });
 }
@@ -4431,12 +5045,13 @@ fn render_crop_selection(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut 
             );
         }
 
-        render_crop_handles(ui, &painter, rect, actions);
+        render_crop_handles(ui, &painter, rect, frame.language, actions);
         if let (Some((image_width, image_height)), Some(crop_uv)) = (frame.img_size, frame.crop_uv)
         {
             render_crop_dimensions_and_move(
                 ui,
                 &painter,
+                frame.language,
                 CropMoveOverlay {
                     rect,
                     image_viewport,
@@ -4464,6 +5079,7 @@ struct CropMoveOverlay {
 fn render_crop_dimensions_and_move(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
+    language: Language,
     overlay: CropMoveOverlay,
     actions: &mut Vec<UiAction>,
 ) {
@@ -4556,24 +5172,42 @@ fn render_crop_dimensions_and_move(
         }
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
     }
-    let accessibility_label =
-        crop_accessibility_label((pixel_x, pixel_y, pixel_width, pixel_height), can_drag);
+    let accessibility_label = crop_accessibility_label(
+        language,
+        (pixel_x, pixel_y, pixel_width, pixel_height),
+        can_drag,
+    );
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::Panel, ui.is_enabled(), &accessibility_label)
     });
 }
 
-fn crop_accessibility_label(bounds: (u32, u32, u32, u32), can_drag: bool) -> String {
+fn crop_accessibility_label(
+    language: Language,
+    bounds: (u32, u32, u32, u32),
+    can_drag: bool,
+) -> String {
     let (pixel_x, pixel_y, pixel_width, pixel_height) = bounds;
-    let controls = if can_drag {
-        "Drag inside to move. Arrow keys move; Shift plus Arrow keys resize."
+    let template = if can_drag {
+        tr!(
+            "Crop selection: {width} by {height} output pixels, source starts at x {x}, y {y}. Drag inside to move. Arrow keys move; Shift plus Arrow keys resize."
+        )
     } else {
-        "Arrow keys move; Shift plus Arrow keys resize."
+        tr!(
+            "Crop selection: {width} by {height} output pixels, source starts at x {x}, y {y}. Arrow keys move; Shift plus Arrow keys resize."
+        )
     };
-    format!(
-        "Crop selection: {pixel_width} by {pixel_height} output pixels, source starts at x \
-         {pixel_x}, y {pixel_y}. {controls}"
-    )
+    language
+        .fill(
+            template,
+            &[
+                ("width", &pixel_width.to_string()),
+                ("height", &pixel_height.to_string()),
+                ("x", &pixel_x.to_string()),
+                ("y", &pixel_y.to_string()),
+            ],
+        )
+        .into_string()
 }
 
 fn crop_pixel_bounds(
@@ -4597,18 +5231,51 @@ fn render_crop_handles(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
     rect: Rect,
+    language: Language,
     actions: &mut Vec<UiAction>,
 ) {
     let colors = chrome_colors(ui);
     let centers = [
-        (rect.left_top(), CursorIcon::ResizeNwSe, "top left"),
-        (rect.center_top(), CursorIcon::ResizeVertical, "top"),
-        (rect.right_top(), CursorIcon::ResizeNeSw, "top right"),
-        (rect.right_center(), CursorIcon::ResizeHorizontal, "right"),
-        (rect.right_bottom(), CursorIcon::ResizeNwSe, "bottom right"),
-        (rect.center_bottom(), CursorIcon::ResizeVertical, "bottom"),
-        (rect.left_bottom(), CursorIcon::ResizeNeSw, "bottom left"),
-        (rect.left_center(), CursorIcon::ResizeHorizontal, "left"),
+        (
+            rect.left_top(),
+            CursorIcon::ResizeNwSe,
+            tr!("Resize crop from top left"),
+        ),
+        (
+            rect.center_top(),
+            CursorIcon::ResizeVertical,
+            tr!("Resize crop from top"),
+        ),
+        (
+            rect.right_top(),
+            CursorIcon::ResizeNeSw,
+            tr!("Resize crop from top right"),
+        ),
+        (
+            rect.right_center(),
+            CursorIcon::ResizeHorizontal,
+            tr!("Resize crop from right"),
+        ),
+        (
+            rect.right_bottom(),
+            CursorIcon::ResizeNwSe,
+            tr!("Resize crop from bottom right"),
+        ),
+        (
+            rect.center_bottom(),
+            CursorIcon::ResizeVertical,
+            tr!("Resize crop from bottom"),
+        ),
+        (
+            rect.left_bottom(),
+            CursorIcon::ResizeNeSw,
+            tr!("Resize crop from bottom left"),
+        ),
+        (
+            rect.left_center(),
+            CursorIcon::ResizeHorizontal,
+            tr!("Resize crop from left"),
+        ),
     ];
     for (index, (center, cursor, name)) in centers.into_iter().enumerate() {
         let visual = Rect::from_center_size(center, Vec2::splat(8.0));
@@ -4624,15 +5291,17 @@ fn render_crop_handles(
             .interact(
                 hit_rect,
                 egui::Id::new(("crop_handle", index)),
-                Sense::drag(),
+                // Pointer only. Keyboard users move and resize the crop from
+                // the crop pane, whose name states those keys, so a handle is
+                // neither a Tab stop nor a node that cannot be activated.
+                Sense::DRAG,
             )
             .on_hover_cursor(cursor);
         response.widget_info(|| {
-            WidgetInfo::labeled(
-                WidgetType::Button,
-                ui.is_enabled(),
-                format!("Resize crop from {name}"),
-            )
+            WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), language.text(name))
+        });
+        response.ctx.accesskit_node_builder(response.id, |node| {
+            node.set_hidden();
         });
         if response.dragged()
             && let Some(pointer) = response.interact_pointer_pos()
@@ -4667,12 +5336,22 @@ mod tests {
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
         EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
         MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS,
-        PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH, UiAction,
-        UiFrameOwned, actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
-        chrome_colors_for, context_tool_button, crop_pixel_bounds, folder_sort_menu,
-        image_open_status, menu_tool_button, mosaic_status, panels_menu, rating_filter_menu,
-        rating_menu, rating_toast_is_status, render, retry_open_label, undo_trash_menu_item,
+        PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH,
+        TOP_STATUS_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
+        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
+        crop_pixel_bounds, folder_sort_menu, image_open_status, menu_tool_button, mosaic_status,
+        panels_menu, rating_filter_menu, rating_menu, render, retry_open_label,
+        top_toast_max_width, undo_trash_menu_item,
     };
+    use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
+    use crate::locale::tr;
+
+    fn visual_toast(text: &str) -> ToastView {
+        ToastView {
+            text: text.to_owned(),
+            announcement: ToastAnnouncement::Visual,
+        }
+    }
 
     fn relative_luminance(color: egui::Color32) -> f64 {
         fn linear(channel: u8) -> f64 {
@@ -4827,7 +5506,7 @@ mod tests {
         };
 
         assert_eq!(
-            super::filmstrip_accessibility_label(&item),
+            super::filmstrip_accessibility_label(Language::English, &item),
             "image 2: rated.jpg"
         );
         assert_eq!(item.index, 8);
@@ -4953,11 +5632,11 @@ mod tests {
     }
 
     #[test]
-    fn rating_discovery_disables_writes_but_keeps_filter_cancellation_available() {
+    fn rating_discovery_keeps_writes_and_filter_cancellation_available() {
         let mut frame = accessibility_test_frame();
         frame.rating.discovery_busy = true;
 
-        assert!(!control_enabled(&frame, ChromeControl::RatingChoice));
+        assert!(control_enabled(&frame, ChromeControl::RatingChoice));
         assert!(control_enabled(&frame, ChromeControl::RatingMenu));
         assert!(control_enabled(&frame, ChromeControl::RatingFilterMenu));
     }
@@ -5284,6 +5963,80 @@ mod tests {
         );
     }
 
+    /// Labels in the accessibility tree after `key` is pressed and the next
+    /// frame is drawn.
+    fn labels_after_key(
+        frame: &UiFrameOwned,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    ) -> Vec<String> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let _ = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, frame);
+        });
+        let mut pressed = accessibility_input();
+        pressed.modifiers = modifiers;
+        pressed.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        });
+        let _ = context.run_ui(pressed, |ui| {
+            let _ = render(ui, frame);
+        });
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, frame);
+        });
+        output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn f10_and_alt_letters_open_the_top_menus_from_the_keyboard() {
+        let frame = accessibility_test_frame();
+        let closed = labels_after_key(&frame, egui::Key::Z, egui::Modifiers::NONE);
+        assert!(!closed.iter().any(|label| label.starts_with("Open File...")));
+
+        let file = labels_after_key(&frame, egui::Key::F10, egui::Modifiers::NONE);
+        assert!(
+            file.iter().any(|label| label.starts_with("Open File...")),
+            "F10 opens File"
+        );
+
+        if !cfg!(target_os = "macos") {
+            let view = labels_after_key(&frame, egui::Key::V, egui::Modifiers::ALT);
+            assert!(
+                view.iter()
+                    .any(|label| label.starts_with("Fit Image to View")),
+                "Alt+V opens View"
+            );
+            let help = labels_after_key(&frame, egui::Key::H, egui::Modifiers::ALT);
+            assert!(
+                help.iter().any(|label| label.starts_with("About viewr")),
+                "Alt+H opens Help"
+            );
+        }
+
+        let mut modal = accessibility_test_frame();
+        modal.show_about = true;
+        let behind_modal = labels_after_key(&modal, egui::Key::F10, egui::Modifiers::NONE);
+        assert!(
+            !behind_modal
+                .iter()
+                .any(|label| label.starts_with("Open File...")),
+            "a modal keeps the menu bar closed"
+        );
+    }
+
     fn accessibility_input() -> egui::RawInput {
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -5367,17 +6120,68 @@ mod tests {
     }
 
     #[test]
-    fn chrome_text_and_controls_meet_wcag_aa_contrast() {
-        for mode in [
-            crate::theme::Mode::Light,
-            crate::theme::Mode::Dark,
-            crate::theme::Mode::Console,
-        ] {
+    fn secondary_text_such_as_shortcut_hints_meets_the_contrast_floor() {
+        for mode in crate::theme::Mode::ALL {
+            let context = egui::Context::default();
+            super::apply_chrome_theme(&context, mode);
             let colors = chrome_colors_for(mode);
-            assert!(contrast_ratio(colors.text, colors.panel) >= 4.5);
-            assert!(contrast_ratio(colors.muted, colors.panel) >= 4.5);
-            assert!(contrast_ratio(colors.accent, colors.panel) >= 4.5);
-            assert!(contrast_ratio(colors.accent_ink, colors.accent) >= 4.5);
+            // Color32 is premultiplied: composite over the panel as drawn.
+            let weak = context.style_of(context.theme()).visuals.weak_text_color();
+            let cover = 255 - u32::from(weak.a());
+            let over = |top: u8, under: u8| {
+                let value = u32::from(top) + (u32::from(under) * cover + 127) / 255;
+                u8::try_from(value.min(255)).unwrap_or(u8::MAX)
+            };
+            let weak = egui::Color32::from_rgb(
+                over(weak.r(), colors.panel.r()),
+                over(weak.g(), colors.panel.g()),
+                over(weak.b(), colors.panel.b()),
+            );
+            let floor = if matches!(
+                mode,
+                crate::theme::Mode::HighContrastDark | crate::theme::Mode::HighContrastLight
+            ) {
+                7.0
+            } else {
+                4.5
+            };
+            let ratio = contrast_ratio(weak, colors.panel);
+            assert!(ratio >= floor, "{mode:?} weak text {ratio:.2} < {floor}");
+        }
+    }
+
+    #[test]
+    fn chrome_text_and_controls_meet_wcag_aa_contrast() {
+        for mode in crate::theme::Mode::ALL {
+            // High-contrast modes answer an operating-system request, so they
+            // meet AAA; the others meet AA.
+            let floor = if matches!(
+                mode,
+                crate::theme::Mode::HighContrastDark | crate::theme::Mode::HighContrastLight
+            ) {
+                7.0
+            } else {
+                4.5
+            };
+            let colors = chrome_colors_for(mode);
+            for (name, ratio) in [
+                ("text", contrast_ratio(colors.text, colors.panel)),
+                ("muted", contrast_ratio(colors.muted, colors.panel)),
+                ("accent", contrast_ratio(colors.accent, colors.panel)),
+                (
+                    "accent ink",
+                    contrast_ratio(colors.accent_ink, colors.accent),
+                ),
+                ("text on raised", contrast_ratio(colors.text, colors.raised)),
+                ("text on active", contrast_ratio(colors.text, colors.active)),
+            ] {
+                assert!(ratio >= floor, "{mode:?} {name} {ratio:.2} < {floor}");
+            }
+            if floor > 4.5 {
+                // Control outlines must be visible without relying on fills.
+                let border = contrast_ratio(colors.border, colors.panel);
+                assert!(border >= floor, "{mode:?} border {border:.2}");
+            }
         }
     }
 
@@ -5417,7 +6221,10 @@ mod tests {
             (crate::theme::Preference::Dark, "Appearance: Dark"),
             (crate::theme::Preference::Console, "Appearance: Console"),
         ] {
-            assert_eq!(crate::chrome::appearance_menu_label(preference), expected);
+            assert_eq!(
+                crate::chrome::appearance_menu_label(Language::English, preference),
+                expected
+            );
         }
     }
 
@@ -5463,7 +6270,7 @@ mod tests {
     }
 
     #[test]
-    fn full_image_mosaic_exposes_photos_as_selected_buttons_without_filenames() {
+    fn full_image_mosaic_exposes_photos_as_selected_list_items_without_filenames() {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
@@ -5489,33 +6296,38 @@ mod tests {
             target: 8,
             state: MosaicLoadState::Loading,
         });
-        let output = context.run_ui(accessibility_input(), |ui| {
-            let _ = render(ui, &frame);
-        });
-        let update = output
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit update should be generated");
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update should be generated");
         let photo_nodes = update
             .nodes
             .iter()
-            .filter_map(|(_, node)| {
+            .filter(|(_, node)| {
                 node.label()
-                    .filter(|label| label.starts_with("Photo "))
-                    .map(|_| node)
+                    .is_some_and(|label| label.starts_with("Photo "))
             })
             .collect::<Vec<_>>();
         assert_eq!(photo_nodes.len(), 2);
+        let (selected_id, selected) = photo_nodes[0];
         assert_eq!(
-            photo_nodes[0].label(),
-            Some("Photo 5 of 20 in the active folder view, selected")
+            selected.label(),
+            Some("Photo 5 of 20 in the active folder view"),
+            "selection is a state, not part of the name"
         );
+        assert!(selected.is_selected() == Some(true));
+        assert_eq!(photo_nodes[1].1.is_selected(), Some(false));
         assert_eq!(
-            photo_nodes[0].toggled(),
-            Some(egui::accesskit::Toggled::True)
+            update.focus, *selected_id,
+            "keyboard focus stays on the selected photo"
         );
-        assert!(photo_nodes.iter().all(|node| {
-            node.role() == egui::accesskit::Role::Button
+        assert!(photo_nodes.iter().all(|(_, node)| {
+            node.role() == egui::accesskit::Role::ListItem
+                && node.toggled().is_none()
                 && !node.label().unwrap_or_default().contains("current.png")
         }));
         assert!(update.nodes.iter().any(|(_, node)| {
@@ -5532,17 +6344,17 @@ mod tests {
             target: 12,
             state: MosaicLoadState::Loading,
         };
-        let (first_visible, first_accessible) = mosaic_status(&mosaic);
+        let (first_visible, first_accessible) = mosaic_status(Language::English, &mosaic);
         mosaic.ready = 11;
-        let (later_visible, later_accessible) = mosaic_status(&mosaic);
+        let (later_visible, later_accessible) = mosaic_status(Language::English, &mosaic);
         assert_ne!(first_visible, later_visible);
         assert_eq!(first_accessible, later_accessible);
 
         mosaic.state = MosaicLoadState::MemoryLimited;
-        let (_, terminal_accessible) = mosaic_status(&mosaic);
+        let (_, terminal_accessible) = mosaic_status(Language::English, &mosaic);
         assert_eq!(
             terminal_accessible,
-            "Full-image collage  11 of 12 photos fit the 256 MiB memory limit"
+            "Full-image collage  11 of 12 photos fit the 640 MiB memory limit"
         );
     }
 
@@ -5553,7 +6365,9 @@ mod tests {
         let mut failed = accessibility_test_frame();
         failed.selected_file_name = Some("target.png".to_owned());
         failed.load_error = Some("Could not decode this image".to_owned());
-        failed.toast = Some("Could not display image: adapter rejected upload".to_owned());
+        failed.toast = Some(visual_toast(
+            "Could not display image: adapter rejected upload",
+        ));
         let failed_output = failed_context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &failed);
         });
@@ -5751,11 +6565,9 @@ mod tests {
             .iter()
             .find(|node| node.label() == Some("image 1: current.png"))
             .expect("current thumbnail node");
-        assert_eq!(current_thumbnail.role(), egui::accesskit::Role::Button);
-        assert_eq!(
-            current_thumbnail.toggled(),
-            Some(egui::accesskit::Toggled::True)
-        );
+        assert_eq!(current_thumbnail.role(), egui::accesskit::Role::ListItem);
+        assert_eq!(current_thumbnail.is_selected(), Some(true));
+        assert_eq!(current_thumbnail.toggled(), None);
     }
 
     #[test]
@@ -6230,17 +7042,13 @@ mod tests {
 
     #[test]
     fn rating_outcome_toast_is_polite_while_ordinary_toast_stays_non_live() {
-        assert!(rating_toast_is_status("Rating 4 of 5 saved."));
-        assert!(rating_toast_is_status(
-            "Could not save the rating safely. The previous rating is unchanged."
-        ));
-        assert!(!rating_toast_is_status("Saving rating..."));
-        assert!(!rating_toast_is_status("Saved copy · EXIF retained"));
-
         let rating_context = egui::Context::default();
         rating_context.enable_accesskit();
         let mut rating_frame = accessibility_test_frame();
-        rating_frame.toast = Some("Rating 4 of 5 saved.".to_owned());
+        rating_frame.toast = Some(ToastView {
+            text: "Rating 4 of 5 saved.".to_owned(),
+            announcement: ToastAnnouncement::PoliteStatus,
+        });
         let rating_output = rating_context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &rating_frame);
         });
@@ -6256,7 +7064,7 @@ mod tests {
         let ordinary_context = egui::Context::default();
         ordinary_context.enable_accesskit();
         let mut ordinary_frame = accessibility_test_frame();
-        ordinary_frame.toast = Some("Saved copy · EXIF retained".to_owned());
+        ordinary_frame.toast = Some(visual_toast("Saved copy · EXIF retained"));
         let ordinary_output = ordinary_context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &ordinary_frame);
         });
@@ -6275,7 +7083,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.toast = Some("Moved to Trash. Undo with U.".to_owned());
+        frame.toast = Some(visual_toast("Moved to Trash. Undo with U."));
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
@@ -7078,6 +7886,737 @@ mod tests {
     }
 
     #[test]
+    fn toast_width_grants_wide_windows_the_space_metadata_leaves() {
+        let width = |available, reserve, content| top_toast_max_width(available, reserve, content);
+        assert!((width(900.0, 400.0, 1_270.0) - 500.0).abs() < f32::EPSILON);
+        assert!(
+            (width(900.0, 850.0, 1_270.0) - TOP_STATUS_MAX_WIDTH).abs() < f32::EPSILON,
+            "crowded wide strips keep the standard cap"
+        );
+        assert!((width(150.0, 850.0, 1_270.0) - 150.0).abs() < f32::EPSILON);
+        assert!(
+            (width(500.0, 100.0, 640.0) - TOP_STATUS_COMPACT_MAX_WIDTH).abs() < f32::EPSILON,
+            "compact windows keep the compact cap"
+        );
+    }
+
+    fn page_frame(can_previous: bool, can_next: bool) -> UiFrameOwned {
+        let mut frame = accessibility_test_frame();
+        frame.dock.show_tools = false;
+        frame.dock.show_filmstrip = false;
+        frame.dock.show_image_info = false;
+        frame.pages = Some(PageUiInfo {
+            index: 1,
+            count: 3,
+            noun: "Page",
+            can_previous,
+            can_next,
+            accessibility_label: "Page 2 of 3, 800 by 600".into(),
+            visible_label: "Page 2 of 3".into(),
+        });
+        frame
+    }
+
+    fn top_bar_node(
+        update: &egui::accesskit::TreeUpdate,
+        label: &str,
+    ) -> Option<egui::accesskit::Node> {
+        update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.label() == Some(label)
+                    && node
+                        .bounds()
+                        .is_some_and(|bounds| bounds.y1 <= f64::from(TOP_BAR_HEIGHT))
+            })
+            .cloned()
+    }
+
+    const MISSING_NOTICE: &str =
+        "The selected image is no longer available. Opening the first image in the folder.";
+
+    /// Render twice so a changed appearance has applied its fonts, then return
+    /// the second frame's tree, the notice's unelided width, and the
+    /// filename's unelided width in that style.
+    fn strip_with_notice(
+        frame: &UiFrameOwned,
+        width: f32,
+    ) -> (egui::accesskit::TreeUpdate, f32, f32) {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut notice_width = 0.0;
+        let mut name_width = 0.0;
+        let mut update = None;
+        for _ in 0..2 {
+            let mut input = accessibility_input();
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(width, 750.0),
+            ));
+            let output = context.run_ui(input, |ui| {
+                let _ = render(ui, frame);
+                notice_width = super::strip_text_width(ui, MISSING_NOTICE, 12.5);
+                name_width = super::strip_text_width(ui, "current.png", 13.5);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        (
+            update.expect("top-bar AccessKit update"),
+            notice_width,
+            name_width,
+        )
+    }
+
+    fn node_bounds(
+        update: &egui::accesskit::TreeUpdate,
+        text: &str,
+    ) -> Option<egui::accesskit::Rect> {
+        update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .filter(|node| node.value() == Some(text) || node.label() == Some(text))
+            .filter_map(egui::accesskit::Node::bounds)
+            .find(|bounds| bounds.y1 <= f64::from(TOP_BAR_HEIGHT))
+    }
+
+    fn assert_notice_whole_beside_metadata(frame: &UiFrameOwned, width: f32) {
+        let (update, notice_width, _) = strip_with_notice(frame, width);
+        let notice = node_bounds(&update, MISSING_NOTICE).expect("notice in the top strip");
+        assert!(
+            notice.x1 - notice.x0 + 0.5 >= f64::from(notice_width),
+            "notice elided at {width} px: {notice:?} narrower than {notice_width}"
+        );
+        assert!(notice.x1 <= f64::from(width));
+        let help = node_bounds(&update, "Help").expect("Help menu title");
+        for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", "current.png"] {
+            let other = node_bounds(&update, value)
+                .unwrap_or_else(|| panic!("{value} stays in the strip beside the notice"));
+            assert!(
+                other.x1 <= notice.x0 || other.x0 >= notice.x1,
+                "{value} overlaps the notice: {other:?} vs {notice:?}"
+            );
+            assert!(
+                other.x0 >= help.x1,
+                "{value} was pushed into the menu titles: {other:?} vs {help:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn long_navigation_notice_is_shown_whole_in_a_wide_strip() {
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(MISSING_NOTICE));
+        assert_notice_whole_beside_metadata(&frame, 1_270.0);
+
+        frame.theme_mode = crate::theme::Mode::Console;
+        assert_notice_whole_beside_metadata(&frame, 1_500.0);
+    }
+
+    #[test]
+    fn an_unbounded_notice_never_displaces_the_metadata() {
+        let endless = "The selected image is no longer available. ".repeat(12);
+        for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Console] {
+            let mut frame = page_frame(true, true);
+            frame.theme_mode = mode;
+            frame.toast = Some(visual_toast(&endless));
+            let (update, _, name_width) = strip_with_notice(&frame, 1_270.0);
+            let help = node_bounds(&update, "Help").expect("Help menu title");
+            for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", "100%"] {
+                let chip = node_bounds(&update, value)
+                    .unwrap_or_else(|| panic!("{value} stays visible in {mode:?}"));
+                assert!(
+                    chip.x0 >= help.x1,
+                    "{value} was pushed into the menu titles in {mode:?}: {chip:?} vs {help:?}"
+                );
+            }
+            let name = node_bounds(&update, "current.png").expect("filename slice");
+            assert!(
+                name.x0 >= help.x1
+                    && name.x1 - name.x0 + 0.5
+                        >= f64::from(name_width.min(super::TOP_FILE_NAME_MIN_WIDTH)),
+                "{mode:?}: the filename lost its reserved slice: {name:?} of {name_width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_notice_after_a_failed_open_keeps_at_least_the_standard_width() {
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(MISSING_NOTICE));
+        frame.selected_file_name = Some(format!("{}.png", "long-name-".repeat(12)));
+        frame.load_error = Some("Could not decode this image".to_owned());
+        let (update, notice_width, _) = strip_with_notice(&frame, 1_270.0);
+        let notice = node_bounds(&update, MISSING_NOTICE).expect("notice beside Retry");
+        assert!(
+            notice.x1 - notice.x0 + 0.5 >= f64::from(TOP_STATUS_MAX_WIDTH.min(notice_width)),
+            "a long failure status must not starve the notice: {notice:?}"
+        );
+    }
+
+    #[test]
+    fn a_compact_notice_keeps_the_compact_cap() {
+        let mut frame = page_frame(true, true);
+        frame.toast = Some(visual_toast(MISSING_NOTICE));
+        let (update, _, _) = strip_with_notice(&frame, 640.0);
+        let notice = node_bounds(&update, MISSING_NOTICE).expect("compact notice");
+        assert!(notice.x1 - notice.x0 <= f64::from(TOP_STATUS_COMPACT_MAX_WIDTH) + 1.0);
+    }
+
+    #[test]
+    fn page_chip_offers_named_steps_that_follow_page_availability() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = page_frame(false, true);
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        for glyph in [TOP_PAGE_PREVIOUS_GLYPH, TOP_PAGE_NEXT_GLYPH] {
+            assert!(
+                context
+                    .fonts_mut(|fonts| fonts.has_glyphs(&egui::FontId::proportional(14.0), glyph)),
+                "bundled chrome font must draw {glyph:?}"
+            );
+            assert!(
+                context.fonts_mut(|fonts| fonts.has_glyphs(&egui::FontId::monospace(14.0), glyph)),
+                "Console appearance font must draw {glyph:?}"
+            );
+        }
+        let previous = top_bar_node(&update, "Previous page").expect("previous step in strip");
+        let next = top_bar_node(&update, "Next page").expect("next step in strip");
+        assert_eq!(previous.role(), egui::accesskit::Role::Button);
+        assert!(previous.is_disabled(), "first page has no previous step");
+        assert!(!next.is_disabled());
+        assert_eq!(previous.keyboard_shortcut(), Some("["));
+        assert_eq!(next.keyboard_shortcut(), Some("]"));
+        let position = |label: &str| {
+            update
+                .nodes
+                .iter()
+                .position(|(_, node)| node.label() == Some(label))
+                .expect("step node")
+        };
+        assert!(
+            position("Previous page") < position("Next page"),
+            "keyboard order must meet Previous before Next, as drawn"
+        );
+        let label = top_bar_bounds_for(&frame, 1_200.0, "Page 2 of 3").expect("page identity");
+        let previous = previous.bounds().expect("previous bounds");
+        let next = next.bounds().expect("next bounds");
+        assert!(
+            previous.x1 <= f64::from(label.min.x) && next.x0 >= f64::from(label.max.x),
+            "steps must flank the identity: {previous:?} {label:?} {next:?}"
+        );
+        let position = top_bar_bounds_for(&frame, 1_200.0, "1 / 2").expect("folder position");
+        assert!(
+            f64::from(position.min.x) - next.x1 <= 24.0,
+            "the chip must end at its next step, not reserve slack: {next:?} {position:?}"
+        );
+    }
+
+    #[test]
+    fn clicking_the_strip_next_step_turns_the_page() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = page_frame(true, true);
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("top-bar AccessKit update");
+        let bounds = top_bar_node(&update, "Next page")
+            .and_then(|node| node.bounds())
+            .expect("next step bounds");
+        let center = egui::pos2(
+            f64::midpoint(bounds.x0, bounds.x1) as f32,
+            f64::midpoint(bounds.y0, bounds.y1) as f32,
+        );
+        let mut actions = Vec::new();
+        for pressed in [true, false] {
+            let mut input = accessibility_input();
+            input.events = vec![
+                egui::Event::PointerMoved(center),
+                egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            let _ = context.run_ui(input, |ui| {
+                actions.extend(render(ui, &frame));
+            });
+        }
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::StepSequence(1))),
+            "clicking the strip step must request the next page"
+        );
+    }
+
+    /// Text the pseudo language cannot mark because it is data rather than
+    /// copy: numbers with universal units, fixture filenames, native language
+    /// names, the product and license names, and platform commands. Every
+    /// entry here is a deliberate exception that LOCALIZATION.md permits.
+    fn is_uncataloged_data(text: &str) -> bool {
+        const NAMES: [&str; 8] = [
+            "current.png",
+            "viewr",
+            "Esc",
+            "Apache-2.0",
+            "English",
+            "Español",
+            "Français",
+            "Deutsch",
+        ];
+        const UNITS: [&str; 2] = ["px", "MP"];
+        NAMES.contains(&text)
+            || text.starts_with(std::env::consts::OS)
+            || text.starts_with("xdg-mime ")
+            || text.split_whitespace().all(|token| {
+                UNITS.contains(&token)
+                    || !token
+                        .chars()
+                        .any(|character| character.is_ascii_alphabetic())
+            })
+    }
+
+    fn untranslated_texts(frame: &UiFrameOwned) -> Vec<String> {
+        let (open, _) = crate::locale::PSEUDO_MARKS;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update");
+        let mut offenders: Vec<String> = update
+            .nodes
+            .iter()
+            // A text run is one wrapped line of its labelled parent, which is
+            // checked whole.
+            .filter(|(_, node)| node.role() != egui::accesskit::Role::TextRun)
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .filter(|text| !text.contains(open) && !is_uncataloged_data(text))
+            .map(str::to_owned)
+            .collect();
+        offenders.sort();
+        offenders.dedup();
+        offenders
+    }
+
+    /// Every interface state the pseudo-language test renders, by name.
+    fn pseudo_language_scenarios() -> Vec<(&'static str, UiFrameOwned)> {
+        fn variant(mutate: impl FnOnce(&mut UiFrameOwned)) -> UiFrameOwned {
+            let mut frame = accessibility_test_frame();
+            frame.language = Language::Pseudo;
+            mutate(&mut frame);
+            frame
+        }
+        fn without_image(frame: &mut UiFrameOwned) {
+            frame.dock.has_image = false;
+            frame.file_path = None;
+            frame.playlist_pos = None;
+        }
+        let at_least_four =
+            crate::ratings::RatingFilter::AtLeast(crate::ratings::Rating::new(4).expect("rating"));
+        vec![
+            (
+                "image with panels",
+                variant(|frame| {
+                    frame.dock.show_tools = true;
+                    frame.dock.show_filmstrip = true;
+                    frame.dock.show_image_info = true;
+                    let position = Language::Pseudo
+                        .fill(
+                            tr!("Page {index} of {count}"),
+                            &[("index", "2"), ("count", "3")],
+                        )
+                        .into_string();
+                    frame.pages = Some(PageUiInfo {
+                        index: 1,
+                        count: 3,
+                        noun: "Page",
+                        can_previous: true,
+                        can_next: true,
+                        accessibility_label: Language::Pseudo
+                            .fill(
+                                tr!("{position}, {width} by {height}"),
+                                &[("position", &position), ("width", "800"), ("height", "600")],
+                            )
+                            .into_string(),
+                        visible_label: position,
+                    });
+                }),
+            ),
+            ("empty state", variant(without_image)),
+            ("about", variant(|frame| frame.show_about = true)),
+            ("update", variant(|frame| frame.show_update = true)),
+            (
+                "preferences",
+                variant(|frame| frame.show_preferences = true),
+            ),
+            (
+                "default viewer",
+                variant(|frame| frame.show_file_associations = true),
+            ),
+            (
+                "save overwrite",
+                variant(|frame| frame.save_overwrite_pending = true),
+            ),
+            (
+                "rating disclosure",
+                variant(|frame| {
+                    frame.rating.pending_disclosure = Some(crate::ratings::RatingAssignment::Set(
+                        crate::ratings::Rating::new(4).expect("rating"),
+                    ));
+                }),
+            ),
+            (
+                "filtered empty",
+                variant(|frame| {
+                    without_image(frame);
+                    frame.rating.filter = at_least_four;
+                    frame.rating.match_count = 0;
+                    frame.rating.visible_position = None;
+                    frame.rating.folder_count = 12;
+                    frame.filmstrip.clear();
+                }),
+            ),
+            (
+                "spot heal",
+                variant(|frame| {
+                    frame.dock.heal_active = true;
+                    frame.heal_supported = true;
+                }),
+            ),
+            (
+                "crop",
+                variant(|frame| {
+                    frame.is_cropping = true;
+                    frame.crop_screen = Some([200.0, 150.0, 800.0, 600.0]);
+                    frame.crop_uv = Some([0.1, 0.1, 0.9, 0.9]);
+                }),
+            ),
+            (
+                "load failure",
+                variant(|frame| frame.load_error = Some("truncated".to_owned())),
+            ),
+        ]
+    }
+
+    #[test]
+    fn the_image_canvas_is_an_image_node_named_by_the_presented_file() {
+        let frame = accessibility_test_frame();
+        let nodes = accesskit_nodes(&frame);
+        let images: Vec<_> = nodes
+            .iter()
+            .filter(|node| node.role() == egui::accesskit::Role::Image)
+            .collect();
+        assert_eq!(images.len(), 1, "exactly one image node");
+        let image = images[0];
+        assert_eq!(
+            image.label(),
+            Some("current.png"),
+            "basename only, never a path"
+        );
+        assert_eq!(image.description(), Some("1920 × 1080"));
+        let bounds = image.bounds().expect("image bounds");
+        assert!(bounds.width() > 0.0 && bounds.height() > 0.0);
+        assert!(
+            !image.supports_action(egui::accesskit::Action::Click)
+                && !image.supports_action(egui::accesskit::Action::Focus),
+            "the canvas keeps pointer and keyboard input"
+        );
+
+        let mut empty = accessibility_test_frame();
+        empty.dock.has_image = false;
+        empty.file_path = None;
+        assert!(
+            accesskit_nodes(&empty)
+                .iter()
+                .all(|node| node.role() != egui::accesskit::Role::Image),
+            "no image node without an image"
+        );
+    }
+
+    fn accesskit_nodes(frame: &UiFrameOwned) -> Vec<egui::accesskit::Node> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        update
+            .expect("AccessKit update")
+            .nodes
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect()
+    }
+
+    #[test]
+    fn zoom_shortcuts_rescale_the_image_not_the_interface() {
+        let context = egui::Context::default();
+        let mut input = accessibility_input();
+        input.events = vec![egui::Event::Key {
+            key: egui::Key::Plus,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }];
+        let frame = accessibility_test_frame();
+        for _ in 0..3 {
+            let _ = context.run_ui(input.clone(), |ui| {
+                let _ = render(ui, &frame);
+            });
+        }
+        assert!(!context.options(|options| options.zoom_with_keyboard));
+        assert!(
+            (context.zoom_factor() - 1.0).abs() < f32::EPSILON,
+            "the interface kept its operating-system scale"
+        );
+    }
+
+    #[test]
+    fn modal_focus_is_claimed_once_and_returned_where_the_user_was() {
+        use super::{ModalKind, claim_initial_modal_focus, sync_modal_focus};
+        let context = egui::Context::default();
+        let before = egui::Id::new("control before the modal");
+        let _ = context.run_ui(accessibility_input(), |ui| {
+            let _ = ui.push_id(before, |ui| ui.button("Before"));
+            ui.interact(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(8.0)),
+                before,
+                egui::Sense::click(),
+            );
+        });
+        context.memory_mut(|memory| memory.request_focus(before));
+
+        sync_modal_focus(&context, Some(ModalKind::About));
+        assert!(claim_initial_modal_focus(&context));
+        assert!(!claim_initial_modal_focus(&context), "claimed exactly once");
+
+        sync_modal_focus(&context, Some(ModalKind::Update));
+        assert!(
+            claim_initial_modal_focus(&context),
+            "a replacing modal takes focus for its own default control"
+        );
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("inside")));
+
+        sync_modal_focus(&context, None);
+        assert_eq!(
+            context.memory(egui::Memory::focused),
+            Some(before),
+            "focus returns to where it was before the first modal opened"
+        );
+        assert!(!claim_initial_modal_focus(&context));
+    }
+
+    /// Closing a modal opened from a menu item must not leave focus on the
+    /// closed item: AccessKit adapters reject focus on a node that is not in
+    /// the tree, and on Windows that rejection crashed viewr under a screen
+    /// reader.
+    #[test]
+    fn closing_a_modal_opened_from_a_menu_never_focuses_a_missing_node() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        let focus_is_in_tree = |update: &egui::accesskit::TreeUpdate| {
+            update.nodes.iter().any(|(id, _)| *id == update.focus)
+        };
+        let opener = context.run_ui(accessibility_input(), |ui| {
+            let response = ui.button("Preferences...");
+            response.request_focus();
+            let _ = render(ui, &frame);
+        });
+        assert!(focus_is_in_tree(
+            &opener
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update")
+        ));
+        frame.show_preferences = true;
+        for show_file_associations in [false, true, false] {
+            frame.show_file_associations = show_file_associations;
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            assert!(focus_is_in_tree(
+                &output
+                    .platform_output
+                    .accesskit_update
+                    .expect("AccessKit update")
+            ));
+        }
+        frame.show_preferences = false;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update");
+            assert!(
+                focus_is_in_tree(&update),
+                "focus returned to the closed menu item"
+            );
+        }
+    }
+
+    #[test]
+    fn accessibility_focus_on_a_missing_node_falls_back_to_the_root() {
+        use egui::accesskit::{Node, NodeId, Role, Tree, TreeId, TreeUpdate};
+        let root = NodeId(1);
+        let mut update = TreeUpdate {
+            nodes: vec![
+                (root, Node::new(Role::Window)),
+                (NodeId(2), Node::new(Role::Button)),
+            ],
+            tree: Some(Tree::new(root)),
+            tree_id: TreeId::ROOT,
+            focus: NodeId(99),
+        };
+        super::settle_accessibility_focus(&mut update);
+        assert_eq!(update.focus, root);
+
+        update.focus = NodeId(2);
+        super::settle_accessibility_focus(&mut update);
+        assert_eq!(update.focus, NodeId(2), "focus on a present node is kept");
+
+        update.tree = None;
+        update.focus = NodeId(99);
+        super::settle_accessibility_focus(&mut update);
+        assert_eq!(
+            update.focus,
+            NodeId(99),
+            "an incremental update is judged against a tree it does not carry"
+        );
+    }
+
+    #[test]
+    fn every_modal_is_a_modal_dialog_and_about_focuses_close() {
+        let mut scenarios = pseudo_language_scenarios();
+        scenarios.retain(|(name, _)| {
+            matches!(
+                *name,
+                "about"
+                    | "update"
+                    | "preferences"
+                    | "default viewer"
+                    | "save overwrite"
+                    | "rating disclosure"
+            )
+        });
+        assert_eq!(scenarios.len(), 6);
+        for (name, mut frame) in scenarios {
+            frame.language = Language::English;
+            let nodes = accesskit_nodes(&frame);
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node.role() == egui::accesskit::Role::Dialog && node.is_modal()),
+                "{name} is not exposed as a modal dialog"
+            );
+        }
+
+        let mut frame = accessibility_test_frame();
+        frame.show_about = true;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update");
+        let focused = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .map(|(_, node)| node);
+        assert_eq!(focused.and_then(|node| node.label()), Some("Close"));
+    }
+
+    #[test]
+    fn crop_handles_are_pointer_only_and_hidden_from_assistive_technology() {
+        let mut frame = accessibility_test_frame();
+        frame.is_cropping = true;
+        frame.crop_screen = Some([200.0, 150.0, 800.0, 600.0]);
+        frame.crop_uv = Some([0.1, 0.1, 0.9, 0.9]);
+        let nodes = accesskit_nodes(&frame);
+        let handles: Vec<_> = nodes
+            .iter()
+            .filter(|node| {
+                node.label()
+                    .is_some_and(|label| label.starts_with("Resize crop from"))
+            })
+            .collect();
+        assert_eq!(handles.len(), 8);
+        assert!(handles.iter().all(|node| node.is_hidden()));
+        assert!(
+            nodes.iter().any(|node| node
+                .label()
+                .is_some_and(|label| label.starts_with("Crop selection:"))),
+            "the keyboard crop pane still names its move and resize keys"
+        );
+    }
+
+    #[test]
+    fn spot_heal_repair_is_announced_as_busy_status() {
+        let mut frame = accessibility_test_frame();
+        frame.dock.heal_active = true;
+        frame.heal_busy = true;
+        let nodes = accesskit_nodes(&frame);
+        let status = nodes
+            .iter()
+            .find(|node| {
+                node.label() == Some("Repairing in memory...")
+                    || node.value() == Some("Repairing in memory...")
+            })
+            .expect("repair status node");
+        assert!(status.is_busy());
+        assert_eq!(status.live(), Some(egui::accesskit::Live::Polite));
+    }
+
+    #[test]
+    fn every_rendered_text_and_accessible_name_comes_from_the_catalog() {
+        let scenarios = pseudo_language_scenarios();
+        let mut failures = Vec::new();
+        for (name, frame) in &scenarios {
+            let offenders = untranslated_texts(frame);
+            if !offenders.is_empty() {
+                failures.push(format!("{name}: {offenders:?}"));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "visible text or accessible names bypassed the catalog:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    #[test]
     fn top_status_names_the_embedded_rating_and_filtered_position() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -7568,6 +9107,7 @@ mod tests {
             appearance_menu(
                 ui,
                 &mut actions,
+                Language::English,
                 crate::theme::Preference::System,
                 crate::theme::Mode::Dark,
             );
@@ -7625,7 +9165,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.toast = Some(NOTICE.to_owned());
+        frame.toast = Some(visual_toast(NOTICE));
         let output = context.run_ui(accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });

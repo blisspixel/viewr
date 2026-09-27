@@ -101,7 +101,7 @@ jobs:
           path: ${{ runner.temp }}/product-quality-fixtures/
           if-no-files-found: error
           compression-level: ${{ github.ref_type == 'tag' && 6 || 0 }}
-          retention-days: 30
+          retention-days: 90
 
       - name: Retain checksummed release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -110,7 +110,7 @@ jobs:
           path: target/release-artifacts/
           if-no-files-found: error
           compression-level: ${{ github.ref_type == 'tag' && 6 || 0 }}
-          retention-days: 30
+          retention-days: 90
 
   publish:
     if: github.event_name == 'push' && github.ref_type == 'tag'

@@ -164,20 +164,54 @@ pub(crate) fn current_work_blocker<const N: usize>(
     work.into_iter().flatten().next()
 }
 
+/// Where a browse request would take the view.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BrowseTarget {
+    /// One image that is not the file a rating write is replacing.
+    OtherImage,
+    /// The file a running rating write is replacing, or a view such as the
+    /// collage that may decode it.
+    RatingWriteTarget,
+}
+
+impl BrowseTarget {
+    /// Classify a browse to `destination` while `rating_write` names the file
+    /// a running rating write is replacing, if any.
+    #[must_use]
+    pub(crate) fn for_image(
+        destination: Option<&std::path::Path>,
+        rating_write: Option<&std::path::Path>,
+    ) -> Self {
+        match (destination, rating_write) {
+            (Some(destination), Some(written)) if destination == written => Self::RatingWriteTarget,
+            _ => Self::OtherImage,
+        }
+    }
+}
+
 /// Folder browsing may replace an in-flight decode or continue while a background
 /// move to Trash completes. The last good frame stays until the newly selected
 /// image is ready.
+///
+/// A rating write also lets culling move on, because the write is bound to its
+/// own path and verified source. Only a request that would decode that path
+/// waits, so no decode can race the atomic replacement.
 #[must_use]
-pub(crate) const fn blocks_browse(work: CurrentWork) -> bool {
-    !matches!(work, CurrentWork::ImagePreparation | CurrentWork::TrashMove)
+pub(crate) const fn blocks_browse(work: CurrentWork, target: BrowseTarget) -> bool {
+    match work {
+        CurrentWork::ImagePreparation | CurrentWork::TrashMove => false,
+        CurrentWork::RatingWrite => matches!(target, BrowseTarget::RatingWriteTarget),
+        _ => true,
+    }
 }
 
-/// Select the first browse blocker after ignoring replaceable image preparation.
+/// Select the first browse blocker after ignoring work that browsing may outlive.
 #[must_use]
 pub(crate) fn browse_work_blocker<const N: usize>(
     work: [Option<CurrentWork>; N],
+    target: BrowseTarget,
 ) -> Option<CurrentWork> {
-    current_work_blocker(work.map(|entry| entry.filter(|active| blocks_browse(*active))))
+    current_work_blocker(work.map(|entry| entry.filter(|active| blocks_browse(*active, target))))
 }
 
 /// A running move to Trash may accept another fully presented source. The
@@ -441,21 +475,30 @@ mod tests {
 
     #[test]
     fn browse_and_spot_heal_preflight_inspect_every_relevant_fact() {
-        assert!(!blocks_browse(CurrentWork::ImagePreparation));
-        assert!(!blocks_browse(CurrentWork::TrashMove));
-        assert!(blocks_browse(CurrentWork::Crop));
-        assert!(blocks_browse(CurrentWork::FolderScan));
-        assert!(blocks_browse(CurrentWork::SpotHeal));
+        for target in [BrowseTarget::OtherImage, BrowseTarget::RatingWriteTarget] {
+            assert!(!blocks_browse(CurrentWork::ImagePreparation, target));
+            assert!(!blocks_browse(CurrentWork::TrashMove, target));
+            assert!(blocks_browse(CurrentWork::Crop, target));
+            assert!(blocks_browse(CurrentWork::FolderScan, target));
+            assert!(blocks_browse(CurrentWork::SpotHeal, target));
+            assert!(blocks_browse(CurrentWork::Save, target));
+        }
         assert_eq!(
-            browse_work_blocker([
-                Some(CurrentWork::ImagePreparation),
-                Some(CurrentWork::Crop),
-                Some(CurrentWork::Save),
-            ]),
+            browse_work_blocker(
+                [
+                    Some(CurrentWork::ImagePreparation),
+                    Some(CurrentWork::Crop),
+                    Some(CurrentWork::Save),
+                ],
+                BrowseTarget::OtherImage,
+            ),
             Some(CurrentWork::Crop)
         );
         assert_eq!(
-            browse_work_blocker([Some(CurrentWork::ImagePreparation), None]),
+            browse_work_blocker(
+                [Some(CurrentWork::ImagePreparation), None],
+                BrowseTarget::OtherImage,
+            ),
             None
         );
         assert_eq!(
@@ -467,6 +510,41 @@ mod tests {
             Some("Retry the failed image load before using Spot Heal")
         );
         assert_eq!(spot_heal_source_blocker(EN, false, false), None);
+    }
+
+    #[test]
+    fn culling_moves_on_during_a_rating_write_but_never_decodes_its_target() {
+        let work = [
+            Some(CurrentWork::ImagePreparation),
+            Some(CurrentWork::RatingWrite),
+        ];
+        assert_eq!(browse_work_blocker(work, BrowseTarget::OtherImage), None);
+        assert_eq!(
+            browse_work_blocker(work, BrowseTarget::RatingWriteTarget),
+            Some(CurrentWork::RatingWrite)
+        );
+        let written = std::path::Path::new("rated.jpg");
+        assert_eq!(
+            BrowseTarget::for_image(Some(written), Some(written)),
+            BrowseTarget::RatingWriteTarget
+        );
+        assert_eq!(
+            BrowseTarget::for_image(Some(std::path::Path::new("next.jpg")), Some(written)),
+            BrowseTarget::OtherImage
+        );
+        assert_eq!(
+            BrowseTarget::for_image(Some(written), None),
+            BrowseTarget::OtherImage
+        );
+        // Every other foreground command still waits for the write.
+        assert_eq!(
+            current_work_blocker(work),
+            Some(CurrentWork::ImagePreparation)
+        );
+        assert_eq!(
+            current_work_blocker([None, Some(CurrentWork::RatingWrite)]),
+            Some(CurrentWork::RatingWrite)
+        );
     }
 
     #[test]

@@ -452,16 +452,18 @@ Shipped:
   endpoint failures become terminal for the current playlist without including a
   path in the worker result. Entries use shared immutable decoded ownership plus
   its paired source handle so a nearby just-left pristine frame can enter the
-  cache without copying pixels. Full-image collage temporarily raises only the
-  entry cap to 12 and lowers the neighbor byte cap by the retained current
-  decode, so current plus neighbor decoded pixels remain within 256 MiB. Mosaic
-  admission does not evict an accepted photo to fit a later completion. Entries
-  and scheduling state are never persisted.
-- **`mosaic`**: pure 12-photo projection paging, ordered keyboard focus, and dense
+  cache without copying pixels. Full-image collage temporarily raises the entry
+  cap to 12 and the combined current plus display-image budget to 640 MiB.
+  Worker decodes become bounded display images before cache admission; opening
+  a slot starts a full-resolution load. Mosaic admission does not evict an
+  accepted photo to fit a later completion. Entries and scheduling state are
+  never persisted.
+- **`mosaic`**: 12-photo projection paging, bounded display-image policy, ordered
+  keyboard focus, and dense
   physical collage geometry. Dynamic programming selects justified row breaks
   from actual image aspect ratios, balances row heights against the viewport, and
   centers only the unavoidable outer remainder. It contains no pixels, paths,
-  cache, or persistence. `App` maps its canonical indices to ordinary full
+  cache, or persistence. `App` maps its canonical indices to background display
   decodes and renderer slots.
 - **`thumbs`**: one event-loop-owned schedule capped at nine active folder-preview
   jobs and nine retained GPU textures for the visible filmstrip window. Exact
@@ -592,9 +594,11 @@ treatment.
    full-image collage group draws at most 12 page textures and reuses the current
    texture when that photo belongs to the page. On a different page, the inactive
    current texture remains owned while up to 12 admitted page textures draw.
-   Current plus neighbor decoded pixels are admitted against the same 256 MiB
-   decoded-byte policy. Mosaic textures retain the normal output transform and mip
-   chain; there is no thumbnail substitution. Image-cache memory does not grow
+   Current plus collage display pixels are admitted against a transient 640 MiB
+   decoded-byte policy. Each background slot is bounded to at most 4 Mi pixels
+   and its actual allowance is divided across the remaining slots. Mosaic
+   textures retain the normal output transform and mip chain; there is no
+   thumbnail substitution. Image-cache memory does not grow
    with folder length; the lightweight playlist path index necessarily does.
 6. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
    are changes to the sampling transform, with mip selection handled by the
@@ -791,7 +795,8 @@ polish.
 
 - **No remote-service client exists.** No HTTP, TLS, telemetry, or update client is
   linked, and CI enforces the dependency policy (see `PRIVACY.md`). Linux's generic
-  D-Bus code is restricted to the AccessKit/AT-SPI path; startup permits Unix-domain
+  D-Bus code is restricted to the AccessKit/AT-SPI path and viewr's reviewed
+  desktop-portal OpenURI and read-only Settings calls; startup permits Unix-domain
   socket creation only and denies io_uring before application threads. Worker
   seccomp and enclosing OS package profiles add stricter boundaries.
 - **C-backed decoding is process-isolated.** The daemon receives one versioned

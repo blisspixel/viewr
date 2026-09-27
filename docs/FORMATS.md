@@ -53,8 +53,9 @@ returns no authority for file mutation.
   still image. `[` and `]` step one frame without wrapping and pause timed
   playback first. Frame identity is "Frame N of M".
 - TIFF pages and ICO frames reuse that same bounded sequence model but never
-  auto-play. Pages may differ in size. `[` and `]` plus Image Information and
-  View menu step one page without wrapping. TIFF identity is "Page N of M". ICO
+  auto-play. Pages may differ in size. `[` and `]`, the step buttons beside the
+  top-status identity, Image Information, and the View menu step one page
+  without wrapping. TIFF identity is "Page N of M". ICO
   identity is "Icon N of M" plus the current pixel size, starting on the
   already-presented largest still when that size exists in the directory. The
   top status shows that identity beside the folder position at every window

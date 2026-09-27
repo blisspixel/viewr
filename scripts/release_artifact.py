@@ -198,22 +198,37 @@ def _require_directory_below_target(repository_root: Path, directory: Path) -> P
     return resolved
 
 
-def _load_identity(repository_root: Path) -> tuple[str, str]:
+def workspace_version(repository_root: Path) -> str:
+    """Return the validated `[workspace.package]` version from `Cargo.toml`.
+
+    Release archives and product-quality evidence both bind to this value, so it
+    is read from the manifest rather than repeated as a literal that can drift.
+    """
     cargo_path = repository_root / "Cargo.toml"
-    toolchain_path = repository_root / "rust-toolchain.toml"
     _require_regular_file(cargo_path, "workspace manifest")
-    _require_regular_file(toolchain_path, "toolchain manifest")
     try:
         cargo = tomllib.loads(cargo_path.read_text(encoding="utf-8"))
-        toolchain = tomllib.loads(toolchain_path.read_text(encoding="utf-8"))
         version = cargo["workspace"]["package"]["version"]
-        channel = toolchain["toolchain"]["channel"]
     except (KeyError, tomllib.TOMLDecodeError) as error:
         raise ReleaseError(
             f"invalid release identity configuration: {error}"
         ) from error
     if not isinstance(version, str) or VERSION_PATTERN.fullmatch(version) is None:
         raise ReleaseError("workspace version must be an explicit semantic version")
+    return version
+
+
+def _load_identity(repository_root: Path) -> tuple[str, str]:
+    version = workspace_version(repository_root)
+    toolchain_path = repository_root / "rust-toolchain.toml"
+    _require_regular_file(toolchain_path, "toolchain manifest")
+    try:
+        toolchain = tomllib.loads(toolchain_path.read_text(encoding="utf-8"))
+        channel = toolchain["toolchain"]["channel"]
+    except (KeyError, tomllib.TOMLDecodeError) as error:
+        raise ReleaseError(
+            f"invalid release identity configuration: {error}"
+        ) from error
     if not isinstance(channel, str) or TOOLCHAIN_PATTERN.fullmatch(channel) is None:
         raise ReleaseError(
             "release toolchain must be pinned to an exact stable version"

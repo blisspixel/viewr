@@ -70,11 +70,6 @@ wildcards = "allow"
 # exact older transitive version and the upstream path that still requires it.
 # `-D warnings` also rejects stale entries after an upstream convergence.
 skip = [
-    # AccessKit's current Windows, AT-SPI, and macOS adapters use three consumer
-    # API lines. Keep the newest line visible and baseline the two older adapters.
-    { crate = "accesskit_consumer@0.35.0", reason = "accesskit_windows 0.32.1 requires this API line" },
-    { crate = "accesskit_consumer@0.36.0", reason = "accesskit_atspi_common 0.18.1 requires this API line" },
-
     # Winit 0.30 and its platform dependencies have not fully converged with the
     # newer egui, wgpu, rfd, clipboard, and text-rendering dependency lines.
     { crate = "bitflags@1.3.2", reason = "winit CoreGraphics and Redox dependencies require bitflags 1" },
@@ -163,7 +158,7 @@ deny = [
     { crate = "native-tls" },
     { crate = "openssl" },
     { crate = "openssl-sys" },
-    { crate = "zbus", wrappers = ["accesskit_unix", "atspi-common", "atspi-proxies", "viewr"], reason = "generic D-Bus transport is allowed only for Linux AccessKit/AT-SPI and the reviewed OpenURI Open With chooser" },
+    { crate = "zbus", wrappers = ["accesskit_unix", "atspi-common", "atspi-proxies", "viewr"], reason = "generic D-Bus transport is allowed only for Linux AccessKit/AT-SPI, the reviewed OpenURI Open With chooser, and the reviewed portal Settings read of high contrast and text size" },
     { crate = "async-process", wrappers = ["zbus"], reason = "process helper is allowed only inside the confined D-Bus transport" },
 ]
 

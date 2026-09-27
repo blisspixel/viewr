@@ -94,6 +94,8 @@ build, see [Installing viewr](docs/INSTALL.md).
 - Stores standard 0-to-5 XMP ratings in supported JPEG files and filters the
   current folder without creating a catalog or sidecar.
 - Shows up to 12 complete photos in a dense, aspect-aware full-image collage.
+  Large photos use bounded display images in the collage; opening one loads its
+  full-resolution source.
 - Shows a presence-only Source Privacy summary and strips supported metadata from
   saved copies by default.
 - Uses native Open With, system Trash with receipt-bound Undo, and explicit

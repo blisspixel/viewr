@@ -258,7 +258,9 @@ the current image.
   remain part of release acceptance.
 - The automated GUI timing probe does not enter Full-Image Collage. Pure collage,
   admission, texture-reuse, and accessibility tests enforce its structural
-  bounds; PQ-PW-08 remains the candidate-binary interaction and visual gate on
-  representative hardware.
+  bounds. The Windows UI Automation smoke also waits for all twelve synthetic
+  6000 by 4000 photos after entering with Up, then checks Right and Down. It does
+  not measure peak memory or representative-GPU latency; PQ-PW-08 remains the
+  candidate-binary interaction and visual gate on representative hardware.
 - Manual cold-launch and interaction checks on Windows, macOS, and representative
   Linux desktops remain release acceptance work.

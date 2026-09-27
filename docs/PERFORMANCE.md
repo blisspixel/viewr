@@ -37,14 +37,17 @@ window thread never performs the resize.
 Full-Image Collage prepares complete, color-correct display images on background
 workers and uses the normal mipmapped texture path. It never calls the Folder
 Previews thumbnail generator. The current full decode counts first against a
-640 MiB transient decoded-pixel budget. Remaining bytes are divided across up
+640 MiB retained decoded-pixel budget. Remaining bytes are divided across up
 to 11 other group photos, or 12 when the retained current photo is outside the
 group; each is capped at 4 Mi pixels and 4096 pixels on either edge. The
 current GPU texture is reused when it belongs to the group. Other textures are
 uploaded at most one per redraw, so entering the view does not issue one burst of
-12 event-loop uploads. A completion that cannot fit does not evict an already
-accepted group photo and trigger decode churn. Collage cache entries are cleared
-on exit so selecting a photo loads the full-resolution source. Level-zero mosaic
+12 event-loop uploads. At most two collage jobs decode at once. Each briefly
+holds a full image before reducing it to its retained display size, so process
+peak memory can exceed 640 MiB while the group loads. A completion that cannot
+fit does not evict an already accepted group photo and trigger decode churn.
+Collage cache entries are cleared on exit so selecting a photo loads the
+full-resolution source. Level-zero mosaic
 texture bytes follow the display-image bound, with the documented mip chain
 overhead, while an inactive current texture remains available for returning to
 single-photo view.

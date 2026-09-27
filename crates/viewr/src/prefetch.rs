@@ -19,6 +19,9 @@ pub const DEFAULT_CAPACITY: usize = 5;
 pub const DEFAULT_MAX_BYTES: usize = 256 * 1024 * 1024;
 const MAX_SAFE_FILENAME_CHARS: usize = 96;
 const MAX_ACTIVE_JOBS: usize = 4;
+// Collage jobs briefly hold a full decode before producing a bounded display
+// image. Limit that overlap independently of ordinary neighbor prefetch.
+const MAX_ACTIVE_COLLAGE_JOBS: usize = 2;
 /// Neighbors decoded ahead in the direction of travel. Culling moves one way
 /// through a folder, so the next steps matter more than the ones behind.
 pub(crate) const NEIGHBORS_AHEAD: usize = 3;
@@ -181,6 +184,9 @@ impl PrefetchSchedule {
         N: FnOnce() + Send + 'static,
         S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
     {
+        if self.active.len() >= MAX_ACTIVE_COLLAGE_JOBS {
+            return false;
+        }
         self.request_with(path, notify, schedule, move |path, cancellation| {
             collage_decode(
                 DecodedImage::load_background_if_current(path, cancellation, 0),
@@ -203,6 +209,9 @@ impl PrefetchSchedule {
         N: FnOnce() + Send + 'static,
         S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
     {
+        if self.active.len() >= MAX_ACTIVE_COLLAGE_JOBS {
+            return false;
+        }
         self.request_with(path, notify, schedule, move |path, cancellation| {
             collage_decode(
                 DecodedImage::load_scanned_background_if_current(path, provenance, cancellation, 0),
@@ -725,9 +734,9 @@ pub(crate) fn neighbor_indices(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ACTIVE_JOBS, PrefetchCache, PrefetchDestination, PrefetchFailure, PrefetchSchedule,
-        exclude_blocked_neighbors, neighbor_decode_may_start, neighbor_indices,
-        path_free_texture_id, prefetch_destination, privacy_safe_file_name,
+        MAX_ACTIVE_COLLAGE_JOBS, MAX_ACTIVE_JOBS, PrefetchCache, PrefetchDestination,
+        PrefetchFailure, PrefetchSchedule, exclude_blocked_neighbors, neighbor_decode_may_start,
+        neighbor_indices, path_free_texture_id, prefetch_destination, privacy_safe_file_name,
     };
     use crate::color::WorkingColorEncoding;
     use crate::decode::DecodedImage;
@@ -1008,6 +1017,37 @@ mod tests {
         assert!(rejected.is_idle());
         assert!(rejected.is_eligible(&path));
         assert_eq!(notifications.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn collage_caps_full_decode_overlap_and_retries_after_completion() {
+        let mut schedule = PrefetchSchedule::default();
+        for index in 0..MAX_ACTIVE_COLLAGE_JOBS {
+            assert!(schedule.request_collage(
+                PathBuf::from(format!("photo-{index}.png")),
+                100_000,
+                || {},
+                |task| {
+                    drop(task);
+                    true
+                },
+            ));
+        }
+        assert_eq!(schedule.in_flight_len(), MAX_ACTIVE_COLLAGE_JOBS);
+        assert!(!schedule.request_collage(PathBuf::from("next.png"), 100_000, || {}, |_| true,));
+        assert_eq!(
+            schedule.poll().into_completions().len(),
+            MAX_ACTIVE_COLLAGE_JOBS
+        );
+        assert!(schedule.request_collage(
+            PathBuf::from("next.png"),
+            100_000,
+            || {},
+            |task| {
+                drop(task);
+                true
+            },
+        ));
     }
 
     #[test]

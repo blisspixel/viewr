@@ -11,6 +11,8 @@ and organized by user-visible concern.
   image because their full decodes exhaust the cache. Each collage slot now gets
   a complete, color-correct display image sized for the available memory. Opening
   a selected photo still loads its full-resolution source.
+- Entering the collage while a photo is still loading no longer lets its reduced
+  collage preview replace the full-resolution single-photo image.
 
 ## 0.6.5 - 2026-09-25
 

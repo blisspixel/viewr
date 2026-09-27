@@ -367,17 +367,22 @@ pub(crate) enum PrefetchDestination {
     Ignore,
 }
 
-/// Pure destination policy for a finished prefetch job.
+/// Pure destination policy for a finished prefetch job. Collage jobs retain
+/// display-sized images, so even a selected photo awaiting its full decode must
+/// stay in the collage cache instead of becoming the foreground image.
 #[must_use]
 pub(crate) fn prefetch_destination(
     selected: Option<&Path>,
     selected_is_pending_or_failed: bool,
+    collage_active: bool,
     path_in_playlist: bool,
     path: &Path,
 ) -> PrefetchDestination {
     if selected == Some(path) {
-        if selected_is_pending_or_failed {
+        if selected_is_pending_or_failed && !collage_active {
             PrefetchDestination::PresentSelected
+        } else if collage_active && path_in_playlist {
+            PrefetchDestination::CacheNeighbor
         } else {
             PrefetchDestination::Ignore
         }
@@ -732,23 +737,37 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn prefetch_destination_presents_selected_only_while_pending_or_failed() {
+    fn prefetch_destination_never_presents_a_collage_preview() {
         let selected = Path::new("selected.png");
         assert_eq!(
-            prefetch_destination(Some(selected), true, true, selected),
+            prefetch_destination(Some(selected), true, false, true, selected),
             PrefetchDestination::PresentSelected
         );
         assert_eq!(
-            prefetch_destination(Some(selected), false, true, selected),
+            prefetch_destination(Some(selected), false, false, true, selected),
             PrefetchDestination::Ignore
         );
         assert_eq!(
-            prefetch_destination(Some(selected), false, true, Path::new("neighbor.png")),
+            prefetch_destination(
+                Some(selected),
+                false,
+                false,
+                true,
+                Path::new("neighbor.png")
+            ),
             PrefetchDestination::CacheNeighbor
         );
         assert_eq!(
-            prefetch_destination(Some(selected), true, false, Path::new("stale.png")),
+            prefetch_destination(Some(selected), true, false, false, Path::new("stale.png")),
             PrefetchDestination::Ignore
+        );
+        assert_eq!(
+            prefetch_destination(Some(selected), true, true, true, selected),
+            PrefetchDestination::CacheNeighbor
+        );
+        assert_eq!(
+            prefetch_destination(Some(selected), false, true, true, selected),
+            PrefetchDestination::CacheNeighbor
         );
     }
 

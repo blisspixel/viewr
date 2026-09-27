@@ -1044,6 +1044,7 @@ $testDirectory = Join-Path (
 $firstImage = Join-Path $testDirectory "first.png"
 $secondImage = Join-Path $testDirectory "second.png"
 $ratedImage = Join-Path $testDirectory "rated.jpg"
+$collageDirectory = Join-Path $testDirectory "collage"
 $appearanceDirectory = Join-Path $testDirectory "viewr"
 $appearanceFile = Join-Path $appearanceDirectory "appearance"
 $folderSortFile = Join-Path $appearanceDirectory "folder-sort"
@@ -1696,6 +1697,37 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
+    Stop-TestApplication
+    [IO.Directory]::CreateDirectory($collageDirectory) | Out-Null
+    for ($index = 1; $index -le 12; $index++) {
+        $photo = Join-Path $collageDirectory ("photo-{0:D2}.png" -f $index)
+        [IO.File]::WriteAllBytes($photo, $png)
+        [IO.File]::SetLastWriteTimeUtc(
+            $photo,
+            [DateTime]::UtcNow.AddMinutes(-$index)
+        )
+    }
+    Start-TestApplication -ImagePath (Join-Path $collageDirectory "photo-01.png")
+    Wait-ForElement -Name "1 / 12" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x26
+    Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
+    Wait-ForSelectionState `
+        -Name "Photo 1 of 12 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x27
+    Wait-ForSelectionState `
+        -Name "Photo 2 of 12 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x28
+    Wait-ForElementAbsent -Name "Full-image collage" -Prefix | Out-Null
+    Wait-ForElement -Name "2 / 12" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
         "actions, first-run scope, stable initial window size, conventional Trash " +
@@ -1705,6 +1737,7 @@ try {
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
         "external file replacement with unsaved edits, last-good-frame after delete, " +
+        "twelve-photo collage keyboard navigation, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }
@@ -1723,6 +1756,15 @@ finally {
     }
     if ([IO.Directory]::Exists($appearanceDirectory)) {
         [IO.Directory]::Delete($appearanceDirectory, $false)
+    }
+    if ([IO.Directory]::Exists($collageDirectory)) {
+        for ($index = 1; $index -le 12; $index++) {
+            $photo = Join-Path $collageDirectory ("photo-{0:D2}.png" -f $index)
+            if ([IO.File]::Exists($photo)) {
+                [IO.File]::Delete($photo)
+            }
+        }
+        [IO.Directory]::Delete($collageDirectory, $false)
     }
     if ([IO.Directory]::Exists($testDirectory)) {
         [IO.Directory]::Delete($testDirectory, $false)

@@ -19,6 +19,8 @@ and organized by user-visible concern.
   a selected photo still loads its full-resolution source.
 - Entering the collage while a photo is still loading no longer lets its reduced
   collage preview replace the full-resolution single-photo image.
+- Collage loading now overlaps at most two full photo decodes before reducing
+  them to display size, lowering temporary memory use for very large groups.
 
 ## 0.6.5 - 2026-09-25
 

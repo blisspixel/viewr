@@ -1753,15 +1753,10 @@ try {
     ) | Out-Null
     Send-ApplicationKey -VirtualKey 0x26
     Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
-    $firstCollageItem = Wait-ForSelectionState `
+    Wait-ForSelectionState `
         -Name "Photo 1 of 13 in the active folder view" `
         -Selected $true `
-        -ControlType ([System.Windows.Automation.ControlType]::ListItem)
-    Write-Host (
-        "accessibility-smoke: collage initial Right; photo one focusable " +
-        "$($firstCollageItem.Current.IsKeyboardFocusable), focused " +
-        "$($firstCollageItem.Current.HasKeyboardFocus)"
-    )
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
     Send-ApplicationKey -VirtualKey 0x27
     Wait-ForSelectionState `
         -Name "Photo 2 of 13 in the active folder view" `
@@ -1787,7 +1782,8 @@ try {
         -Name "Photo 1 of 13 in the active folder view" `
         -Selected $true `
         -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
-    Write-Host "accessibility-smoke: collage Right after Escape and re-entry"
+    # Re-entry exposes the current photo before background neighbors are ready.
+    Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
     Send-ApplicationKey -VirtualKey 0x27
     Wait-ForSelectionState `
         -Name "Photo 2 of 13 in the active folder view" `

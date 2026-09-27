@@ -1,6 +1,6 @@
 # Accessibility validation
 
-**Status on 2026-08-27:** native AccessKit delivery is implemented on Windows,
+**Status:** native AccessKit delivery is implemented on Windows,
 macOS, and Linux. Semantic unit tests, contrast tests, keyboard tests, cross-target
 builds, and an external Windows UI Automation smoke test pass. Windows CI retries
 transient UI Automation focus rejection without weakening semantic assertions.
@@ -175,9 +175,10 @@ pwsh -NoProfile -File scripts/accessibility-smoke.ps1 `
 
 UI interaction uses the operating system's UI Automation client against the real
 out-of-process AccessKit tree. The script also uses local Win32 window and keyboard
-messages, WPF only to encode a disposable JPEG, Shell Property System and
+messages, WPF to encode disposable JPEG and PNG files, Shell Property System and
 filesystem APIs for metadata and alternate-stream checks, and an optional GExiv2
-probe. It creates three small disposable images beneath `target/` and verifies:
+probe. It creates three small disposable images and twelve compressed 6000 by
+4000 PNGs beneath `target/` and verifies:
 
 - the application root and menu focusability;
 - the visible first-run drop and file-versus-folder session scope and both open
@@ -196,8 +197,10 @@ probe. It creates three small disposable images beneath `target/` and verifies:
 - the enabled current-image Move to Trash action and absence of the removed
   mark, review, and batch-trash controls;
 - the exact disabled `Undo Trash` label before a recoverable receipt exists;
-- showing Folder Previews and discovering both thumbnail buttons; and
+- showing Folder Previews and discovering both thumbnail buttons;
 - accessible thumbnail activation and resulting image navigation;
+- Up entering a twelve-photo large-image collage, Right moving the native
+  selected state to photo two, and Down opening that photo;
 - first-write rating disclosure and safe initial focus, native `0`, `4`, and `5`
   key handling, minimum-rating radio state, filtered-empty recovery, and rating
   persistence across a real process restart; and
@@ -208,16 +211,16 @@ probe. It creates three small disposable images beneath `target/` and verifies:
 In-process semantic regressions separately cover full-image collage position-only
 photo buttons and selected identity, settled Undo Trash ownership, its path-free
 other-folder guidance, menu bounds, and generic copy while restore ownership is
-active or uncertain. Collage keyboard and native dynamic-state behavior plus
+active or uncertain. The Windows smoke covers one collage keyboard path; complete
+collage interactions, native dynamic-state behavior on all platforms, and
 announcement timing remain in the manual target-OS matrix.
 
-It closes the exact process it launched and removes its three known fixtures, the
+It closes the exact process it launched and removes its fifteen known fixtures, the
 isolated `viewr/appearance` and `viewr/folder-sort` preferences, and the empty
-unique directory. The
-Windows CI job runs the same script against the debug binary. Every wait is bounded
-both per operation and by one absolute five-minute suite deadline, which reports
-the active probe and accessible tree if reached, so successful earlier waits cannot
-extend the job indefinitely.
+unique directory. The Windows CI job runs the same script against the debug binary.
+Every wait has a per-operation bound and shares one absolute five-minute suite
+deadline. Reaching that deadline reports the active probe and accessible tree,
+so successful earlier waits cannot extend the job indefinitely.
 
 This test proves that the native provider and action path work. It does not prove
 speech quality, reading order under every screen-reader mode, target-platform

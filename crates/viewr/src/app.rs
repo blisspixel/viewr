@@ -218,6 +218,7 @@ fn run_internal(
         current_rating_capability: RatingWriteCapability::UnsafeSource,
         system_accessibility: crate::system_accessibility::SystemAccessibility::default(),
         accessibility_query: None,
+        accessibility_refresh_pending: false,
         presented_rating: RatingState::Loading,
         transform: Transform::default(),
         custom_crop_ratio: (3, 5),
@@ -1087,6 +1088,8 @@ struct App {
     system_accessibility: crate::system_accessibility::SystemAccessibility,
     /// A background read of those settings, when the read can block.
     accessibility_query: Option<Receiver<crate::system_accessibility::SystemAccessibility>>,
+    /// A newer settings event arrived while the background read was in flight.
+    accessibility_refresh_pending: bool,
     /// Rating associated with the last source whose pixels were presented.
     presented_rating: RatingState,
     transform: Transform,
@@ -3753,6 +3756,7 @@ impl App {
             return;
         }
         if self.accessibility_query.is_some() {
+            self.accessibility_refresh_pending = true;
             return;
         }
         let (sender, receiver) = mpsc::channel();
@@ -3776,12 +3780,17 @@ impl App {
             return;
         };
         match poll_worker(receiver) {
-            WorkerPoll::Pending => {}
+            WorkerPoll::Pending => return,
             WorkerPoll::Ready(settings) => {
                 self.accessibility_query = None;
-                self.apply_system_accessibility(settings);
+                if !self.accessibility_refresh_pending {
+                    self.apply_system_accessibility(settings);
+                }
             }
             WorkerPoll::Disconnected => self.accessibility_query = None,
+        }
+        if std::mem::take(&mut self.accessibility_refresh_pending) {
+            self.refresh_system_accessibility();
         }
     }
 

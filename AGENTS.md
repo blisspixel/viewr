@@ -195,8 +195,9 @@ published tag.
 Local inspection, reversible edits, tests, and isolated worktrees are in
 scope. Do not commit, push, tag, publish, dispatch `Release artifacts`, or
 change GitHub release state unless the user asked. `main` is protected and
-linear: work lands through a branch and a reviewed pull request with the
-required checks green, never a direct push, merge commit, or force push. Do not run the public
+linear: work lands through a branch and a pull request with the required
+checks green. Tester feedback is welcome but an approval is not required.
+Never direct push, merge commit, or force push. Do not run the public
 installers as part of development. Do not operate on the user's real photos;
 use synthetic fixtures. Report vulnerabilities only through `SECURITY.md`.
 

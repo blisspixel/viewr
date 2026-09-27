@@ -220,7 +220,7 @@ announcement timing remain in the manual target-OS matrix.
 It closes the exact process it launched and removes its sixteen known fixtures, the
 isolated `viewr/appearance` and `viewr/folder-sort` preferences, and the empty
 unique directory. The Windows CI job runs the same script against the debug binary.
-Every wait has a per-operation bound and shares one absolute five-minute suite
+Every wait has a per-operation bound and shares one absolute ten-minute suite
 deadline. Reaching that deadline reports the active probe and accessible tree,
 so successful earlier waits cannot extend the job indefinitely.
 

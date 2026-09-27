@@ -1699,9 +1699,38 @@ try {
 
     Stop-TestApplication
     [IO.Directory]::CreateDirectory($collageDirectory) | Out-Null
+    Add-Type -AssemblyName PresentationCore
+    $collagePixels = [byte[]]::new(6000 * 4000 * 3)
+    $collageBitmap = [System.Windows.Media.Imaging.BitmapSource]::Create(
+        6000,
+        4000,
+        96,
+        96,
+        [System.Windows.Media.PixelFormats]::Bgr24,
+        $null,
+        $collagePixels,
+        6000 * 3
+    )
+    $collageEncoder = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $collageEncoder.Frames.Add(
+        [System.Windows.Media.Imaging.BitmapFrame]::Create($collageBitmap)
+    )
+    $firstCollagePhoto = Join-Path $collageDirectory "photo-01.png"
+    $collageStream = [IO.File]::Create($firstCollagePhoto)
+    try {
+        $collageEncoder.Save($collageStream)
+    }
+    finally {
+        $collageStream.Dispose()
+    }
+    $collagePixels = $null
+    $collageBitmap = $null
+    $collageEncoder = $null
     for ($index = 1; $index -le 12; $index++) {
         $photo = Join-Path $collageDirectory ("photo-{0:D2}.png" -f $index)
-        [IO.File]::WriteAllBytes($photo, $png)
+        if ($index -gt 1) {
+            [IO.File]::Copy($firstCollagePhoto, $photo)
+        }
         [IO.File]::SetLastWriteTimeUtc(
             $photo,
             [DateTime]::UtcNow.AddMinutes(-$index)
@@ -1737,7 +1766,7 @@ try {
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
         "external file replacement with unsaved edits, last-good-frame after delete, " +
-        "twelve-photo collage keyboard navigation, " +
+        "twelve large-photo collage keyboard navigation, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }

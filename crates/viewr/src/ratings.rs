@@ -459,14 +459,11 @@ fn scan_path_rating_while_with_hook(
     let Ok(source) = RatingScanSource::open_while(path, provenance, &mut keep_going) else {
         return RatingState::Unreadable;
     };
-    if !source.native_version_is_current_while(&mut keep_going) {
-        return RatingState::Unreadable;
-    }
+    // Opening retains the source identity and checks scan provenance when
+    // available. Both snapshots read that handle, and the final native check
+    // verifies the pathname still names it, so earlier reopens add no authority.
     let header = read_rating_header_snapshot_while(&source, &mut keep_going);
     before_confirmation();
-    if !source.native_version_is_current_while(&mut keep_going) {
-        return RatingState::Unreadable;
-    }
     let confirmation = read_rating_header_snapshot_while(&source, &mut keep_going);
     if !source.native_version_is_current_while(&mut keep_going) {
         return RatingState::Unreadable;
@@ -2685,6 +2682,65 @@ mod tests {
                     .unwrap()
                     .set_times(std::fs::FileTimes::new().set_modified(modified))
                     .unwrap();
+            },
+        );
+
+        assert_eq!(rating, RatingState::Unreadable);
+    }
+
+    #[test]
+    fn folder_rating_scan_rejects_a_non_jpeg_rewrite_between_snapshots() {
+        let workspace = TempWorkspace::new("rating_folder_non_jpeg_rewrite").unwrap();
+        let path = workspace.path().join("photo.png");
+        let accepted = b"first non-JPEG";
+        let replacement = b"other non-JPEG";
+        assert_eq!(accepted.len(), replacement.len());
+        fs::write(&path, accepted).unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        let (_, provenance) = crate::fs::scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .into_parts();
+
+        let rating = scan_path_rating_while_with_hook(
+            &path,
+            Some(provenance),
+            || true,
+            || {
+                fs::write(&path, replacement).unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_times(std::fs::FileTimes::new().set_modified(modified))
+                    .unwrap();
+            },
+        );
+
+        assert_eq!(rating, RatingState::Unreadable);
+    }
+
+    #[test]
+    fn folder_rating_scan_rejects_a_replaced_path_with_identical_bytes() {
+        let workspace = TempWorkspace::new("rating_folder_path_replacement").unwrap();
+        let path = workspace.path().join("photo.png");
+        let moved = workspace.path().join("moved.png");
+        let bytes = b"not a JPEG";
+        fs::write(&path, bytes).unwrap();
+        let (_, provenance) = crate::fs::scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap()
+            .into_parts();
+
+        let rating = scan_path_rating_while_with_hook(
+            &path,
+            Some(provenance),
+            || true,
+            || {
+                fs::rename(&path, &moved).unwrap();
+                fs::write(&path, bytes).unwrap();
             },
         );
 

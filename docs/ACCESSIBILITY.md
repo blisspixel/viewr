@@ -177,7 +177,7 @@ UI interaction uses the operating system's UI Automation client against the real
 out-of-process AccessKit tree. The script also uses local Win32 window and keyboard
 messages, WPF to encode disposable JPEG and PNG files, Shell Property System and
 filesystem APIs for metadata and alternate-stream checks, and an optional GExiv2
-probe. It creates three small disposable images and twelve compressed 6000 by
+probe. It creates four small disposable images and twelve compressed 6000 by
 4000 PNGs beneath `target/` and verifies:
 
 - the application root and menu focusability;
@@ -200,7 +200,9 @@ probe. It creates three small disposable images and twelve compressed 6000 by
 - showing Folder Previews and discovering both thumbnail buttons;
 - accessible thumbnail activation and resulting image navigation;
 - Up entering a twelve-photo large-image collage, Right moving the native
-  selected state to photo two, and Down opening that photo;
+  selected state to photo two, Page Down reaching a thirteenth small photo,
+  Page Up returning to the first group, Escape preserving the original
+  single-photo selection, and Enter and Down opening photo two;
 - first-write rating disclosure and safe initial focus, native `0`, `4`, and `5`
   key handling, minimum-rating radio state, filtered-empty recovery, and rating
   persistence across a real process restart; and
@@ -211,11 +213,11 @@ probe. It creates three small disposable images and twelve compressed 6000 by
 In-process semantic regressions separately cover full-image collage position-only
 photo buttons and selected identity, settled Undo Trash ownership, its path-free
 other-folder guidance, menu bounds, and generic copy while restore ownership is
-active or uncertain. The Windows smoke covers one collage keyboard path; complete
+active or uncertain. The Windows smoke covers these collage keyboard paths; complete
 collage interactions, native dynamic-state behavior on all platforms, and
 announcement timing remain in the manual target-OS matrix.
 
-It closes the exact process it launched and removes its fifteen known fixtures, the
+It closes the exact process it launched and removes its sixteen known fixtures, the
 isolated `viewr/appearance` and `viewr/folder-sort` preferences, and the empty
 unique directory. The Windows CI job runs the same script against the debug binary.
 Every wait has a per-operation bound and shares one absolute five-minute suite

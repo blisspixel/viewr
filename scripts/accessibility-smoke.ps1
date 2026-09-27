@@ -1736,24 +1736,72 @@ try {
             [DateTime]::UtcNow.AddMinutes(-$index)
         )
     }
+    $lastCollagePhoto = Join-Path $collageDirectory "photo-13.png"
+    [IO.File]::WriteAllBytes(
+        $lastCollagePhoto,
+        [Convert]::FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+    )
+    [IO.File]::SetLastWriteTimeUtc(
+        $lastCollagePhoto,
+        [DateTime]::UtcNow.AddMinutes(-13)
+    )
     Start-TestApplication -ImagePath (Join-Path $collageDirectory "photo-01.png")
-    Wait-ForElement -Name "1 / 12" -ControlType (
+    Wait-ForElement -Name "1 / 13" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
     Send-ApplicationKey -VirtualKey 0x26
     Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
     Wait-ForSelectionState `
-        -Name "Photo 1 of 12 in the active folder view" `
+        -Name "Photo 1 of 13 in the active folder view" `
         -Selected $true `
         -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
     Send-ApplicationKey -VirtualKey 0x27
     Wait-ForSelectionState `
-        -Name "Photo 2 of 12 in the active folder view" `
+        -Name "Photo 2 of 13 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x22
+    Wait-ForSelectionState `
+        -Name "Photo 13 of 13 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x21
+    Wait-ForSelectionState `
+        -Name "Photo 1 of 13 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x1B
+    Wait-ForElementAbsent -Name "Full-image collage" -Prefix | Out-Null
+    Wait-ForElement -Name "1 / 13" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x26
+    Wait-ForSelectionState `
+        -Name "Photo 1 of 13 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    # Re-entry exposes the current photo before background neighbors are ready.
+    Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
+    Send-ApplicationKey -VirtualKey 0x27
+    Wait-ForSelectionState `
+        -Name "Photo 2 of 13 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x0D
+    Wait-ForElementAbsent -Name "Full-image collage" -Prefix | Out-Null
+    Wait-ForElement -Name "2 / 13" -ControlType (
+        [System.Windows.Automation.ControlType]::Text
+    ) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x26
+    Wait-ForSelectionState `
+        -Name "Photo 2 of 13 in the active folder view" `
         -Selected $true `
         -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
     Send-ApplicationKey -VirtualKey 0x28
     Wait-ForElementAbsent -Name "Full-image collage" -Prefix | Out-Null
-    Wait-ForElement -Name "2 / 12" -ControlType (
+    Wait-ForElement -Name "2 / 13" -ControlType (
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
@@ -1766,7 +1814,7 @@ try {
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
         "external file replacement with unsaved edits, last-good-frame after delete, " +
-        "twelve large-photo collage keyboard navigation, " +
+        "twelve large-photo collage load, group paging, Escape, Enter, and Down navigation, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }
@@ -1787,7 +1835,7 @@ finally {
         [IO.Directory]::Delete($appearanceDirectory, $false)
     }
     if ([IO.Directory]::Exists($collageDirectory)) {
-        for ($index = 1; $index -le 12; $index++) {
+        for ($index = 1; $index -le 13; $index++) {
             $photo = Join-Path $collageDirectory ("photo-{0:D2}.png" -f $index)
             if ([IO.File]::Exists($photo)) {
                 [IO.File]::Delete($photo)

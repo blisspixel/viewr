@@ -5,6 +5,12 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Large folders
+
+- Folder rating discovery now avoids repeated pathname checks before reading
+  each file. It still compares two header snapshots and verifies the accepted
+  source at the end, while large folders settle sooner.
+
 ### Full-image collage
 
 - Large camera photos no longer leave a 12-photo collage with only one visible

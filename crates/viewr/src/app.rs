@@ -7470,7 +7470,9 @@ impl App {
             concat!(
                 "probe exceeded its {} second deadline ",
                 "(scan={}, image={}, auxiliary={}, navigation={}, remaining_navigation={}, ",
-                "presented_current={}, idle_started={}, prefetch={}, thumbnails={}, ",
+                "presented_current={}, idle_started={}, idle_remaining_ms={}, ",
+                "rating_scan={}, egui_repaint={}, ",
+                "prefetch={}, thumbnails={}, ",
                 "ready_thumbnails={}/{})"
             ),
             PERFORMANCE_PROBE_TIMEOUT.as_secs(),
@@ -7485,6 +7487,14 @@ impl App {
             self.performance_probe
                 .as_ref()
                 .is_some_and(|probe| probe.idle_until.is_some()),
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.idle_until)
+                .map_or(0, |until| until
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()),
+            self.rating_scan_worker.is_some(),
+            self.egui_repaint_at.is_some(),
             self.prefetch_schedule.in_flight_len(),
             self.thumbnail_schedule.in_flight_len(),
             ready_thumbnails,

@@ -67,7 +67,9 @@ The harness preserves every completed run in order when `--idle-diagnostics` is
 requested and automatically prints the same fixed evidence when completed reports
 violate a gate. Normal viewer launches never emit it. The probe has a one-minute
 internal deadline, and the outer harness has a 90-second process timeout. A hang
-therefore fails with a bounded diagnostic instead of stalling CI.
+therefore fails with a bounded diagnostic instead of stalling CI. The timeout
+diagnostic reports whether rating discovery or an egui repaint was still active
+and how much of the idle observation remained.
 
 ## Local curation timing evidence
 

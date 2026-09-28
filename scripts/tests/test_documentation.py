@@ -66,16 +66,16 @@ class DocumentationTests(unittest.TestCase):
 
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
-            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.7.0 or commit SHA",),
+            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.7.1 or commit SHA",),
             "README.md": (
-                "v0.7.0 is the current public preview",
+                "v0.7.1 is the current public preview",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.7.0 is the current public GitHub Release",
+                "v0.7.1 is the current public GitHub Release",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -212,6 +212,7 @@ class DocumentationTests(unittest.TestCase):
                 "Representative-hardware",
             ),
             "CHANGELOG.md": (
+                "## 0.7.1 - 2026-09-28",
                 "## 0.7.0 - 2026-09-28",
                 "## 0.6.5 - 2026-09-25",
                 "## 0.6.4 - 2026-09-24",

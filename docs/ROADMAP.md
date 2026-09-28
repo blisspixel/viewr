@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.6.5](https://github.com/blisspixel/viewr/releases/tag/v0.6.5), the shipped-feedback patch over v0.6.4, published without the carried representative-hardware matrix |
-| Workspace version | `0.6.5` while the carried v0.6 hardware gate remains open. A non-publishing candidate is identified by its full commit SHA and workflow run, not by treating its embedded version as a new public release |
-| Active milestone | **v0.7.0**, beginning with the carried v0.6 representative-hardware gate and then human accessibility evidence |
-| Next version update | After the v0.6 hardware gate closes, one reviewed release-preparation change advances the workspace and release documents from `0.6.5` to `0.7.0` before v0.7 evidence is collected |
-| Next tag allowed | **v0.7.0** only after both the carried v0.6 gate and the v0.7 exit criteria below are true. A later v0.6.x tag would require another narrowly scoped shipped-defect patch with explicit evidence limits |
+| Workspace version | `0.7.0` for the accessibility and collage release candidate. A non-publishing candidate is identified by its full commit SHA and workflow run, not by its embedded version alone |
+| Active milestone | **v0.7.0**, with automated accessibility and collage checks; representative-hardware and human assistive-technology rows remain open evidence work |
+| Next version update | After v0.7.0 publishes, keep the workspace version until the next reviewed release-preparation change |
+| Next tag allowed | **v0.7.0** after exact-commit CI, fuzzing, packaging, integrity checks, release notes, and a local install check pass. The uncollected human rows must be disclosed, not marked passed or used to halt this preview |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -123,74 +123,62 @@ v1.0.0  Broadly recommended release
 | **v0.4.0** | File-coherence preview | Viewers sit beside editors and downloaders | External edits, replacement, rename, deletion, and noisy watcher events produce deterministic visible states without blanking the last good frame or discarding unsaved edits. Open With reaches supported user-mediated chooser APIs on all three platforms. |
 | **v0.5.0** | Format-contract preview | Format breadth without honest page and color contracts misleads users | Multi-page and multi-frame containers expose bounded, identifiable navigation. The format table distinguishes decode, animation, page, metadata, and color behavior. Camera RAW either meets the isolated-worker bar or is explicitly deferred from 1.0. |
 | **v0.6.0** | Integrated product-quality beta | Isolated green checks do not prove the product feels right | Primary first-time, power-user, admin, failure-recovery, and visual-polish paths pass on representative Windows, macOS, and Linux hardware. Startup, navigation, memory, mixed-DPI, multi-monitor, empty, loading, and error states meet budgets with no unresolved high-severity product-quality issue. |
-| **v0.7.0** | Accessibility evidence preview | Implementation can be green while real AT fails | Narrator, VoiceOver, and Orca matrices complete against exact artifact hashes. Keyboard-only operation, focus, names, roles, selected and busy state, high contrast, text scaling, loading, errors, crop, ratings, panels, and recovery have no unresolved critical or high-severity accessibility defect. |
+| **v0.7.0** | Accessibility preview | Implementation can be green while real AT fails | Automated semantic, contrast, keyboard, native Windows UI Automation, and cross-platform build checks pass. Release notes disclose missing Narrator, VoiceOver, Orca, and representative-hardware evidence. A known critical or high-severity defect still blocks publication. |
 | **v0.8.0** | Release-readiness beta | Install and update must be boring before trust theater | Representative-hardware, clean-install, reinstall, explicit update, uninstall, rollback, file-association, provenance, and complete product-acceptance matrices pass. Unsigned candidates remain acceptable only with an explicit trust boundary. |
 | **v0.9.0** | Publisher-authenticated release candidate | Signing is last because scope must be frozen first | Windows Authenticode-signed delivery; macOS Developer ID-signed, hardened, notarized, and stapled; normal Linux package verified on Wayland and X11. Full security, dependency, fuzz, coverage, performance, privacy, accessibility, packaging, upgrade, rollback, documentation, and hardware matrices pass on the exact candidate. |
 | **v1.0.0** | Broadly recommended release | Not a new feature tranche after v0.9 | Proven v0.9 scope ships. Docs match artifacts. Normal workflows need no developer tools. No known critical or high-severity defect remains. |
 
 ### Immediate focus
 
-**Immediate focus: v0.7 accessibility evidence, after closing the carried v0.6
-representative-hardware acceptance gate.**
+**Immediate focus: publish a verified v0.7 preview and keep the uncollected
+representative-hardware and assistive-technology rows visible.**
 
 The product scope for v0.6.0 is public, but its artifact-bound Windows, macOS,
 and Linux acceptance rows and eight performance reports were not collected.
-That missing evidence is carried forward as an open prerequisite. It is not a
+That missing evidence is carried forward as open acceptance work. It is not a
 claim attached retroactively to the immutable v0.6.0 release.
 
 ### Next steps to v0.7.0
 
-#### Stage A: close the carried v0.6 product-quality gate
+#### Stage A: publish the v0.7 preview
 
-1. Integrate this planning state on one clean `main` commit and require its CI
-   and fuzz workflows to pass.
-2. Dispatch one non-publishing `Release artifacts` workflow for that exact
-   commit. Retain its full commit SHA, run link, four checksummed archives, and
-   deterministic product-quality fixture artifact as one indivisible candidate
-   set. Do not substitute a developer build or combine workflow runs.
-3. Execute [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) on representative Windows,
-   macOS, and Linux hardware. Record all three platform rows and the eight
-   performance sessions against that one candidate set.
-4. Run the evidence validator. A critical or high-severity defect returns the
-   work to product correction, complete automated validation, and a replacement
-   candidate. A shipped defect that belongs on the v0.6 line is released as a
-   v0.6.x patch. An approved lower-severity exception remains visible in both its
-   issue and evidence record.
-5. Close the gate only when the validator accepts the complete evidence set.
+1. Land the `0.7.0` workspace version, compiled installer commands, changelog,
+   release notes, and current-state documents through a pull request. Keep the
+   public README and INSTALL links on the published v0.6.5 assets until the
+   tag-ready change.
+2. Require exact-commit CI and fuzzing on clean `main`. Dispatch one
+   non-publishing `Release artifacts` run for that commit and verify its four
+   archives, sidecars, fixture, and packaged Windows behavior. Keep the full SHA
+   and run link together; do not combine candidates.
+3. Fix any failed automated gate or confirmed critical or high-severity defect,
+   then replace the candidate and repeat affected checks. Run the complete
+   release checks in [VERIFY.md](VERIFY.md).
+4. Make the final public-link and changelog-date change, require green CI and
+   fuzz on that commit, then tag and verify v0.7.0 under
+   [PUBLISHING.md](PUBLISHING.md). Disclose the uncollected human rows in the
+   release notes and do not report them as passed.
 
-#### Stage B: enter and close the v0.7 accessibility milestone
+#### Stage B: continue acceptance evidence and v0.8 readiness
 
-6. Land one reviewed release-preparation change that advances `Cargo.toml`,
-   `Cargo.lock`, compiled version-specific commands, the changelog candidate
-   section, prospective `docs/releases/v0.7.0.md`, and relevant status documents
-   from `0.6.5` to `0.7.0`. README and INSTALL remain on v0.6.5 throughout
-   candidate evidence and advance only in the final tag-ready change.
-7. Require CI and fuzz on the exact release-preparation commit, then dispatch a
-   new non-publishing candidate run. The earlier v0.6 candidate cannot supply
-   v0.7 accessibility evidence.
-8. Complete the Narrator, VoiceOver, and Orca matrices in
-   [ACCESSIBILITY.md](ACCESSIBILITY.md) against that single v0.7 candidate set.
-   Keyboard-only operation, focus, names, roles, selected and busy state, high
-   contrast, text scaling, loading, errors, crop, ratings, panels, and recovery
-   must have no unresolved critical or high-severity defect. Complete the
-   catalog coverage and language row in the same matrix so every translated
-   visible name agrees with its native accessibility node.
-9. Fix any failed gate, rerun the automated checks, replace the candidate, and
-   repeat every affected evidence row. Do not preserve a run number merely to
-   avoid repeating evidence.
-10. Integrate only the permitted evidence and status updates, prepare and verify
-    the final tag commit, and publish v0.7.0 through the procedure in
-    [PUBLISHING.md](PUBLISHING.md). After GitHub publishes it, record that public
-    state here and advance the immediate focus to v0.8.0 release readiness
-    without pulling v0.8 scope into the v0.7 tag.
+5. Collect the three platform rows and eight performance sessions in
+   [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) against one exact candidate. Run its
+   validator. The earlier published v0.6 archives cannot acquire this evidence
+   retroactively.
+6. Complete the Narrator, VoiceOver, and Orca rows in
+   [ACCESSIBILITY.md](ACCESSIBILITY.md), including translated names, focus,
+   loading, crop, ratings, high contrast, and text size. Record defects and
+   correct them on main. Human feedback is welcome, but these rows do not halt
+   code fixes or the explicitly limited v0.7 preview.
+7. Move to v0.8 clean-install, update, uninstall, rollback, association,
+   provenance, and product-acceptance work with every missing row still visible.
 
 ### Version state and update points
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
 | Public release | `0.6.5` | Immutable tag and release assets | Never rewritten. A shipped correction uses a new v0.6.x tag |
-| Carried v0.6 evidence candidate | `0.6.5` | Full commit SHA plus one `Release artifacts` run | Replaced after any candidate-invalidating change |
-| v0.7 evidence line | `0.7.0` | Full commit SHA plus one v0.7 candidate run | Begins only after Stage A closes and the reviewed version update lands |
+| Carried v0.6 evidence candidate | `0.7.0` | Full commit SHA plus one `Release artifacts` run | Open acceptance work, never backfilled against a published v0.6 tag |
+| v0.7 release candidate | `0.7.0` | Full commit SHA plus one v0.7 candidate run | Automated release proof and explicit human evidence gaps |
 | Published v0.7 | `0.7.0` | Immutable tag and release assets | Roadmap advances to v0.8.0; public install links change only after publication |
 
 The semantic version is not changed on every development commit. Before a
@@ -225,8 +213,8 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped as v0.6.0 and refined in v0.6.1 through v0.6.5 with its hardware matrix still open | The v0.6 product scope and shipped-feedback patches are released, but their representative-hardware acceptance evidence was not collected. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Closing it requires one fresh exact-commit candidate, three representative-hardware records, eight performance reports, and an accepted validator result. It blocks the v0.7.0 version update and tag. |
-| Human accessibility evidence | Open for v0.7 | After the carried v0.6 gate closes, update the workspace to `0.7.0`, build one exact-commit candidate, and complete the Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/v0.7.0/`. |
+| Integrated product quality | Shipped as v0.6.0 and refined through v0.6.5; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. |
+| Human accessibility evidence | Open for v0.7 | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records under `docs/release-evidence/accessibility/v0.7.0/` remain to be collected before claiming native assistive-technology acceptance. |
 | Release readiness | Open for v0.8 | Clean install, update, uninstall, rollback, and acceptance matrices. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
 

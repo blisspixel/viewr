@@ -5,6 +5,17 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Accessibility
+
+- System appearance now follows supported operating-system high-contrast
+  settings. Windows Text size and the GNOME desktop portal's text scaling
+  factor enlarge the interface within the available window space. macOS
+  Increase Contrast is supported; macOS has no system-wide AppKit text-size
+  setting. Image pixels and image zoom remain unchanged.
+- High-contrast palettes and menu shortcut hints use tested text and control
+  colors. The Windows native accessibility smoke covers twelve large collage
+  photos, keyboard paging, selection, and return to single-photo view.
+
 ### Large folders
 
 - Folder rating discovery now avoids repeated pathname checks before reading

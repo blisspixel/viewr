@@ -19,7 +19,7 @@ Start with the document that matches the task.
 - [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
   failure-recovery, and visual-polish matrix plus the candidate-artifact and
   evidence-validation contract for v0.6. Representative hardware evidence is
-  still required before v0.7.0 may be tagged.
+  still open; the v0.7.0 preview discloses this evidence gap.
 - [Performance](PERFORMANCE.md): measured budgets and current evidence.
 
 ## Understanding and contributing

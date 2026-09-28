@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.7.0](https://github.com/blisspixel/viewr/releases/tag/v0.7.0), the accessibility and collage preview with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.1`, a patch candidate; v0.7.0 remains the public install target |
-| Active milestone | **v0.7.1** patch release for the bounded rating scan and installer recovery fixes, then v0.8.0 release readiness |
-| Next version update | After the v0.7.1 patch, advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.1**, tag-ready after the exact-commit [candidate run](https://github.com/blisspixel/viewr/actions/runs/36473818735) succeeds. Uncollected hardware or screen-reader rows stay open and are disclosed in the patch notes |
+| Published install target | Immutable [v0.7.1](https://github.com/blisspixel/viewr/releases/tag/v0.7.1), the rating scan and installer recovery patch with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.1`, matching the current public patch |
+| Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
+| Next version update | Advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
+| Next tag allowed | **v0.8.0** after its automated release checks and documented preview limits are ready. Uncollected hardware or screen-reader rows stay open and do not halt preview development or publication |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.7.0 archives. The v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.1 archives. The v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -103,7 +103,7 @@ v0.6.5  Status discoverability patch     [released, same matrix open]
    v
 v0.7.0  Accessibility and collage preview [released, acceptance rows open]
 
-v0.7.1  Rating scan and installer recovery patch [candidate]
+v0.7.1  Rating scan and installer recovery patch [released, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -177,7 +177,7 @@ claim attached retroactively to the immutable v0.6.0 release.
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.7.0` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Public release | `0.7.1` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
@@ -213,7 +213,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped through v0.7.0; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
+| Integrated product quality | Shipped through v0.7.1; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
 | Release readiness | Open for v0.8 | Automate clean install, update, uninstall, rollback, association, and provenance checks. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -258,7 +258,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.7.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.1; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -584,7 +584,7 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set from the current release line. v0.6.0 through v0.7.0 were
+  candidate set from the current release line. v0.6.0 through v0.7.1 were
   tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.

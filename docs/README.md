@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.7.0
+- [Install and update](INSTALL.md): current source builds, current v0.7.1
   one-command installers, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
@@ -19,7 +19,7 @@ Start with the document that matches the task.
 - [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
   failure-recovery, and visual-polish matrix plus the candidate-artifact and
   evidence-validation contract for v0.6. Representative hardware evidence is
-  still open; the v0.7.0 preview discloses this evidence gap.
+  still open; the v0.7.1 preview discloses this evidence gap.
 - [Performance](PERFORMANCE.md): measured budgets and current evidence.
 
 ## Understanding and contributing
@@ -37,10 +37,10 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.7.0 release notes](releases/v0.7.0.md): the current accessibility and
-  collage preview and its explicit evidence limits.
-- [v0.7.1 candidate notes](releases/v0.7.1.md): the rating scan and installer
-  recovery patch, pending publication.
+- [v0.7.1 release notes](releases/v0.7.1.md): the current rating scan and
+  installer recovery patch and its explicit evidence limits.
+- [v0.7.0 release notes](releases/v0.7.0.md): the accessibility and collage
+  preview.
 - [v0.6.5 release notes](releases/v0.6.5.md): the earlier shipped-feedback
   patch for page identity, substitution notices, and rating scope.
 - [v0.6.4 release notes](releases/v0.6.4.md): the shipped-feedback

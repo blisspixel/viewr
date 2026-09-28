@@ -4,8 +4,8 @@
 macOS, and Linux. Semantic unit tests, contrast tests, keyboard tests, cross-target
 builds, and an external Windows UI Automation smoke test pass. Windows CI retries
 transient UI Automation focus rejection without weakening semantic assertions.
-Manual Narrator, VoiceOver, and Orca acceptance remains required before Phase 8
-can close.
+Manual Narrator, VoiceOver, and Orca acceptance remains open. The v0.7 preview
+does not claim that native assistive-technology matrix has passed.
 
 ## Product contract
 
@@ -229,7 +229,7 @@ speech quality, reading order under every screen-reader mode, target-platform
 keyboard conventions, or human usability. It therefore does not replace the
 manual matrix below.
 
-## Manual release matrix
+## Manual acceptance matrix
 
 Use disposable copies, never personal photos, for trash and overwrite checks.
 Record the operating-system version, assistive-technology version, package type,

@@ -197,6 +197,13 @@ class DocumentationTests(unittest.TestCase):
                 "notarized",
                 "representative-hardware product-quality matrix is still incomplete",
             ),
+            "docs/releases/v0.7.0.md": (
+                "accessibility and collage preview",
+                "GitHub build-provenance attestation",
+                "not Authenticode-signed",
+                "notarized",
+                "representative-hardware matrix",
+            ),
             "CHANGELOG.md": (
                 "## 0.6.5 - 2026-09-25",
                 "## 0.6.4 - 2026-09-24",
@@ -394,13 +401,13 @@ class DocumentationTests(unittest.TestCase):
             "| **v0.4.0** | File-coherence preview |",
             "| **v0.5.0** | Format-contract preview |",
             "| **v0.6.0** | Integrated product-quality beta |",
-            "| **v0.7.0** | Accessibility evidence preview |",
+            "| **v0.7.0** | Accessibility preview |",
             "| **v0.8.0** | Release-readiness beta |",
             "| **v0.9.0** | Publisher-authenticated release candidate |",
         )
         positions = [roadmap.index(gate) for gate in ordered_gates]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("Immediate focus: v0.7 accessibility evidence", roadmap)
+        self.assertIn("Immediate focus: publish a verified v0.7 preview", roadmap)
         self.assertIn("### Next steps to v0.7.0", roadmap)
         self.assertIn("### Version state and update points", roadmap)
         self.assertIn("Native platform trust | Deferred to v0.9", roadmap)
@@ -453,7 +460,9 @@ class DocumentationTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("It does not close v0.6", product_quality)
-        self.assertIn("Do not tag v0.7.0", product_quality)
+        self.assertIn(
+            "Do not claim representative-hardware acceptance", product_quality
+        )
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         self.assertIn("PRODUCT-QUALITY.md", roadmap)
         release_artifact = (REPOSITORY_ROOT / "scripts/release_artifact.py").read_text(

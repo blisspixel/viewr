@@ -11,9 +11,8 @@ we change the rule in the open rather than quietly ignore it.
 
 Much of the modern quality problem is "AI slop": code that compiles, passes basic
 checks, and looks polished, but is subtly wrong, bloated, or misaligned with what
-was actually needed. Industry analysis in 2026 tied AI-heavy code to several times
-more duplication and churn. viewr is written with AI assistance, so we guard
-against its failure modes explicitly. Reviewers reject, and authors avoid:
+was actually needed. We guard against those failure modes explicitly. Reviewers
+reject, and authors avoid:
 
 - **Over-defensive boilerplate.** No wrapping trivial code in layers of error
   handling "just in case," no custom error types for a one-shot helper, no

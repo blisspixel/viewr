@@ -93,23 +93,22 @@ Four version states must not be conflated:
    later release actually exists.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.6.5` while the carried v0.6 hardware gate remains open.
+   `0.7.0` for the accessibility and collage preview candidate.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
    archive name or version string alone.
-4. **Intended tag:** the next milestone version after every prerequisite gate is
-   closed. The next intended tag is v0.7.0, but it is not yet the workspace or
-   public version.
+4. **Intended tag:** the next version selected for publication. It is v0.7.0;
+   it is the workspace version but not yet the public version.
 
 Advance the workspace version once, before collecting evidence for the intended
-tag. That reviewed release-preparation change updates `Cargo.toml`, `Cargo.lock`,
+tag. That release-preparation change updates `Cargo.toml`, `Cargo.lock`,
 compiled version-specific commands, the changelog candidate content,
 `docs/releases/v<version>.md`, and every status document that describes the
 workspace. Do not use a changing `-dev` suffix or bump the version on ordinary
-development commits. For v0.7.0, the update from `0.6.5` happens only after the
-carried v0.6 product-quality matrix closes and before v0.7 accessibility evidence
-begins.
+development commits. For v0.7.0, the update from `0.6.5` precedes the exact-commit
+candidate. The carried product-quality and native assistive-technology rows remain
+open and must not be described as passing in the release notes.
 
 The v0.6.1, v0.6.2, v0.6.3, v0.6.4, and v0.6.5 patches were narrow exceptions for confirmed shipped
 defects and closely related usability fixes. They still required the complete
@@ -141,18 +140,19 @@ exit evidence, never calendar forecasts or duration estimates.
 ## Pre-1.0 release procedure
 
 This is the procedure used for `v0.1.0` and repeated for each later tag. The
-next allowed tag is `v0.7.0`, and it is blocked until the v0.6 hardware matrix
-closes. An unsigned pre-1.0 release is acceptable only
+next allowed tag is `v0.7.0`. Its representative-hardware and native
+assistive-technology rows remain uncollected, so its release notes must state
+those limits. An unsigned pre-1.0 release is acceptable only
 when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
 
-1. Close every prerequisite gate in the roadmap before changing the workspace
-   version. For the next release, validate the carried v0.6 product-quality set
-   before beginning v0.7 work:
+1. Check the roadmap's release gate and record any uncollected evidence as a
+   release limit. The carried v0.6 product-quality set is still open; run its
+   validator when the required platform records are available:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.5
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.0
    ```
 
 2. On a feature branch, make the single version transition described in
@@ -166,12 +166,12 @@ production environment.
 4. Integrate the release-preparation change through normal review. Select its
    exact clean `main` commit only after CI and fuzz pass there, and retain both
    run links.
-5. Dispatch one non-publishing `Release artifacts` run for that commit. Complete
-   every evidence set required by the target milestone against that one candidate.
-   For v0.7.0 this is the Narrator, VoiceOver, and Orca matrix in
-   [Accessibility](ACCESSIBILITY.md). For v0.8.0 and later, also complete every
-   product-quality, install, update, rollback, packaging, and platform-trust gate
-   assigned to that milestone by the roadmap.
+5. Dispatch one non-publishing `Release artifacts` run for that commit. Verify
+   all four archives and the fixture as one exact candidate. For v0.7.0, run the
+   automated accessibility and packaged Windows collage checks; keep missing
+   Narrator, VoiceOver, Orca, and representative-hardware rows visible in the
+   release notes and roadmap. Later milestones retain the evidence assigned in
+   [Accessibility](ACCESSIBILITY.md) and [Product quality](PRODUCT-QUALITY.md).
 6. If a gate fails, correct the defect, repeat the complete automated validation,
    produce a replacement candidate, and repeat every affected evidence row. If
    the candidate passes, integrate the evidence and other permitted status-only

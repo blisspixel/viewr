@@ -10,7 +10,9 @@ candidate workflow run.
 v0.6.0, v0.6.1, v0.6.2, v0.6.3, v0.6.4, and v0.6.5 were published before any of those rows were recorded. The
 released archives therefore carry no representative-hardware evidence, the
 release notes state that limit, and this matrix is carried forward as open work
-that blocks the v0.7.0 tag.
+that remains unverified after the v0.7.0 preview unless its candidate-bound
+records are completed. The missing rows are disclosed in release notes and do
+not halt the explicitly limited preview.
 
 v0.6 broadens the core viewing surface with a transient full-image collage. It
 does not add a library, catalog, thumbnail mode, or durable album state. Clipboard
@@ -239,7 +241,7 @@ and 200% after changing the primary display scale, session label, and filename t
 `windows-150` and `windows-200`:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.6.5/performance/windows-100.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.7.0/performance/windows-100.json
 ```
 
 On macOS, make the built-in Retina display the main display and run once with
@@ -249,7 +251,7 @@ report records a one-way SHA-256 identity, built-in and Retina flags, and measur
 scale for the main display. On Linux, run in the native sessions named below:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.6.5/performance/<session>.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.7.0/performance/<session>.json
 ```
 
 Use `linux-wayland` and `linux-x11` in the corresponding native sessions. For the
@@ -260,7 +262,7 @@ required software renderer, use an X11 or Xwayland session with `DISPLAY`, insta
 `glxinfo`, confirm that `glxinfo -B` names Mesa llvmpipe or softpipe, then run:
 
 ```text
-WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.6.5/performance/linux-mesa-software.json
+WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.7.0/performance/linux-mesa-software.json
 ```
 
 The complete committed report set is exactly `windows-100`, `windows-150`,
@@ -321,7 +323,7 @@ in `Cargo.toml`, which the validator reads directly:
 
 ```text
 python -B scripts/product_quality_evidence.py check <platform-record.md>
-python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.6.5
+python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.0
 ```
 
 The gate rejects missing or duplicate rows, generic observations, invalid archive
@@ -352,7 +354,8 @@ Use only synthetic filenames and fixtures. Do not include a personal image,
 private path, raw metadata, or unrelated screen content. If the tested artifact
 bytes change, the record no longer closes the gate.
 
-Do not tag v0.7.0 while any required platform row is unrecorded or any
-high-severity product-quality issue remains. v0.6.0, v0.6.1, v0.6.2, v0.6.3, v0.6.4, and v0.6.5 were tagged in
-exactly that state as explicit, documented exceptions; do not treat automated
-gates as a substitute for these hardware records.
+Do not claim representative-hardware acceptance while any required platform row
+is unrecorded. A known critical or high-severity product-quality defect still
+blocks publication. v0.6.0 through v0.6.5 were tagged without these records,
+and the v0.7.0 preview discloses the same gap. Automated gates do not substitute
+for the hardware records.

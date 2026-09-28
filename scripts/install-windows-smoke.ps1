@@ -232,6 +232,53 @@ try {
     if ($leftovers.Count -ne 0) {
         throw "installer left staging or backup directories behind"
     }
+
+    $beforeFailure = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $installDir -File -Force)) {
+        $beforeFailure[$file.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash
+    }
+
+    $global:ViewrInstallerSmokeFailActivation = $true
+    $global:ViewrInstallerSmokeInstallDir = $installDir
+    function Move-Item {
+        param([string]$LiteralPath, [string]$Destination)
+        if ($global:ViewrInstallerSmokeFailActivation -and
+            $LiteralPath -like "*viewr.installing.*" -and
+            $Destination -ceq $global:ViewrInstallerSmokeInstallDir) {
+            $global:ViewrInstallerSmokeFailActivation = $false
+            throw "simulated activation failure"
+        }
+        Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination
+    }
+
+    $activationFailed = $false
+    try {
+        & $installer -Version $version -InstallDir $installDir -NoPath -NoShortcut
+    }
+    catch {
+        if ($_.Exception.Message -cne "simulated activation failure") {
+            throw
+        }
+        $activationFailed = $true
+    }
+    if (-not $activationFailed) {
+        throw "installer did not exercise the simulated activation failure"
+    }
+    foreach ($file in @(Get-ChildItem -LiteralPath $installDir -File -Force)) {
+        if (-not $beforeFailure.ContainsKey($file.Name) -or
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash -cne $beforeFailure[$file.Name]) {
+            throw "failed activation changed the previous installation"
+        }
+        $null = $beforeFailure.Remove($file.Name)
+    }
+    if ($beforeFailure.Count -ne 0) {
+        throw "failed activation removed a previous installation file"
+    }
+    $leftovers = @(Get-ChildItem -LiteralPath (Split-Path -Parent $installDir) -Force |
+        Where-Object { $_.Name -like "viewr.installing.*" -or $_.Name -like "viewr.backup.*" })
+    if ($leftovers.Count -ne 0) {
+        throw "failed activation left staging or backup directories behind"
+    }
     Write-Host "install-windows-smoke: PASS"
 }
 finally {
@@ -239,6 +286,8 @@ finally {
     $global:ViewrInstallerSmokeArchive = $null
     $global:ViewrInstallerSmokeSidecar = $null
     $global:ViewrInstallerSmokeRelease = $null
+    $global:ViewrInstallerSmokeFailActivation = $null
+    $global:ViewrInstallerSmokeInstallDir = $null
     if (Test-Path -LiteralPath $testRoot) {
         for ($attempt = 1; $attempt -le 5; $attempt++) {
             try {

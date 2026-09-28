@@ -178,6 +178,15 @@ measurement surface small and auditable.
 
 ## Current evidence
 
+On this Windows development host on 2026-09-28, the installed, publicly
+verified v0.7.0 binary passed one-run and three-run synthetic 50,000-image
+gates. The three-run result measured 344.12 MiB large-folder peak resident set,
+151.31 ms slowest sampled navigation, zero settled idle redraws, and the exact
+256 MiB decoded-cache budget. The intermittent rating-scan deadline was not
+reproduced in these runs. The probe does not yet separate rating-scan stages in
+its timing output, so these passes do not explain the earlier timeout or close
+that investigation.
+
 On the Windows development host on 2026-08-01, the final three-run optimized
 rating-enabled probe met every startup, navigation, memory, folder-scaling, cache,
 and idle budget after full accepted-source comparisons were confined to background

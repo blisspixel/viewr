@@ -709,8 +709,8 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("/main/install.sh", combined)
         self.assertNotIn("/master/install.ps1", combined)
         self.assertNotIn("/master/install.sh", combined)
-        self.assertIn("/releases/download/v0.6.5/install.ps1", public_commands)
-        self.assertIn("/releases/download/v0.6.5/install.sh", public_commands)
+        self.assertIn("/releases/download/v0.7.0/install.ps1", public_commands)
+        self.assertIn("/releases/download/v0.7.0/install.sh", public_commands)
         self.assertIn("/releases/download/v0.7.0/install.ps1", compiled_commands)
         self.assertIn("/releases/download/v0.7.0/install.sh", compiled_commands)
 

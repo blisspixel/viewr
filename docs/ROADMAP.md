@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.6.5](https://github.com/blisspixel/viewr/releases/tag/v0.6.5), the shipped-feedback patch over v0.6.4, published without the carried representative-hardware matrix |
-| Workspace version | `0.7.0` for the accessibility and collage release candidate. A non-publishing candidate is identified by its full commit SHA and workflow run, not by its embedded version alone |
-| Active milestone | **v0.7.0**, with automated accessibility and collage checks; representative-hardware and human assistive-technology rows remain open evidence work |
-| Next version update | After v0.7.0 publishes, keep the workspace version until the next reviewed release-preparation change |
-| Next tag allowed | **v0.7.0** after exact-commit CI, fuzzing, packaging, integrity checks, release notes, and a local install check pass. The uncollected human rows must be disclosed, not marked passed or used to halt this preview |
+| Published install target | Immutable [v0.7.0](https://github.com/blisspixel/viewr/releases/tag/v0.7.0), the accessibility and collage preview with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.0`, matching the current public preview |
+| Active milestone | **v0.8.0** release readiness, beginning with the carried representative-hardware and human assistive-technology evidence gaps |
+| Next version update | Advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
+| Next tag allowed | **v0.8.0** after its release-readiness gates close. The v0.7.0 preview did not claim the uncollected hardware or screen-reader rows passed |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.6.5 archives. The v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.0 archives. The v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -101,10 +101,10 @@ v0.6.4  Network storage & culling patch  [released, same matrix open]
 v0.6.5  Status discoverability patch     [released, same matrix open]
    |
    v
-v0.7.0  Accessibility evidence preview  [next]
+v0.7.0  Accessibility and collage preview [released, acceptance rows open]
    |
    v
-v0.8.0  Release-readiness beta
+v0.8.0  Release-readiness beta            [next]
    |
    v
 v0.9.0  Publisher-authenticated RC
@@ -130,56 +130,42 @@ v1.0.0  Broadly recommended release
 
 ### Immediate focus
 
-**Immediate focus: publish a verified v0.7 preview and keep the uncollected
-representative-hardware and assistive-technology rows visible.**
+**Immediate focus: v0.8 release readiness while closing the uncollected
+representative-hardware and assistive-technology rows.**
 
 The product scope for v0.6.0 is public, but its artifact-bound Windows, macOS,
 and Linux acceptance rows and eight performance reports were not collected.
 That missing evidence is carried forward as open acceptance work. It is not a
 claim attached retroactively to the immutable v0.6.0 release.
 
-### Next steps to v0.7.0
+### Next steps to v0.8.0
 
-#### Stage A: publish the v0.7 preview
-
-1. Land the `0.7.0` workspace version, compiled installer commands, changelog,
-   release notes, and current-state documents through a pull request. Keep the
-   public README and INSTALL links on the published v0.6.5 assets until the
-   tag-ready change.
-2. Require exact-commit CI and fuzzing on clean `main`. Dispatch one
-   non-publishing `Release artifacts` run for that commit and verify its four
-   archives, sidecars, fixture, and packaged Windows behavior. Keep the full SHA
-   and run link together; do not combine candidates.
-3. Fix any failed automated gate or confirmed critical or high-severity defect,
-   then replace the candidate and repeat affected checks. Run the complete
-   release checks in [VERIFY.md](VERIFY.md).
-4. Make the final public-link and changelog-date change, require green CI and
-   fuzz on that commit, then tag and verify v0.7.0 under
-   [PUBLISHING.md](PUBLISHING.md). Disclose the uncollected human rows in the
-   release notes and do not report them as passed.
-
-#### Stage B: continue acceptance evidence and v0.8 readiness
-
-5. Collect the three platform rows and eight performance sessions in
-   [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) against one exact candidate. Run its
-   validator. The earlier published v0.6 archives cannot acquire this evidence
-   retroactively.
-6. Complete the Narrator, VoiceOver, and Orca rows in
+1. Reproduce the intermittent Windows 50,000-file rating-scan stall with a
+   synthetic corpus and stage timings. Preserve the final source-identity and
+   header-snapshot checks while correcting a measured bottleneck.
+2. Collect the three representative-platform rows and eight performance
+   sessions in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md) against one exact
+   candidate. Run the validator. Published v0.6 and v0.7 tags cannot acquire
+   this evidence retroactively.
+3. Complete the Narrator, VoiceOver, and Orca rows in
    [ACCESSIBILITY.md](ACCESSIBILITY.md), including translated names, focus,
    loading, crop, ratings, high contrast, and text size. Record defects and
-   correct them on main. Human feedback is welcome, but these rows do not halt
-   code fixes or the explicitly limited v0.7 preview.
-7. Move to v0.8 clean-install, update, uninstall, rollback, association,
-   provenance, and product-acceptance work with every missing row still visible.
+   correct them on main. These rows are required before claiming native
+   assistive-technology acceptance.
+4. Exercise clean install, reinstall, explicit update, uninstall, rollback,
+   file associations, and artifact provenance on representative hosts using
+   the v0.8 acceptance matrix. Keep any missing row visible.
+5. Only after those gates pass, prepare the v0.8.0 version and release notes,
+   require exact-commit CI and fuzzing, and build one non-publishing candidate
+   for the v0.8 release gate in [PUBLISHING.md](PUBLISHING.md).
 
 ### Version state and update points
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.6.5` | Immutable tag and release assets | Never rewritten. A shipped correction uses a new v0.6.x tag |
-| Carried v0.6 evidence candidate | `0.7.0` | Full commit SHA plus one `Release artifacts` run | Open acceptance work, never backfilled against a published v0.6 tag |
-| v0.7 release candidate | `0.7.0` | Full commit SHA plus one v0.7 candidate run | Automated release proof and explicit human evidence gaps |
-| Published v0.7 | `0.7.0` | Immutable tag and release assets | Roadmap advances to v0.8.0; public install links change only after publication |
+| Public release | `0.7.0` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Carried acceptance evidence | `0.7.0` | Full commit SHA plus one non-publishing candidate run | Complete the open hardware and assistive-technology rows without backfilling a published tag |
+| v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
 The semantic version is not changed on every development commit. Before a
 milestone evidence cycle starts, it is advanced once to the intended tag so the
@@ -258,7 +244,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.6.5; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.0; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -283,7 +269,7 @@ code but still owes its representative-hardware evidence.
   as checksummed dual-binary archives from the green commit with reviewed notes,
   GitHub build provenance, and clear optional file-association guidance.
 - [x] Make the release-state and quality-gate contract executable: canonical
-  documentation now agrees on the public unsigned v0.6.5 state, CI runs the exact
+  documentation now agrees on the public unsigned v0.7.0 state, CI runs the exact
   locked all-target commands, and cargo-deny rejects unreviewed duplicate versions
   against an explicit transitive baseline without unexplained warnings.
 - [ ] For v0.9, produce and verify a signed Windows delivery, a Developer ID-signed and
@@ -584,8 +570,8 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set after the current planning change reaches `main`. v0.6.0,
-  v0.6.1, v0.6.2, v0.6.3, v0.6.4, and v0.6.5 were tagged and published before this box could be checked, so the
+  candidate set from the current release line. v0.6.0 through v0.7.0 were
+  tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.
 - [x] Make About, the empty card, and README essential controls quote one covered

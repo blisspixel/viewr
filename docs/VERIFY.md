@@ -88,6 +88,8 @@ The Unix installer integration tests use disposable files and mocked downloads.
 They check failed release and command activation against the previous installation,
 and require an explicit retained-backup path if a simulated filesystem failure
 also prevents restoration. These tests run on Linux and macOS CI hosts.
+They also reject extra visible or hidden files, linked entries, and modified
+ownership markers before replacing a release directory, preserving those bytes.
 
 ## 3. Build the exact target
 

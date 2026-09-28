@@ -251,6 +251,80 @@ exec /bin/mv "$@"
             list((self.install_root / "releases").glob(".installing-*")), []
         )
 
+    def test_reinstall_preserves_an_unexpected_file(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        notes = release / "user-notes.txt"
+        notes.write_bytes(b"keep these notes")
+        command_target = os.readlink(self.bin_dir / "viewr")
+
+        result = self.run_installer(check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected path", result.stderr)
+        self.assertEqual(notes.read_bytes(), b"keep these notes")
+        self.assertEqual(os.readlink(self.bin_dir / "viewr"), command_target)
+        self.assertEqual(list((self.install_root / "releases").glob(".backup-*")), [])
+
+    def test_reinstall_preserves_an_unexpected_hidden_directory(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        private = release / ".private"
+        private.mkdir()
+        (private / "photo.jpg").write_bytes(b"personal file")
+
+        result = self.run_installer(check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected path", result.stderr)
+        self.assertEqual((private / "photo.jpg").read_bytes(), b"personal file")
+        self.assertEqual(list((self.install_root / "releases").glob(".backup-*")), [])
+
+    def test_reinstall_rejects_a_linked_managed_file(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        outside = self.root / "outside-readme"
+        outside.write_bytes(b"external content")
+        readme = release / "README.md"
+        readme.unlink()
+        readme.symlink_to(outside)
+
+        result = self.run_installer(check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("linked or non-file entry", result.stderr)
+        self.assertTrue(readme.is_symlink())
+        self.assertEqual(outside.read_bytes(), b"external content")
+        self.assertEqual(list((self.install_root / "releases").glob(".backup-*")), [])
+
+    def test_reinstall_rejects_a_linked_release_directory(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        outside = self.root / "outside-release"
+        release.rename(outside)
+        release.symlink_to(outside, target_is_directory=True)
+
+        result = self.run_installer(check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a regular directory", result.stderr)
+        self.assertTrue(release.is_symlink())
+        self.assertTrue((outside / "viewr").is_file())
+        self.assertEqual(list((self.install_root / "releases").glob(".backup-*")), [])
+
+    def test_reinstall_rejects_a_modified_ownership_marker(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        marker = release / ".viewr-install"
+        marker.write_text(marker.read_text(encoding="utf-8") + "note=keep\n")
+
+        result = self.run_installer(check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid ownership marker", result.stderr)
+        self.assertIn("note=keep", marker.read_text(encoding="utf-8"))
+        self.assertEqual(list((self.install_root / "releases").glob(".backup-*")), [])
+
     def test_rejects_an_archive_member_outside_the_manifest(self) -> None:
         archive, sidecar = self.make_release(extra_member=True)
         result = self.run_installer(archive=archive, sidecar=sidecar, check=False)

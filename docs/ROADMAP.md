@@ -149,7 +149,9 @@ claim attached retroactively to the immutable v0.6.0 release.
    injects an activation failure and verifies byte-for-byte restoration of the
    previous installer-owned directory. Unix installer tests now inject release
    and command activation failures and verify restoration or a retained backup;
-   update, uninstall, association, and provenance paths remain open.
+   reinstallation also refuses unexpected files and links in an existing
+   release directory. Update, uninstall, association, and provenance paths
+   remain open.
 3. Prepare the v0.8.0 version and release notes before building one exact-commit
    non-publishing candidate. Require green CI, coverage, privacy, and fuzzing;
    verify every archive and the published limits under

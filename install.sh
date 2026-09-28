@@ -345,11 +345,28 @@ ln -s "$release_dir/viewr" "$temporary_link" ||
     fail "could not stage the viewr command"
 
 backup_dir=
-if [ -e "$release_dir" ]; then
+if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+    [ -d "$release_dir" ] && [ ! -L "$release_dir" ] ||
+        fail "refusing to replace an installation that is not a regular directory: $release_dir"
     [ -f "$release_dir/.viewr-install" ] && [ ! -L "$release_dir/.viewr-install" ] ||
         fail "refusing to replace an installation not owned by the viewr installer: $release_dir"
-    grep -Fqx "repository=$REPOSITORY" "$release_dir/.viewr-install" ||
-        fail "refusing to replace an installation with a foreign ownership marker"
+    printf 'repository=%s\nversion=%s\ntarget=%s\n' "$REPOSITORY" "$version" "$target" |
+        cmp -s - "$release_dir/.viewr-install" ||
+        fail "refusing to replace an installation with an invalid ownership marker"
+    # The installer normally disables globbing. Enable it only to inspect every
+    # existing entry, including hidden names, before replacing this directory.
+    set +f
+    for child in "$release_dir"/* "$release_dir"/.[!.]* "$release_dir"/..?*; do
+        [ -e "$child" ] || [ -L "$child" ] || continue
+        case "${child##*/}" in
+            .viewr-install|viewr|viewr-decode|LICENSE|NOTICE|README.md|THIRD_PARTY_LICENSES.txt|release-manifest.json)
+                [ -f "$child" ] && [ ! -L "$child" ] ||
+                    fail "refusing to replace an installation with a linked or non-file entry: $child"
+                ;;
+            *) fail "refusing to replace an installation with an unexpected path: $child" ;;
+        esac
+    done
+    set -f
     backup_dir="$releases_dir/.backup-$tag-$$"
     [ ! -e "$backup_dir" ] || fail "installer backup path already exists"
     mv "$release_dir" "$backup_dir" || fail "could not stage the previous installation"

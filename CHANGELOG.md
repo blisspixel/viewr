@@ -10,6 +10,9 @@ and organized by user-visible concern.
 - The macOS and Linux installer now reports the retained backup location if an
   update fails and the operating system also prevents restoration. It no longer
   says the previous version was restored in that case.
+- Reinstalling the same macOS or Linux release now refuses to replace a managed
+  directory containing extra files, linked entries, or a changed ownership
+  marker. Those files remain available for inspection.
 
 ## 0.7.0 - 2026-09-28
 

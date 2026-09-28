@@ -62,6 +62,10 @@ The shell installer:
 If update activation fails, the installer restores the previous release. If the
 operating system also prevents restoration, it reports the exact retained backup
 directory instead of claiming recovery succeeded.
+Reinstalling a version refuses to replace its directory if that directory has
+unexpected files, linked entries, or a changed ownership marker. Move personal
+files out of the release directory before retrying; the installer does not delete
+them.
 
 Supported release targets are macOS Intel, macOS Apple Silicon, and Linux x86-64
 glibc. Linux ARM64 and musl users must build from source for now.

@@ -168,10 +168,10 @@ production environment.
    exact clean `main` commit only after CI and fuzz pass there, and retain both
    run links.
 5. Dispatch one non-publishing `Release artifacts` run for that commit. Verify
-   all four archives and the fixture as one exact candidate. For v0.7.0, run the
-   automated accessibility and packaged Windows collage checks; keep missing
-   Narrator, VoiceOver, Orca, and representative-hardware rows visible in the
-   release notes and roadmap. Later milestones retain the evidence assigned in
+   all four archives and the fixture as one exact candidate. For v0.8.0, complete
+   the representative-hardware, native assistive-technology, install, update,
+   rollback, association, and provenance evidence assigned in the
+   [Roadmap](ROADMAP.md). The exact procedures remain in
    [Accessibility](ACCESSIBILITY.md) and [Product quality](PRODUCT-QUALITY.md).
 6. If a gate fails, correct the defect, repeat the complete automated validation,
    produce a replacement candidate, and repeat every affected evidence row. If

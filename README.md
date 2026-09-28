@@ -163,13 +163,16 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 
 ## Appearance
 
-- **System** follows the operating system's light or dark setting.
+- **System** follows the operating system's light or dark setting and supported
+  high-contrast preference.
 - **Light** uses bright neutral chrome.
 - **Dark** uses low-glare charcoal chrome.
 - **Console** uses near-black chrome, phosphor-green text, and monospace type.
 
 Image Background independently offers Theme Default, Black, Neutral Gray, and
 White. Appearance changes interface chrome and canvas only, never image pixels.
+Windows Text size and GNOME text scaling enlarge the interface when the window
+has room; image zoom does not change.
 
 ## Project status
 

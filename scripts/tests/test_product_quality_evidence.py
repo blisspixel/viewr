@@ -248,6 +248,11 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             "rating_scan_worker_us": 200,
             "rating_scan_apply_us": 100,
             "rating_scan_total_us": 500,
+            "rating_scan_paths": playlist_entries,
+            "rating_scan_open_work_us": 100,
+            "rating_scan_first_snapshot_work_us": 100,
+            "rating_scan_second_snapshot_work_us": 100,
+            "rating_scan_verify_work_us": 100,
             "idle_redraws": 0,
             "idle_non_redraw_events": 0,
             "idle_event_repaint_requests": 0,
@@ -327,7 +332,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
                     }
                 )
         report = {
-            "schema": 4,
+            "schema": 5,
             "status": "pass",
             "executable_sha256": {
                 "viewr": main_digest,

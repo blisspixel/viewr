@@ -429,7 +429,13 @@ impl Drop for FolderScanContext {
 struct RatingScanWorker {
     generation: u64,
     cancel: Arc<AtomicBool>,
-    result_rx: Receiver<(Vec<(PathBuf, RatingState)>, Duration)>,
+    result_rx: Receiver<RatingScanCompletion>,
+}
+
+struct RatingScanCompletion {
+    ratings: Vec<(PathBuf, RatingState)>,
+    worker_duration: Duration,
+    stages: Option<crate::ratings::RatingScanStages>,
 }
 
 struct PendingRatingWrite {
@@ -3090,17 +3096,32 @@ impl App {
         let worker_cancel = Arc::clone(&cancel);
         let (sender, receiver) = mpsc::channel();
         let event_proxy = self.event_proxy.clone();
+        let profile = self.performance_probe.is_some();
         let spawned = std::thread::Builder::new()
             .name("viewr-rating-scan".into())
             .spawn(move || {
                 let scan_started = Instant::now();
-                let ratings = crate::ratings::scan_folder_ratings_while(
-                    files,
-                    || !worker_cancel.load(Ordering::Acquire),
-                    crate::decode::max_concurrent_file_decodes(),
-                );
-                if let Some(ratings) = ratings {
-                    let _ = sender.send((ratings, scan_started.elapsed()));
+                let result = if profile {
+                    crate::ratings::scan_folder_ratings_with_stages_while(
+                        files,
+                        || !worker_cancel.load(Ordering::Acquire),
+                        crate::decode::max_concurrent_file_decodes(),
+                    )
+                    .map(|(ratings, stages)| (ratings, Some(stages)))
+                } else {
+                    crate::ratings::scan_folder_ratings_while(
+                        files,
+                        || !worker_cancel.load(Ordering::Acquire),
+                        crate::decode::max_concurrent_file_decodes(),
+                    )
+                    .map(|ratings| (ratings, None))
+                };
+                if let Some((ratings, stages)) = result {
+                    let _ = sender.send(RatingScanCompletion {
+                        ratings,
+                        worker_duration: scan_started.elapsed(),
+                        stages,
+                    });
                     let _ = event_proxy.send_event(UserEvent::Wake);
                 }
             });
@@ -3146,7 +3167,12 @@ impl App {
         if worker.generation != self.rating_generation {
             return;
         }
-        let Ok((ratings, worker_duration)) = completed else {
+        let Ok(RatingScanCompletion {
+            ratings,
+            worker_duration,
+            stages,
+        }) = completed
+        else {
             if let Some(probe) = self.performance_probe.as_mut() {
                 probe.rating_scan_failed = true;
             }
@@ -3177,6 +3203,7 @@ impl App {
         self.apply_filter_selection(selection);
         if let Some(probe) = self.performance_probe.as_mut() {
             probe.rating_scan_worker = Some(worker_duration);
+            probe.rating_scan_stages = stages;
             probe.rating_scan_apply = Some(apply_started.elapsed());
             probe.rating_scan_total = probe.rating_scan_started.map(|start| start.elapsed());
         }
@@ -7430,6 +7457,9 @@ impl App {
             return;
         };
         let probe = self.performance_probe.as_ref().unwrap();
+        let stages = probe
+            .rating_scan_stages
+            .expect("probe measured rating stages");
         let Some(window_ready) = probe.window_ready else {
             self.fail_performance_probe(event_loop, "probe never observed a visible window".into());
             return;
@@ -7459,6 +7489,15 @@ impl App {
             rating_scan_total_us: crate::performance::duration_us(
                 probe.rating_scan_total.expect("probe timed rating scan"),
             ),
+            rating_scan_paths: stages.paths,
+            rating_scan_open_work_us: crate::performance::duration_us(stages.open),
+            rating_scan_first_snapshot_work_us: crate::performance::duration_us(
+                stages.first_snapshot,
+            ),
+            rating_scan_second_snapshot_work_us: crate::performance::duration_us(
+                stages.second_snapshot,
+            ),
+            rating_scan_verify_work_us: crate::performance::duration_us(stages.verify),
             idle_redraws: probe.idle_redraws,
             idle_non_redraw_events: probe.idle_non_redraw_events,
             idle_event_repaint_requests: probe.idle_event_repaint_requests,
@@ -7498,8 +7537,10 @@ impl App {
                 "probe exceeded its {} second deadline ",
                 "(scan={}, image={}, auxiliary={}, navigation={}, remaining_navigation={}, ",
                 "presented_current={}, idle_started={}, idle_remaining_ms={}, ",
+                "idle_overdue_ms={}, idle_resets={}, ",
                 "rating_scan={}, rating_scan_elapsed_ms={}, rating_scan_prepared_ms={}, ",
-                "rating_scan_worker_ms={}, rating_scan_applied_ms={}, egui_repaint={}, ",
+                "rating_scan_worker_ms={}, rating_scan_applied_ms={}, ",
+                "rating_scan_total_ms={}, egui_repaint={}, ",
                 "prefetch={}, thumbnails={}, ",
                 "ready_thumbnails={}/{})"
             ),
@@ -7521,6 +7562,15 @@ impl App {
                 .map_or(0, |until| until
                     .saturating_duration_since(Instant::now())
                     .as_millis()),
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.idle_until)
+                .map_or(0, |until| Instant::now()
+                    .saturating_duration_since(until)
+                    .as_millis()),
+            self.performance_probe
+                .as_ref()
+                .map_or(0, |probe| probe.idle_reset_count),
             self.rating_scan_worker.is_some(),
             self.performance_probe
                 .as_ref()
@@ -7536,6 +7586,10 @@ impl App {
             self.performance_probe
                 .as_ref()
                 .and_then(|probe| probe.rating_scan_apply)
+                .map_or(0, |elapsed| elapsed.as_millis()),
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.rating_scan_total)
                 .map_or(0, |elapsed| elapsed.as_millis()),
             self.egui_repaint_at.is_some(),
             self.prefetch_schedule.in_flight_len(),
@@ -7569,10 +7623,18 @@ impl App {
             self.fail_performance_probe(event_loop, "rating discovery worker disconnected".into());
             return;
         }
-        if Instant::now() >= deadline {
-            let message = self.performance_probe_timeout_message();
-            self.fail_performance_probe(event_loop, message);
-            return;
+        let now = Instant::now();
+        if now >= deadline {
+            let idle_completed = self
+                .performance_probe
+                .as_ref()
+                .is_some_and(|probe| probe.idle_completed_within_deadline(now))
+                && self.performance_probe_is_settled();
+            if !idle_completed {
+                let message = self.performance_probe_timeout_message();
+                self.fail_performance_probe(event_loop, message);
+                return;
+            }
         }
         if !self.performance_probe_has_presented_current() {
             return;

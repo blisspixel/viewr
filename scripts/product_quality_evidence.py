@@ -100,6 +100,11 @@ PROBE_REPORT_KEYS = frozenset(
         "rating_scan_worker_us",
         "rating_scan_apply_us",
         "rating_scan_total_us",
+        "rating_scan_paths",
+        "rating_scan_open_work_us",
+        "rating_scan_first_snapshot_work_us",
+        "rating_scan_second_snapshot_work_us",
+        "rating_scan_verify_work_us",
         "idle_redraws",
         "idle_non_redraw_events",
         "idle_event_repaint_requests",
@@ -960,6 +965,16 @@ def _require_probe_report(value: object, label: str) -> dict[str, object]:
     if (
         validated["rating_scan_worker_us"] == 0
         or validated["rating_scan_total_us"] == 0
+        or validated["rating_scan_paths"] != validated["playlist_entries"]
+        or any(
+            validated[field] == 0
+            for field in (
+                "rating_scan_open_work_us",
+                "rating_scan_first_snapshot_work_us",
+                "rating_scan_second_snapshot_work_us",
+                "rating_scan_verify_work_us",
+            )
+        )
         or any(
             validated[field] > validated["rating_scan_total_us"]
             for field in (
@@ -1146,7 +1161,7 @@ def _validate_performance_report(
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise EvidenceError(f"performance report is invalid JSON: {path}") from error
     report = _require_exact_json_keys(payload, PERFORMANCE_REPORT_KEYS, str(path))
-    if report["schema"] != 4:
+    if report["schema"] != 5:
         raise EvidenceError(f"{path}: unsupported performance report schema")
     if report["status"] != "pass" or report["failures"] != []:
         raise EvidenceError(f"{path}: performance report must pass without failures")

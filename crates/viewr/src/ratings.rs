@@ -18,6 +18,7 @@ use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 const XMP_APP1_PREFIX: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 const EXTENDED_XMP_APP1_PREFIX: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
@@ -372,6 +373,49 @@ pub(crate) fn scan_folder_ratings_while(
     keep_going: impl Fn() -> bool + Sync,
     parallelism: usize,
 ) -> Option<Vec<(PathBuf, RatingState)>> {
+    scan_folder_ratings_inner(files, keep_going, parallelism, None)
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RatingScanStages {
+    pub(crate) paths: usize,
+    pub(crate) open: Duration,
+    pub(crate) first_snapshot: Duration,
+    pub(crate) second_snapshot: Duration,
+    pub(crate) verify: Duration,
+}
+
+impl RatingScanStages {
+    fn merge(&mut self, other: Self) {
+        self.paths += other.paths;
+        self.open += other.open;
+        self.first_snapshot += other.first_snapshot;
+        self.second_snapshot += other.second_snapshot;
+        self.verify += other.verify;
+    }
+}
+
+/// Run the same scan with summed per-file stage times for an explicit probe.
+/// Times are CPU work across workers and may exceed elapsed wall time.
+pub(crate) fn scan_folder_ratings_with_stages_while(
+    files: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)>,
+    keep_going: impl Fn() -> bool + Sync,
+    parallelism: usize,
+) -> Option<(Vec<(PathBuf, RatingState)>, RatingScanStages)> {
+    let stages = Mutex::new(RatingScanStages::default());
+    let ratings = scan_folder_ratings_inner(files, keep_going, parallelism, Some(&stages))?;
+    let stages = stages
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Some((ratings, stages))
+}
+
+fn scan_folder_ratings_inner(
+    files: Vec<(PathBuf, Option<crate::fs::ScanProvenance>)>,
+    keep_going: impl Fn() -> bool + Sync,
+    parallelism: usize,
+    stages: Option<&Mutex<RatingScanStages>>,
+) -> Option<Vec<(PathBuf, RatingState)>> {
     if files.is_empty() {
         return Some(Vec::new());
     }
@@ -381,12 +425,28 @@ pub(crate) fn scan_folder_ratings_while(
     let workers = parallelism.max(1).min(files.len());
     if workers == 1 {
         let mut ratings = Vec::with_capacity(files.len());
+        let mut local_stages = RatingScanStages::default();
         for (path, provenance) in files {
             if !keep_going() {
                 return None;
             }
-            let rating = scan_path_rating_while(&path, provenance, &keep_going);
+            let rating = if stages.is_some() {
+                scan_path_rating_while_with_stages(
+                    &path,
+                    provenance,
+                    &keep_going,
+                    Some(&mut local_stages),
+                )
+            } else {
+                scan_path_rating_while(&path, provenance, &keep_going)
+            };
             ratings.push((path, rating));
+        }
+        if let Some(stages) = stages {
+            stages
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .merge(local_stages);
         }
         return Some(ratings);
     }
@@ -399,6 +459,7 @@ pub(crate) fn scan_folder_ratings_while(
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
+                let mut local_stages = RatingScanStages::default();
                 loop {
                     if cancelled.load(Ordering::Acquire) || !keep_going() {
                         cancelled.store(true, Ordering::Release);
@@ -406,11 +467,20 @@ pub(crate) fn scan_folder_ratings_while(
                     }
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some((path, provenance)) = files.get(index) else {
-                        return;
+                        break;
                     };
-                    let rating = scan_path_rating_while(path, *provenance, || {
-                        !cancelled.load(Ordering::Acquire) && keep_going()
-                    });
+                    let rating = if stages.is_some() {
+                        scan_path_rating_while_with_stages(
+                            path,
+                            *provenance,
+                            || !cancelled.load(Ordering::Acquire) && keep_going(),
+                            Some(&mut local_stages),
+                        )
+                    } else {
+                        scan_path_rating_while(path, *provenance, || {
+                            !cancelled.load(Ordering::Acquire) && keep_going()
+                        })
+                    };
                     if cancelled.load(Ordering::Acquire) || !keep_going() {
                         cancelled.store(true, Ordering::Release);
                         return;
@@ -418,6 +488,12 @@ pub(crate) fn scan_folder_ratings_while(
                     *slots[index]
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rating);
+                }
+                if let Some(stages) = stages {
+                    stages
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .merge(local_stages);
                 }
             });
         }
@@ -450,22 +526,70 @@ pub(crate) fn scan_path_rating_while(
     scan_path_rating_while_with_hook(path, provenance, keep_going, || {})
 }
 
+fn scan_path_rating_while_with_stages(
+    path: &Path,
+    provenance: Option<crate::fs::ScanProvenance>,
+    keep_going: impl FnMut() -> bool,
+    stages: Option<&mut RatingScanStages>,
+) -> RatingState {
+    scan_path_rating_while_with_hook_and_stages(path, provenance, keep_going, || {}, stages)
+}
+
 fn scan_path_rating_while_with_hook(
+    path: &Path,
+    provenance: Option<crate::fs::ScanProvenance>,
+    keep_going: impl FnMut() -> bool,
+    before_confirmation: impl FnOnce(),
+) -> RatingState {
+    scan_path_rating_while_with_hook_and_stages(
+        path,
+        provenance,
+        keep_going,
+        before_confirmation,
+        None,
+    )
+}
+
+fn scan_path_rating_while_with_hook_and_stages(
     path: &Path,
     provenance: Option<crate::fs::ScanProvenance>,
     mut keep_going: impl FnMut() -> bool,
     before_confirmation: impl FnOnce(),
+    mut stages: Option<&mut RatingScanStages>,
 ) -> RatingState {
+    if let Some(stages) = stages.as_deref_mut() {
+        stages.paths += 1;
+    }
+    let started = stages.is_some().then(Instant::now);
     let Ok(source) = RatingScanSource::open_while(path, provenance, &mut keep_going) else {
+        if let (Some(started), Some(stages)) = (started, stages.as_deref_mut()) {
+            stages.open += started.elapsed();
+        }
         return RatingState::Unreadable;
     };
+    if let (Some(started), Some(stages)) = (started, stages.as_deref_mut()) {
+        stages.open += started.elapsed();
+    }
     // Opening retains the source identity and checks scan provenance when
     // available. Both snapshots read that handle, and the final native check
     // verifies the pathname still names it, so earlier reopens add no authority.
+    let started = stages.is_some().then(Instant::now);
     let header = read_rating_header_snapshot_while(&source, &mut keep_going);
+    if let (Some(started), Some(stages)) = (started, stages.as_deref_mut()) {
+        stages.first_snapshot += started.elapsed();
+    }
     before_confirmation();
+    let started = stages.is_some().then(Instant::now);
     let confirmation = read_rating_header_snapshot_while(&source, &mut keep_going);
-    if !source.native_version_is_current_while(&mut keep_going) {
+    if let (Some(started), Some(stages)) = (started, stages.as_deref_mut()) {
+        stages.second_snapshot += started.elapsed();
+    }
+    let started = stages.is_some().then(Instant::now);
+    let current = source.native_version_is_current_while(&mut keep_going);
+    if let (Some(started), Some(stages)) = (started, stages) {
+        stages.verify += started.elapsed();
+    }
+    if !current {
         return RatingState::Unreadable;
     }
     rating_from_matching_header_snapshots(&header, &confirmation)
@@ -2616,8 +2740,20 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let sequential = scan_folder_ratings_while(files.clone(), || true, 1).unwrap();
+        let (timed_sequential, sequential_stages) =
+            scan_folder_ratings_with_stages_while(files.clone(), || true, 1).unwrap();
+        let (timed, stages) =
+            scan_folder_ratings_with_stages_while(files.clone(), || true, 4).unwrap();
         let parallel = scan_folder_ratings_while(files, || true, 4).unwrap();
         assert_eq!(sequential, parallel);
+        assert_eq!(timed_sequential, parallel);
+        assert_eq!(sequential_stages.paths, 3);
+        assert_eq!(timed, parallel);
+        assert_eq!(stages.paths, 3);
+        assert!(!stages.open.is_zero());
+        assert!(!stages.first_snapshot.is_zero());
+        assert!(!stages.second_snapshot.is_zero());
+        assert!(!stages.verify.is_zero());
         assert_eq!(
             sequential
                 .iter()

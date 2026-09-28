@@ -70,6 +70,16 @@ pub struct PerformanceReport {
     pub rating_scan_apply_us: u64,
     /// Wall time from starting rating discovery through applying it, in microseconds.
     pub rating_scan_total_us: u64,
+    /// Number of paths whose rating-scan stages were measured.
+    pub rating_scan_paths: usize,
+    /// Summed source-open and provenance work across rating workers, in microseconds.
+    pub rating_scan_open_work_us: u64,
+    /// Summed first-header-snapshot work across rating workers, in microseconds.
+    pub rating_scan_first_snapshot_work_us: u64,
+    /// Summed confirming-header-snapshot work across rating workers, in microseconds.
+    pub rating_scan_second_snapshot_work_us: u64,
+    /// Summed final source verification work across rating workers, in microseconds.
+    pub rating_scan_verify_work_us: u64,
     /// Delivered redraw events observed during the settled 500 ms idle window.
     pub idle_redraws: u64,
     /// Non-redraw window events delivered during the idle window.
@@ -111,6 +121,11 @@ impl PerformanceReport {
                 "\"rating_scan_worker_us\":{},",
                 "\"rating_scan_apply_us\":{},",
                 "\"rating_scan_total_us\":{},",
+                "\"rating_scan_paths\":{},",
+                "\"rating_scan_open_work_us\":{},",
+                "\"rating_scan_first_snapshot_work_us\":{},",
+                "\"rating_scan_second_snapshot_work_us\":{},",
+                "\"rating_scan_verify_work_us\":{},",
                 "\"idle_redraws\":{},",
                 "\"idle_non_redraw_events\":{},",
                 "\"idle_event_repaint_requests\":{},",
@@ -134,6 +149,11 @@ impl PerformanceReport {
             self.rating_scan_worker_us,
             self.rating_scan_apply_us,
             self.rating_scan_total_us,
+            self.rating_scan_paths,
+            self.rating_scan_open_work_us,
+            self.rating_scan_first_snapshot_work_us,
+            self.rating_scan_second_snapshot_work_us,
+            self.rating_scan_verify_work_us,
             self.idle_redraws,
             self.idle_non_redraw_events,
             self.idle_event_repaint_requests,
@@ -244,12 +264,14 @@ pub(crate) struct PerformanceProbe {
     pub(crate) rating_scan_worker: Option<Duration>,
     pub(crate) rating_scan_apply: Option<Duration>,
     pub(crate) rating_scan_total: Option<Duration>,
+    pub(crate) rating_scan_stages: Option<crate::ratings::RatingScanStages>,
     pub(crate) rating_scan_failed: bool,
     pub(crate) navigation_started: Option<Instant>,
     pub(crate) navigation_target: Option<PathBuf>,
     pub(crate) navigation_targets: Option<VecDeque<usize>>,
     pub(crate) last_presented_path: Option<PathBuf>,
     pub(crate) idle_until: Option<Instant>,
+    pub(crate) idle_reset_count: u64,
     pub(crate) idle_redraws: u64,
     pub(crate) idle_non_redraw_events: u64,
     pub(crate) idle_event_repaint_requests: u64,
@@ -271,12 +293,14 @@ impl PerformanceProbe {
             rating_scan_worker: None,
             rating_scan_apply: None,
             rating_scan_total: None,
+            rating_scan_stages: None,
             rating_scan_failed: false,
             navigation_started: None,
             navigation_target: None,
             navigation_targets: None,
             last_presented_path: None,
             idle_until: None,
+            idle_reset_count: 0,
             idle_redraws: 0,
             idle_non_redraw_events: 0,
             idle_event_repaint_requests: 0,
@@ -303,10 +327,16 @@ impl PerformanceProbe {
 
     pub(crate) fn reset_idle_observation(&mut self) {
         self.idle_until = None;
+        self.idle_reset_count = self.idle_reset_count.saturating_add(1);
         self.idle_redraws = 0;
         self.idle_non_redraw_events = 0;
         self.idle_event_repaint_requests = 0;
         self.idle_scheduled_egui_repaints = 0;
+    }
+
+    pub(crate) fn idle_completed_within_deadline(&self, now: Instant) -> bool {
+        self.idle_until
+            .is_some_and(|until| until <= self.deadline && now >= until)
     }
 }
 
@@ -330,6 +360,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn idle_window_that_finished_before_deadline_survives_a_late_wake() {
+        let started = Instant::now();
+        let mut probe = PerformanceProbe::new(started);
+        let idle_until = started + Duration::from_secs(1);
+        probe.idle_until = Some(idle_until);
+        assert!(!probe.idle_completed_within_deadline(started));
+        assert!(probe.idle_completed_within_deadline(probe.deadline + Duration::from_millis(1)));
+
+        probe.idle_until = Some(probe.deadline + Duration::from_millis(1));
+        assert!(!probe.idle_completed_within_deadline(probe.deadline + Duration::from_millis(2)));
+    }
+
+    #[test]
     fn report_json_is_stable_and_machine_readable() {
         let report = PerformanceReport {
             adapter_backend: "vulkan".into(),
@@ -343,6 +386,11 @@ mod tests {
             rating_scan_worker_us: 14,
             rating_scan_apply_us: 15,
             rating_scan_total_us: 16,
+            rating_scan_paths: 3,
+            rating_scan_open_work_us: 17,
+            rating_scan_first_snapshot_work_us: 18,
+            rating_scan_second_snapshot_work_us: 19,
+            rating_scan_verify_work_us: 20,
             idle_redraws: 4,
             idle_non_redraw_events: 10,
             idle_event_repaint_requests: 11,
@@ -357,7 +405,7 @@ mod tests {
         };
         assert_eq!(
             report.to_json(),
-            "{\"adapter_backend\":\"vulkan\",\"adapter_name\":\"Test Adapter\",\"adapter_device_type\":\"discrete-gpu\",\"adapter_driver\":\"Test Driver\",\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"rating_scan_prepare_us\":13,\"rating_scan_worker_us\":14,\"rating_scan_apply_us\":15,\"rating_scan_total_us\":16,\"idle_redraws\":4,\"idle_non_redraw_events\":10,\"idle_event_repaint_requests\":11,\"idle_scheduled_egui_repaints\":12,\"idle_window_focused\":true,\"idle_pointer_inside\":false,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
+            "{\"adapter_backend\":\"vulkan\",\"adapter_name\":\"Test Adapter\",\"adapter_device_type\":\"discrete-gpu\",\"adapter_driver\":\"Test Driver\",\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"rating_scan_prepare_us\":13,\"rating_scan_worker_us\":14,\"rating_scan_apply_us\":15,\"rating_scan_total_us\":16,\"rating_scan_paths\":3,\"rating_scan_open_work_us\":17,\"rating_scan_first_snapshot_work_us\":18,\"rating_scan_second_snapshot_work_us\":19,\"rating_scan_verify_work_us\":20,\"idle_redraws\":4,\"idle_non_redraw_events\":10,\"idle_event_repaint_requests\":11,\"idle_scheduled_egui_repaints\":12,\"idle_window_focused\":true,\"idle_pointer_inside\":false,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
         );
     }
 

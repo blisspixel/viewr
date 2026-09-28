@@ -66,6 +66,12 @@ navigation. Its path-free JSON record includes preparation, background worker,
 result-application, and total wall times in microseconds. The gate rejects a
 report without a completed worker scan. The worker still performs the final
 source-identity and header-snapshot checks used by ordinary rating discovery.
+The explicit probe also sums the worker time spent opening and checking each
+source, reading each of two bounded header snapshots, and verifying final
+native identity and pathname. These work sums can exceed wall time because
+workers run concurrently. The report records the number of measured paths and
+the gate requires it to equal the playlist size. Ordinary viewer scans do not
+call the per-file timer.
 `--rating-scan-diagnostics` prints the ordered stage times for every process
 in a multi-run local gate, including a slow outlier hidden by the median.
 Alongside the
@@ -185,11 +191,33 @@ measurement surface small and auditable.
 
 ## Current evidence
 
+On this Windows development host on 2026-09-28, the inner-stage probe measured
+93.84 seconds of summed final-verification work in a passing 50,000-image run;
+the worker's wall time was 23.84 seconds. One repeat hit the 60-second probe
+deadline after its 23.92-second worker had completed. That timeout's older
+diagnostic did not distinguish a late idle wake from late scan application, so
+it is not evidence of a 60-second rating read. The probe now accepts an idle
+observation that completed within the deadline even if the next event arrives
+late, and its timeout reports completed scan time, idle overdue time, and idle
+resets.
+
+The rating-scan path now skips a preliminary pathname metadata read before
+reopening the final path without following links. It still checks the reopened
+handle's regular-file type, native identity, and version against the retained
+source. Six optimized 50,000-image Windows runs passed with worker wall times
+from 13.48 to 17.56 seconds. The first three measured 16.65, 17.56, and
+15.98 seconds; the second three measured 15.48, 13.48, and 14.55 seconds.
+Summed final-verification work ranged from 45.30 to 58.78 seconds. The
+development corpus and host match the baseline,
+but operating-system cache and other host load can vary between runs. The
+intermittent deadline remains under observation; these passes do not prove it
+cannot recur.
+
 On this Windows development host on 2026-09-28, an optimized build of the
 corrected probe passed one-run and three-run gates on a synthetic 50,000-image
 folder. The three large-folder scans took 24.56, 24.67, and 24.81 seconds;
-their background workers took 24.51, 24.63, and 24.77 seconds. The median
-maximum large-folder peak resident set was 329.27 MiB, slowest sampled navigation was
+their background workers took 24.51, 24.63, and 24.77 seconds. The maximum
+large-folder peak resident set was 329.27 MiB, slowest sampled navigation was
 225.91 ms, and settled idle redraws were zero. These are development-build
 measurements, not candidate-bound release evidence. They did not reproduce the
 intermittent deadline, but now measure the scan the earlier probe omitted.
@@ -201,7 +229,7 @@ gates. The three-run result measured 344.12 MiB large-folder peak resident set,
 256 MiB decoded-cache budget. The intermittent rating-scan deadline was not
 reproduced in these runs. The probe at that commit did not start rating
 discovery, so those passes do not test the rating-scan deadline. The corrected
-probe needs a new run before that investigation can close.
+development run above supplies initial scan timings.
 
 On the Windows development host on 2026-08-01, the final three-run optimized
 GUI probe met every startup, navigation, memory, folder-scaling, cache,

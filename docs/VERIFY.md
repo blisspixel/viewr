@@ -79,6 +79,12 @@ test members.
 
 Platform package and optional C-decoder checks require their documented local
 SDKs or system libraries. A skipped platform check is an evidence gap, not a pass.
+The Windows installer smoke test uses disposable files and mocked downloads. It
+checks a clean install, reinstall, and a forced activation failure after the old
+directory is moved aside. The failure must restore every prior file byte for byte
+and leave no staging or backup directory. It does not prove that Start menu,
+associations, or uninstallation work on every Windows configuration.
+
 ## 3. Build the exact target
 
 Build both workspace binaries from locked dependencies:

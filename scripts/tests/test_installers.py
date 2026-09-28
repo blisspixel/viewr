@@ -165,15 +165,48 @@ else:
 """,
             encoding="utf-8",
         )
+        move = self.fake_bin / "mv"
+        move.write_text(
+            """#!/bin/sh
+case "${FAKE_FAIL_MOVE:-}" in
+    release|restore)
+        case "$1:$2" in
+            */.installing-*:*/releases/v1.2.3) exit 1 ;;
+        esac
+        if [ "$FAKE_FAIL_MOVE" = restore ]; then
+            case "$1:$2" in
+                */.backup-*:*/releases/v1.2.3) exit 1 ;;
+            esac
+        fi
+        ;;
+    command|command_restore)
+        if [ "${1:-}" = -f ] && [ "${2:-}" = -- ]; then
+            case "$3:$4" in
+                */.viewr-link-*:*/bin/viewr) exit 1 ;;
+            esac
+        fi
+        if [ "$FAKE_FAIL_MOVE" = command_restore ]; then
+            case "$1:$2" in
+                */.backup-*:*/releases/v1.2.3) exit 1 ;;
+            esac
+        fi
+        ;;
+esac
+exec /bin/mv "$@"
+""",
+            encoding="utf-8",
+        )
         curl.chmod(0o755)
         uname.chmod(0o755)
         unzip.chmod(0o755)
+        move.chmod(0o755)
 
     def run_installer(
         self,
         *,
         archive: Path | None = None,
         sidecar: Path | None = None,
+        fail_move: str | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
@@ -181,6 +214,7 @@ else:
             {
                 "FAKE_ARCHIVE": str(archive or self.archive),
                 "FAKE_SIDECAR": str(sidecar or self.sidecar),
+                "FAKE_FAIL_MOVE": fail_move or "",
                 "HOME": str(self.home),
                 "PATH": f"{self.fake_bin}{os.pathsep}{environment['PATH']}",
                 "TMPDIR": str(self.temp_dir),
@@ -238,6 +272,84 @@ else:
         self.assertEqual(
             list((self.install_root / "releases").glob(".installing-*")), []
         )
+
+    def test_failed_release_activation_restores_every_previous_file(self) -> None:
+        self.run_installer()
+        releases = self.install_root / "releases"
+        release = releases / "v1.2.3"
+        previous = {path.name: path.read_bytes() for path in release.iterdir()}
+        command_target = os.readlink(self.bin_dir / "viewr")
+
+        result = self.run_installer(fail_move="release", check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("previous release was restored", result.stderr)
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in release.iterdir()}, previous
+        )
+        self.assertEqual(os.readlink(self.bin_dir / "viewr"), command_target)
+        self.assertEqual(list(releases.glob(".backup-*")), [])
+        self.assertEqual(list(releases.glob(".installing-*")), [])
+        self.assertEqual(list(self.bin_dir.glob(".viewr-link-*")), [])
+
+    def test_failed_restore_reports_and_retains_the_previous_release(self) -> None:
+        self.run_installer()
+        releases = self.install_root / "releases"
+        release = releases / "v1.2.3"
+        previous = {path.name: path.read_bytes() for path in release.iterdir()}
+
+        result = self.run_installer(fail_move="restore", check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not activate the new release or restore", result.stderr)
+        self.assertFalse(release.exists())
+        backups = list(releases.glob(".backup-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertIn(str(backups[0]), result.stderr)
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in backups[0].iterdir()}, previous
+        )
+        self.assertEqual(list(releases.glob(".installing-*")), [])
+        self.assertEqual(list(self.bin_dir.glob(".viewr-link-*")), [])
+
+    def test_failed_command_activation_restores_every_previous_file(self) -> None:
+        self.run_installer()
+        releases = self.install_root / "releases"
+        release = releases / "v1.2.3"
+        previous = {path.name: path.read_bytes() for path in release.iterdir()}
+        command_target = os.readlink(self.bin_dir / "viewr")
+
+        result = self.run_installer(fail_move="command", check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("previous release was restored", result.stderr)
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in release.iterdir()}, previous
+        )
+        self.assertEqual(os.readlink(self.bin_dir / "viewr"), command_target)
+        self.assertEqual(list(releases.glob(".backup-*")), [])
+        self.assertEqual(list(releases.glob(".installing-*")), [])
+        self.assertEqual(list(self.bin_dir.glob(".viewr-link-*")), [])
+
+    def test_failed_command_restore_reports_and_retains_backup(self) -> None:
+        self.run_installer()
+        releases = self.install_root / "releases"
+        release = releases / "v1.2.3"
+        previous = {path.name: path.read_bytes() for path in release.iterdir()}
+
+        result = self.run_installer(fail_move="command_restore", check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not activate the viewr command or restore", result.stderr)
+        self.assertFalse(release.exists())
+        backups = list(releases.glob(".backup-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertIn(str(backups[0]), result.stderr)
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in backups[0].iterdir()}, previous
+        )
+        self.assertEqual(list(releases.glob(".installing-*")), [])
+        self.assertEqual(list(self.bin_dir.glob(".viewr-link-*")), [])
 
 
 if __name__ == "__main__":

@@ -147,7 +147,9 @@ claim attached retroactively to the immutable v0.6.0 release.
    associations, and artifact provenance into repeatable platform checks. Run
    them against verified release archives and fix any failures. Windows CI now
    injects an activation failure and verifies byte-for-byte restoration of the
-   previous installer-owned directory; the other paths remain open.
+   previous installer-owned directory. Unix installer tests now inject release
+   and command activation failures and verify restoration or a retained backup;
+   update, uninstall, association, and provenance paths remain open.
 3. Prepare the v0.8.0 version and release notes before building one exact-commit
    non-publishing candidate. Require green CI, coverage, privacy, and fuzzing;
    verify every archive and the published limits under

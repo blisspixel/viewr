@@ -39,6 +39,8 @@ Start with the document that matches the task.
   ordered next steps, completed phases, and explicit non-goals.
 - [v0.7.0 release notes](releases/v0.7.0.md): the current accessibility and
   collage preview and its explicit evidence limits.
+- [v0.7.1 candidate notes](releases/v0.7.1.md): the rating scan and installer
+  recovery patch, pending publication.
 - [v0.6.5 release notes](releases/v0.6.5.md): the earlier shipped-feedback
   patch for page identity, substitution notices, and rating scope.
 - [v0.6.4 release notes](releases/v0.6.4.md): the shipped-feedback

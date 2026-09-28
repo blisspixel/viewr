@@ -66,16 +66,16 @@ class DocumentationTests(unittest.TestCase):
 
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
-            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.6.5 or commit SHA",),
+            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.7.0 or commit SHA",),
             "README.md": (
-                "v0.6.5 is the current public preview",
+                "v0.7.0 is the current public preview",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.6.5 is the current public GitHub Release",
+                "v0.7.0 is the current public GitHub Release",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -83,14 +83,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Published install target | Immutable [v0.6.5]",
+                "Published install target | Immutable [v0.7.0]",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.6.5 is public, immutable, checksummed, and attested",
+                "v0.7.0 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (
@@ -205,6 +205,7 @@ class DocumentationTests(unittest.TestCase):
                 "representative-hardware matrix",
             ),
             "CHANGELOG.md": (
+                "## 0.7.0 - 2026-09-28",
                 "## 0.6.5 - 2026-09-25",
                 "## 0.6.4 - 2026-09-24",
                 "## 0.6.3 - 2026-09-09",
@@ -407,8 +408,8 @@ class DocumentationTests(unittest.TestCase):
         )
         positions = [roadmap.index(gate) for gate in ordered_gates]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("Immediate focus: publish a verified v0.7 preview", roadmap)
-        self.assertIn("### Next steps to v0.7.0", roadmap)
+        self.assertIn("Immediate focus: v0.8 release readiness", roadmap)
+        self.assertIn("### Next steps to v0.8.0", roadmap)
         self.assertIn("### Version state and update points", roadmap)
         self.assertIn("Native platform trust | Deferred to v0.9", roadmap)
         self.assertIn("explicitly unsigned pre-1.0 preview", standards)
@@ -417,7 +418,7 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("full commit SHA plus one non-publishing", publishing)
         self.assertLess(
             publishing.index("`docs/releases/v<version>.md`"),
-            publishing.index("git tag -a v0.7.0"),
+            publishing.index("git tag -a v0.8.0"),
         )
         self.assertNotIn("git tag -a v0.6.0", publishing)
 

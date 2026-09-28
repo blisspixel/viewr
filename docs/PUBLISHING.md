@@ -89,17 +89,18 @@ workflow results, and release assets remain the source of truth:
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.6.5. README and INSTALL call this the install target until a
+   currently v0.7.0. README and INSTALL call this the install target until a
    later release actually exists.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.0` for the accessibility and collage preview candidate.
+   `0.7.0`, matching the public accessibility and collage preview.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
    archive name or version string alone.
-4. **Intended tag:** the next version selected for publication. It is v0.7.0;
-   it is the workspace version but not yet the public version.
+4. **Intended tag:** the next version selected for publication after its gates
+   close. The next minor candidate is v0.8.0; it is not yet the workspace or
+   public version.
 
 Advance the workspace version once, before collecting evidence for the intended
 tag. That release-preparation change updates `Cargo.toml`, `Cargo.lock`,
@@ -140,9 +141,9 @@ exit evidence, never calendar forecasts or duration estimates.
 ## Pre-1.0 release procedure
 
 This is the procedure used for `v0.1.0` and repeated for each later tag. The
-next allowed tag is `v0.7.0`. Its representative-hardware and native
-assistive-technology rows remain uncollected, so its release notes must state
-those limits. An unsigned pre-1.0 release is acceptable only
+next planned minor tag is `v0.8.0`, after its release-readiness gates close.
+v0.7.0 published with its representative-hardware and native
+assistive-technology rows disclosed as uncollected. An unsigned pre-1.0 release is acceptable only
 when its trust boundary is explicit.
 It must never be presented as signed, notarized, store-reviewed, or ready for every
 production environment.
@@ -167,10 +168,10 @@ production environment.
    exact clean `main` commit only after CI and fuzz pass there, and retain both
    run links.
 5. Dispatch one non-publishing `Release artifacts` run for that commit. Verify
-   all four archives and the fixture as one exact candidate. For v0.7.0, run the
-   automated accessibility and packaged Windows collage checks; keep missing
-   Narrator, VoiceOver, Orca, and representative-hardware rows visible in the
-   release notes and roadmap. Later milestones retain the evidence assigned in
+   all four archives and the fixture as one exact candidate. For v0.8.0, complete
+   the representative-hardware, native assistive-technology, install, update,
+   rollback, association, and provenance evidence assigned in the
+   [Roadmap](ROADMAP.md). The exact procedures remain in
    [Accessibility](ACCESSIBILITY.md) and [Product quality](PRODUCT-QUALITY.md).
 6. If a gate fails, correct the defect, repeat the complete automated validation,
    produce a replacement candidate, and repeat every affected evidence row. If
@@ -186,8 +187,8 @@ production environment.
    annotated tag:
 
    ```text
-   git tag -a v0.7.0 -m "viewr 0.7.0"
-   git push origin v0.7.0
+   git tag -a v0.8.0 -m "viewr 0.8.0"
+   git push origin v0.8.0
    ```
 
    Use `git tag -s` when a configured signing identity is available. Do not weaken
@@ -420,9 +421,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.6.5 is public, immutable, checksummed, and attested, and v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.7.0 is public, immutable, checksummed, and attested, and v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, and v0.6.0 carry no representative-hardware
+  known-issues note. v0.7.0 and v0.6.5 through v0.6.0 carry no representative-hardware
   acceptance evidence, which their release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.

@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.6.5
+- [Install and update](INSTALL.md): current source builds, current v0.7.0
   one-command installers, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
@@ -37,9 +37,10 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.6.5 release notes](releases/v0.6.5.md): the current shipped-feedback
-  patch for page identity, substitution notices, and rating scope in the top
-  status.
+- [v0.7.0 release notes](releases/v0.7.0.md): the current accessibility and
+  collage preview and its explicit evidence limits.
+- [v0.6.5 release notes](releases/v0.6.5.md): the earlier shipped-feedback
+  patch for page identity, substitution notices, and rating scope.
 - [v0.6.4 release notes](releases/v0.6.4.md): the shipped-feedback
   patch for network storage, O(1) playlist indexing, and responsive culling.
 - [v0.6.3 release notes](releases/v0.6.3.md): the shipped-feedback
@@ -67,7 +68,7 @@ Start with the document that matches the task.
 - [v0.1.0 release notes](releases/v0.1.0.md): first-preview highlights,
   verification, platform limits, and the known issues that v0.1.1 fixes.
 - [Publishing](PUBLISHING.md): public-repository controls, version state policy,
-  the repeatable pre-1.0 tag procedure (next minor tag v0.7.0), verification, and the
+  the repeatable pre-1.0 tag procedure, verification, and the
   stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
 - [Changelog](../CHANGELOG.md): user-visible changes by release.

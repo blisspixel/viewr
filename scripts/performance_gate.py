@@ -200,8 +200,8 @@ def create_linked_corpus(directory: Path, source: Path, count: int) -> Path:
     return first
 
 
-def parse_report(stdout: str) -> ProbeReport:
-    """Parse the final exact-shape JSON object emitted by the GUI probe."""
+def parse_report(stdout: str, *, require_rating_scan: bool = True) -> ProbeReport:
+    """Parse the final exact-shape GUI report, optionally requiring scan timing."""
 
     for line in reversed(stdout.splitlines()):
         line = line.strip()
@@ -226,7 +226,7 @@ def parse_report(stdout: str) -> ProbeReport:
             raise PerformanceGateError("probe adapter backend is unsupported")
         if payload["adapter_device_type"] not in ADAPTER_DEVICE_TYPES:
             raise PerformanceGateError("probe adapter device type is unsupported")
-        if (
+        if require_rating_scan and (
             payload["rating_scan_worker_us"] == 0
             or payload["rating_scan_total_us"] == 0
             or payload["rating_scan_paths"] != payload["playlist_entries"]

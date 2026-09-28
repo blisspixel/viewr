@@ -61,7 +61,10 @@ def presented(report: str) -> bool:
     """Whether the exact probe report proves software-OpenGL presentation."""
 
     try:
-        measurements = parse_report(report)
+        # One generated image can finish scan stages within a microsecond. This
+        # probe proves presentation; the separate performance gate requires a
+        # complete timed scan on its larger synthetic folder.
+        measurements = parse_report(report, require_rating_scan=False)
     except PerformanceGateError as error:
         raise SoftwareGlProbeError(f"probe report was invalid: {error}") from error
     adapter_text = f"{measurements.adapter_name} {measurements.adapter_driver}"

@@ -76,6 +76,20 @@ class SoftwareGlProbeTests(unittest.TestCase):
 
     def test_a_report_counts_only_when_a_frame_reached_the_display(self) -> None:
         self.assertTrue(presented(report_json()))
+        self.assertTrue(
+            presented(
+                report_json(
+                    playlist_entries=1,
+                    rating_scan_paths=1,
+                    rating_scan_worker_us=0,
+                    rating_scan_total_us=0,
+                    rating_scan_open_work_us=0,
+                    rating_scan_first_snapshot_work_us=0,
+                    rating_scan_second_snapshot_work_us=0,
+                    rating_scan_verify_work_us=0,
+                )
+            )
+        )
         # A probe that exits without ever presenting reports no first pixel.
         self.assertFalse(presented(report_json(first_pixel_us=0)))
         with self.assertRaisesRegex(SoftwareGlProbeError, "invalid"):

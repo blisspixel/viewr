@@ -59,6 +59,10 @@ The shell installer:
 - atomically updates an installer-owned symlink in `~/.local/bin`;
 - installs the desktop entry and icon on Linux without changing default handlers.
 
+If update activation fails, the installer restores the previous release. If the
+operating system also prevents restoration, it reports the exact retained backup
+directory instead of claiming recovery succeeded.
+
 Supported release targets are macOS Intel, macOS Apple Silicon, and Linux x86-64
 glibc. Linux ARM64 and musl users must build from source for now.
 

@@ -354,8 +354,9 @@ if [ -e "$release_dir" ]; then
     [ ! -e "$backup_dir" ] || fail "installer backup path already exists"
     mv "$release_dir" "$backup_dir" || fail "could not stage the previous installation"
     if ! mv "$stage_dir" "$release_dir"; then
-        mv "$backup_dir" "$release_dir" || true
         rm -f -- "$temporary_link"
+        mv "$backup_dir" "$release_dir" ||
+            fail "could not activate the new release or restore the previous one; the previous release remains at $backup_dir"
         fail "could not activate the new release; the previous release was restored"
     fi
 else
@@ -366,9 +367,15 @@ else
 fi
 
 if ! mv -f -- "$temporary_link" "$command_link"; then
-    rm -rf -- "$release_dir"
+    rm -rf -- "$release_dir" || {
+        if [ -n "$backup_dir" ]; then
+            fail "could not activate the viewr command or remove the new release; the previous release remains at $backup_dir"
+        fi
+        fail "could not activate the viewr command or remove the new release"
+    }
     if [ -n "$backup_dir" ]; then
-        mv "$backup_dir" "$release_dir" || true
+        mv "$backup_dir" "$release_dir" ||
+            fail "could not activate the viewr command or restore the previous release; the previous release remains at $backup_dir"
     fi
     fail "could not activate the viewr command; the previous release was restored when available"
 fi

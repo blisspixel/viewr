@@ -84,6 +84,10 @@ checks a clean install, reinstall, and a forced activation failure after the old
 directory is moved aside. The failure must restore every prior file byte for byte
 and leave no staging or backup directory. It does not prove that Start menu,
 associations, or uninstallation work on every Windows configuration.
+The Unix installer integration tests use disposable files and mocked downloads.
+They check failed release and command activation against the previous installation,
+and require an explicit retained-backup path if a simulated filesystem failure
+also prevents restoration. These tests run on Linux and macOS CI hosts.
 
 ## 3. Build the exact target
 

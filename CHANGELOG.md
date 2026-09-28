@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+### Installation
+
+- The macOS and Linux installer now reports the retained backup location if an
+  update fails and the operating system also prevents restoration. It no longer
+  says the previous version was restored in that case.
+
 ## 0.7.0 - 2026-09-28
 
 ### Accessibility

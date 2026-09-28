@@ -96,14 +96,14 @@ Four version states must not be conflated:
    later release actually exists.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.0`, matching the public accessibility and collage preview.
+   `0.7.1`, the rating scan and installer recovery patch candidate.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
    archive name or version string alone.
 4. **Intended tag:** the next version selected for publication after its gates
-   close. The next minor candidate is v0.8.0; it is not yet the workspace or
-   public version.
+   close. The intended patch tag is v0.7.1. The next minor milestone is v0.8.0;
+   it is not yet the workspace or public version.
 
 Advance the workspace version once, before collecting evidence for the intended
 tag. That release-preparation change updates `Cargo.toml`, `Cargo.lock`,
@@ -156,7 +156,7 @@ production environment.
    validator when the required platform records are available:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.0
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.1
    ```
 
 2. On a feature branch, make the single version transition described in

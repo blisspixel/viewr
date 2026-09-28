@@ -741,7 +741,7 @@ impl ImageSource {
         self.retained_version_is_current_while(&mut keep_going)
             && self.accepted_path.as_deref().is_none_or(|path| {
                 !self.markable
-                    || self.matches_path_inner(path, false, &mut keep_going)
+                    || self.matches_path_inner(path, false, true, &mut keep_going)
                         == ImageSourceMatch::Same
             })
     }
@@ -841,7 +841,7 @@ impl ImageSource {
     /// from owned background work.
     #[must_use]
     pub(crate) fn matches_path_native(&self, path: &Path) -> ImageSourceMatch {
-        self.matches_path_inner(path, false, &mut || true)
+        self.matches_path_inner(path, false, true, &mut || true)
     }
 
     /// Compare a pathname while cooperatively stopping superseded work.
@@ -851,13 +851,14 @@ impl ImageSource {
         path: &Path,
         mut keep_going: impl FnMut() -> bool,
     ) -> ImageSourceMatch {
-        self.matches_path_inner(path, true, &mut keep_going)
+        self.matches_path_inner(path, true, true, &mut keep_going)
     }
 
     fn matches_path_inner(
         &self,
         path: &Path,
         require_content_match: bool,
+        classify_entry_before_open: bool,
         keep_going: &mut impl FnMut() -> bool,
     ) -> ImageSourceMatch {
         if !keep_going() {
@@ -872,15 +873,17 @@ impl ImageSource {
         let Some(expected_version) = self.version else {
             return ImageSourceMatch::Unavailable;
         };
-        let entry = match std::fs::symlink_metadata(path) {
-            Ok(entry) => entry,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return ImageSourceMatch::Missing;
+        if classify_entry_before_open {
+            let entry = match std::fs::symlink_metadata(path) {
+                Ok(entry) => entry,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return ImageSourceMatch::Missing;
+                }
+                Err(_) => return ImageSourceMatch::Unavailable,
+            };
+            if !metadata_is_markable_regular(&entry) {
+                return ImageSourceMatch::Unsupported;
             }
-            Err(_) => return ImageSourceMatch::Unavailable,
-        };
-        if !metadata_is_markable_regular(&entry) {
-            return ImageSourceMatch::Unsupported;
         }
         let file = match open_regular_no_follow(path) {
             Ok(file) => file,
@@ -1006,7 +1009,11 @@ impl RatingScanSource {
         self.0.native_version_is_current_while(&mut keep_going)
             && self.0.accepted_path.as_deref().is_none_or(|path| {
                 !self.0.markable
-                    || self.0.matches_path_inner(path, false, &mut keep_going)
+                    // The no-follow handle is checked for regular type, native
+                    // identity, and version below. Rating discovery only needs
+                    // Same versus not-Same, so an earlier pathname stat adds
+                    // no authority and doubles metadata work for large folders.
+                    || self.0.matches_path_inner(path, false, false, &mut keep_going)
                         == ImageSourceMatch::Same
             })
     }
@@ -2770,6 +2777,11 @@ mod tests {
             source.0.matches_path(&path),
             super::ImageSourceMatch::Unavailable
         );
+
+        let moved = workspace.path().join("moved.jpg");
+        fs::rename(&path, &moved).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(!source.native_version_is_current_while(|| true));
     }
 
     #[cfg(unix)]

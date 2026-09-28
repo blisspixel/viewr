@@ -10,7 +10,13 @@ and organized by user-visible concern.
 - The explicit GUI probe now runs folder rating discovery on its synthetic
   corpus. Its report separates input preparation, background scanning, result
   application, and total elapsed time, so the 50,000-file gate can detect a
-  stalled rating scan.
+  stalled rating scan. The probe also measures source opening, both bounded
+  header snapshots, and final identity verification within the worker.
+- Folder rating discovery skips a redundant pathname stat before its final
+  no-follow handle check. A three-run synthetic Windows gate measured roughly
+  16 to 18 seconds per 50,000-file worker, down from roughly 24 seconds before
+  the change. The probe also accepts an idle window completed by its deadline
+  when event delivery is late.
 
 ### Installation
 

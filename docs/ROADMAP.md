@@ -142,10 +142,12 @@ claim attached retroactively to the immutable v0.6.0 release.
 
 1. Run the corrected explicit probe on a synthetic Windows 50,000-file corpus.
    It now starts rating discovery and reports preparation, worker, application,
-   and total times. One-run and three-run development gates passed with workers
-   near 24.5 seconds; the intermittent stall has not reproduced. Continue
-   repeat runs and measure the worker's inner stages before changing its final
-   source-identity and header-snapshot checks.
+   and total times. An inner-stage run isolated final pathname verification as
+   the dominant Windows cost and reproduced one 60-second probe deadline after
+   the worker completed. Removing a redundant pre-open pathname stat reduced
+   six Windows worker runs to 13.48 to 17.56 seconds while retaining the
+   no-follow handle, native identity, version, and two header-snapshot checks.
+   Continue repeat runs to determine whether the intermittent late wake recurs.
 2. Turn clean install, reinstall, explicit update, uninstall, rollback, file
    associations, and artifact provenance into repeatable platform checks. Run
    them against verified release archives and fix any failures. Windows CI now

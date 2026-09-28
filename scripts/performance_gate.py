@@ -44,6 +44,11 @@ REPORT_KEYS = frozenset(
         "rating_scan_worker_us",
         "rating_scan_apply_us",
         "rating_scan_total_us",
+        "rating_scan_paths",
+        "rating_scan_open_work_us",
+        "rating_scan_first_snapshot_work_us",
+        "rating_scan_second_snapshot_work_us",
+        "rating_scan_verify_work_us",
         "idle_redraws",
         "idle_non_redraw_events",
         "idle_event_repaint_requests",
@@ -112,6 +117,11 @@ class ProbeReport:
     rating_scan_worker_us: int
     rating_scan_apply_us: int
     rating_scan_total_us: int
+    rating_scan_paths: int
+    rating_scan_open_work_us: int
+    rating_scan_first_snapshot_work_us: int
+    rating_scan_second_snapshot_work_us: int
+    rating_scan_verify_work_us: int
     idle_redraws: int
     idle_non_redraw_events: int
     idle_event_repaint_requests: int
@@ -219,6 +229,16 @@ def parse_report(stdout: str) -> ProbeReport:
         if (
             payload["rating_scan_worker_us"] == 0
             or payload["rating_scan_total_us"] == 0
+            or payload["rating_scan_paths"] != payload["playlist_entries"]
+            or any(
+                payload[key] == 0
+                for key in (
+                    "rating_scan_open_work_us",
+                    "rating_scan_first_snapshot_work_us",
+                    "rating_scan_second_snapshot_work_us",
+                    "rating_scan_verify_work_us",
+                )
+            )
             or any(
                 payload[key] > payload["rating_scan_total_us"]
                 for key in (
@@ -326,6 +346,23 @@ def _median_report(reports: list[ProbeReport]) -> ProbeReport:
         rating_scan_total_us=int(
             statistics.median(report.rating_scan_total_us for report in reports)
         ),
+        rating_scan_paths=max(report.rating_scan_paths for report in reports),
+        rating_scan_open_work_us=int(
+            statistics.median(report.rating_scan_open_work_us for report in reports)
+        ),
+        rating_scan_first_snapshot_work_us=int(
+            statistics.median(
+                report.rating_scan_first_snapshot_work_us for report in reports
+            )
+        ),
+        rating_scan_second_snapshot_work_us=int(
+            statistics.median(
+                report.rating_scan_second_snapshot_work_us for report in reports
+            )
+        ),
+        rating_scan_verify_work_us=int(
+            statistics.median(report.rating_scan_verify_work_us for report in reports)
+        ),
         idle_redraws=max(report.idle_redraws for report in reports),
         idle_non_redraw_events=max(report.idle_non_redraw_events for report in reports),
         idle_event_repaint_requests=max(
@@ -380,6 +417,11 @@ def _rating_scan_diagnostics(
             "worker_us": report.rating_scan_worker_us,
             "apply_us": report.rating_scan_apply_us,
             "total_us": report.rating_scan_total_us,
+            "paths": report.rating_scan_paths,
+            "open_work_us": report.rating_scan_open_work_us,
+            "first_snapshot_work_us": report.rating_scan_first_snapshot_work_us,
+            "second_snapshot_work_us": report.rating_scan_second_snapshot_work_us,
+            "verify_work_us": report.rating_scan_verify_work_us,
         }
 
     payload = {
@@ -918,7 +960,7 @@ def _evidence_report(
 
     retained_reports = (*small_reports, *large_reports, cache_stress)
     return {
-        "schema": 4,
+        "schema": 5,
         "status": "fail" if failures else "pass",
         "executable_sha256": executable_sha256,
         "session_label": session_label,
@@ -1081,6 +1123,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"(prepare={large.rating_scan_prepare_us / 1000:.2f}, "
         f"worker={large.rating_scan_worker_us / 1000:.2f}, "
         f"apply={large.rating_scan_apply_us / 1000:.2f}), "
+        f"rating-worker-work={large.rating_scan_open_work_us / 1000:.2f} ms open/"
+        f"{large.rating_scan_first_snapshot_work_us / 1000:.2f} ms first/"
+        f"{large.rating_scan_second_snapshot_work_us / 1000:.2f} ms second/"
+        f"{large.rating_scan_verify_work_us / 1000:.2f} ms verify, "
         f"cache-stress={cache_stress.decoded_cache_entries} entries/"
         f"{cache_stress.decoded_cache_bytes / (1024 * 1024):.2f} MiB"
     )

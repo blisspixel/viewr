@@ -62,6 +62,14 @@ pub struct PerformanceReport {
     pub first_pixel_us: u64,
     /// Slowest sampled navigation-to-present interval, in microseconds.
     pub max_navigation_us: u64,
+    /// Time spent preparing the folder rating scan input, in microseconds.
+    pub rating_scan_prepare_us: u64,
+    /// Time spent reading folder ratings off the UI thread, in microseconds.
+    pub rating_scan_worker_us: u64,
+    /// Time spent applying discovered ratings on the UI thread, in microseconds.
+    pub rating_scan_apply_us: u64,
+    /// Wall time from starting rating discovery through applying it, in microseconds.
+    pub rating_scan_total_us: u64,
     /// Delivered redraw events observed during the settled 500 ms idle window.
     pub idle_redraws: u64,
     /// Non-redraw window events delivered during the idle window.
@@ -99,6 +107,10 @@ impl PerformanceReport {
                 "\"window_ready_us\":{},",
                 "\"first_pixel_us\":{},",
                 "\"max_navigation_us\":{},",
+                "\"rating_scan_prepare_us\":{},",
+                "\"rating_scan_worker_us\":{},",
+                "\"rating_scan_apply_us\":{},",
+                "\"rating_scan_total_us\":{},",
                 "\"idle_redraws\":{},",
                 "\"idle_non_redraw_events\":{},",
                 "\"idle_event_repaint_requests\":{},",
@@ -118,6 +130,10 @@ impl PerformanceReport {
             self.window_ready_us,
             self.first_pixel_us,
             self.max_navigation_us,
+            self.rating_scan_prepare_us,
+            self.rating_scan_worker_us,
+            self.rating_scan_apply_us,
+            self.rating_scan_total_us,
             self.idle_redraws,
             self.idle_non_redraw_events,
             self.idle_event_repaint_requests,
@@ -223,6 +239,12 @@ pub(crate) struct PerformanceProbe {
     pub(crate) window_ready: Option<Duration>,
     pub(crate) first_pixel: Option<Duration>,
     pub(crate) max_navigation: Duration,
+    pub(crate) rating_scan_started: Option<Instant>,
+    pub(crate) rating_scan_prepare: Duration,
+    pub(crate) rating_scan_worker: Option<Duration>,
+    pub(crate) rating_scan_apply: Option<Duration>,
+    pub(crate) rating_scan_total: Option<Duration>,
+    pub(crate) rating_scan_failed: bool,
     pub(crate) navigation_started: Option<Instant>,
     pub(crate) navigation_target: Option<PathBuf>,
     pub(crate) navigation_targets: Option<VecDeque<usize>>,
@@ -244,6 +266,12 @@ impl PerformanceProbe {
             window_ready: None,
             first_pixel: None,
             max_navigation: Duration::ZERO,
+            rating_scan_started: None,
+            rating_scan_prepare: Duration::ZERO,
+            rating_scan_worker: None,
+            rating_scan_apply: None,
+            rating_scan_total: None,
+            rating_scan_failed: false,
             navigation_started: None,
             navigation_target: None,
             navigation_targets: None,
@@ -311,6 +339,10 @@ mod tests {
             window_ready_us: 1,
             first_pixel_us: 2,
             max_navigation_us: 3,
+            rating_scan_prepare_us: 13,
+            rating_scan_worker_us: 14,
+            rating_scan_apply_us: 15,
+            rating_scan_total_us: 16,
             idle_redraws: 4,
             idle_non_redraw_events: 10,
             idle_event_repaint_requests: 11,
@@ -325,7 +357,7 @@ mod tests {
         };
         assert_eq!(
             report.to_json(),
-            "{\"adapter_backend\":\"vulkan\",\"adapter_name\":\"Test Adapter\",\"adapter_device_type\":\"discrete-gpu\",\"adapter_driver\":\"Test Driver\",\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"idle_redraws\":4,\"idle_non_redraw_events\":10,\"idle_event_repaint_requests\":11,\"idle_scheduled_egui_repaints\":12,\"idle_window_focused\":true,\"idle_pointer_inside\":false,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
+            "{\"adapter_backend\":\"vulkan\",\"adapter_name\":\"Test Adapter\",\"adapter_device_type\":\"discrete-gpu\",\"adapter_driver\":\"Test Driver\",\"window_ready_us\":1,\"first_pixel_us\":2,\"max_navigation_us\":3,\"rating_scan_prepare_us\":13,\"rating_scan_worker_us\":14,\"rating_scan_apply_us\":15,\"rating_scan_total_us\":16,\"idle_redraws\":4,\"idle_non_redraw_events\":10,\"idle_event_repaint_requests\":11,\"idle_scheduled_egui_repaints\":12,\"idle_window_focused\":true,\"idle_pointer_inside\":false,\"peak_resident_bytes\":5,\"playlist_entries\":6,\"decoded_cache_entries\":7,\"decoded_cache_bytes\":9,\"thumbnail_texture_entries\":8}"
         );
     }
 

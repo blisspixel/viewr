@@ -40,6 +40,10 @@ REPORT_KEYS = frozenset(
         "window_ready_us",
         "first_pixel_us",
         "max_navigation_us",
+        "rating_scan_prepare_us",
+        "rating_scan_worker_us",
+        "rating_scan_apply_us",
+        "rating_scan_total_us",
         "idle_redraws",
         "idle_non_redraw_events",
         "idle_event_repaint_requests",
@@ -104,6 +108,10 @@ class ProbeReport:
     window_ready_us: int
     first_pixel_us: int
     max_navigation_us: int
+    rating_scan_prepare_us: int
+    rating_scan_worker_us: int
+    rating_scan_apply_us: int
+    rating_scan_total_us: int
     idle_redraws: int
     idle_non_redraw_events: int
     idle_event_repaint_requests: int
@@ -208,6 +216,19 @@ def parse_report(stdout: str) -> ProbeReport:
             raise PerformanceGateError("probe adapter backend is unsupported")
         if payload["adapter_device_type"] not in ADAPTER_DEVICE_TYPES:
             raise PerformanceGateError("probe adapter device type is unsupported")
+        if (
+            payload["rating_scan_worker_us"] == 0
+            or payload["rating_scan_total_us"] == 0
+            or any(
+                payload[key] > payload["rating_scan_total_us"]
+                for key in (
+                    "rating_scan_prepare_us",
+                    "rating_scan_worker_us",
+                    "rating_scan_apply_us",
+                )
+            )
+        ):
+            raise PerformanceGateError("probe did not complete a timed rating scan")
         for key in ("adapter_name", "adapter_driver"):
             value = payload[key]
             if len(value) > 256 or any(
@@ -293,6 +314,18 @@ def _median_report(reports: list[ProbeReport]) -> ProbeReport:
             statistics.median(report.first_pixel_us for report in reports)
         ),
         max_navigation_us=max(report.max_navigation_us for report in reports),
+        rating_scan_prepare_us=int(
+            statistics.median(report.rating_scan_prepare_us for report in reports)
+        ),
+        rating_scan_worker_us=int(
+            statistics.median(report.rating_scan_worker_us for report in reports)
+        ),
+        rating_scan_apply_us=int(
+            statistics.median(report.rating_scan_apply_us for report in reports)
+        ),
+        rating_scan_total_us=int(
+            statistics.median(report.rating_scan_total_us for report in reports)
+        ),
         idle_redraws=max(report.idle_redraws for report in reports),
         idle_non_redraw_events=max(report.idle_non_redraw_events for report in reports),
         idle_event_repaint_requests=max(
@@ -326,6 +359,27 @@ def _idle_diagnostics(
             "scheduled_egui_repaints": report.idle_scheduled_egui_repaints,
             "window_focused": report.idle_window_focused,
             "pointer_inside": report.idle_pointer_inside,
+        }
+
+    payload = {
+        "small": [one(report) for report in small],
+        "large": [one(report) for report in large],
+        "cache_stress": one(cache_stress),
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def _rating_scan_diagnostics(
+    small: list[ProbeReport], large: list[ProbeReport], cache_stress: ProbeReport
+) -> str:
+    """Return ordered, path-free rating scan stage times for every process."""
+
+    def one(report: ProbeReport) -> dict[str, int]:
+        return {
+            "prepare_us": report.rating_scan_prepare_us,
+            "worker_us": report.rating_scan_worker_us,
+            "apply_us": report.rating_scan_apply_us,
+            "total_us": report.rating_scan_total_us,
         }
 
     payload = {
@@ -490,6 +544,11 @@ def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--idle-diagnostics",
         action="store_true",
         help="print fixed per-run idle attribution even when the gate passes",
+    )
+    parser.add_argument(
+        "--rating-scan-diagnostics",
+        action="store_true",
+        help="print ordered per-run rating scan stage times even when the gate passes",
     )
     parser.add_argument("--peak-resident-mib", type=_positive_finite_float, default=768)
     parser.add_argument("--folder-growth-mib", type=_positive_finite_float, default=96)
@@ -859,7 +918,7 @@ def _evidence_report(
 
     retained_reports = (*small_reports, *large_reports, cache_stress)
     return {
-        "schema": 3,
+        "schema": 4,
         "status": "fail" if failures else "pass",
         "executable_sha256": executable_sha256,
         "session_label": session_label,
@@ -1018,6 +1077,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"small-rss={small.peak_resident_bytes / (1024 * 1024):.2f} MiB, "
         f"large-rss={large.peak_resident_bytes / (1024 * 1024):.2f} MiB, "
         f"large-folder={large.playlist_entries} images, "
+        f"large-rating-scan={large.rating_scan_total_us / 1000:.2f} ms "
+        f"(prepare={large.rating_scan_prepare_us / 1000:.2f}, "
+        f"worker={large.rating_scan_worker_us / 1000:.2f}, "
+        f"apply={large.rating_scan_apply_us / 1000:.2f}), "
         f"cache-stress={cache_stress.decoded_cache_entries} entries/"
         f"{cache_stress.decoded_cache_bytes / (1024 * 1024):.2f} MiB"
     )
@@ -1062,6 +1125,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         destination = sys.stderr if failures else sys.stdout
         print(
             f"idle diagnostics: {_idle_diagnostics(small_reports, large_reports, cache_stress)}",
+            file=destination,
+        )
+    if args.rating_scan_diagnostics or failures:
+        destination = sys.stderr if failures else sys.stdout
+        print(
+            "rating-scan diagnostics: "
+            f"{_rating_scan_diagnostics(small_reports, large_reports, cache_stress)}",
             file=destination,
         )
     if failures:

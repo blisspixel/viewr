@@ -96,6 +96,10 @@ PROBE_REPORT_KEYS = frozenset(
         "window_ready_us",
         "first_pixel_us",
         "max_navigation_us",
+        "rating_scan_prepare_us",
+        "rating_scan_worker_us",
+        "rating_scan_apply_us",
+        "rating_scan_total_us",
         "idle_redraws",
         "idle_non_redraw_events",
         "idle_event_repaint_requests",
@@ -953,6 +957,19 @@ def _require_probe_report(value: object, label: str) -> dict[str, object]:
         raise EvidenceError(f"{label}.adapter_backend is unsupported")
     if validated["adapter_device_type"] not in ADAPTER_DEVICE_TYPES:
         raise EvidenceError(f"{label}.adapter_device_type is unsupported")
+    if (
+        validated["rating_scan_worker_us"] == 0
+        or validated["rating_scan_total_us"] == 0
+        or any(
+            validated[field] > validated["rating_scan_total_us"]
+            for field in (
+                "rating_scan_prepare_us",
+                "rating_scan_worker_us",
+                "rating_scan_apply_us",
+            )
+        )
+    ):
+        raise EvidenceError(f"{label}: rating scan timing is incomplete")
     for field in ("adapter_name", "adapter_driver"):
         text = str(validated[field])
         if len(text) > 256 or any(not character.isprintable() for character in text):
@@ -1129,7 +1146,7 @@ def _validate_performance_report(
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise EvidenceError(f"performance report is invalid JSON: {path}") from error
     report = _require_exact_json_keys(payload, PERFORMANCE_REPORT_KEYS, str(path))
-    if report["schema"] != 3:
+    if report["schema"] != 4:
         raise EvidenceError(f"{path}: unsupported performance report schema")
     if report["status"] != "pass" or report["failures"] != []:
         raise EvidenceError(f"{path}: performance report must pass without failures")

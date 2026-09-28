@@ -83,6 +83,9 @@ workflow results, and release assets remain the source of truth:
   [v0.6.5](https://github.com/blisspixel/viewr/releases/tag/v0.6.5). Its
   release notes carry the same open representative-hardware evidence limit
   and the remaining English fallback plus native-review gate.
+- [x] Publish and verify annotated tag `v0.7.0`, the accessibility and collage
+  preview. The immutable [v0.7.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.0)
+  discloses its unsigned status and uncollected hardware and screen-reader rows.
 
 ## Version state policy
 
@@ -396,6 +399,23 @@ re-verifies from the release page with its matching sidecar, a 47-file internal
 manifest, verified release provenance, and an attestation bound to
 `release.yml@refs/tags/v0.6.5` at that commit. The official archive verifier
 accepts that download.
+
+For v0.7.0, [main CI run 36448294480](https://github.com/blisspixel/viewr/actions/runs/36448294480)
+passed all seven jobs and [main CodeQL run 36445352111](https://github.com/blisspixel/viewr/actions/runs/36445352111)
+passed on commit `390d5b6060b6944e4eb88d45b686e2aa1749cdb9`.
+[Candidate run 36445812156](https://github.com/blisspixel/viewr/actions/runs/36445812156)
+passed quality, fuzzing, and all four archive builds without publishing. Its
+verified Windows archive passed the native accessibility smoke suite, including
+12 large-photo collage navigation. [Tag release run 36448288363](https://github.com/blisspixel/viewr/actions/runs/36448288363)
+repeated quality and fuzzing, rebuilt all four archives, and published the
+immutable 12-asset [v0.7.0 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.0).
+The public Windows archive has SHA-256
+`e383a34da070d734748405f08142bc466bcb6944d63e99a474b66561d5e06360`.
+The downloaded archive passed its sidecar and internal manifest verifier and
+its GitHub attestation. The public Windows installer sidecar matched the
+downloaded script. Its installed executables matched the public archive by
+SHA-256 on Windows. Representative-hardware and native screen-reader acceptance
+remain uncollected.
 
 ## Required before a broadly recommended 1.0
 

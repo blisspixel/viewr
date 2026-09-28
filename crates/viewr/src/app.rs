@@ -429,7 +429,7 @@ impl Drop for FolderScanContext {
 struct RatingScanWorker {
     generation: u64,
     cancel: Arc<AtomicBool>,
-    result_rx: Receiver<Vec<(PathBuf, RatingState)>>,
+    result_rx: Receiver<(Vec<(PathBuf, RatingState)>, Duration)>,
 }
 
 struct PendingRatingWrite {
@@ -3076,10 +3076,15 @@ impl App {
         let Some(playlist) = self.playlist.as_ref() else {
             return;
         };
+        let started = Instant::now();
         let files = playlist
             .files_with_provenance()
             .map(|(path, provenance)| (path.to_owned(), provenance))
             .collect::<Vec<_>>();
+        if let Some(probe) = self.performance_probe.as_mut() {
+            probe.rating_scan_started = Some(started);
+            probe.rating_scan_prepare = started.elapsed();
+        }
         let generation = self.rating_generation;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
@@ -3088,13 +3093,14 @@ impl App {
         let spawned = std::thread::Builder::new()
             .name("viewr-rating-scan".into())
             .spawn(move || {
+                let scan_started = Instant::now();
                 let ratings = crate::ratings::scan_folder_ratings_while(
                     files,
                     || !worker_cancel.load(Ordering::Acquire),
                     crate::decode::max_concurrent_file_decodes(),
                 );
                 if let Some(ratings) = ratings {
-                    let _ = sender.send(ratings);
+                    let _ = sender.send((ratings, scan_started.elapsed()));
                     let _ = event_proxy.send_event(UserEvent::Wake);
                 }
             });
@@ -3126,7 +3132,7 @@ impl App {
             return;
         };
         let completed = match worker.result_rx.try_recv() {
-            Ok(ratings) => Some(Ok(ratings)),
+            Ok(result) => Some(Ok(result)),
             Err(mpsc::TryRecvError::Empty) => None,
             Err(mpsc::TryRecvError::Disconnected) => Some(Err(())),
         };
@@ -3140,7 +3146,10 @@ impl App {
         if worker.generation != self.rating_generation {
             return;
         }
-        let Ok(ratings) = completed else {
+        let Ok((ratings, worker_duration)) = completed else {
+            if let Some(probe) = self.performance_probe.as_mut() {
+                probe.rating_scan_failed = true;
+            }
             if let Some(playlist) = self.playlist.as_mut() {
                 playlist.show_all();
             }
@@ -3149,6 +3158,7 @@ impl App {
             )));
             return;
         };
+        let apply_started = Instant::now();
         let selection = if let Some(playlist) = self.playlist.as_mut() {
             let filter = playlist.filter();
             playlist.set_discovered_ratings(&ratings);
@@ -3165,6 +3175,11 @@ impl App {
             return;
         };
         self.apply_filter_selection(selection);
+        if let Some(probe) = self.performance_probe.as_mut() {
+            probe.rating_scan_worker = Some(worker_duration);
+            probe.rating_scan_apply = Some(apply_started.elapsed());
+            probe.rating_scan_total = probe.rating_scan_started.map(|start| start.elapsed());
+        }
     }
 
     fn apply_filter_selection(&mut self, selection: FilterSelection) {
@@ -7432,6 +7447,18 @@ impl App {
             window_ready_us: crate::performance::duration_us(window_ready),
             first_pixel_us: crate::performance::duration_us(first_pixel),
             max_navigation_us: crate::performance::duration_us(probe.max_navigation),
+            rating_scan_prepare_us: crate::performance::duration_us(probe.rating_scan_prepare),
+            rating_scan_worker_us: crate::performance::duration_us(
+                probe
+                    .rating_scan_worker
+                    .expect("probe completed rating scan"),
+            ),
+            rating_scan_apply_us: crate::performance::duration_us(
+                probe.rating_scan_apply.expect("probe applied rating scan"),
+            ),
+            rating_scan_total_us: crate::performance::duration_us(
+                probe.rating_scan_total.expect("probe timed rating scan"),
+            ),
             idle_redraws: probe.idle_redraws,
             idle_non_redraw_events: probe.idle_non_redraw_events,
             idle_event_repaint_requests: probe.idle_event_repaint_requests,
@@ -7471,7 +7498,8 @@ impl App {
                 "probe exceeded its {} second deadline ",
                 "(scan={}, image={}, auxiliary={}, navigation={}, remaining_navigation={}, ",
                 "presented_current={}, idle_started={}, idle_remaining_ms={}, ",
-                "rating_scan={}, egui_repaint={}, ",
+                "rating_scan={}, rating_scan_elapsed_ms={}, rating_scan_prepared_ms={}, ",
+                "rating_scan_worker_ms={}, rating_scan_applied_ms={}, egui_repaint={}, ",
                 "prefetch={}, thumbnails={}, ",
                 "ready_thumbnails={}/{})"
             ),
@@ -7494,6 +7522,21 @@ impl App {
                     .saturating_duration_since(Instant::now())
                     .as_millis()),
             self.rating_scan_worker.is_some(),
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.rating_scan_started)
+                .map_or(0, |started| started.elapsed().as_millis()),
+            self.performance_probe
+                .as_ref()
+                .map_or(0, |probe| probe.rating_scan_prepare.as_millis()),
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.rating_scan_worker)
+                .map_or(0, |elapsed| elapsed.as_millis()),
+            self.performance_probe
+                .as_ref()
+                .and_then(|probe| probe.rating_scan_apply)
+                .map_or(0, |elapsed| elapsed.as_millis()),
             self.egui_repaint_at.is_some(),
             self.prefetch_schedule.in_flight_len(),
             self.thumbnail_schedule.in_flight_len(),
@@ -7518,6 +7561,14 @@ impl App {
         let Some(deadline) = self.performance_probe.as_ref().map(|probe| probe.deadline) else {
             return;
         };
+        if self
+            .performance_probe
+            .as_ref()
+            .is_some_and(|probe| probe.rating_scan_failed)
+        {
+            self.fail_performance_probe(event_loop, "rating discovery worker disconnected".into());
+            return;
+        }
         if Instant::now() >= deadline {
             let message = self.performance_probe_timeout_message();
             self.fail_performance_probe(event_loop, message);
@@ -7548,6 +7599,24 @@ impl App {
             if let Some(renderer) = self.renderer.as_ref() {
                 renderer.window().request_redraw();
             }
+            return;
+        }
+        if self
+            .performance_probe
+            .as_ref()
+            .is_some_and(|probe| probe.rating_scan_started.is_none())
+        {
+            self.start_rating_discovery();
+            if self.rating_scan_worker.is_none() {
+                self.fail_performance_probe(event_loop, "could not start rating discovery".into());
+            }
+            return;
+        }
+        if self
+            .performance_probe
+            .as_ref()
+            .is_some_and(|probe| probe.rating_scan_total.is_none())
+        {
             return;
         }
         if !self.performance_probe_is_settled() {

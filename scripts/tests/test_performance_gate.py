@@ -23,6 +23,7 @@ from scripts.performance_gate import (
     _linux_graphics_evidence,
     _macos_display_evidence,
     _median_report,
+    _rating_scan_diagnostics,
     _require_one_adapter,
     _session_evidence,
     _trusted_executable,
@@ -50,6 +51,10 @@ def report(**overrides: int | bool | str) -> ProbeReport:
         "window_ready_us": 100_000,
         "first_pixel_us": 200_000,
         "max_navigation_us": 10_000,
+        "rating_scan_prepare_us": 100,
+        "rating_scan_worker_us": 200,
+        "rating_scan_apply_us": 300,
+        "rating_scan_total_us": 700,
         "idle_redraws": 0,
         "idle_non_redraw_events": 0,
         "idle_event_repaint_requests": 0,
@@ -67,6 +72,18 @@ def report(**overrides: int | bool | str) -> ProbeReport:
 
 
 class PerformanceGateTests(unittest.TestCase):
+    def test_rating_scan_diagnostics_preserve_run_order_and_stage_times(self) -> None:
+        rendered = json.loads(
+            _rating_scan_diagnostics(
+                [report(rating_scan_worker_us=1)],
+                [report(rating_scan_worker_us=2), report(rating_scan_worker_us=3)],
+                report(rating_scan_worker_us=4),
+            )
+        )
+        self.assertEqual([run["worker_us"] for run in rendered["large"]], [2, 3])
+        self.assertEqual(rendered["small"][0]["prepare_us"], 100)
+        self.assertEqual(rendered["cache_stress"]["total_us"], 700)
+
     def test_png_is_valid_and_has_exact_dimensions(self) -> None:
         encoded = deterministic_png(7, 5)
         self.assertTrue(encoded.startswith(b"\x89PNG\r\n\x1a\n"))
@@ -121,6 +138,10 @@ class PerformanceGateTests(unittest.TestCase):
             parse_report(json.dumps({**payload, "first_pixel_us": -1}))
         with self.assertRaises(PerformanceGateError):
             parse_report(json.dumps({**payload, "first_pixel_us": True}))
+        with self.assertRaisesRegex(PerformanceGateError, "timed rating scan"):
+            parse_report(json.dumps({**payload, "rating_scan_worker_us": 0}))
+        with self.assertRaisesRegex(PerformanceGateError, "timed rating scan"):
+            parse_report(json.dumps({**payload, "rating_scan_worker_us": 701}))
         with self.assertRaises(PerformanceGateError):
             parse_report(json.dumps({**payload, "idle_window_focused": 1}))
         with self.assertRaises(PerformanceGateError):
@@ -535,7 +556,7 @@ class PerformanceGateTests(unittest.TestCase):
                 [],
             )
 
-        self.assertEqual(rendered["schema"], 3)
+        self.assertEqual(rendered["schema"], 4)
         self.assertEqual(rendered["status"], "pass")
         self.assertEqual(rendered["session_label"], "windows-200")
         self.assertEqual(rendered["host_platform"], "Windows")
@@ -807,8 +828,18 @@ class PerformanceGateTests(unittest.TestCase):
                 ),
             ):
                 with redirect_stdout(diagnostic_output):
-                    self.assertEqual(main([*base, "--idle-diagnostics"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                *base,
+                                "--idle-diagnostics",
+                                "--rating-scan-diagnostics",
+                            ]
+                        ),
+                        0,
+                    )
             self.assertIn("idle diagnostics:", diagnostic_output.getvalue())
+            self.assertIn("rating-scan diagnostics:", diagnostic_output.getvalue())
 
             report_file = Path(temp) / "evidence" / "performance.json"
             with (

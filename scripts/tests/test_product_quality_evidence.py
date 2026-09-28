@@ -244,6 +244,10 @@ class ProductQualityEvidenceTests(unittest.TestCase):
             "window_ready_us": 117_820,
             "first_pixel_us": 282_890,
             "max_navigation_us": 186_650,
+            "rating_scan_prepare_us": 100,
+            "rating_scan_worker_us": 200,
+            "rating_scan_apply_us": 100,
+            "rating_scan_total_us": 500,
             "idle_redraws": 0,
             "idle_non_redraw_events": 0,
             "idle_event_repaint_requests": 0,
@@ -323,7 +327,7 @@ class ProductQualityEvidenceTests(unittest.TestCase):
                     }
                 )
         report = {
-            "schema": 3,
+            "schema": 4,
             "status": "pass",
             "executable_sha256": {
                 "viewr": main_digest,
@@ -373,6 +377,12 @@ class ProductQualityEvidenceTests(unittest.TestCase):
         cache_stress["max_navigation_us"] = 730_000
         summary = evidence._expected_performance_summary(small, large, cache_stress)
         self.assertEqual(summary["navigation_max_ms"], 730.0)
+
+    def test_candidate_probe_requires_completed_rating_scan_timing(self) -> None:
+        report = self.probe_report(50_000, 330.08)
+        report["rating_scan_worker_us"] = 0
+        with self.assertRaisesRegex(evidence.EvidenceError, "rating scan timing"):
+            evidence._require_probe_report(report, "synthetic probe")
 
     def write_candidate_gate(self) -> Path:
         artifact_root = self.directory / "artifacts"

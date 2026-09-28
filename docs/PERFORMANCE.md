@@ -61,7 +61,14 @@ The work remains asynchronous and cancellable. A ground-truth repair corpus and
 dedicated heal latency gate are tracked in `ROADMAP.md`; the GUI navigation probe
 does not claim to measure repair quality or latency.
 
-The probe emits one path-free JSON record to its caller and exits. Alongside the
+The probe exercises rating discovery on the same synthetic folder after sampled
+navigation. Its path-free JSON record includes preparation, background worker,
+result-application, and total wall times in microseconds. The gate rejects a
+report without a completed worker scan. The worker still performs the final
+source-identity and header-snapshot checks used by ordinary rating discovery.
+`--rating-scan-diagnostics` prints the ordered stage times for every process
+in a multi-run local gate, including a slow outlier hidden by the median.
+Alongside the
 enforced delivered-redraw count, that record carries fixed diagnostic counts for
 non-redraw window events, event-driven egui repaint requests, and scheduled egui
 repaints, plus final window-focus and pointer-inside booleans. These fields identify
@@ -71,8 +78,8 @@ requested and automatically prints the same fixed evidence when completed report
 violate a gate. Normal viewer launches never emit it. The probe has a one-minute
 internal deadline, and the outer harness has a 90-second process timeout. A hang
 therefore fails with a bounded diagnostic instead of stalling CI. The timeout
-diagnostic reports whether rating discovery or an egui repaint was still active
-and how much of the idle observation remained.
+diagnostic reports rating-scan progress and elapsed stage times, whether an
+egui repaint was still active, and how much of the idle observation remained.
 
 ## Local curation timing evidence
 
@@ -178,17 +185,26 @@ measurement surface small and auditable.
 
 ## Current evidence
 
+On this Windows development host on 2026-09-28, an optimized build of the
+corrected probe passed one-run and three-run gates on a synthetic 50,000-image
+folder. The three large-folder scans took 24.56, 24.67, and 24.81 seconds;
+their background workers took 24.51, 24.63, and 24.77 seconds. The median
+maximum large-folder peak resident set was 329.27 MiB, slowest sampled navigation was
+225.91 ms, and settled idle redraws were zero. These are development-build
+measurements, not candidate-bound release evidence. They did not reproduce the
+intermittent deadline, but now measure the scan the earlier probe omitted.
+
 On this Windows development host on 2026-09-28, the installed, publicly
 verified v0.7.0 binary passed one-run and three-run synthetic 50,000-image
 gates. The three-run result measured 344.12 MiB large-folder peak resident set,
 151.31 ms slowest sampled navigation, zero settled idle redraws, and the exact
 256 MiB decoded-cache budget. The intermittent rating-scan deadline was not
-reproduced in these runs. The probe does not yet separate rating-scan stages in
-its timing output, so these passes do not explain the earlier timeout or close
-that investigation.
+reproduced in these runs. The probe at that commit did not start rating
+discovery, so those passes do not test the rating-scan deadline. The corrected
+probe needs a new run before that investigation can close.
 
 On the Windows development host on 2026-08-01, the final three-run optimized
-rating-enabled probe met every startup, navigation, memory, folder-scaling, cache,
+GUI probe met every startup, navigation, memory, folder-scaling, cache,
 and idle budget after full accepted-source comparisons were confined to background
 work: 866.91 ms median first frame, 918.70 ms median first image, 74.57 ms slowest
 sampled navigation, 253.76 MiB small-folder peak resident set, 277.88 MiB large-folder peak
@@ -196,8 +212,10 @@ resident set, four decoded cache entries at the exact 256 MiB byte budget, and a
 most one delivered redraw in every measured idle window. All completed idle
 windows reported zero non-redraw events, zero event-driven repaint requests, and
 zero scheduled egui repaints. The synthetic 50,000-image folder included the
-session rating scan and filtered-playlist state; those processes were unfocused
-with the pointer outside at measurement completion.
+folder corpus, but source inspection shows that the probe did not start rating
+discovery or apply a rating filter. Its ratings-related acceptance claim is
+withdrawn; the measured startup, navigation, memory, cache, and idle values
+remain the record of that run.
 
 The probe now treats an outstanding egui repaint deadline as unsettled UI work. A
 500 ms idle observation starts or restarts only after delayed hover and activation

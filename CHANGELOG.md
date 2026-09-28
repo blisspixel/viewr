@@ -5,6 +5,13 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Performance verification
+
+- The explicit GUI probe now runs folder rating discovery on its synthetic
+  corpus. Its report separates input preparation, background scanning, result
+  application, and total elapsed time, so the 50,000-file gate can detect a
+  stalled rating scan.
+
 ### Installation
 
 - The macOS and Linux installer now reports the retained backup location if an

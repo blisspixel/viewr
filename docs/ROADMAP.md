@@ -140,9 +140,12 @@ claim attached retroactively to the immutable v0.6.0 release.
 
 ### Next steps to v0.8.0
 
-1. Reproduce the intermittent Windows 50,000-file rating-scan stall with a
-   synthetic corpus and stage timings. Preserve the final source-identity and
-   header-snapshot checks while correcting a measured bottleneck.
+1. Run the corrected explicit probe on a synthetic Windows 50,000-file corpus.
+   It now starts rating discovery and reports preparation, worker, application,
+   and total times. One-run and three-run development gates passed with workers
+   near 24.5 seconds; the intermittent stall has not reproduced. Continue
+   repeat runs and measure the worker's inner stages before changing its final
+   source-identity and header-snapshot checks.
 2. Turn clean install, reinstall, explicit update, uninstall, rollback, file
    associations, and artifact provenance into repeatable platform checks. Run
    them against verified release archives and fix any failures. Windows CI now
@@ -675,7 +678,8 @@ approved behavior and safety contract is in `docs/RATINGS.md`.
   surfaces, numeric shortcuts, persistent active-filter status, filtered-empty
   state, and native accessibility coverage.
 - [x] Keep the existing 85 percent logic-coverage floor and 50,000-file memory,
-  startup, navigation, and idle budgets green with ratings present.
+  startup, navigation, and idle budgets green. The earlier GUI probe did not
+  exercise rating discovery; that measurement is carried into v0.8.
 
 Definition of done: ratings survive restart and ordinary rename, other compliant
 software sees the same value, filters govern every navigation surface, unsupported

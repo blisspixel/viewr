@@ -5,6 +5,8 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+## 0.7.1 - 2026-09-28
+
 ### Performance verification
 
 - The explicit GUI probe now runs folder rating discovery on its synthetic

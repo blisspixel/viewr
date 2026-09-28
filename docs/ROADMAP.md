@@ -22,7 +22,7 @@ Two rules hold across every phase:
 | Workspace version | `0.7.1`, a patch candidate; v0.7.0 remains the public install target |
 | Active milestone | **v0.7.1** patch release for the bounded rating scan and installer recovery fixes, then v0.8.0 release readiness |
 | Next version update | After the v0.7.1 patch, advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.1** after its automated release checks and documented preview limits are ready. Uncollected hardware or screen-reader rows stay open and do not halt preview publication |
+| Next tag allowed | **v0.7.1**, tag-ready after the exact-commit [candidate run](https://github.com/blisspixel/viewr/actions/runs/36473818735) succeeds. Uncollected hardware or screen-reader rows stay open and are disclosed in the patch notes |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.

@@ -4,7 +4,7 @@
 //! This module owns only whether a completed scan still applies and which
 //! visible playlist outcome follows from purpose plus scan facts.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::playlist::ScanPurpose;
 
@@ -87,6 +87,60 @@ pub(crate) fn path_entry(path: &Path, is_directory: impl Fn(&Path) -> bool) -> P
     } else {
         PathEntry::Image
     }
+}
+
+/// Result of evaluating clipboard text as an image or folder path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ClipboardPathResult {
+    /// No text or only whitespace in the clipboard.
+    Empty,
+    /// A candidate path was extracted from the clipboard.
+    Path(PathBuf),
+}
+
+/// Extract a path candidate from raw clipboard text.
+///
+/// Strips leading and trailing whitespace, surrounding single or double quotes,
+/// and file:// URI schemes.
+#[must_use]
+pub(crate) fn parse_clipboard_path(raw: &str) -> ClipboardPathResult {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return ClipboardPathResult::Empty;
+    }
+    let stripped_quotes =
+        if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2)
+        {
+            &trimmed[1..trimmed.len() - 1]
+        } else {
+            trimmed
+        };
+    let unquoted = stripped_quotes.trim();
+    if unquoted.is_empty() {
+        return ClipboardPathResult::Empty;
+    }
+    let path_str = if let Some(rest) = unquoted.strip_prefix("file://") {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(win_rest) = rest.strip_prefix('/') {
+                win_rest
+            } else {
+                rest
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(root_path) = rest.strip_prefix("localhost") {
+                root_path
+            } else {
+                rest
+            }
+        }
+    } else {
+        unquoted
+    };
+    ClipboardPathResult::Path(PathBuf::from(path_str))
 }
 
 #[must_use]
@@ -571,5 +625,39 @@ mod tests {
             assert!(!message.contains('\\'));
             assert!(!message.contains('/'));
         }
+    }
+
+    #[test]
+    fn parse_clipboard_path_extracts_paths_and_ignores_empty() {
+        assert_eq!(parse_clipboard_path(""), ClipboardPathResult::Empty);
+        assert_eq!(
+            parse_clipboard_path("   \n\t  "),
+            ClipboardPathResult::Empty
+        );
+        assert_eq!(parse_clipboard_path("\"\""), ClipboardPathResult::Empty);
+        assert_eq!(parse_clipboard_path("''"), ClipboardPathResult::Empty);
+
+        assert_eq!(
+            parse_clipboard_path("  photos/cat.png  "),
+            ClipboardPathResult::Path(PathBuf::from("photos/cat.png"))
+        );
+        assert_eq!(
+            parse_clipboard_path("\"/tmp/photos/sunset.jpg\""),
+            ClipboardPathResult::Path(PathBuf::from("/tmp/photos/sunset.jpg"))
+        );
+        assert_eq!(
+            parse_clipboard_path("'C:\\Pictures\\vacation'"),
+            ClipboardPathResult::Path(PathBuf::from("C:\\Pictures\\vacation"))
+        );
+        #[cfg(target_os = "windows")]
+        assert_eq!(
+            parse_clipboard_path("file:///C:/Users/test/img.png"),
+            ClipboardPathResult::Path(PathBuf::from("C:/Users/test/img.png"))
+        );
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(
+            parse_clipboard_path("file:///home/user/img.png"),
+            ClipboardPathResult::Path(PathBuf::from("/home/user/img.png"))
+        );
     }
 }

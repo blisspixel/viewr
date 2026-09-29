@@ -138,6 +138,7 @@ automatically.
 | --- | --- |
 | Open file | `O`, `Ctrl/Cmd+O`, or drop a file |
 | Open folder | `Ctrl/Cmd+Shift+O`, or drop a folder |
+| Paste path | `Ctrl/Cmd+V` |
 | Previous or next image | Left/Right, Home/End, Page Up/Page Down |
 | Folder order | File > Preferences or View > Folder Sort; Latest First is the initial default |
 | Interface language | File > Preferences; System is the initial default |

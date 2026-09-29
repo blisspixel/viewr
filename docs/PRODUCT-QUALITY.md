@@ -241,7 +241,7 @@ and 200% after changing the primary display scale, session label, and filename t
 `windows-150` and `windows-200`:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.7.1/performance/windows-100.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr.exe --no-xvfb --idle-diagnostics --session-label windows-100 --report-file docs/release-evidence/product-quality/v0.7.2/performance/windows-100.json
 ```
 
 On macOS, make the built-in Retina display the main display and run once with
@@ -251,7 +251,7 @@ report records a one-way SHA-256 identity, built-in and Retina flags, and measur
 scale for the main display. On Linux, run in the native sessions named below:
 
 ```text
-python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.7.1/performance/<session>.json
+python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label <session> --report-file docs/release-evidence/product-quality/v0.7.2/performance/<session>.json
 ```
 
 Use `linux-wayland` and `linux-x11` in the corresponding native sessions. For the
@@ -262,7 +262,7 @@ required software renderer, use an X11 or Xwayland session with `DISPLAY`, insta
 `glxinfo`, confirm that `glxinfo -B` names Mesa llvmpipe or softpipe, then run:
 
 ```text
-WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.7.1/performance/linux-mesa-software.json
+WGPU_BACKEND=gl LIBGL_ALWAYS_SOFTWARE=1 python -B scripts/performance_gate.py --binary <extracted-directory>/<archive-prefix>/bin/viewr --no-xvfb --idle-diagnostics --session-label linux-mesa-software --report-file docs/release-evidence/product-quality/v0.7.2/performance/linux-mesa-software.json
 ```
 
 The complete committed report set is exactly `windows-100`, `windows-150`,
@@ -323,7 +323,7 @@ in `Cargo.toml`, which the validator reads directly:
 
 ```text
 python -B scripts/product_quality_evidence.py check <platform-record.md>
-python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.1
+python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.2
 ```
 
 The gate rejects missing or duplicate rows, generic observations, invalid archive

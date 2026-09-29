@@ -4500,7 +4500,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viewr"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "accesskit_winit",
  "anyhow",
@@ -4543,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "viewr-decode"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "image",
  "libavif-image",
@@ -4559,11 +4559,11 @@ dependencies = [
 
 [[package]]
 name = "viewr-protocol"
-version = "0.7.1"
+version = "0.7.2"
 
 [[package]]
 name = "viewr-seccomp"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "libc",
  "seccompiler",

@@ -49,17 +49,17 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.1 is the current public preview. Its portable archives are checksummed and
+v0.7.2 is the current public preview. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
-[v0.7.1 notes](docs/releases/v0.7.1.md) record that gap exactly.
+[v0.7.2 notes](docs/releases/v0.7.2.md) record that gap exactly.
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.1/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -69,13 +69,13 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.1/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The published command downloads the v0.7.1 installer, which installs the v0.7.1
+The published command downloads the v0.7.2 installer, which installs the v0.7.2
 archive after verifying its SHA-256 sidecar and internal manifest, without
 giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
@@ -177,15 +177,15 @@ has room; image zoom does not change.
 
 ## Project status
 
-v0.7.1 is the current public preview and install target, not a percentage-complete
+v0.7.2 is the current public preview and install target, not a percentage-complete
 score or a claim that the product is finished. It retains the operating-system
 contrast, text sizing, and twelve-photo collage work from v0.7.0, and improves
-folder rating scans and installer recovery.
+folder rating scans, installer recovery, and empty-launch fallback.
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, and v0.6.1 through v0.6.5 remain published. `main` continues the logical order in the
+v0.4.0, v0.5.0, v0.6.1 through v0.6.5, and v0.7.1 remain published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.8.0** release
 readiness through v0.9 publisher authentication, then v1.0.
-The [current release notes](docs/releases/v0.7.1.md) state the exact published
+The [current release notes](docs/releases/v0.7.2.md) state the exact published
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
 Unpublished candidates are identified by exact commit and workflow run. The

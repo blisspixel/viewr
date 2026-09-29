@@ -5,6 +5,19 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Storage and folder performance
+
+- Added directory-level detection of Windows FileIdInfo support to skip
+  redundant, failing Win32 queries across network shares (SMB, Samba, TrueNAS,
+  Synology) and non-NTFS volumes, eliminating extra network round-trips for every
+  file during folder scans.
+- Added Win32 fallback in file version queries for volumes where FileBasicInfo is
+  unsupported.
+- Displayed active folder scan progress ("Reading folder..." and busy spinner) in
+  both the top status bar and on the empty-state startup card when opening folders,
+  providing immediate visual and screen-reader feedback while scanning large or
+  slow network directories before initial images are presented.
+
 ## 0.7.2 - 2026-09-29
 
 ### Navigation and launch fallback

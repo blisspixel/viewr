@@ -504,6 +504,8 @@ impl Seek for ImageSourceReader<'_> {
 pub(crate) struct DirectorySource {
     file: std::fs::File,
     identity: FileIdentity,
+    #[cfg(target_os = "windows")]
+    supports_file_id_info: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for ImageSource {
@@ -1051,8 +1053,43 @@ impl DirectorySource {
                 "Save As parent changed while it was opened",
             ));
         }
+        #[cfg(target_os = "windows")]
+        let (identity, supports_file_id_info) = file_identity_probe(&file)?;
+        #[cfg(not(target_os = "windows"))]
         let identity = file_identity(&file, &opened)?;
-        Ok(Self { file, identity })
+        Ok(Self {
+            file,
+            identity,
+            #[cfg(target_os = "windows")]
+            supports_file_id_info: std::sync::atomic::AtomicBool::new(supports_file_id_info),
+        })
+    }
+
+    pub(crate) fn file_identity(
+        &self,
+        file: &std::fs::File,
+        _metadata: &std::fs::Metadata,
+    ) -> io::Result<FileIdentity> {
+        #[cfg(target_os = "windows")]
+        {
+            use std::sync::atomic::Ordering;
+            if !self.supports_file_id_info.load(Ordering::Relaxed) {
+                return file_identity_by_handle(file);
+            }
+            match file_identity_probe(file) {
+                Ok((identity, supports)) => {
+                    if !supports {
+                        self.supports_file_id_info.store(false, Ordering::Relaxed);
+                    }
+                    Ok(identity)
+                }
+                Err(err) => Err(err),
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            file_identity(file, _metadata)
+        }
     }
 
     fn open_regular(&self, name: &OsStr) -> io::Result<std::fs::File> {
@@ -1081,7 +1118,9 @@ impl DirectorySource {
             return false;
         };
         metadata_is_plain_directory(&opened)
-            && file_identity(&file, &opened).is_ok_and(|identity| identity == self.identity)
+            && self
+                .file_identity(&file, &opened)
+                .is_ok_and(|identity| identity == self.identity)
     }
 }
 
@@ -1390,13 +1429,12 @@ fn file_identity(_file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Res
 }
 
 #[cfg(target_os = "windows")]
-#[allow(unsafe_code)] // one audited read-only Win32 file-identity query
-fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Result<FileIdentity> {
+#[allow(unsafe_code)] // one audited read-only Win32 file-identity query with feature detection
+fn file_identity_probe(file: &std::fs::File) -> io::Result<(FileIdentity, bool)> {
     use std::mem::{MaybeUninit, size_of};
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_ID_INFO, FileIdInfo, GetFileInformationByHandle,
-        GetFileInformationByHandleEx,
+        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
     };
 
     let mut info = MaybeUninit::<FILE_ID_INFO>::uninit();
@@ -1416,14 +1454,30 @@ fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Res
     if succeeded != 0 {
         // SAFETY: A successful call initialized the complete FILE_ID_INFO buffer.
         let info = unsafe { info.assume_init() };
-        return Ok(FileIdentity {
-            volume: info.VolumeSerialNumber,
-            file_id: info.FileId.Identifier,
-        });
+        return Ok((
+            FileIdentity {
+                volume: info.VolumeSerialNumber,
+                file_id: info.FileId.Identifier,
+            },
+            true,
+        ));
     }
 
     // Fallback for SMB shares, NAS volumes (Samba, TrueNAS, Synology, QNAP), and non-NTFS
     // filesystems where FileIdInfo returns ERROR_INVALID_PARAMETER (87) or ERROR_NOT_SUPPORTED (50).
+    let identity = file_identity_by_handle(file)?;
+    Ok((identity, false))
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // one audited read-only Win32 file-identity fallback query
+fn file_identity_by_handle(file: &std::fs::File) -> io::Result<FileIdentity> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+
     let mut by_handle = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
     // SAFETY: `file` owns a valid handle. `by_handle` points to writable storage of
     // exactly size_of::<BY_HANDLE_FILE_INFORMATION>() bytes.
@@ -1442,6 +1496,11 @@ fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Res
     }
 
     Err(io::Error::last_os_error())
+}
+
+#[cfg(target_os = "windows")]
+fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> io::Result<FileIdentity> {
+    file_identity_probe(file).map(|(identity, _)| identity)
 }
 
 #[cfg(unix)]
@@ -1467,7 +1526,8 @@ fn file_version(file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Resul
     use std::mem::{MaybeUninit, size_of};
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandleEx,
+        BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandle,
+        GetFileInformationByHandleEx,
     };
 
     let mut info = MaybeUninit::<FILE_BASIC_INFO>::uninit();
@@ -1483,16 +1543,37 @@ fn file_version(file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Resul
             size,
         )
     };
-    if succeeded == 0 {
-        return Err(io::Error::last_os_error());
+    if succeeded != 0 {
+        // SAFETY: A successful call initialized the complete FILE_BASIC_INFO value.
+        let info = unsafe { info.assume_init() };
+        return Ok(FileVersion {
+            length: metadata.len(),
+            last_write_time: info.LastWriteTime,
+            change_time: info.ChangeTime,
+        });
     }
-    // SAFETY: A successful call initialized the complete FILE_BASIC_INFO value.
-    let info = unsafe { info.assume_init() };
-    Ok(FileVersion {
-        length: metadata.len(),
-        last_write_time: info.LastWriteTime,
-        change_time: info.ChangeTime,
-    })
+
+    // Fallback for SMB shares and non-NTFS volumes where FileBasicInfo is unsupported.
+    let mut by_handle = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // SAFETY: `file` owns a valid handle. `by_handle` points to writable storage of
+    // exactly size_of::<BY_HANDLE_FILE_INFORMATION>() bytes.
+    let succeeded =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), by_handle.as_mut_ptr()) };
+    if succeeded != 0 {
+        // SAFETY: A successful call initialized the complete BY_HANDLE_FILE_INFORMATION buffer.
+        let info = unsafe { by_handle.assume_init() };
+        let last_write_time = (i64::from(info.ftLastWriteTime.dwHighDateTime) << 32)
+            | i64::from(info.ftLastWriteTime.dwLowDateTime);
+        let creation_time = (i64::from(info.ftCreationTime.dwHighDateTime) << 32)
+            | i64::from(info.ftCreationTime.dwLowDateTime);
+        return Ok(FileVersion {
+            length: metadata.len(),
+            last_write_time,
+            change_time: creation_time,
+        });
+    }
+
+    Err(io::Error::last_os_error())
 }
 
 #[cfg(all(target_os = "windows", test))]
@@ -1897,7 +1978,7 @@ fn scan_image_entries_sorted_with_hook(
         if !metadata_is_markable_regular(&opened) {
             continue;
         }
-        let Ok(identity) = file_identity(&file, &opened) else {
+        let Ok(identity) = directory_source.file_identity(&file, &opened) else {
             continue;
         };
         let Ok(version) = file_version(&file, &opened) else {
@@ -2812,5 +2893,34 @@ mod tests {
         let third = super::directory_stamp(workspace.path()).expect("stamp after remove");
         assert!(first.identity == third.identity);
         assert!(second != third);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_file_identity_by_handle_and_directory_source() {
+        use std::sync::atomic::Ordering;
+
+        let workspace = TempWorkspace::new("win_file_identity").unwrap();
+        let file_path = workspace.path().join("test.png");
+        fs::write(&file_path, b"test_image_bytes").unwrap();
+
+        let dir_source = super::DirectorySource::open(workspace.path()).unwrap();
+        let file = std::fs::File::open(&file_path).unwrap();
+        let metadata = file.metadata().unwrap();
+
+        // 1. file_identity_by_handle produces a valid FileIdentity
+        let handle_identity = super::file_identity_by_handle(&file).unwrap();
+        assert_ne!(handle_identity.volume, 0);
+
+        // 2. DirectorySource::file_identity when supports_file_id_info is forced to false
+        dir_source
+            .supports_file_id_info
+            .store(false, Ordering::Relaxed);
+        let fallback_identity = dir_source.file_identity(&file, &metadata).unwrap();
+        assert!(handle_identity == fallback_identity);
+
+        // 3. file_version works on the file
+        let version = super::file_version(&file, &metadata).unwrap();
+        assert_eq!(version.length, 16);
     }
 }

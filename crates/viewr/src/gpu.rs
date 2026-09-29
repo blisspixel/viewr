@@ -221,6 +221,11 @@ impl Renderer {
         &self.window
     }
 
+    /// Read clipboard text through the windowing state.
+    pub fn clipboard_text(&mut self) -> Option<String> {
+        self.egui_state.clipboard_text()
+    }
+
     pub(crate) fn performance_adapter(&self) -> &GpuAdapterReport {
         &self.adapter_report
     }

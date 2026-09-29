@@ -687,6 +687,12 @@ const MESSAGES: &[Message] = &[
         german: "Ordner öffnen",
     },
     Message {
+        english: "Paste Path",
+        spanish: "Pegar ruta",
+        french: "Coller le chemin",
+        german: "Pfad einfügen",
+    },
+    Message {
         english: "Retry",
         spanish: "Reintentar",
         french: "Réessayer",
@@ -914,6 +920,12 @@ const MESSAGES: &[Message] = &[
         spanish: "Abrir carpeta",
         french: "Ouvrir un dossier",
         german: "Ordner öffnen",
+    },
+    Message {
+        english: "Paste path",
+        spanish: "Pegar ruta",
+        french: "Coller le chemin",
+        german: "Pfad einfügen",
     },
     Message {
         english: "Save As",
@@ -2864,6 +2876,18 @@ const MESSAGES: &[Message] = &[
         german: "Der Ordner konnte nicht durchsucht werden: {error}",
     },
     Message {
+        english: "Clipboard does not contain a file or folder path",
+        spanish: "El portapapeles no contiene una ruta de archivo o carpeta",
+        french: "Le presse-papiers ne contient pas de chemin de fichier ou de dossier",
+        german: "Die Zwischenablage enthält keinen Datei- oder Ordnerpfad",
+    },
+    Message {
+        english: "Could not find path: {path}",
+        spanish: "No se pudo encontrar la ruta: {path}",
+        french: "Impossible de trouver le chemin : {path}",
+        german: "Pfad konnte nicht gefunden werden: {path}",
+    },
+    Message {
         english: "{label}: {value}",
         spanish: "{label}: {value}",
         french: "{label} : {value}",
@@ -3204,6 +3228,12 @@ const MESSAGES: &[Message] = &[
         spanish: "Elija una carpeta de forma explícita y examine sus imágenes compatibles durante esta sesión.",
         french: "Choisissez explicitement un dossier et parcourez ses images prises en charge pendant cette session.",
         german: "Wählen Sie ausdrücklich einen Ordner und durchsuchen Sie seine unterstützten Bilder in dieser Sitzung.",
+    },
+    Message {
+        english: "Open an image or folder path from the clipboard.",
+        spanish: "Abre una ruta de imagen o carpeta desde el portapapeles.",
+        french: "Ouvrir un chemin d’image ou de dossier depuis le presse-papiers.",
+        german: "Einen Bild- oder Ordnerpfad aus der Zwischenablage öffnen.",
     },
     Message {
         english: "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost.",

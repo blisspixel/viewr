@@ -90,6 +90,7 @@ const OPEN_FILE_SCOPE_HELP: &str = tr!(
 );
 const OPEN_FOLDER_SCOPE_HELP: &str =
     tr!("Choose a folder explicitly and browse its supported images for this session.");
+const PASTE_PATH_SCOPE_HELP: &str = tr!("Open an image or folder path from the clipboard.");
 const OPEN_WITH_HELP: &str = tr!(
     "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost."
 );
@@ -102,7 +103,7 @@ const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
 const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMINDER;
 pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
-const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 268.0;
+const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 308.0;
 const MODAL_FOCUS_STATE: &str = "modal_focus_state";
 /// Stable identity of the accessibility node that stands for the image canvas.
 const IMAGE_CANVAS_NODE: &str = "viewr image canvas";
@@ -113,6 +114,8 @@ pub(crate) enum UiAction {
     Open,
     /// Open a folder with explicit user consent for sibling navigation.
     OpenFolder,
+    /// Open an image or folder path copied to the clipboard.
+    PastePath,
     /// Decode the current file from disk again, bypassing the neighbor cache.
     Reload,
     /// Open a save as dialog.
@@ -1717,6 +1720,17 @@ fn file_menu(
                 .on_hover_text(frame.text(OPEN_FOLDER_SCOPE_HELP));
             if open_folder.clicked() {
                 actions.push(UiAction::OpenFolder);
+                ui.close();
+            }
+            let paste_path = ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::OpenSource),
+                    egui::Button::new(frame.text(tr!("Paste Path")))
+                        .shortcut_text(format!("{PRIMARY_MODIFIER}+V")),
+                )
+                .on_hover_text(frame.text(PASTE_PATH_SCOPE_HELP));
+            if paste_path.clicked() {
+                actions.push(UiAction::PastePath);
                 ui.close();
             }
             if ui
@@ -3478,6 +3492,16 @@ fn render_empty_state_actions(
             actions.push(UiAction::OpenFolder);
         }
     });
+    ui.add_space(8.0);
+    let paste_path = ui
+        .add_enabled(
+            chrome.is_enabled(ChromeControl::OpenSource),
+            egui::Button::new(frame.text(tr!("Paste Path"))).min_size(Vec2::new(116.0, 32.0)),
+        )
+        .on_hover_text(frame.text(PASTE_PATH_SCOPE_HELP));
+    if paste_path.clicked() {
+        actions.push(UiAction::PastePath);
+    }
     ui.add_space(12.0);
 }
 
@@ -6066,6 +6090,7 @@ mod tests {
     #[test]
     fn ui_action_variants_exist_for_toolbar() {
         let _ = UiAction::OpenFolder;
+        let _ = UiAction::PastePath;
         let _ = UiAction::Reload;
         let _ = UiAction::ConfirmSaveOverwrite;
         let _ = UiAction::CancelSaveOverwrite;
@@ -7629,7 +7654,7 @@ mod tests {
                 "missing empty-state accessible text: {expected}; values: {values:?}"
             );
         }
-        for expected in ["Open File", "Open Folder"] {
+        for expected in ["Open File", "Open Folder", "Paste Path"] {
             assert!(
                 nodes.iter().any(|node| {
                     node.role() == egui::accesskit::Role::Button && node.label() == Some(expected)

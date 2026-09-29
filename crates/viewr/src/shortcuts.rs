@@ -123,6 +123,10 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
                 action: "Open folder",
             },
             ShortcutSpec {
+                keys: "{primary}+V",
+                action: "Paste path",
+            },
+            ShortcutSpec {
                 keys: "{primary}+Shift+S",
                 action: "Save As",
             },

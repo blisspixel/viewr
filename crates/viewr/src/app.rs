@@ -1494,6 +1494,38 @@ impl App {
         }
     }
 
+    fn open_clipboard_path(&mut self) {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherImage) {
+            return;
+        }
+        self.cancel_open_with_check();
+        let Some(text) = self.renderer.as_mut().and_then(Renderer::clipboard_text) else {
+            self.show_toast(
+                self.language
+                    .localize(tr!("Clipboard does not contain a file or folder path")),
+            );
+            return;
+        };
+        match crate::entry_state::parse_clipboard_path(&text) {
+            crate::entry_state::ClipboardPathResult::Empty => {
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Clipboard does not contain a file or folder path")),
+                );
+            }
+            crate::entry_state::ClipboardPathResult::Path(path) => {
+                if path.exists() {
+                    self.open_path_request(path);
+                } else {
+                    self.show_toast(self.language.fill(
+                        tr!("Could not find path: {path}"),
+                        &[("path", &path.display().to_string())],
+                    ));
+                }
+            }
+        }
+    }
+
     fn start_folder_scan(&mut self, directory: PathBuf, purpose: ScanPurpose) {
         self.folder_scan_job = None;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -8408,6 +8440,11 @@ impl ApplicationHandler<UserEvent> for App {
                         self.open_image_dialog();
                     }
                     Key::Character(c)
+                        if (c == "v" || c == "V") && primary_modifier_pressed(self.modifiers) =>
+                    {
+                        self.open_clipboard_path();
+                    }
+                    Key::Character(c)
                         if (c == "z" || c == "Z") && primary_modifier_pressed(self.modifiers) =>
                     {
                         if self.modifiers.shift_key() {
@@ -8886,6 +8923,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.open_image_dialog();
                         }
                         crate::ui::UiAction::OpenFolder => self.open_folder_dialog(),
+                        crate::ui::UiAction::PastePath => self.open_clipboard_path(),
                         crate::ui::UiAction::Reload => self.reload_current_image(),
                         crate::ui::UiAction::OpenWith => self.open_current_with(),
                         crate::ui::UiAction::SaveAs => self.save_as(),

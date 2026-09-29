@@ -5,6 +5,22 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+## 0.7.2 - 2026-09-29
+
+### Navigation and launch fallback
+
+- Added an in-window Paste Path action and standard shortcut (Ctrl+V on
+  Windows and Linux, Cmd+V on macOS) as a launch fallback on the empty-state
+  card and under the File menu.
+- On minimal desktop sessions or container environments where native file-chooser
+  dialogs fail to present, users can paste a copied file or folder path directly.
+- Path normalization handles plain filesystem paths, quoted paths, and `file://`
+  or `file:///` URIs, verifying existence and opening the target file (with sibling
+  folder browsing) or folder, or delivering polite, localized feedback when empty
+  or missing.
+- Control labels and notifications are cataloged across English, Spanish, French,
+  and German.
+
 ## 0.7.1 - 2026-09-28
 
 ### Performance verification

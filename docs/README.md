@@ -37,8 +37,10 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.7.1 release notes](releases/v0.7.1.md): the current rating scan and
-  installer recovery patch and its explicit evidence limits.
+- [v0.7.2 release notes](releases/v0.7.2.md): the current launch fallback
+  patch and its explicit evidence limits.
+- [v0.7.1 release notes](releases/v0.7.1.md): the previous rating scan and
+  installer recovery patch.
 - [v0.7.0 release notes](releases/v0.7.0.md): the accessibility and collage
   preview.
 - [v0.6.5 release notes](releases/v0.6.5.md): the earlier shipped-feedback

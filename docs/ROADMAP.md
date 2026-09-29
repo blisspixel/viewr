@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.1](https://github.com/blisspixel/viewr/releases/tag/v0.7.1), the rating scan and installer recovery patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.1`, matching the current public patch |
-| Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
-| Next version update | Advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its automated release checks and documented preview limits are ready. Uncollected hardware or screen-reader rows stay open and do not halt preview development or publication |
+| Workspace version | `0.7.2`, a patch candidate; v0.7.1 remains the public install target |
+| Active milestone | **v0.7.2** patch release for the in-window launch fallback fix, then v0.8.0 release readiness |
+| Next version update | After the v0.7.2 patch, advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
+| Next tag allowed | **v0.7.2** after its automated release checks and documented preview limits are ready. Uncollected hardware or screen-reader rows stay open and do not halt preview publication |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -104,6 +104,8 @@ v0.6.5  Status discoverability patch     [released, same matrix open]
 v0.7.0  Accessibility and collage preview [released, acceptance rows open]
 
 v0.7.1  Rating scan and installer recovery patch [released, acceptance rows open]
+
+v0.7.2  Launch fallback patch             [candidate]
    |
    v
 v0.8.0  Release-readiness beta            [next]

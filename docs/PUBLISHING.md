@@ -89,24 +89,27 @@ workflow results, and release assets remain the source of truth:
 - [x] Publish and verify annotated tag `v0.7.1`, the rating scan and installer
   recovery patch. The immutable [v0.7.1 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.1)
   discloses the same open acceptance rows and unsigned status.
+- [x] Publish and verify annotated tag `v0.7.2`, the in-window path fallback
+  patch. The immutable [v0.7.2 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.2)
+  discloses the same open acceptance rows and unsigned status.
 
 ## Version state policy
 
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.1. README and INSTALL call this the install target until a
+   currently v0.7.2. README and INSTALL call this the install target until a
    later release actually exists.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.2`, the launch fallback patch candidate.
+   `0.7.2`, matching the current public patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
    archive name or version string alone.
 4. **Intended tag:** the next version selected for publication after its gates
-   close. The intended patch tag is v0.7.2. The next minor milestone is v0.8.0;
-   it is not yet the workspace or public version.
+   close. The next minor milestone is v0.8.0; it is not yet the workspace or
+   public version.
 
 Advance the workspace version once, before collecting evidence for the intended
 tag. That release-preparation change updates `Cargo.toml`, `Cargo.lock`,
@@ -431,6 +434,16 @@ repeated quality and fuzzing, rebuilt all four archives, and published the
 immutable 12-asset [v0.7.1 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.1).
 Representative-hardware and native screen-reader acceptance remain uncollected.
 
+For v0.7.2, [candidate run 36591189142](https://github.com/blisspixel/viewr/actions/runs/36591189142)
+passed quality, fuzzing, and all four verified archive builds on commit
+`181573a6a9fae9bb8b8dbdd99971bc391ca3dbe5` without publishing.
+[Main CI run 36593078251](https://github.com/blisspixel/viewr/actions/runs/36593078251)
+passed on tag-ready commit `64d811f59b33cfbc13c04a9c295117a0f2dab5a9`.
+[Tag release run 36594782398](https://github.com/blisspixel/viewr/actions/runs/36594782398)
+repeated quality and fuzzing, rebuilt all four archives, and published the
+immutable 12-asset [v0.7.2 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.2).
+Representative-hardware and native screen-reader acceptance remain uncollected.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)
@@ -455,9 +468,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.7.1 is public, immutable, checksummed, and attested, and v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.7.2 is public, immutable, checksummed, and attested, and v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
+  known-issues note. v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
   acceptance evidence, which their release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.

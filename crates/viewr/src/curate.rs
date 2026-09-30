@@ -500,14 +500,28 @@ impl TrashReceiptCapture {
     }
 
     fn bind_receipts<'a>(receipts: impl IntoIterator<Item = &'a mut TrashReceipt>) {
-        #[cfg(any(
-            target_os = "windows",
-            all(
-                unix,
-                not(target_os = "macos"),
-                not(target_os = "ios"),
-                not(target_os = "android")
-            )
+        #[cfg(target_os = "windows")]
+        {
+            let receipts_vec: Vec<&'a mut TrashReceipt> = receipts.into_iter().collect();
+            let (remote_receipts, local_receipts): (Vec<_>, Vec<_>) = receipts_vec
+                .into_iter()
+                .partition(|receipt| is_remote_path(&receipt.original_path));
+
+            for receipt in remote_receipts {
+                receipt.platform_id = None;
+                receipt.capture_status = TrashReceiptCaptureStatus::NoCandidate;
+            }
+
+            if !local_receipts.is_empty() {
+                Self::bind_receipts_with(local_receipts, trash::os_limited::list);
+            }
+        }
+
+        #[cfg(all(
+            unix,
+            not(target_os = "macos"),
+            not(target_os = "ios"),
+            not(target_os = "android")
         ))]
         {
             Self::bind_receipts_with(receipts, trash::os_limited::list);
@@ -1050,6 +1064,36 @@ fn classify_trash_item_id(
     } else {
         TrashReceiptCaptureStatus::NoCandidate
     })
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // one audited read-only Win32 drive-type query
+fn is_remote_path(path: &Path) -> bool {
+    const DRIVE_REMOTE: u32 = 4;
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+
+    let path_str = path.to_string_lossy();
+    if path_str.starts_with(r"\\") || path_str.starts_with("//") {
+        return true;
+    }
+
+    let mut components = path.components();
+    if let Some(std::path::Component::Prefix(prefix)) = components.next() {
+        use std::path::Prefix;
+        match prefix.kind() {
+            Prefix::UNC(..) | Prefix::VerbatimUNC(..) => return true,
+            Prefix::Disk(disk) | Prefix::VerbatimDisk(disk) => {
+                let root = [u16::from(disk), u16::from(b':'), u16::from(b'\\'), 0];
+                // SAFETY: `root` is a valid null-terminated UTF-16 wide string.
+                let drive_type = unsafe { GetDriveTypeW(root.as_ptr()) };
+                if drive_type == DRIVE_REMOTE {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(target_os = "windows")]
@@ -1931,5 +1975,18 @@ mod tests {
             }
             Err(error) => panic!("current accepted source should pass preflight: {error:?}"),
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_remote_path_detection() {
+        assert!(super::is_remote_path(Path::new(
+            r"\\server\share\photo.jpg"
+        )));
+        assert!(super::is_remote_path(Path::new(r"//nas/media/image.png")));
+        assert!(super::is_remote_path(Path::new(
+            r"\\?\UNC\server\share\photo.jpg"
+        )));
+        assert!(!super::is_remote_path(Path::new(r"C:\Windows\System32")));
     }
 }

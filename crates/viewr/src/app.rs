@@ -1371,7 +1371,7 @@ fn run_coherence_watch(
         if cancel.load(Ordering::Acquire) {
             return;
         }
-        let source = source_observation(source.matches_path(&path));
+        let source = source_observation(source.matches_path_native(&path));
         let folder = match folder.as_deref() {
             None => FolderObservation::Unchanged,
             Some(folder) => match crate::fs::directory_stamp(folder) {
@@ -3707,28 +3707,6 @@ impl App {
         self.folder_scan_job
             .as_ref()
             .is_some_and(|job| folder_scan_blocks_interaction(job.context().purpose.as_ref()))
-    }
-
-    fn restart_membership_scan_if_active(&mut self) {
-        let Some(job) = self.folder_scan_job.as_ref() else {
-            return;
-        };
-        if folder_scan_blocks_interaction(job.context().purpose.as_ref()) {
-            return;
-        }
-        let Some(path) = self.session.selected_path.clone() else {
-            return;
-        };
-        let Some(directory) = path.parent().map(Path::to_owned) else {
-            return;
-        };
-        self.start_folder_scan(
-            directory,
-            ScanPurpose::SelectedFile {
-                path,
-                missing_recovery: false,
-            },
-        );
     }
 
     fn refresh_folder_membership(&mut self) {
@@ -6546,7 +6524,6 @@ impl App {
             self.session.selected_path = None;
             self.invalidate_displayed_image();
             self.sync_collage_after_catalog_change();
-            self.restart_membership_scan_if_active();
             return;
         }
 
@@ -6560,7 +6537,6 @@ impl App {
             self.session.selected_path = Some(path);
             self.kick_prefetch();
             self.sync_collage_after_catalog_change();
-            self.restart_membership_scan_if_active();
             self.request_redraw();
             return;
         }
@@ -6574,7 +6550,6 @@ impl App {
         }
         self.kick_prefetch();
         self.sync_collage_after_catalog_change();
-        self.restart_membership_scan_if_active();
     }
 
     fn handle_missing_selected_path(&mut self, path: PathBuf) {

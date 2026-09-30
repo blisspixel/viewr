@@ -1372,7 +1372,7 @@ fn render_top_operation_status(
             )),
             colors,
         );
-    } else if frame.folder_scan_busy && frame.dock.has_image {
+    } else if frame.folder_scan_busy {
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, frame.text(tr!("Reading folder...")));
     } else if let Some(toast) = frame.toast.as_ref() {
@@ -1453,7 +1453,13 @@ fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
     };
     if let Some((index, total)) = displayed_position {
         Some(match frame.rating.filter {
-            crate::ratings::RatingFilter::All => format!("{index} / {total}"),
+            crate::ratings::RatingFilter::All => {
+                if frame.folder_scan_busy && total == 1 {
+                    format!("{index} / ...")
+                } else {
+                    format!("{index} / {total}")
+                }
+            }
             crate::ratings::RatingFilter::AtLeast(minimum) => format!(
                 "{index} / {total} rated {}+ · {} total",
                 minimum.get(),
@@ -3375,8 +3381,13 @@ fn render_empty_state(
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
 ) {
-    let is_opening = frame.is_opening;
-    let load_error = frame.load_error.as_deref();
+    let folder_scan_busy = frame.folder_scan_busy;
+    let is_opening = frame.is_opening || folder_scan_busy;
+    let load_error = if folder_scan_busy {
+        None
+    } else {
+        frame.load_error.as_deref()
+    };
     let selected_file_name = frame.selected_file_name.as_deref();
     let colors = chrome_colors(ui);
     let screen = ui.ctx().content_rect();
@@ -3389,12 +3400,20 @@ fn render_empty_state(
         (screen.center().y - EMPTY_STATE_EXPECTED_HEIGHT * 0.5)
             .clamp(minimum_card_top, maximum_card_top),
     );
-    let copy = crate::shortcuts::empty_state_copy(
-        frame.language,
-        is_opening,
-        load_error,
-        selected_file_name,
-    );
+    let copy = if folder_scan_busy {
+        crate::shortcuts::EmptyStateCopy {
+            heading: frame.text(tr!("Reading folder...")).to_owned(),
+            description: frame.text(crate::shortcuts::FIRST_RUN_SCOPE).to_owned(),
+            show_retry: false,
+        }
+    } else {
+        crate::shortcuts::empty_state_copy(
+            frame.language,
+            is_opening,
+            load_error,
+            selected_file_name,
+        )
+    };
     Area::new("empty_state".into())
         .fixed_pos(card_position)
         .constrain_to(screen)
@@ -7066,6 +7085,29 @@ mod tests {
     }
 
     #[test]
+    fn empty_window_folder_scan_names_reading_folder_and_shows_progress() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.dock.has_image = false;
+        frame.folder_scan_busy = true;
+        frame.playlist_pos = None;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("folder-scan status AccessKit update should be generated");
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.value() == Some("Reading folder...") || node.label() == Some("Reading folder...")
+        }));
+        let labels: Vec<_> = update.nodes.iter().filter_map(|(_, n)| n.label()).collect();
+        assert!(!labels.contains(&"Open File"));
+        assert!(!labels.contains(&"Open Folder"));
+    }
+
+    #[test]
     fn rating_outcome_toast_is_polite_while_ordinary_toast_stays_non_live() {
         let rating_context = egui::Context::default();
         rating_context.enable_accesskit();
@@ -7712,6 +7754,11 @@ mod tests {
     }
 
     fn empty_state_pane_label(frame: &UiFrameOwned) -> String {
+        if frame.folder_scan_busy {
+            return frame
+                .text(crate::locale::tr!("Reading folder..."))
+                .to_owned();
+        }
         crate::shortcuts::empty_state_copy(
             frame.language,
             frame.is_opening,

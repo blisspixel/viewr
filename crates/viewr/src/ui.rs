@@ -1453,7 +1453,13 @@ fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
     };
     if let Some((index, total)) = displayed_position {
         Some(match frame.rating.filter {
-            crate::ratings::RatingFilter::All => format!("{index} / {total}"),
+            crate::ratings::RatingFilter::All => {
+                if frame.folder_scan_busy && total == 1 {
+                    format!("{index} / ...")
+                } else {
+                    format!("{index} / {total}")
+                }
+            }
             crate::ratings::RatingFilter::AtLeast(minimum) => format!(
                 "{index} / {total} rated {}+ · {} total",
                 minimum.get(),

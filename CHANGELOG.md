@@ -7,10 +7,23 @@ and organized by user-visible concern.
 
 ### Storage and folder performance
 
-- Added directory-level detection of Windows FileIdInfo support to skip
-  redundant, failing Win32 queries across network shares (SMB, Samba, TrueNAS,
-  Synology) and non-NTFS volumes, eliminating extra network round-trips for every
-  file during folder scans.
+- Added single-call Win32 metadata, identity, and version querying in
+  `scan_entry_provenance` when scanning directories on network shares (SMB,
+  Samba, TrueNAS, Synology) and non-NTFS volumes, eliminating redundant network
+  round-trips for every file.
+- Opened regular directory entries with `FILE_READ_ATTRIBUTES | SYNCHRONIZE`
+  instead of `FILE_GENERIC_READ` during folder scans, preventing unnecessary
+  network data-read leases and locks on SMB shares.
+- Replaced whole-file SHA-256 rehashing in the background coherence watch loop
+  with native non-mutating identity and version checks, eliminating continuous
+  network I/O saturation while viewing images on network shares.
+- Preserved active background folder scans across file deletion instead of
+  restarting the scan from file zero when moving a file to Trash.
+- Bypassed full Windows Recycle Bin COM enumeration when trashing files located
+  on remote UNC and mapped network shares where Recycle Bin is not supported.
+- Updated top status position counter to display folder scan progress ("1 / ...")
+  instead of an apparent single-item catalog ("1 / 1") while folder scanning is
+  in flight.
 - Added Win32 fallback in file version queries for volumes where FileBasicInfo is
   unsupported.
 - Displayed active folder scan progress ("Reading folder..." and busy spinner) in

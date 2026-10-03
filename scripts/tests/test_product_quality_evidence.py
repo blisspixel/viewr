@@ -2059,7 +2059,7 @@ class EvidenceDocumentationDriftTests(unittest.TestCase):
                 self.assertTrue(cited)
                 self.assertEqual(cited, {evidence.EVIDENCE_DIRECTORY})
 
-    def test_install_contract_row_names_the_published_readme_version(self) -> None:
+    def test_install_contract_row_names_the_archive_readme_version(self) -> None:
         readme = (evidence.REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
         published = set(
             re.findall(
@@ -2073,7 +2073,7 @@ class EvidenceDocumentationDriftTests(unittest.TestCase):
         row = next(
             line for line in matrix.splitlines() if line.startswith("| PQ-AD-02 |")
         )
-        self.assertIn(f"identify {release} as the current", row)
+        self.assertIn(f"identify {release} as the preview", row)
 
 
 if __name__ == "__main__":

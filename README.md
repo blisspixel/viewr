@@ -49,17 +49,17 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.3 is the current public preview. Its portable archives are checksummed and
+v0.7.4 is the preview described here. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
-[v0.7.3 notes](docs/releases/v0.7.3.md) record that gap exactly.
+[v0.7.4 notes](docs/releases/v0.7.4.md) record that gap exactly.
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.4/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -69,13 +69,13 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.4/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The published command downloads the v0.7.3 installer, which installs the v0.7.3
+The command downloads the v0.7.4 installer, which installs the v0.7.4
 archive after verifying its SHA-256 sidecar and internal manifest, without
 giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
@@ -134,7 +134,7 @@ automatically.
 
 ## Essential controls
 
-Current development includes a typed image or folder path on the empty card
+An editable image or folder path is available on the empty card
 and File > Open Path while viewing. Enter opens it; a missing path stays editable
 with a complete inline explanation. A native chooser that returns no selection
 points to these alternatives. Path input stays in memory for this session.
@@ -197,16 +197,15 @@ has room; image zoom does not change.
 
 ## Project status
 
-v0.7.3 is the current public preview and install target. It ships focused viewing
-and navigation fixes, platform typography, quieter chrome, and accurate canvas
-backgrounds. The representative-hardware and screen-reader acceptance rows remain
+v0.7.4 adds recoverable path entry and clean Linux window-loss handling to the
+focused viewer. The representative-hardware and screen-reader acceptance rows remain
 open; this patch does not complete the v0.8 release-readiness milestone.
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.2 remain
+v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.3 remain
 published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.8.0** release
 readiness through v0.9 publisher authentication, then v1.0.
-The [current release notes](docs/releases/v0.7.3.md) state the exact published
+The [current release notes](docs/releases/v0.7.4.md) state the exact published
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
 Unpublished candidates are identified by exact commit and workflow run. The

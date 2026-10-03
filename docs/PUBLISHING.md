@@ -101,10 +101,11 @@ workflow results, and release assets remain the source of truth:
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.3. README and INSTALL use this fixed immutable install target.
+   currently v0.7.3. README and INSTALL are tag-ready for the intended v0.7.4
+   fixed immutable URLs; publication has not happened yet.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.4`, preparing the bounded Linux entry and window-loss patch.
+   `0.7.4`, verified and tag-ready for the bounded Linux entry and window-loss patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -134,7 +135,7 @@ dependency maintenance, requires the full automated release procedure, and
 carries the open hardware, native assistive-technology, and v0.8 acceptance work.
 It does not advance or complete a minor milestone.
 
-The v0.7.4 preparation uses the same narrow exception for reproduced Linux
+The v0.7.4 patch uses the same narrow exception for reproduced Linux
 window-loss and file-entry defects, with related recovery and control fixes.
 It requires the complete automated gate and one exact candidate; it does not
 close hardware, native assistive-technology, or v0.8 acceptance work.
@@ -484,6 +485,36 @@ Both installed executables matched that archive on Windows. The doctor probe
 passed, existing preferences were preserved, and the Start menu and user PATH
 continue to point to the installed viewer. Representative-hardware and native
 screen-reader acceptance remain uncollected.
+
+For v0.7.4, [main CI run 37148910797](https://github.com/blisspixel/viewr/actions/runs/37148910797),
+[fuzz run 37148910824](https://github.com/blisspixel/viewr/actions/runs/37148910824),
+and [CodeQL run 37148910801](https://github.com/blisspixel/viewr/actions/runs/37148910801)
+passed on candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a`.
+One non-publishing [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754)
+repeated the complete quality and fuzz gates and built all four archives. All
+four downloads passed their sidecars and the official 52-file manifest verifier.
+The complete fixture set also verified against manifest SHA-256
+`0ca94fd40b372c94fcdf45d7c530829cb2345b597725db7bbbfacc1b07fc12a2`.
+
+| Candidate target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `bf0a19408c612a875217414d3805ca409a27446629fd7cc8c7f08faea8dff1f5` |
+| macOS Intel | `4f55a5b7e73580b39f86b6c03ae2b981e1427ef9890040512cb4fb6c42df3d0e` |
+| macOS Apple Silicon | `505c96a5d3cf10bef3b943139c247f20b986a5d11b01ea36c962881fb46a44f9` |
+| Linux x64 | `10f07ed892c4f253c82b793dc54f014830d1f745286c0d4b113d450fdb2eb95b` |
+
+The verified Windows candidate passed the native accessibility smoke suite,
+including rating writes, Trash and Undo, collage, direct-file navigation across
+319 images, distinct pan cursors, and clean Exit and Ctrl+Q. The exact Linux
+candidate passed typed-path opening and the X11 rating-dialog close regression:
+Ctrl+Q and immediate drawable destruction both exited successfully with empty
+stderr and a byte-identical unconfirmed JPEG. The Linux checks used software GL
+in a private Xvfb display and an isolated Ubuntu 24.04 loader on WSL. They prove
+these bounded regressions, not representative desktop or hardware acceptance.
+The tag-ready follow-up changes release status, immutable links, and version
+assertions only. Application source, dependencies, workflows, and packaging
+remain identical to the verified candidate. Native screen-reader and carried
+hardware acceptance rows remain uncollected.
 
 ## Required before a broadly recommended 1.0
 

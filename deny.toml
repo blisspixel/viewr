@@ -106,13 +106,7 @@ skip = [
     { crate = "quick-xml@0.37.5", reason = "little_exif 0.6 requires quick-xml 0.37" },
     { crate = "quick-xml@0.39.4", reason = "wayland-scanner 0.31 requires quick-xml 0.39 at build time" },
 
-    # trash 5 remains on windows 0.56, while AccessKit and wgpu use windows 0.62.
-    # Winit and rustix also retain two older windows-sys ABI lines.
-    { crate = "windows@0.56.0", reason = "trash 5.2 requires the windows 0.56 API" },
-    { crate = "windows-core@0.56.0", reason = "windows 0.56 requires its matching core crate" },
-    { crate = "windows-implement@0.56.0", reason = "windows-core 0.56 requires its matching implementation crate" },
-    { crate = "windows-interface@0.56.0", reason = "windows-core 0.56 requires its matching interface crate" },
-    { crate = "windows-result@0.1.2", reason = "windows-core 0.56 requires the legacy result ABI" },
+    # Winit and rustix retain two older windows-sys ABI lines.
     { crate = "windows-sys@0.52.0", reason = "winit 0.30 and arboard 3 require windows-sys 0.52" },
     { crate = "windows-sys@0.59.0", reason = "viewr's native glue and rustix 0.38 require windows-sys 0.59" },
 
@@ -121,7 +115,7 @@ skip = [
     # windows-sys 0.60 brings in 0.53. The main check permits these entries to be
     # unmatched; the fuzz check denies warnings and proves every entry is live.
     { crate = "windows-sys@0.60.2", reason = "the fuzz lock's arboard and uds_windows paths require windows-sys 0.60" },
-    { crate = "windows-targets@0.52.6", reason = "the fuzz lock's Windows 0.56 and windows-sys 0.52 paths require targets 0.52" },
+    { crate = "windows-targets@0.52.6", reason = "the fuzz lock's windows-sys 0.52 paths require targets 0.52" },
     { crate = "windows_aarch64_gnullvm@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
     { crate = "windows_aarch64_msvc@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },
     { crate = "windows_i686_gnu@0.52.6", reason = "windows-targets 0.52 requires its matching generated target crate" },

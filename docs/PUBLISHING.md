@@ -20,9 +20,9 @@ workflow results, and release assets remain the source of truth:
   `attestations: write`.
 - [x] Merged branches are deleted automatically. Dependabot limits each update lane
   to one grouped patch proposal.
-- [x] `main` requires the seven stable CI checks, linear history, one code-owner
-  approval with stale-review dismissal and last-push approval, and conversation
-  resolution. Force pushes and deletion are blocked. Administrators retain an
+- [x] `main` requires the seven stable CI checks, an up-to-date branch, linear
+  history, and conversation resolution. Independent approval is not required.
+  Force pushes and deletion are blocked. Administrators retain an
   explicit emergency bypass; path-filtered fuzz remains a release-workflow gate.
 - [x] Immutable releases are enabled before the first tag is published.
 - [x] Publish and verify annotated tag `v0.1.0`. The release is immutable, contains
@@ -102,14 +102,13 @@ Four version states must not be conflated:
    later release actually exists.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.2`, matching the current public patch.
+   `0.7.3`, prepared for the focused viewer-polish patch and not yet published.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
    archive name or version string alone.
 4. **Intended tag:** the next version selected for publication after its gates
-   close. The next minor milestone is v0.8.0; it is not yet the workspace or
-   public version.
+   close. The next patch is v0.7.3; the next minor milestone remains v0.8.0.
 
 Advance the workspace version once, before collecting evidence for the intended
 tag. That release-preparation change updates `Cargo.toml`, `Cargo.lock`,
@@ -126,6 +125,12 @@ automated release gate, reviewed notes, immutable assets, checksums, manifests,
 and attestations. Their notes disclose the uncollected representative-hardware
 rows. Those exceptions did not close the carried v0.6 evidence gate or begin
 v0.7 accessibility evidence.
+
+The v0.7.3 candidate is the same narrow patch exception for viewing-control,
+folder-navigation, and closely related visual fixes. It includes reviewed patch
+dependency maintenance, requires the full automated release procedure, and
+carries the open hardware, native assistive-technology, and v0.8 acceptance work.
+It does not advance or complete a minor milestone.
 
 Application source, dependencies, workflows, packaging, or user-facing behavior
 instructions changed after a candidate run invalidate that candidate and all
@@ -162,7 +167,7 @@ production environment.
    validator when the required platform records are available:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.2
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.3
    ```
 
 2. On a feature branch, make the single version transition described in

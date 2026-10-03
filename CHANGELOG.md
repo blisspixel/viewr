@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.7.3 candidate
 
 ### Viewing controls
 
@@ -72,6 +72,12 @@ and organized by user-visible concern.
   both the top status bar and on the empty-state startup card when opening folders,
   providing immediate visual and screen-reader feedback while scanning large or
   slow network directories before initial images are presented.
+
+### Dependency maintenance
+
+- Updated the existing Trash, error-derivation, and CRC dependencies within their
+  patch release lines. Both lockfiles, the offline Flatpak source map, and the
+  third-party license inventory describe the same reviewed dependency versions.
 
 ## 0.7.2 - 2026-09-29
 

@@ -83,14 +83,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Published install target | Immutable [v0.7.3]",
+                "Published install target | Immutable [v0.7.4]",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.7.3 is public, immutable, checksummed, and attested",
+                "v0.7.4 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (

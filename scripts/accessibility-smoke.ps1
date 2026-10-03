@@ -201,12 +201,35 @@ public static class ViewrAccessibilityNativeMethods {
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorInfo(ref CursorInfo info);
 
-    public static IntPtr VisibleCursor() {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CursorImage {
+        public bool IsIcon;
+        public uint HotspotX;
+        public uint HotspotY;
+        public IntPtr Mask;
+        public IntPtr Color;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetIconInfo(IntPtr icon, out CursorImage image);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteObject(IntPtr bitmap);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    public static bool TryGetCursorImage(out CursorImage image) {
+        image = default(CursorImage);
         var info = new CursorInfo { Size = (uint)Marshal.SizeOf<CursorInfo>() };
-        if (!GetCursorInfo(ref info) || (info.Flags & 1) == 0) {
-            throw new InvalidOperationException("the native cursor is not visible");
+        if (!GetCursorInfo(ref info)) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         }
-        return info.Handle;
+        if ((info.Flags & 1) == 0 || info.Handle == IntPtr.Zero) return false;
+        if (!GetIconInfo(info.Handle, out image)) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        return true;
     }
 
     public static bool HoverScreenPoint(IntPtr hwnd, int x, int y) {
@@ -354,6 +377,40 @@ function Get-ApplicationClientSize {
     return [pscustomobject]@{
         Width = $size[0]
         Height = $size[1]
+    }
+}
+
+function Get-CursorFingerprint {
+    $image = [ViewrAccessibilityNativeMethods+CursorImage]::new()
+    if (-not [ViewrAccessibilityNativeMethods]::TryGetCursorImage([ref]$image)) {
+        return $null
+    }
+    try {
+        if ($image.Color -eq [IntPtr]::Zero) { return $null }
+        $bitmap = [Drawing.Bitmap]::FromHbitmap($image.Color)
+        try {
+            if ($bitmap.Width -gt 256 -or $bitmap.Height -gt 256) {
+                throw 'native test cursor exceeded its bounded capture size'
+            }
+            $pixels = [byte[]]::new($bitmap.Width * $bitmap.Height * 4)
+            $offset = 0
+            for ($y = 0; $y -lt $bitmap.Height; $y++) {
+                for ($x = 0; $x -lt $bitmap.Width; $x++) {
+                    $pixel = $bitmap.GetPixel($x, $y)
+                    $pixels[$offset++] = $pixel.R
+                    $pixels[$offset++] = $pixel.G
+                    $pixels[$offset++] = $pixel.B
+                    $pixels[$offset++] = $pixel.A
+                }
+            }
+            $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($pixels))
+            return "$($bitmap.Width)x$($bitmap.Height)@$($image.HotspotX),$($image.HotspotY):$digest"
+        }
+        finally { $bitmap.Dispose() }
+    }
+    finally {
+        [void][ViewrAccessibilityNativeMethods]::DeleteObject($image.Mask)
+        [void][ViewrAccessibilityNativeMethods]::DeleteObject($image.Color)
     }
 }
 
@@ -1943,15 +2000,31 @@ try {
     if (-not [ViewrAccessibilityNativeMethods]::HoverScreenPoint($script:Window, $centerX, $centerY)) {
         throw "could not hover the synthetic image canvas"
     }
-    Start-Sleep -Milliseconds 300
-    $openHand = [ViewrAccessibilityNativeMethods]::VisibleCursor()
+    $cursorSize = [int][Math]::Round(
+        24 * [Math]::Clamp(
+            [double][ViewrAccessibilityNativeMethods]::GetDpiForWindow($script:Window) / 96,
+            1.0, 4.0
+        ),
+        [MidpointRounding]::AwayFromZero
+    )
+    $hotspot = [int][Math]::Floor($cursorSize / 2)
+    $cursorPrefix = "${cursorSize}x${cursorSize}@${hotspot},${hotspot}:"
+    $openHand = Wait-ForResult -Description "the DPI-scaled open hand over the image" -Probe {
+        $fingerprint = Get-CursorFingerprint
+        if ($null -ne $fingerprint -and $fingerprint.StartsWith($cursorPrefix)) {
+            return $fingerprint
+        }
+        return $null
+    }
     try {
         if (-not [ViewrAccessibilityNativeMethods]::SendLeftButton($script:Window, $true)) {
             throw "could not press the pan button"
         }
         Wait-ForResult -Description "a distinct closed hand while panning" -Probe {
-            $cursor = [ViewrAccessibilityNativeMethods]::VisibleCursor()
-            if ($cursor -ne $openHand) { return $cursor }
+            $cursor = Get-CursorFingerprint
+            if ($null -ne $cursor -and $cursor.StartsWith($cursorPrefix) -and $cursor -ne $openHand) {
+                return $cursor
+            }
             return $null
         } | Out-Null
     }
@@ -1961,7 +2034,7 @@ try {
         }
     }
     Wait-ForResult -Description "the open hand after releasing pan" -Probe {
-        $cursor = [ViewrAccessibilityNativeMethods]::VisibleCursor()
+        $cursor = Get-CursorFingerprint
         if ($cursor -eq $openHand) { return $cursor }
         return $null
     } | Out-Null

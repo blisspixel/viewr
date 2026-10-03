@@ -60,6 +60,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/releases/v0.7.0.md",
     "docs/releases/v0.7.1.md",
     "docs/releases/v0.7.2.md",
+    "docs/releases/v0.7.3.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-dark-example.png",

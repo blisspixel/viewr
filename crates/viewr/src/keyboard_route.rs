@@ -12,6 +12,20 @@ pub(crate) fn single_key_shortcut_allowed(modifiers: ModifiersState) -> bool {
     !modifiers.control_key() && !modifiers.alt_key() && !modifiers.super_key()
 }
 
+/// Quit is a global application command, including while a popup owns focus.
+#[must_use]
+pub(crate) fn is_exit_shortcut(key: &Key, modifiers: ModifiersState) -> bool {
+    let primary = if cfg!(target_os = "macos") {
+        modifiers.super_key()
+    } else {
+        modifiers.control_key()
+    };
+    primary
+        && !modifiers.alt_key()
+        && !modifiers.shift_key()
+        && matches!(key, Key::Character(character) if character.eq_ignore_ascii_case("q"))
+}
+
 /// Fullscreen toggles once for bare F or F11. Repeated press events are consumed
 /// by the event loop without toggling again.
 #[must_use]
@@ -626,5 +640,30 @@ mod tests {
         assert!(space_tap_fits(false, false));
         assert!(!space_tap_fits(true, false));
         assert!(!space_tap_fits(false, true));
+    }
+    #[test]
+    fn exit_requires_the_platform_primary_modifier_without_alt_or_shift() {
+        let primary = if cfg!(target_os = "macos") {
+            ModifiersState::SUPER
+        } else {
+            ModifiersState::CONTROL
+        };
+        for character in ["q", "Q"] {
+            let key = Key::Character(character.into());
+            assert!(super::is_exit_shortcut(&key, primary));
+            for modifiers in [
+                ModifiersState::empty(),
+                ModifiersState::SHIFT,
+                ModifiersState::ALT,
+                primary | ModifiersState::SHIFT,
+                primary | ModifiersState::ALT,
+            ] {
+                assert!(!super::is_exit_shortcut(&key, modifiers));
+            }
+        }
+        assert!(!super::is_exit_shortcut(
+            &Key::Character("f".into()),
+            primary
+        ));
     }
 }

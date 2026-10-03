@@ -487,6 +487,18 @@ struct Message {
 
 const MESSAGES: &[Message] = &[
     Message {
+        english: "Exit",
+        spanish: "Salir",
+        french: "Quitter",
+        german: "Beenden",
+    },
+    Message {
+        english: "Quit viewr",
+        spanish: "Salir de viewr",
+        french: "Quitter viewr",
+        german: "viewr beenden",
+    },
+    Message {
         english: "High Contrast",
         spanish: "Alto contraste",
         french: "Contraste élevé",

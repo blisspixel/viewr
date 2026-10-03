@@ -7,6 +7,25 @@ and organized by user-visible concern.
 
 ### Viewing controls
 
+- Unsupported formats no longer show a persistent "Rating: JPEG only" badge.
+  The rating menu keeps the capability explanation; JPEG rating state and errors
+  remain visible.
+
+- File now includes Exit (Quit viewr on macOS), with Ctrl+Q or Cmd+Q. Menu,
+  shortcut, and window close share the same pending-write completion behavior.
+- Interface type prefers installed platform fonts, including Segoe UI Variable
+  on Windows, San Francisco on macOS, and modern Linux sans-serif fallbacks.
+  Console prefers the installed monospace font. Bundled glyph fallbacks remain;
+  fonts are read once, locally, with size and validity checks.
+- Console uses a softer phosphor-green accent and text, quieter themed controls,
+  a thinner collage selection outline, and smaller visible crop handles with
+  unchanged drag targets.
+
+- Fullscreen starts at Fit and enlarges small images to the available viewport.
+  Returning to the window refits there. Actual Size still shows one source pixel
+  per physical display pixel, and wheel zoom stays continuous from it.
+- Windows uses compact, outlined open and closed hands at the display's DPI,
+  replacing the identical four-way arrows returned for both native pan states.
 - Corrected theme and inspection backgrounds that were being encoded to sRGB
   twice, making the canvas lighter than the specified color. Dark, Light,
   Console, and high-contrast backgrounds now match their palette values.
@@ -30,10 +49,10 @@ and organized by user-visible concern.
 
 ### Storage and folder performance
 
-- Added single-call Win32 metadata, identity, and version querying in
-  `scan_entry_provenance` when scanning directories on network shares (SMB,
-  Samba, TrueNAS, Synology) and non-NTFS volumes, eliminating redundant network
-  round-trips for every file.
+- Fixed Windows folder scans that could reject an unchanged neighboring image
+  after a legacy directory metadata probe. Scan and decode now use the same
+  child identity and version evidence, including native change time when
+  available, without weakening replacement or link checks.
 - Opened regular directory entries with `FILE_READ_ATTRIBUTES | SYNCHRONIZE`
   instead of `FILE_GENERIC_READ` during folder scans, preventing unnecessary
   network data-read leases and locks on SMB shares.

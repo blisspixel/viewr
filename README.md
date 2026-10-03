@@ -33,8 +33,8 @@ history, crash-report uploader, or automatic update check.
   stays with an editor you choose through native Open With, without adding a
   catalog or subscription.
 - **Cross-platform.** The same Rust codebase is built and tested on Windows,
-  macOS, and Linux, with native dialogs, menus, shortcuts, and accessibility
-  semantics.
+  macOS, and Linux, with native dialogs and shortcuts, accessible menus, and
+  accessibility semantics.
 
 ## Interface
 
@@ -134,10 +134,17 @@ automatically.
 
 ## Essential controls
 
-Current development uses a hand cursor and direct drag-to-pan in image view.
-The zoom percentage opens Fit, Actual Size, and zoom controls. Pan limits keep
-part of the photo reachable. The published v0.7.2 preview still requires holding
-Space to pan and has a display-only zoom percentage.
+Current development includes File > Exit (Quit viewr on macOS), with Ctrl+Q
+or Cmd+Q, and installed platform interface fonts with bundled fallbacks.
+Console uses softer phosphor-green text and selection outlines.
+
+Current development uses a compact open-hand cursor and direct drag-to-pan in
+image view, with a closed hand while dragging. The zoom percentage opens Fit,
+Actual Size, and zoom controls. Pan limits keep part of the photo reachable.
+Fullscreen starts at Fit and enlarges small images to the available screen area;
+Actual Size remains available for exact pixel inspection. The published v0.7.2
+preview still requires holding Space to pan, has a display-only zoom percentage,
+and retains its existing zoom when entering fullscreen.
 
 | Action | Control |
 | --- | --- |

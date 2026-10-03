@@ -115,8 +115,17 @@ public static class ViewrAccessibilityNativeMethods {
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point { public int X; public int Y; }
+
     [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
+    private static extern bool SetPhysicalCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetPhysicalCursorPos(out Point point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPhysicalPoint(Point point);
 
     private static bool FocusWindowForInput(IntPtr hwnd) {
         if (GetForegroundWindow() == hwnd) return true;
@@ -180,6 +189,64 @@ public static class ViewrAccessibilityNativeMethods {
         return text.ToString();
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo {
+        public uint Size;
+        public uint Flags;
+        public IntPtr Handle;
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetCursorInfo(ref CursorInfo info);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CursorImage {
+        public bool IsIcon;
+        public uint HotspotX;
+        public uint HotspotY;
+        public IntPtr Mask;
+        public IntPtr Color;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetIconInfo(IntPtr icon, out CursorImage image);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteObject(IntPtr bitmap);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    public static bool TryGetCursorImage(out CursorImage image) {
+        image = default(CursorImage);
+        var info = new CursorInfo { Size = (uint)Marshal.SizeOf<CursorInfo>() };
+        if (!GetCursorInfo(ref info)) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        if ((info.Flags & 1) == 0 || info.Handle == IntPtr.Zero) return false;
+        if (!GetIconInfo(info.Handle, out image)) {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        return true;
+    }
+
+    public static bool HoverScreenPoint(IntPtr hwnd, int x, int y) {
+        // UIA bounds are physical pixels even when the test host is DPI-unaware.
+        if (!FocusWindowForInput(hwnd) || !SetPhysicalCursorPos(x, y)) return false;
+        if (WindowFromPhysicalPoint(new Point { X = x, Y = y }) != hwnd) return false;
+        // Real mouse motion wakes cursor presentation on keyboard-only CI desktops
+        // and produces a move event even if the requested point was already current.
+        var inputs = new[] {
+            new Input { Type = 0, Value = new InputValue { Mouse = new MouseInput { Dx = 1, Flags = 0x0001 } } },
+            new Input { Type = 0, Value = new InputValue { Mouse = new MouseInput { Dx = -1, Flags = 0x0001 } } }
+        };
+        return SendInput(2, inputs, Marshal.SizeOf<Input>()) == 2 &&
+            SetPhysicalCursorPos(x, y) &&
+            WindowFromPhysicalPoint(new Point { X = x, Y = y }) == hwnd;
+    }
+
     public static bool SendKeyPress(IntPtr hwnd, ushort virtualKey) {
         if (!FocusWindowForInput(hwnd)) {
             return PostKeyPress(hwnd, virtualKey);
@@ -206,9 +273,26 @@ public static class ViewrAccessibilityNativeMethods {
         return sent == 0 && PostKeyPress(hwnd, virtualKey);
     }
 
-    public static bool ClickScreenPoint(IntPtr hwnd, int screenX, int screenY) {
+    public static bool SendControlKeyPress(IntPtr hwnd, ushort virtualKey) {
         if (!FocusWindowForInput(hwnd)) return false;
-        if (!SetCursorPos(screenX, screenY)) return false;
+        var keys = new ushort[] { 0x11, virtualKey, virtualKey, 0x11 };
+        var inputs = new Input[keys.Length];
+        for (var index = 0; index < keys.Length; index++) {
+            inputs[index] = new Input {
+                Type = 1,
+                Value = new InputValue {
+                    Keyboard = new KeyboardInput {
+                        VirtualKey = keys[index],
+                        Flags = index >= 2 ? 0x0002u : 0u
+                    }
+                }
+            };
+        }
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length;
+    }
+
+    public static bool ClickScreenPoint(IntPtr hwnd, int screenX, int screenY) {
+        if (!HoverScreenPoint(hwnd, screenX, screenY)) return false;
         Thread.Sleep(20);
         var inputs = new[] {
             new Input {
@@ -226,6 +310,33 @@ public static class ViewrAccessibilityNativeMethods {
         };
         return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) ==
             (uint)inputs.Length;
+    }
+
+    public static bool ScrollScreenPoint(IntPtr hwnd, int screenX, int screenY, int delta) {
+        if (!HoverScreenPoint(hwnd, screenX, screenY)) return false;
+        var inputs = new[] {
+            new Input {
+                Type = 0,
+                Value = new InputValue {
+                    Mouse = new MouseInput { MouseData = unchecked((uint)delta), Flags = 0x0800 }
+                }
+            }
+        };
+        return SendInput(1, inputs, Marshal.SizeOf<Input>()) == 1;
+    }
+
+    public static bool SendLeftButton(IntPtr hwnd, bool pressed) {
+        if (pressed && (!FocusWindowForInput(hwnd) ||
+            !GetPhysicalCursorPos(out var point) || WindowFromPhysicalPoint(point) != hwnd)) return false;
+        var inputs = new[] {
+            new Input {
+                Type = 0,
+                Value = new InputValue {
+                    Mouse = new MouseInput { Flags = pressed ? 0x0002u : 0x0004u }
+                }
+            }
+        };
+        return SendInput(1, inputs, Marshal.SizeOf<Input>()) == 1;
     }
 
     private static bool PostKeyPress(IntPtr hwnd, ushort virtualKey) {
@@ -266,6 +377,40 @@ function Get-ApplicationClientSize {
     return [pscustomobject]@{
         Width = $size[0]
         Height = $size[1]
+    }
+}
+
+function Get-CursorFingerprint {
+    $image = [ViewrAccessibilityNativeMethods+CursorImage]::new()
+    if (-not [ViewrAccessibilityNativeMethods]::TryGetCursorImage([ref]$image)) {
+        return $null
+    }
+    try {
+        if ($image.Color -eq [IntPtr]::Zero) { return $null }
+        $bitmap = [Drawing.Bitmap]::FromHbitmap($image.Color)
+        try {
+            if ($bitmap.Width -gt 256 -or $bitmap.Height -gt 256) {
+                throw 'native test cursor exceeded its bounded capture size'
+            }
+            $pixels = [byte[]]::new($bitmap.Width * $bitmap.Height * 4)
+            $offset = 0
+            for ($y = 0; $y -lt $bitmap.Height; $y++) {
+                for ($x = 0; $x -lt $bitmap.Width; $x++) {
+                    $pixel = $bitmap.GetPixel($x, $y)
+                    $pixels[$offset++] = $pixel.R
+                    $pixels[$offset++] = $pixel.G
+                    $pixels[$offset++] = $pixel.B
+                    $pixels[$offset++] = $pixel.A
+                }
+            }
+            $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($pixels))
+            return "$($bitmap.Width)x$($bitmap.Height)@$($image.HotspotX),$($image.HotspotY):$digest"
+        }
+        finally { $bitmap.Dispose() }
+    }
+    finally {
+        [void][ViewrAccessibilityNativeMethods]::DeleteObject($image.Mask)
+        [void][ViewrAccessibilityNativeMethods]::DeleteObject($image.Color)
     }
 }
 
@@ -1045,6 +1190,7 @@ $firstImage = Join-Path $testDirectory "first.png"
 $secondImage = Join-Path $testDirectory "second.png"
 $ratedImage = Join-Path $testDirectory "rated.jpg"
 $collageDirectory = Join-Path $testDirectory "collage"
+$navigationDirectory = Join-Path $testDirectory "navigation"
 $appearanceDirectory = Join-Path $testDirectory "viewr"
 $appearanceFile = Join-Path $appearanceDirectory "appearance"
 $folderSortFile = Join-Path $appearanceDirectory "folder-sort"
@@ -1250,14 +1396,27 @@ try {
         [System.Windows.Automation.ControlType]::Window
     )
     foreach ($aboutText in @(
+        "Space  Fit",
         "[ / ]",
         "F5  Reload file",
-        "T G I",
-        "Space  Fit"
+        "T G I"
     )) {
-        Wait-ForElement -Name $aboutText -Prefix -Root $aboutModal -ControlType (
-            [System.Windows.Automation.ControlType]::Text
-        ) | Out-Null
+        Wait-ForResult -Description "visible About shortcut '$aboutText'" -Probe {
+            $element = Get-Element -Name $aboutText -Prefix -Root $aboutModal -ControlType (
+                [System.Windows.Automation.ControlType]::Text
+            )
+            if ($null -ne $element) { return $element }
+            # Font metrics and available height can put later groups below the
+            # viewport. Use the viewer's real scroll interaction, then require
+            # the expected text to be fully within the modal's bounds.
+            $bounds = $aboutModal.Current.BoundingRectangle
+            $x = [int]($bounds.Left + $bounds.Width / 2)
+            $y = [int]($bounds.Top + $bounds.Height / 2)
+            if (-not [ViewrAccessibilityNativeMethods]::ScrollScreenPoint(
+                $script:Window, $x, $y, -120
+            )) { throw 'the About scroll input was not delivered' }
+            return $null
+        } | Out-Null
     }
     $closeAbout = Wait-ForElement -Name "Close" -Root $aboutModal -ControlType (
         [System.Windows.Automation.ControlType]::Button
@@ -1805,6 +1964,102 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
+    Stop-TestApplication
+    Add-Type -AssemblyName System.Drawing
+    [IO.Directory]::CreateDirectory($navigationDirectory) | Out-Null
+    [IO.File]::WriteAllText($folderSortFile, "name")
+    for ($index = 1; $index -le 319; $index++) {
+        $bitmap = [Drawing.Bitmap]::new(100 + $index, 60)
+        try {
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            try {
+                $graphics.Clear([Drawing.Color]::FromArgb($index % 255, 80, 200))
+            }
+            finally { $graphics.Dispose() }
+            $bitmap.Save((Join-Path $navigationDirectory ("image{0:D3}.png" -f $index)))
+        }
+        finally { $bitmap.Dispose() }
+    }
+    Start-TestApplication -ImagePath (Join-Path $navigationDirectory "image017.png")
+    $previousNavigationIndex = $null
+    foreach ($index in @(17, 18, 19, 18, 17, 16)) {
+        if ($null -ne $previousNavigationIndex) {
+            $key = if ($index -gt $previousNavigationIndex) { 0x27 } else { 0x25 }
+            Send-ApplicationKey -VirtualKey $key
+        }
+        Wait-ForElement -Name ("image{0:D3}.png" -f $index) | Out-Null
+        Wait-ForElement -Name ("{0} {1} 60" -f (100 + $index), [char]0xD7) | Out-Null
+        Wait-ForElement -Name "$index / 319" | Out-Null
+        Wait-ForElementAbsent -Name "Could not open" -Prefix | Out-Null
+        $previousNavigationIndex = $index
+    }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:Window)
+    $bounds = $root.Current.BoundingRectangle
+    $centerX = [int]($bounds.Left + $bounds.Width / 2)
+    $centerY = [int]($bounds.Top + $bounds.Height / 2)
+    if (-not [ViewrAccessibilityNativeMethods]::HoverScreenPoint($script:Window, $centerX, $centerY)) {
+        throw "could not hover the synthetic image canvas"
+    }
+    $cursorSize = [int][Math]::Round(
+        24 * [Math]::Clamp(
+            [double][ViewrAccessibilityNativeMethods]::GetDpiForWindow($script:Window) / 96,
+            1.0, 4.0
+        ),
+        [MidpointRounding]::AwayFromZero
+    )
+    $hotspot = [int][Math]::Floor($cursorSize / 2)
+    $cursorPrefix = "${cursorSize}x${cursorSize}@${hotspot},${hotspot}:"
+    $openHand = Wait-ForResult -Description "the DPI-scaled open hand over the image" -Probe {
+        $fingerprint = Get-CursorFingerprint
+        if ($null -ne $fingerprint -and $fingerprint.StartsWith($cursorPrefix)) {
+            return $fingerprint
+        }
+        return $null
+    }
+    try {
+        if (-not [ViewrAccessibilityNativeMethods]::SendLeftButton($script:Window, $true)) {
+            throw "could not press the pan button"
+        }
+        Wait-ForResult -Description "a distinct closed hand while panning" -Probe {
+            $cursor = Get-CursorFingerprint
+            if ($null -ne $cursor -and $cursor.StartsWith($cursorPrefix) -and $cursor -ne $openHand) {
+                return $cursor
+            }
+            return $null
+        } | Out-Null
+    }
+    finally {
+        if (-not [ViewrAccessibilityNativeMethods]::SendLeftButton($script:Window, $false)) {
+            throw "could not release the pan button"
+        }
+    }
+    Wait-ForResult -Description "the open hand after releasing pan" -Probe {
+        $cursor = Get-CursorFingerprint
+        if ($cursor -eq $openHand) { return $cursor }
+        return $null
+    } | Out-Null
+
+    Activate-Element -Element (Wait-ForElement -Name "File")
+    $exit = Wait-ForElement -Name "Exit" -Prefix
+    if ($exit.Current.Name -notlike "*Ctrl+Q") {
+        throw "Exit did not expose its keyboard shortcut"
+    }
+    Activate-Element -Element $exit
+    if (-not $script:Process.WaitForExit(5000) -or $script:Process.ExitCode -ne 0) {
+        throw "File Exit did not close viewr cleanly"
+    }
+    Stop-TestApplication
+    Start-TestApplication -ImagePath (Join-Path $navigationDirectory "image017.png")
+    Wait-ForElement -Name "image017.png" | Out-Null
+    Activate-Element -Element (Wait-ForElement -Name "File")
+    Wait-ForElement -Name "Exit" -Prefix | Out-Null
+    if (-not [ViewrAccessibilityNativeMethods]::SendControlKeyPress($script:Window, 0x51)) {
+        throw "could not deliver Ctrl+Q to the test application"
+    }
+    if (-not $script:Process.WaitForExit(5000) -or $script:Process.ExitCode -ne 0) {
+        throw "Ctrl+Q did not close viewr cleanly with a menu open"
+    }
+
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
         "actions, first-run scope, stable initial window size, conventional Trash " +
@@ -1815,6 +2070,7 @@ try {
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
         "external file replacement with unsaved edits, last-good-frame after delete, " +
         "twelve large-photo collage load, group paging, Escape, Enter, and Down navigation, " +
+        "direct-file navigation across 319 images, distinct Windows pan cursors, menu Exit and Ctrl+Q, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }
@@ -1842,6 +2098,13 @@ finally {
             }
         }
         [IO.Directory]::Delete($collageDirectory, $false)
+    }
+    if ([IO.Directory]::Exists($navigationDirectory)) {
+        for ($index = 1; $index -le 319; $index++) {
+            $photo = Join-Path $navigationDirectory ("image{0:D3}.png" -f $index)
+            if ([IO.File]::Exists($photo)) { [IO.File]::Delete($photo) }
+        }
+        [IO.Directory]::Delete($navigationDirectory, $false)
     }
     if ([IO.Directory]::Exists($testDirectory)) {
         [IO.Directory]::Delete($testDirectory, $false)

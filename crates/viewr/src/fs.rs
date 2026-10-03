@@ -1097,43 +1097,20 @@ impl DirectorySource {
         }
     }
 
-    #[allow(
-        clippy::unused_self,
-        reason = "retained directory tracks volume FileIdInfo support on Windows while Unix uses uniform stat metadata"
-    )]
     pub(crate) fn scan_entry_provenance(&self, name: &OsStr) -> io::Result<ScanProvenance> {
         let file = self.open_regular(name)?;
-        #[cfg(target_os = "windows")]
-        {
-            use std::sync::atomic::Ordering;
-            if !self.supports_file_id_info.load(Ordering::Relaxed) {
-                return file_provenance_by_handle(&file);
-            }
-
-            let opened = file.metadata()?;
-            if !metadata_is_markable_regular(&opened) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "not a markable regular file",
-                ));
-            }
-            let identity = self.file_identity(&file, &opened)?;
-            let version = file_version(&file, &opened)?;
-            Ok(ScanProvenance { identity, version })
+        let opened = file.metadata()?;
+        if !metadata_is_markable_regular(&opened) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a markable regular file",
+            ));
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let opened = file.metadata()?;
-            if !metadata_is_markable_regular(&opened) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "not a markable regular file",
-                ));
-            }
-            let identity = self.file_identity(&file, &opened)?;
-            let version = file_version(&file, &opened)?;
-            Ok(ScanProvenance { identity, version })
-        }
+        // A directory probe cannot choose a child's identity representation.
+        // Decode opens the child independently using this same identity/version pair.
+        let identity = file_identity(&file, &opened)?;
+        let version = file_version(&file, &opened)?;
+        Ok(ScanProvenance { identity, version })
     }
 
     fn open_regular(&self, name: &OsStr) -> io::Result<std::fs::File> {
@@ -1537,53 +1514,6 @@ fn file_identity_by_handle(file: &std::fs::File) -> io::Result<FileIdentity> {
             volume: u64::from(info.dwVolumeSerialNumber),
             file_id,
         });
-    }
-
-    Err(io::Error::last_os_error())
-}
-
-#[cfg(target_os = "windows")]
-#[allow(unsafe_code)] // one audited read-only Win32 single-call file-provenance query
-fn file_provenance_by_handle(file: &std::fs::File) -> io::Result<ScanProvenance> {
-    use std::mem::MaybeUninit;
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        GetFileInformationByHandle,
-    };
-
-    let mut by_handle = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
-    // SAFETY: `file` owns a valid handle. `by_handle` points to writable storage of
-    // exactly size_of::<BY_HANDLE_FILE_INFORMATION>() bytes.
-    let succeeded =
-        unsafe { GetFileInformationByHandle(file.as_raw_handle(), by_handle.as_mut_ptr()) };
-    if succeeded != 0 {
-        // SAFETY: A successful call initialized the complete BY_HANDLE_FILE_INFORMATION buffer.
-        let info = unsafe { by_handle.assume_init() };
-        if info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "not a markable regular file",
-            ));
-        }
-        let mut file_id = [0u8; 16];
-        file_id[..4].copy_from_slice(&info.nFileIndexHigh.to_ne_bytes());
-        file_id[4..8].copy_from_slice(&info.nFileIndexLow.to_ne_bytes());
-        let identity = FileIdentity {
-            volume: u64::from(info.dwVolumeSerialNumber),
-            file_id,
-        };
-        let length = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
-        let last_write_time = (i64::from(info.ftLastWriteTime.dwHighDateTime) << 32)
-            | i64::from(info.ftLastWriteTime.dwLowDateTime);
-        let creation_time = (i64::from(info.ftCreationTime.dwHighDateTime) << 32)
-            | i64::from(info.ftCreationTime.dwLowDateTime);
-        let version = FileVersion {
-            length,
-            last_write_time,
-            change_time: creation_time,
-        };
-        return Ok(ScanProvenance { identity, version });
     }
 
     Err(io::Error::last_os_error())
@@ -2425,6 +2355,36 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tied, ["image2.png", "image10.png"]);
         assert_eq!(FolderSort::default(), FolderSort::Latest);
+    }
+
+    #[test]
+    fn scanned_unchanged_image_can_be_opened() {
+        let workspace = TempWorkspace::new("folder_scan_open").unwrap();
+        fs::write(workspace.path().join("image.png"), b"scanned object").unwrap();
+        let entry = scan_image_entries_while(workspace.path(), || true)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let (path, provenance) = entry.into_parts();
+        assert!(super::ImageSource::open_scanned(&path, provenance).is_ok());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn scanned_image_can_open_after_legacy_directory_probe() {
+        use std::sync::atomic::Ordering;
+
+        let workspace = TempWorkspace::new("folder_scan_legacy_open").unwrap();
+        let path = workspace.path().join("image.png");
+        fs::write(&path, b"scanned object").unwrap();
+        let directory = super::DirectorySource::open(workspace.path()).unwrap();
+        directory
+            .supports_file_id_info
+            .store(false, Ordering::Relaxed);
+        let provenance = directory
+            .scan_entry_provenance(super::OsStr::new("image.png"))
+            .unwrap();
+        assert!(super::ImageSource::open_scanned(&path, provenance).is_ok());
     }
 
     #[test]

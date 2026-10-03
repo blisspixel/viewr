@@ -134,11 +134,11 @@ automatically.
 
 ## Essential controls
 
-Current development includes File > Exit (Quit viewr on macOS), with Ctrl+Q
+The v0.7.3 candidate includes File > Exit (Quit viewr on macOS), with Ctrl+Q
 or Cmd+Q, and installed platform interface fonts with bundled fallbacks.
 Console uses softer phosphor-green text and selection outlines.
 
-Current development uses a compact open-hand cursor and direct drag-to-pan in
+The v0.7.3 candidate uses a compact open-hand cursor and direct drag-to-pan in
 image view, with a closed hand while dragging. The zoom percentage opens Fit,
 Actual Size, and zoom controls. Pan limits keep part of the photo reachable.
 Fullscreen starts at Fit and enlarges small images to the available screen area;
@@ -166,6 +166,7 @@ and retains its existing zoom when entering fullscreen.
 | Crop or Spot Heal | `C`, `J` |
 | Reload after an external edit | `F5` |
 | Save As | `Ctrl/Cmd+Shift+S` |
+| Exit | File > Exit or Quit viewr; `Ctrl/Cmd+Q` |
 | Move current image to Trash | Delete |
 | Undo the latest recoverable Trash action | `U` |
 
@@ -186,7 +187,7 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 
 Image Background independently offers Theme Default, Black, Neutral Gray, and
 White. Appearance changes interface chrome and canvas only, never image pixels.
-Current development corrects overly light canvas backgrounds in the published
+The v0.7.3 candidate corrects overly light canvas backgrounds in the published
 v0.7.2 preview so they match the specified appearance colors.
 Windows Text size and GNOME text scaling enlarge the interface when the window
 has room; image zoom does not change.

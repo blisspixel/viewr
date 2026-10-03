@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.2](https://github.com/blisspixel/viewr/releases/tag/v0.7.2), the in-window path fallback patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.2`, matching the current public patch |
+| Workspace version | `0.7.3`, prepared for the focused viewer-polish patch; not yet published |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
-| Next version update | Advance the workspace only in a reviewed v0.8.0 release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its automated release checks and documented preview limits are ready. Uncollected hardware or screen-reader rows stay open and do not halt preview development or publication |
+| Next version update | The v0.7.3 patch update precedes its exact candidate. Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
+| Next tag allowed | **v0.7.3** after the complete automated patch-release gate and explicit preview limits. v0.8.0 remains the next minor milestone; uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -106,6 +106,8 @@ v0.7.0  Accessibility and collage preview [released, acceptance rows open]
 v0.7.1  Rating scan and installer recovery patch [released, acceptance rows open]
 
 v0.7.2  Launch fallback patch             [released, acceptance rows open]
+
+v0.7.3  Focused viewer polish patch       [candidate, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -204,6 +206,7 @@ activity history.
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
 | Public release | `0.7.2` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Focused patch candidate | `0.7.3` | Full commit SHA plus one non-publishing candidate run | Complete the automated release gate and publish explicit preview limits without closing v0.8 |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 

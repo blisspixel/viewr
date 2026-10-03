@@ -6,7 +6,7 @@ LICENSE.
 
 ## License summary
 
-- Apache-2.0 (Apache License 2.0): 280 packages
+- Apache-2.0 (Apache License 2.0): 275 packages
 - MIT (MIT License): 87 packages
 - Unicode-3.0 (Unicode License v3): 19 packages
 - BSD-3-Clause (BSD 3-Clause "New" or "Revised" License): 9 packages
@@ -877,16 +877,12 @@ text:
 name: Apache License 2.0
 used_by:
   windows-collections 0.3.2
-  windows-core 0.56.0
   windows-core 0.62.2
   windows-future 0.3.2
-  windows-implement 0.56.0
   windows-implement 0.60.2
-  windows-interface 0.56.0
   windows-interface 0.59.3
   windows-link 0.2.1
   windows-numerics 0.3.1
-  windows-result 0.1.2
   windows-result 0.4.1
   windows-strings 0.5.1
   windows-sys 0.52.0
@@ -894,7 +890,6 @@ used_by:
   windows-sys 0.61.2
   windows-targets 0.52.6
   windows-threading 0.2.1
-  windows 0.56.0
   windows 0.62.2
   windows_x86_64_gnu 0.52.6
   windows_x86_64_msvc 0.52.6
@@ -2590,7 +2585,7 @@ used_by:
   anstyle-wincon 3.0.11
   anstyle 1.0.14
   colorchoice 1.0.5
-  crc32fast 1.5.1
+  crc32fast 1.5.2
   env_filter 2.0.0
   env_logger 0.11.11
   foreign-types-macros 0.2.3
@@ -6491,9 +6486,9 @@ used_by:
   syn 2.0.119
   syn 3.0.3
   thiserror-impl 1.0.69
-  thiserror-impl 2.0.20
+  thiserror-impl 2.0.21
   thiserror 1.0.69
-  thiserror 2.0.20
+  thiserror 2.0.21
   type-map 0.5.1
   unicode-ident 1.0.24
   usvg 0.47.0
@@ -7477,7 +7472,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ### MIT
 name: MIT License
 used_by:
-  trash 5.2.7
+  trash 5.2.9
 text:
 <<<
 Copyright 2019 Artúr Barnabás Kovács

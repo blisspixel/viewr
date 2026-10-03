@@ -713,8 +713,8 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("/master/install.sh", combined)
         self.assertIn("/releases/download/v0.7.2/install.ps1", public_commands)
         self.assertIn("/releases/download/v0.7.2/install.sh", public_commands)
-        self.assertIn("/releases/download/v0.7.2/install.ps1", compiled_commands)
-        self.assertIn("/releases/download/v0.7.2/install.sh", compiled_commands)
+        self.assertIn("/releases/download/v0.7.3/install.ps1", compiled_commands)
+        self.assertIn("/releases/download/v0.7.3/install.sh", compiled_commands)
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

@@ -185,6 +185,7 @@ or accessibility evidence gates.
 | --- | --- | --- |
 | Default hand interaction | Implemented, unreleased | Image view shows Grab and drags directly to pan. Space temporarily pans in Crop and Spot Heal without moving a crop handle or painting. Release restores the edit tool. Chrome retains its own gestures. |
 | Mouse-control discoverability | Implemented, unreleased | Localized Help lists drag-to-pan, wheel/trackpad zoom, double-click Fit/Actual Size, and Back/Forward navigation. |
+| Canvas background accuracy | Implemented, unreleased | Theme and inspection backgrounds decode sRGB once before clearing the sRGB surface. Displayed Dark, Light, Console, and high-contrast colors match their specified palette values. |
 | Pan recovery and bounds | Implemented, unreleased | Keep at least 32 logical pixels of each image axis reachable, or the complete axis when smaller. Recheck after zoom, rotation, resize, and dock changes. Preserve direct motion within bounds. Fit remains a one-action recovery. Tests cover rotated and tiny images and docked viewports. |
 | Zoom readout as a control | Implemented, unreleased | The existing percentage opens Fit, Actual Size, Zoom In, and Zoom Out. It remains visible at 640 by 480, supports keyboard focus and activation, and exposes translated accessible names. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |

@@ -186,6 +186,8 @@ disappears. This spec is the converged result of two rounds of design critique
   ink `#0B0E14`; light uses `#F4F5F7` rather than pure white so bright photos
   retain an edge; Console uses `#010502`. View also offers explicit black,
   neutral-gray, and white inspection backgrounds independently of chrome.
+  Palette and inspection RGB values are decoded to linear values before the
+  sRGB surface encodes the clear color; alpha is kept unchanged.
 - Dark mode retains accent amber `#F7A845`. Light uses a darker amber that remains
   legible on a bright panel. Console uses phosphor green. In every theme, the
   accent marks active or affirmative state only, never decoration.

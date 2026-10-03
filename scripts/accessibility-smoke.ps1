@@ -270,6 +270,19 @@ public static class ViewrAccessibilityNativeMethods {
             (uint)inputs.Length;
     }
 
+    public static bool ScrollScreenPoint(IntPtr hwnd, int screenX, int screenY, int delta) {
+        if (!FocusWindowForInput(hwnd) || !SetCursorPos(screenX, screenY)) return false;
+        var inputs = new[] {
+            new Input {
+                Type = 0,
+                Value = new InputValue {
+                    Mouse = new MouseInput { MouseData = unchecked((uint)delta), Flags = 0x0800 }
+                }
+            }
+        };
+        return SendInput(1, inputs, Marshal.SizeOf<Input>()) == 1;
+    }
+
     private static bool PostKeyPress(IntPtr hwnd, ushort virtualKey) {
         const uint keyDown = 0x0100;
         const uint keyUp = 0x0101;
@@ -1293,14 +1306,27 @@ try {
         [System.Windows.Automation.ControlType]::Window
     )
     foreach ($aboutText in @(
+        "Space  Fit",
         "[ / ]",
         "F5  Reload file",
-        "T G I",
-        "Space  Fit"
+        "T G I"
     )) {
-        Wait-ForElement -Name $aboutText -Prefix -Root $aboutModal -ControlType (
-            [System.Windows.Automation.ControlType]::Text
-        ) | Out-Null
+        Wait-ForResult -Description "visible About shortcut '$aboutText'" -Probe {
+            $element = Get-Element -Name $aboutText -Prefix -Root $aboutModal -ControlType (
+                [System.Windows.Automation.ControlType]::Text
+            )
+            if ($null -ne $element) { return $element }
+            # Font metrics and available height can put later groups below the
+            # viewport. Use the viewer's real scroll interaction, then require
+            # the expected text to be fully within the modal's bounds.
+            $bounds = $aboutModal.Current.BoundingRectangle
+            $x = [int]($bounds.Left + $bounds.Width / 2)
+            $y = [int]($bounds.Top + $bounds.Height / 2)
+            if (-not [ViewrAccessibilityNativeMethods]::ScrollScreenPoint(
+                $script:Window, $x, $y, -120
+            )) { throw 'the About scroll input was not delivered' }
+            return $null
+        } | Out-Null
     }
     $closeAbout = Wait-ForElement -Name "Close" -Root $aboutModal -ControlType (
         [System.Windows.Automation.ControlType]::Button

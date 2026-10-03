@@ -199,14 +199,36 @@ mod tests {
 
     #[test]
     fn selected_font_draws_localized_menus_with_symbol_fallbacks() {
+        let definitions = font_definitions();
+        let text = "Fichier, Édition, Größe, Español, ← →";
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            for character in text.chars() {
+                assert!(
+                    definitions.families[&family].iter().any(|name| {
+                        let data = &definitions.font_data[name];
+                        FontRef::from_index(data.font.as_ref(), data.index)
+                            .unwrap()
+                            .charmap()
+                            .map(character)
+                            .is_some()
+                    }),
+                    "missing character {character:?} in {family:?}"
+                );
+            }
+        }
         let context = egui::Context::default();
-        context.set_fonts(font_definitions());
+        context.set_fonts(definitions);
         let _ = context.run_ui(egui::RawInput::default(), |ui| {
-            ui.label("Fichier, Édition, Größe, Español");
-        });
-        context.fonts_mut(|fonts| {
-            for text in ["Fichier, Édition, Größe, Español", "← →"] {
-                assert!(fonts.has_glyphs(&egui::FontId::proportional(14.0), text));
+            for family in [FontFamily::Proportional, FontFamily::Monospace] {
+                let galley = ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(
+                        text.to_owned(),
+                        egui::FontId::new(14.0, family),
+                        egui::Color32::WHITE,
+                    )
+                });
+                assert_eq!(galley.text(), text);
+                assert!(galley.size().x > 0.0 && galley.size().y > 0.0);
             }
         });
     }

@@ -1,20 +1,21 @@
 # Installing viewr
 
-viewr is pre-1.0. v0.7.2 is the current public GitHub Release, a launch-fallback
-patch over the accessibility and collage preview. Its portable
-archives are checksummed, manifest-verified, and attested, but the Windows
+viewr is pre-1.0. v0.7.3 is the tag-ready preview, a focused viewer-polish patch.
+Publication is pending; the commands below become available when its GitHub
+Release is published. Candidate archives are checksummed and manifest-verified;
+published assets will also be attested, but the Windows
 artifacts are not Authenticode-signed and the macOS artifacts are not Developer
 ID-signed or notarized. Normal operating-system trust warnings may appear.
 Installation is per user and never requires elevation. The
 representative-hardware product-quality matrix was not completed for this tag;
-the [v0.7.2 notes](releases/v0.7.2.md) record that gap exactly.
+the [v0.7.3 notes](releases/v0.7.3.md) record that gap exactly.
 
 ## One-command install and update
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.ps1 | iex
 ```
 
 The installer:
@@ -34,7 +35,7 @@ background.
 To install a specific version from a reviewed local copy of the script:
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.ps1 `
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.ps1 `
   -OutFile $env:TEMP\viewr-install.ps1
 & $env:TEMP\viewr-install.ps1 -Version 0.6.2
 ```
@@ -46,7 +47,7 @@ shortcut. `-InstallDir` is accepted only inside the current user's
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.sh | sh
 ```
 
 The shell installer:
@@ -85,11 +86,11 @@ configuration. The installer reports this without editing profile files.
 ## Review before running
 
 Pipe-to-shell commands are convenient but execute installer code. The commands
-above are fixed to the immutable `v0.7.2` release rather than a moving branch.
+above target the intended immutable `v0.7.3` release rather than a moving branch.
 To review it first:
 
 ```sh
-curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.sh
 less install.sh
 sh install.sh
 ```
@@ -126,7 +127,7 @@ Extract the archive and keep `bin/viewr` and `bin/viewr-decode` side by side. Th
 archive also contains the project license, notice, third-party license inventory,
 security policy, canonical documentation, and a per-file release manifest.
 
-GitHub checksums and attestations improve integrity and provenance. The v0.7.2
+GitHub checksums and attestations improve integrity and provenance. The v0.7.3
 portable archives are not Authenticode-signed or Apple-notarized, so
 operating-system trust dialogs may still apply. Do not disable platform security
 controls to force a launch.

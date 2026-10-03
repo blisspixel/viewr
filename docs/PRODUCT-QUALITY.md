@@ -187,7 +187,7 @@ Run the same workflow on every platform.
 | ID | Action | Required result |
 | --- | --- | --- |
 | PQ-AD-01 | `viewr doctor` | Reports binaries, worker protocol, windowing libraries, and graphics runtimes. A passing last line is not proof that a window opened. |
-| PQ-AD-02 | Inspect the installation contract in the candidate archive and open File > Default Image Viewer | README and INSTALL identify v0.7.2 as the current immutable public download. The named modal states that file associations are opt in, provides the platform-specific PNG and JPEG route, and blocks background actions. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, association, and rollback acceptance remain the v0.8 gate. |
+| PQ-AD-02 | Inspect the installation contract in the candidate archive and open File > Default Image Viewer | README and INSTALL identify v0.7.3 as the current tag-ready immutable download, pending publication. The named modal states that file associations are opt in, provides the platform-specific PNG and JPEG route, and blocks background actions. No background updater runs, and no instruction disables platform security. Clean install, update, uninstall, association, and rollback acceptance remain the v0.8 gate. |
 | PQ-AD-03 | Help > Get latest release | The Update modal names the running version, refuses to check a network, and only the explicit button hands the release URL to the browser. |
 | PQ-AD-04 | Unsigned preview | OS trust warnings may appear. Docs do not tell anyone to disable platform security. |
 

@@ -49,17 +49,19 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.2 is the current public preview. Its portable archives are checksummed and
-attested, but they are not Authenticode-signed on Windows or notarized on macOS.
+v0.7.3 is the tag-ready preview. Publication is pending; the commands below become
+available when its GitHub Release is published. Candidate archives are checksummed and
+manifest-verified; published assets will also be attested. They are
+not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
-[v0.7.2 notes](docs/releases/v0.7.2.md) record that gap exactly.
+[v0.7.3 notes](docs/releases/v0.7.3.md) record that gap exactly.
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -69,13 +71,13 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.2/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The published command downloads the v0.7.2 installer, which installs the v0.7.2
+Once published, the command downloads the v0.7.3 installer, which installs the v0.7.3
 archive after verifying its SHA-256 sidecar and internal manifest, without
 giving the application network access.
 Run the same command again for an explicit update. For review-first installation,

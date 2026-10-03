@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.7.4 - 2026-10-03
 
 - Retire a destroyed native window before accessibility, input, or rendering
   can query its geometry. On X11, externally destroying the window while the

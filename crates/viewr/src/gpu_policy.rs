@@ -77,17 +77,27 @@ pub(super) fn pack_placement(placement: &Placement) -> [u8; 48] {
     bytes
 }
 
-/// Convert a palette background into the renderer's clear-color descriptor.
+/// Convert an sRGB palette background to the linear clear color of an sRGB surface.
 pub(super) fn palette_to_color(palette: Palette) -> wgpu::Color {
-    let [r, g, b, a] = palette.background;
-    wgpu::Color { r, g, b, a }
+    srgb_clear_color(palette.background)
+}
+
+/// Surface writes encode RGB to sRGB; alpha stays linear.
+pub(super) fn srgb_clear_color([r, g, b, a]: [f64; 4]) -> wgpu::Color {
+    let linear = |channel: f64| f64::from(egui::ecolor::linear_from_gamma(channel as f32));
+    wgpu::Color {
+        r: linear(r),
+        g: linear(g),
+        b: linear(b),
+        a,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         PLACEMENT_BYTES, pack_placement, palette_to_color, select_srgb_surface_format,
-        validate_patch_upload,
+        srgb_clear_color, validate_patch_upload,
     };
     use crate::color::{OutputColorSpace, WorkingColorEncoding};
     use crate::edit::Rect;
@@ -245,15 +255,42 @@ mod tests {
     }
 
     #[test]
-    fn palette_mapping_preserves_every_background_channel() {
-        let palette = theme::palette_for(Mode::Dark);
-        let expected = palette.background;
-        let color = palette_to_color(palette);
-        for (actual, expected) in [color.r, color.g, color.b, color.a]
-            .into_iter()
-            .zip(expected)
-        {
-            assert_eq!(actual.to_bits(), expected.to_bits());
+    fn palette_mapping_returns_the_specified_display_colors() {
+        for (mode, expected) in [
+            (Mode::Dark, [11, 14, 20]),
+            (Mode::Light, [244, 245, 247]),
+            (Mode::Console, [1, 5, 2]),
+            (Mode::HighContrastDark, [0, 0, 0]),
+            (Mode::HighContrastLight, [255, 255, 255]),
+        ] {
+            let color = palette_to_color(theme::palette_for(mode));
+            let displayed = [color.r, color.g, color.b]
+                .map(|channel| egui::ecolor::gamma_u8_from_linear_f32(channel as f32));
+            assert_eq!(displayed, expected, "{mode:?} after sRGB surface encoding");
+            assert_eq!(color.a.to_bits(), 1.0_f64.to_bits());
         }
+    }
+
+    #[test]
+    fn inspection_backgrounds_decode_rgb_without_changing_alpha() {
+        let color = srgb_clear_color([0.04045, 0.5, 0.2, 0.37]);
+        for (actual, expected) in
+            [color.r, color.g, color.b]
+                .into_iter()
+                .zip([0.003_130_8, 0.214_041_14, 0.033_104_77])
+        {
+            assert!((actual - expected).abs() < 1e-7);
+        }
+        assert_eq!(color.a.to_bits(), 0.37_f64.to_bits());
+        let endpoints = srgb_clear_color([0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(
+            endpoints,
+            wgpu::Color {
+                r: 0.0,
+                g: 1.0,
+                b: 0.0,
+                a: 1.0
+            }
+        );
     }
 }

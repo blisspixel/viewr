@@ -7,6 +7,9 @@ and organized by user-visible concern.
 
 ### Viewing controls
 
+- Corrected theme and inspection backgrounds that were being encoded to sRGB
+  twice, making the canvas lighter than the specified color. Dark, Light,
+  Console, and high-contrast backgrounds now match their palette values.
 - The zoom percentage now opens Fit, Actual Size, Zoom In, and Zoom Out. It
   remains visible at the minimum window size, with a translated accessible name
   and keyboard activation.

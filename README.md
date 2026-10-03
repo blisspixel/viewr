@@ -179,6 +179,8 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 
 Image Background independently offers Theme Default, Black, Neutral Gray, and
 White. Appearance changes interface chrome and canvas only, never image pixels.
+Current development corrects overly light canvas backgrounds in the published
+v0.7.2 preview so they match the specified appearance colors.
 Windows Text size and GNOME text scaling enlarge the interface when the window
 has room; image zoom does not change.
 

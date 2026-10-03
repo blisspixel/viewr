@@ -18,7 +18,7 @@ pub(crate) use crate::gpu_image::{
 use crate::gpu_image::{mip_level_count, preview_spec, select_image_upload};
 use crate::gpu_policy::{
     PLACEMENT_BYTES, pack_placement, palette_to_color, select_srgb_surface_format,
-    validate_patch_upload,
+    srgb_clear_color, validate_patch_upload,
 };
 use crate::performance::GpuAdapterReport;
 use crate::theme::{self, Mode};
@@ -594,14 +594,9 @@ impl Renderer {
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 
-    /// Set the clear color.
+    /// Set the image background from sRGB channels.
     pub fn set_clear_color(&mut self, color: [f64; 4]) {
-        self.clear = wgpu::Color {
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-        };
+        self.clear = srgb_clear_color(color);
     }
 
     /// Change the clear color to match `mode`.

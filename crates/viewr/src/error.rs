@@ -27,6 +27,12 @@ pub enum Error {
     /// An image could not be encoded or written to disk.
     #[error("could not save image: {0}")]
     Encode(String),
+
+    /// Accepted file work failed after its native window disappeared.
+    #[error(
+        "window closed while file work failed or required recovery; check the source and destination files before continuing"
+    )]
+    Shutdown,
 }
 
 #[cfg(test)]
@@ -40,6 +46,10 @@ mod tests {
     fn each_error_reports_its_own_category_to_the_reader() {
         let launch = Error::Launch("no display session is reachable".into());
         for (error, expected) in [
+            (
+                Error::Shutdown,
+                "window closed while file work failed or required recovery; check the source and destination files before continuing",
+            ),
             (
                 Error::from(winit::error::EventLoopError::ExitFailure(3)),
                 "event loop error: Exit Failure: 3",

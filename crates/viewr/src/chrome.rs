@@ -877,7 +877,10 @@ impl ChromeViewModel {
             label,
             shortcut,
             enabled,
-            selected,
+            selected: selected
+                && self.input.dock.has_image
+                && self.input.rating_capability
+                    != crate::ratings::RatingWriteCapability::ReadOnlyFormat,
         })
         .collect()
     }
@@ -1830,6 +1833,12 @@ mod tests {
         let mut input = ready_input();
         input.rating_state = crate::ratings::RatingState::Unrated;
         input.rating_capability = crate::ratings::RatingWriteCapability::ReadOnlyFormat;
+        assert!(
+            ChromeViewModel::new(input)
+                .rating_choices()
+                .iter()
+                .all(|choice| !choice.selected)
+        );
         assert_eq!(
             ChromeViewModel::new(input).rating_menu_label(),
             "Rating: JPEG only"

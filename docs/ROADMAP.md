@@ -56,6 +56,12 @@ Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
 
+Current development addresses the v0.7.3 Linux entry and window-loss feedback:
+an always-available typed path, visible chooser recovery guidance, and retiring
+a destroyed native drawable while accepted file work finishes. Issue
+[137](https://github.com/blisspixel/viewr/issues/137) tracks this bounded patch;
+the published v0.7.3 assets retain their original behavior.
+
 ## Order of operations to 1.0
 
 Work is a single dependency chain. Do not tag a later version while an earlier

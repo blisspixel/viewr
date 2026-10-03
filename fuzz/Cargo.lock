@@ -3995,6 +3995,7 @@ dependencies = [
  "windows-sys 0.59.0",
  "winit",
  "winres",
+ "x11-dl",
  "zbus",
 ]
 

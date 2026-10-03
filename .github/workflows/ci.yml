@@ -160,7 +160,7 @@ jobs:
       - name: Install virtual-display and software-GPU dependencies
         timeout-minutes: 15
         run: |
-          bash scripts/ci-install-packages.sh --no-install-recommends libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev mesa-vulkan-drivers xauth xvfb
+          bash scripts/ci-install-packages.sh --no-install-recommends libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev mesa-vulkan-drivers xauth xvfb xdotool
       - name: Set up pinned Rust
         run: rustup show
 
@@ -173,6 +173,9 @@ jobs:
 
       - name: Enforce startup, first-pixel, navigation, idle, and memory budgets
         run: python -B scripts/performance_gate.py --binary target/release/viewr
+
+      - name: Close X11 windows safely with an unconfirmed rating
+        run: bash scripts/linux-gui-smoke.sh target/release/viewr
 
       # A host with no Vulkan driver must still present through OpenGL. wgpu
       # reaches Mesa's GL through EGL, and it can only do so when the display

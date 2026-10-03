@@ -103,6 +103,26 @@ pub(crate) enum LinuxWindowBackend {
     None,
 }
 
+/// Admit only a failed software-GL upload to this window's destroyed X drawable.
+/// Other resources, connections, and X11 requests retain winit's error handling.
+#[cfg(any(target_os = "linux", test))]
+#[must_use]
+pub(crate) const fn is_destroyed_x11_upload(
+    same_display: bool,
+    own_window: u64,
+    resource: u64,
+    error: u8,
+    request: u8,
+    minor: u8,
+) -> bool {
+    same_display
+        && own_window != 0
+        && resource == own_window
+        && error == 9
+        && request == 72
+        && minor == 0
+}
+
 /// Facts the event loop can supply without parsing an ICC.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DisplayHints {
@@ -298,6 +318,23 @@ pub(crate) fn output_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn destroyed_upload_is_confined_to_the_exact_native_window_and_request() {
+        assert!(is_destroyed_x11_upload(true, 42, 42, 9, 72, 0));
+        for args in [
+            (false, 42, 42, 9, 72, 0),
+            (true, 0, 0, 9, 72, 0),
+            (true, 42, 43, 9, 72, 0),
+            (true, 42, 42, 8, 72, 0),
+            (true, 42, 42, 9, 14, 0),
+            (true, 42, 42, 9, 72, 1),
+        ] {
+            assert!(!is_destroyed_x11_upload(
+                args.0, args.1, args.2, args.3, args.4, args.5
+            ));
+        }
+    }
 
     fn identity(
         name: Option<&str>,

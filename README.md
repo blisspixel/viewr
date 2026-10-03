@@ -134,6 +134,11 @@ automatically.
 
 ## Essential controls
 
+Current development includes a typed image or folder path on the empty card
+and File > Open Path while viewing. Enter opens it; a missing path stays editable
+with a complete inline explanation. A native chooser that returns no selection
+points to these alternatives. Path input stays in memory for this session.
+
 v0.7.3 includes File > Exit (Quit viewr on macOS), with Ctrl+Q
 or Cmd+Q, and installed platform interface fonts with bundled fallbacks.
 Console uses softer phosphor-green text and selection outlines.

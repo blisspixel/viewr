@@ -1,16 +1,66 @@
-//! Thin platform fetch of display ICC bytes, Advanced Color facts, and the
-//! accessibility display settings (high contrast and text size).
+//! Thin native display boundary: ICC, Advanced Color, accessibility display
+//! settings, and delivery of a lost X11 drawable to the application owner.
 #![allow(unsafe_code)]
 // DisplayConfig, GetICMProfile, libX11 property reads, and
-// the high-contrast and text-size reads
+// the high-contrast and text-size reads, and a borrowed Xlib error event
 //!
 //! Policy and admission live in `display_state` and `system_accessibility`.
-//! This module only asks the operating system for a file, a color-management
-//! flag, or an accessibility setting. It never builds a
+//! This module asks the operating system for display facts and confines native
+//! event access. It never builds a
 //! transform or writes pixels.
 
 use crate::display_state::{DisplayHints, MonitorIdentity};
 use crate::system_accessibility::SystemAccessibilityReading;
+
+/// Keep a software-GL upload to a lost X11 drawable out of winit's unrelated
+/// input-context error slot. Route the loss to the sole application owner.
+#[cfg(target_os = "linux")]
+pub(crate) fn install_x11_drawable_hook(
+    window: &winit::window::Window,
+    proxy: winit::event_loop::EventLoopProxy<crate::app::UserEvent>,
+) {
+    use winit::raw_window_handle::{
+        HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+    };
+
+    let (Ok(display), Ok(handle)) = (window.display_handle(), window.window_handle()) else {
+        return;
+    };
+    let (RawDisplayHandle::Xlib(display), RawWindowHandle::Xlib(handle)) =
+        (display.as_raw(), handle.as_raw())
+    else {
+        return;
+    };
+    let Some(display) = display.display else {
+        return;
+    };
+    let display_address = display.as_ptr() as usize;
+    let own_window = handle.window;
+    winit::platform::x11::register_xlib_error_hook(Box::new(move |display, event| {
+        if event.is_null() {
+            return false;
+        }
+        // Safety: winit invokes this hook with a live Xlib XErrorEvent for the
+        // duration of the callback. x11-dl defines its native C layout. Read
+        // only numeric fields; do not retain the pointer or issue X requests
+        // from the error callback, which runs under Xlib/winit locks.
+        let event = unsafe { &*event.cast::<x11_dl::xlib::XErrorEvent>() };
+        if !crate::display_state::is_destroyed_x11_upload(
+            display as usize == display_address,
+            own_window,
+            event.resourceid,
+            event.error_code,
+            event.request_code,
+            event.minor_code,
+        ) {
+            return false;
+        }
+        // BadDrawable for our own XPutImage means the native window no longer
+        // exists. Never let a later frame use it, even if Destroyed is delayed.
+        let _ = proxy.send_event(crate::app::UserEvent::NativeDrawableLost);
+        true
+    }));
+}
 
 /// Refresh host color-management facts that can change when the window moves.
 #[must_use]

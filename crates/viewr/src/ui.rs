@@ -24,6 +24,29 @@ use egui::{
     ScrollArea, Sense, Stroke, TextFormat, Vec2, WidgetInfo, WidgetType,
 };
 
+/// Complete egui-winit input using observed dimensions rather than querying a
+/// native drawable that can disappear between event dispatch and presentation.
+pub(crate) fn prepare_frame_input(
+    mut input: egui::RawInput,
+    physical_size: (u32, u32),
+    native_scale: f32,
+    interface_scale: f32,
+    elapsed: f64,
+) -> egui::RawInput {
+    let points = Vec2::new(physical_size.0 as f32, physical_size.1 as f32)
+        / (native_scale * interface_scale);
+    input.time = Some(elapsed);
+    input.screen_rect =
+        (points.x > 0.0 && points.y > 0.0).then(|| Rect::from_min_size(Pos2::ZERO, points));
+    input.viewport_id = egui::ViewportId::ROOT;
+    input
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .native_pixels_per_point = Some(native_scale);
+    input
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ChromeColors {
     accent: Color32,
@@ -74,7 +97,7 @@ const TOP_STATUS_MAX_WIDTH: f32 = 220.0;
 const TOP_STATUS_COMPACT_MAX_WIDTH: f32 = 172.0;
 /// Smallest filename slice kept legible when a status needs the strip.
 const TOP_FILE_NAME_MIN_WIDTH: f32 = 120.0;
-const TOP_PAGE_STEP_WIDTH: f32 = 16.0;
+const TOP_PAGE_STEP_WIDTH: f32 = 24.0;
 const TOP_PAGE_STEP_SPACING: f32 = 2.0;
 const TOP_PAGE_STEP_GLYPH_SIZE: f32 = 14.0;
 const TOP_PAGE_PREVIOUS_GLYPH: &str = "\u{23F4}";
@@ -119,6 +142,10 @@ pub(crate) enum UiAction {
     OpenFolder,
     /// Open an image or folder path copied to the clipboard.
     PastePath,
+    /// Change the session-only typed path, without opening or persisting it.
+    SetOpenPathText(String),
+    /// Open the typed path through the same file/folder entry policy.
+    OpenEnteredPath,
     /// Decode the current file from disk again, bypassing the neighbor cache.
     Reload,
     /// Open a save as dialog.
@@ -312,6 +339,10 @@ pub(crate) struct UiFrameOwned {
     pub file_path: Option<String>,
     /// Privacy-safe basename of the currently selected file.
     pub selected_file_name: Option<String>,
+    /// Session-only typed path. Never stored as a preference or history.
+    pub open_path_text: String,
+    /// Inline feedback for the last typed-path attempt.
+    pub open_path_error: Option<String>,
     /// Pixel dimensions of the current image, if any.
     pub img_size: Option<(u32, u32)>,
     /// Playback state for an animated image.
@@ -1593,7 +1624,7 @@ fn strip_step_button(
             .color(colors.text),
     )
     .frame(false)
-    .min_size(Vec2::new(width, 20.0))
+    .min_size(Vec2::new(width, 24.0))
 }
 
 /// Unwrapped width of strip text in the active body family. Console
@@ -1706,13 +1737,10 @@ fn render_top_image_facts(
                 .size(12.5)
                 .color(colors.muted),
         );
-        has_detail = true;
     }
     if let Some(path) = frame.file_path.as_ref() {
         let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
-        if has_detail {
-            ui.add_space(TOP_METADATA_GAP);
-        }
+        ui.add_space(TOP_METADATA_GAP);
         let response = ui.add(
             egui::Label::new(RichText::new(&name).size(13.5).strong().color(colors.text))
                 .truncate(),
@@ -1791,6 +1819,12 @@ fn file_menu(
                 actions.push(UiAction::PastePath);
                 ui.close();
             }
+            ui.add_enabled_ui(chrome.is_enabled(ChromeControl::OpenSource), |ui| {
+                ui.menu_button(frame.text(tr!("Open Path...")), |ui| {
+                    ui.set_width(330.0);
+                    render_path_entry(ui, actions, frame, chrome, "menu_path_input");
+                });
+            });
             if ui
                 .add_enabled(
                     chrome.is_enabled(ChromeControl::Reload),
@@ -3600,7 +3634,79 @@ fn render_empty_state_actions(
     if paste_path.clicked() {
         actions.push(UiAction::PastePath);
     }
+    ui.add_space(8.0);
+    render_path_entry(ui, actions, frame, chrome, "empty_path_input");
     ui.add_space(12.0);
+}
+
+fn render_path_entry(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+    field_id: &'static str,
+) {
+    ui.add_enabled_ui(chrome.is_enabled(ChromeControl::OpenSource), |ui| {
+        let mut text = frame.open_path_text.clone();
+        let (field, open_clicked) = ui
+            .vertical(|ui| {
+                ui.label(frame.text(tr!("Image or folder path")));
+                ui.horizontal(|ui| {
+                    let width =
+                        (ui.available_width() - 80.0 - ui.spacing().item_spacing.x).max(80.0);
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(egui::Id::new(field_id))
+                            .desired_width(width)
+                            .min_size(Vec2::new(0.0, 32.0))
+                            .margin(egui::Margin::symmetric(6, 8))
+                            .char_limit(32_768),
+                    );
+                    let open_clicked = ui
+                        .add_enabled(
+                            !text.trim().is_empty(),
+                            egui::Button::new(frame.text(tr!("Open")))
+                                .min_size(Vec2::new(72.0, 32.0)),
+                        )
+                        .clicked();
+                    (field, open_clicked)
+                })
+                .inner
+            })
+            .inner;
+        field.widget_info(|| {
+            WidgetInfo::text_edit(
+                ui.is_enabled(),
+                &frame.open_path_text,
+                &text,
+                frame.text(tr!("Image or folder path")),
+            )
+        });
+        field.ctx.accesskit_node_builder(field.id, |node| {
+            node.set_label(frame.text(tr!("Image or folder path")));
+        });
+        let submit = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if field.changed() {
+            actions.push(UiAction::SetOpenPathText(text.clone()));
+        }
+        if open_clicked || submit {
+            actions.push(UiAction::OpenEnteredPath);
+        }
+        if let Some(error) = &frame.open_path_error {
+            ScrollArea::vertical().max_height(72.0).show(ui, |ui| {
+                let response = ui.add(egui::Label::new(error).wrap());
+                mark_as_polite_status(&response);
+            });
+        }
+    });
+}
+
+pub(crate) fn path_input_has_focus(ctx: &egui::Context) -> bool {
+    ctx.memory(|memory| {
+        ["menu_path_input", "empty_path_input"]
+            .into_iter()
+            .any(|id| memory.focused() == Some(egui::Id::new(id)))
+    })
 }
 
 fn paint_empty_image_icon(painter: &egui::Painter, rect: Rect, colors: ChromeColors) {
@@ -5467,6 +5573,37 @@ fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn observed_frame_dimensions_preserve_input_and_follow_dpi_and_minimize() {
+        let mut input = egui::RawInput::default();
+        input.events.push(egui::Event::Text("path5".into()));
+        input.focused = false;
+        let prepared = super::prepare_frame_input(input, (1200, 900), 2.0, 1.5, 3.25);
+        assert_eq!(prepared.time, Some(3.25));
+        assert_eq!(
+            prepared.screen_rect.unwrap().size(),
+            egui::Vec2::new(400.0, 300.0)
+        );
+        assert_eq!(prepared.events, vec![egui::Event::Text("path5".into())]);
+        assert!(!prepared.focused);
+        assert_eq!(prepared.viewport_id, egui::ViewportId::ROOT);
+        assert_eq!(
+            prepared.viewports[&egui::ViewportId::ROOT].native_pixels_per_point,
+            Some(2.0)
+        );
+        let minimized = super::prepare_frame_input(prepared, (0, 0), 2.0, 1.5, 4.0);
+        assert_eq!(minimized.screen_rect, None);
+        let restored = super::prepare_frame_input(minimized, (800, 600), 1.0, 1.0, 5.0);
+        assert_eq!(
+            restored.screen_rect.unwrap().size(),
+            egui::Vec2::new(800.0, 600.0)
+        );
+        assert_eq!(
+            restored.viewports[&egui::ViewportId::ROOT].native_pixels_per_point,
+            Some(1.0)
+        );
+    }
+
     use super::Language;
     use super::{
         APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
@@ -5480,6 +5617,7 @@ mod tests {
         top_toast_max_width, undo_trash_menu_item,
     };
     use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
+    use super::{path_input_has_focus, render_path_entry};
     use crate::locale::tr;
 
     fn visual_toast(text: &str) -> ToastView {
@@ -5562,6 +5700,8 @@ mod tests {
             source_gone: false,
             file_path: Some("C:/photos/current.png".to_owned()),
             selected_file_name: Some("current.png".to_owned()),
+            open_path_text: String::new(),
+            open_path_error: None,
             img_size: Some((1920, 1080)),
             animation: None,
             pages: None,
@@ -6829,6 +6969,91 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn typed_path_entry_owns_typing_and_submit_and_exposes_wrapped_errors() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.open_path_text = "photo.jpg".to_owned();
+        frame.open_path_error = Some("Could not find path: very/long/missing/photo.jpg".repeat(5));
+        let mut actions = Vec::new();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            ui.set_width(330.0);
+            render_path_entry(
+                ui,
+                &mut actions,
+                &frame,
+                frame.chrome_view_model(),
+                "empty_path_input",
+            );
+        });
+        let update = output.platform_output.accesskit_update.unwrap();
+        let input = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.role() == egui::accesskit::Role::TextInput)
+            .expect("named path input");
+        assert_eq!(input.label(), Some("Image or folder path"));
+        assert_eq!(input.value(), Some("photo.jpg"));
+        let error = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.value() == frame.open_path_error.as_deref())
+            .expect("complete inline error");
+        assert_eq!(error.live(), Some(egui::accesskit::Live::Polite));
+        assert!(error.bounds().unwrap().width() <= 330.0);
+
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("empty_path_input")));
+        assert!(path_input_has_focus(&context));
+        let mut input = accessibility_input();
+        input.events = vec![egui::Event::Text("5".to_owned())];
+        let _ = context.run_ui(input, |ui| {
+            render_path_entry(
+                ui,
+                &mut actions,
+                &frame,
+                frame.chrome_view_model(),
+                "empty_path_input",
+            );
+        });
+        let edited = actions
+            .iter()
+            .find_map(|action| match action {
+                UiAction::SetOpenPathText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .expect("typing must update the field");
+        assert!(edited.contains('5'));
+        frame.open_path_text = edited;
+        actions.clear();
+        let mut input = accessibility_input();
+        input.events = vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        let _ = context.run_ui(input, |ui| {
+            render_path_entry(
+                ui,
+                &mut actions,
+                &frame,
+                frame.chrome_view_model(),
+                "empty_path_input",
+            );
+        });
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::OpenEnteredPath))
+        );
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("zoom_button")));
+        assert!(!path_input_has_focus(&context));
     }
 
     #[test]

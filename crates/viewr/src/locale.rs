@@ -705,6 +705,24 @@ const MESSAGES: &[Message] = &[
         german: "Pfad einfügen",
     },
     Message {
+        english: "Open Path...",
+        spanish: "Abrir ruta...",
+        french: "Ouvrir un chemin...",
+        german: "Pfad öffnen...",
+    },
+    Message {
+        english: "Image or folder path",
+        spanish: "Ruta de imagen o carpeta",
+        french: "Chemin d'image ou de dossier",
+        german: "Bild- oder Ordnerpfad",
+    },
+    Message {
+        english: "No path selected. Use Open Path in the File menu, Paste Path, or drop an image or folder.",
+        spanish: "No se seleccionó una ruta. Usa Abrir ruta en el menú Archivo, Pegar ruta o arrastra una imagen o carpeta.",
+        french: "Aucun chemin sélectionné. Utilisez Ouvrir un chemin dans le menu Fichier, Coller le chemin ou déposez une image ou un dossier.",
+        german: "Kein Pfad ausgewählt. Verwenden Sie Pfad öffnen im Menü Datei, Pfad einfügen oder ziehen Sie ein Bild oder einen Ordner hierher.",
+    },
+    Message {
         english: "Retry",
         spanish: "Reintentar",
         french: "Réessayer",

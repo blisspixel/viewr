@@ -175,6 +175,24 @@ claim attached retroactively to the immutable v0.6.0 release.
    These rows are required to claim native assistive-technology acceptance,
    but their absence does not stop preview development or publication.
 
+### Focused viewer polish
+
+Small usability fixes support the existing viewer scope while v0.8 release
+readiness remains the active milestone. They do not replace the open hardware
+or accessibility evidence gates.
+
+| Item | State | Acceptance |
+| --- | --- | --- |
+| Default hand interaction | Implemented, unreleased | Image view shows Grab and drags directly to pan. Space temporarily pans in Crop and Spot Heal without moving a crop handle or painting. Release restores the edit tool. Chrome retains its own gestures. |
+| Mouse-control discoverability | Implemented, unreleased | Localized Help lists drag-to-pan, wheel/trackpad zoom, double-click Fit/Actual Size, and Back/Forward navigation. |
+| Pan recovery and bounds | Implemented, unreleased | Keep at least 32 logical pixels of each image axis reachable, or the complete axis when smaller. Recheck after zoom, rotation, resize, and dock changes. Preserve direct motion within bounds. Fit remains a one-action recovery. Tests cover rotated and tiny images and docked viewports. |
+| Zoom readout as a control | Implemented, unreleased | The existing percentage opens Fit, Actual Size, Zoom In, and Zoom Out. It remains visible at 640 by 480, supports keyboard focus and activation, and exposes translated accessible names. |
+| Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
+
+Clipboard image open/copy, touch gestures, and slideshow remain separately
+tracked candidates. The viewing-control changes add no preference, catalog, or
+activity history.
+
 ### Version state and update points
 
 | State | Version shown by builds | Durable identity | What changes next |
@@ -757,7 +775,8 @@ cover ordering and cache eviction.
 
 Make viewing excellent, not merely functional.
 
-- [x] GPU pan while holding Space, focal-point scroll zoom, and explicit keyboard
+- [x] GPU pan by dragging in image view, temporary Space pan in editing tools,
+  focal-point scroll zoom, and explicit keyboard
   commands for fit (`Ctrl/Cmd+0`), actual pixels (`Ctrl/Cmd+1`), zoom in (`+`),
   and zoom out (`-`). A Space tap fits; double-click toggles fit and actual pixels.
 - [x] Rotate 90 degrees either direction, and flip.
@@ -1053,15 +1072,11 @@ silence, and so that scope creep stays visible and deliberate.
   metadata, representative fixtures, fuzz seeds, and AVIF/HEIC memory and
   deadline contracts all hold. libraw-rs remains pre-1.0, licensed camera
   samples are not in tree, and default CI cannot carry LibRaw.
-- Optional, local-only, one-click-clearable recent folders.
 - Simple non-destructive adjustments (lossless rotate, straighten, basic exposure),
   only if they stay simple and never turn viewr into an editor.
 - A simple slideshow.
-- Localization.
-- A user-initiated **Check for Updates** command after a canonical release
-  repository and signed release policy exist. It must never run at launch or in
-  the background, and it must show the destination before opening a browser or
-  downloading anything.
+- Additional interface languages after native review of the bundled English,
+  Spanish, French, and German catalogs. Localization is already implemented.
 - Optional **Describe Image** after the offline bake-off and process-level privacy
   proof in `docs/LOCAL-INTELLIGENCE.md` pass on Windows, Linux, and macOS. It must
   be absent without a separately installed model pack, run **only** on explicit
@@ -1071,10 +1086,16 @@ silence, and so that scope creep stays visible and deliberate.
   background database.** Built-in speech and model-assisted large-area removal
   remain separate later decisions.
 
+Help > Get latest release already provides an explicit browser handoff to the
+official release page. The application performs no network check or download.
+Recent folders are excluded by the rule against activity history; saved UI
+preferences remain limited to appearance, folder sort, and language, with no
+image paths.
+
 ## Explicit non-goals, the anti-bloat charter
 
 viewr will not add, now or later: accounts, cloud sync, sharing services, ads,
-discover or feed surfaces, face or AI grouping, background services, automatic or
+activity history, discover or feed surfaces, face or AI grouping, background services, automatic or
 background update checks, telemetry or analytics of any kind, or a plugin marketplace. These
 are the features that turned every big-company photo app into the thing we are
 replacing. Leaving them out is a permanent part of the product, not a stage of it.

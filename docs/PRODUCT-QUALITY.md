@@ -24,7 +24,7 @@ Help, the first-run card, README essential controls, the Windows accessibility
 smoke test, and this matrix quote one covered catalog:
 
 - `crates/viewr/src/shortcuts.rs` owns empty-state copy and About shortcut groups.
-- About lists Open, Browse, View, and Edit keys, including `[` / `]`, `F5`,
+- About lists Open, Browse, View, Edit, and Mouse controls, including `[` / `]`, `F5`,
   `T` `G` `I`, `Shift+G`, Space-to-fit, `F` / `F11`, Escape, Save As, and Undo
   Trash.
 - The empty card heading distinguishes first-run, opening, and failure. First-run
@@ -175,7 +175,7 @@ Run the same workflow on every platform.
 | PQ-PW-01 | Keyboard-only first image | `O` or `Ctrl/Cmd+O` opens a file; `Ctrl/Cmd+Shift+O` opens a folder; Left/Right, Home/End, Page Up/Page Down browse. |
 | PQ-PW-02 | Open `sequences/two-page.tiff` and `sequences/two-size.ico` | `[` and `]` plus Image Information and View step one page. Documents do not play. Crop and Spot Heal block a step. |
 | PQ-PW-03 | Open all three `sequences/two-frame.*` animations | GIF, WebP, and APNG play in bounds. While paused, `[` and `]` step frames. |
-| PQ-PW-04 | Open `visual/small.png` and `visual/large.png` | Space tap fits. Hold Space to pan. `Ctrl/Cmd+0` fits, `Ctrl/Cmd+1` is actual size, and `+` / `-` zoom around the viewport center. Wheel or trackpad zoom keeps the pointer location fixed. The small source rests at 100 percent. |
+| PQ-PW-04 | Open `visual/small.png` and `visual/large.png`; drag in image view, then repeat while holding Space in Crop and Spot Heal, including over a crop handle; release Space before releasing the mouse; open Help | The image shows an open hand and drags directly to pan, with a closed hand during the drag. Space temporarily pans in editing tools without moving the crop or painting; releasing it restores the edit tool and stops that pan. Space tap fits. Double-click toggles Fit/Actual Size, while a prior drag does not count as its first click. `Ctrl/Cmd+0` fits, `Ctrl/Cmd+1` is actual size, and `+` / `-` zoom around the viewport center. Wheel or trackpad zoom keeps the pointer location fixed within the reachable-image bounds. Drag far past each edge, then resize, rotate, and change docks: at least 32 logical pixels of each image axis remain reachable, or the whole axis when smaller. The small source rests at 100 percent. At 640 by 480 the percentage remains reachable and opens Fit, Actual Size, Zoom In, and Zoom Out by mouse or keyboard. Help lists the mouse gestures. |
 | PQ-PW-05 | Panels | `T`, `G`, and `I` show Tools, Folder Previews, and Image Information. Persistent chrome never covers the photo. |
 | PQ-PW-06 | Replace a disposable copy of `editing/source.png` with `editing/replacement.png` and press F5. Repeat after making an unsaved crop before the external replacement | The clean case reloads without blanking. The unsaved-edit case keeps the last good frame, does not discard the crop, and asks for F5. |
 | PQ-PW-07 | Spot Heal a disposable `editing/source.png`, finish the tool, use Save As, then Trash the source | Heal success and the continuing top cue identify the in-memory Save As boundary. `Ctrl/Cmd+Shift+S` exports a copy containing the repaired pixels while the source stays unchanged. Delete moves the visible image to Trash, and its routine result stays in top chrome instead of covering the photo. `U` restores the recoverable receipt when the platform can prove it. |

@@ -14,6 +14,7 @@ pub use crate::chrome::{
     viewport_insets,
 };
 pub(crate) use crate::chrome::{RATING_RECOVERY_STATUS, SAVE_RECOVERY_STATUS};
+use crate::edit_state::{CanvasTool, canvas_tool};
 use crate::locale::{Language, tr};
 use crate::shortcuts::{TopMenu, menu_access_keys};
 use egui::containers::scroll_area::ScrollBarVisibility;
@@ -765,9 +766,15 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
     let modal_active = active_modal.is_some();
     sync_modal_focus(ui.ctx(), active_modal);
 
-    ui.add_enabled_ui(!modal_active, |ui| {
+    if modal_active {
+        ui.add_enabled_ui(false, |ui| {
+            render_background(ui, &mut actions, frame, chrome, colors);
+        });
+    } else {
+        // A layout scope around the docked panels consumes the root canvas,
+        // making egui claim its pointer input before the viewer can pan or zoom.
         render_background(ui, &mut actions, frame, chrome, colors);
-    });
+    }
 
     if frame.save_overwrite_pending {
         render_save_overwrite_confirmation(ui, &mut actions, frame);
@@ -859,11 +866,10 @@ fn render_background(
         render_toast(ui, toast, frame);
     }
 
+    apply_cursor(ui, frame);
     if frame.is_cropping {
         render_crop_overlay(ui, frame, chrome, actions);
     }
-
-    apply_cursor(ui, frame);
 }
 
 fn render_mosaic_overlay(
@@ -1240,7 +1246,7 @@ fn render_top_menu(
                     render_top_operation_status(ui, actions, frame, chrome, colors, reserve);
                     render_top_rating_position(ui, frame, colors);
                     render_top_page_position(ui, actions, frame, colors);
-                    render_top_image_facts(ui, frame, chrome, colors);
+                    render_top_image_facts(ui, actions, frame, chrome, colors);
                 });
             });
         });
@@ -1605,10 +1611,12 @@ fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewM
         return reserve;
     }
     reserve += chip(&chrome.rating_menu_label());
+    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5)
+        + 2.0 * ui.spacing().button_padding.x
+        + TOP_METADATA_SPACING;
     if is_compact_width(ui.ctx().content_rect().width()) {
         return reserve;
     }
-    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5) + TOP_METADATA_SPACING;
     if let Some((width, height)) = frame.img_size {
         reserve +=
             TOP_METADATA_GAP + measure(&format!("{width} × {height}"), 12.5) + TOP_METADATA_SPACING;
@@ -1639,6 +1647,7 @@ fn is_compact_width(content_width: f32) -> bool {
 
 fn render_top_image_facts(
     ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
     chrome: ChromeViewModel,
     colors: ChromeColors,
@@ -1657,17 +1666,13 @@ fn render_top_image_facts(
             });
         ui.add_space(TOP_METADATA_GAP);
     }
-    if ui.ctx().content_rect().width() < 720.0 {
-        return;
-    }
     let mut has_detail = false;
     if frame.dock.has_image {
-        ui.label(
-            RichText::new(format!("{:.0}%", frame.pixel_scale * 100.0))
-                .size(12.5)
-                .color(colors.muted),
-        );
+        render_image_zoom(ui, actions, frame, chrome, colors);
         has_detail = true;
+    }
+    if is_compact_width(ui.ctx().content_rect().width()) {
+        return;
     }
     if let Some((width, height)) = frame.img_size {
         if has_detail {
@@ -1691,6 +1696,30 @@ fn render_top_image_facts(
         );
         let _ = response.on_hover_text(name);
     }
+}
+
+fn render_image_zoom(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+    colors: ChromeColors,
+) -> egui::Response {
+    let value = format!("{:.0}%", frame.pixel_scale * 100.0);
+    let label = frame
+        .language
+        .fill(tr!("Image zoom: {value}"), &[("value", &value)]);
+    let enabled = chrome.is_enabled(ChromeControl::ViewImage);
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.menu_button(RichText::new(value).size(12.5).color(colors.muted), |ui| {
+                view_zoom_menu(ui, actions, chrome);
+            })
+            .response
+        })
+        .inner;
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label.as_str()));
+    response.on_hover_text(label.as_str())
 }
 
 fn file_menu(
@@ -2687,6 +2716,7 @@ fn render_about_facts(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeCol
 fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors, frame: &UiFrameOwned) {
     egui::Grid::new("about_shortcuts")
         .num_columns(2)
+        .max_col_width(((ui.available_width() - 20.0) * 0.5).max(1.0))
         .spacing(Vec2::new(20.0, 8.0))
         .show(ui, |ui| {
             for (index, group) in crate::shortcuts::ABOUT_SHORTCUT_GROUPS.iter().enumerate() {
@@ -2698,20 +2728,18 @@ fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors, frame: 
                             .strong(),
                     );
                     for item in group.items {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(format!(
-                                    "{}  {}",
-                                    crate::shortcuts::format_shortcut_keys(
-                                        item.keys,
-                                        PRIMARY_MODIFIER
-                                    ),
-                                    frame.text(item.action)
-                                ))
-                                .size(12.0)
-                                .color(colors.muted),
+                        let text = if item.keys.is_empty() {
+                            frame.text(item.action).to_owned()
+                        } else {
+                            format!(
+                                "{}  {}",
+                                crate::shortcuts::format_shortcut_keys(item.keys, PRIMARY_MODIFIER),
+                                frame.text(item.action)
                             )
-                            .extend(),
+                        };
+                        ui.add(
+                            egui::Label::new(RichText::new(text).size(12.0).color(colors.muted))
+                                .wrap(),
                         );
                     }
                 });
@@ -5088,7 +5116,14 @@ fn render_crop_selection(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut 
             );
         }
 
-        render_crop_handles(ui, &painter, rect, frame.language, actions);
+        render_crop_handles(
+            ui,
+            &painter,
+            rect,
+            frame.language,
+            frame.space_held,
+            actions,
+        );
         if let (Some((image_width, image_height)), Some(crop_uv)) = (frame.img_size, frame.crop_uv)
         {
             render_crop_dimensions_and_move(
@@ -5102,6 +5137,7 @@ fn render_crop_selection(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut 
                     crop_uv,
                     swap_axes: frame.crop_swaps_axes,
                     crop_ratio: frame.crop_ratio,
+                    pan_override: frame.space_held,
                 },
                 actions,
             );
@@ -5117,6 +5153,7 @@ struct CropMoveOverlay {
     crop_uv: [f32; 4],
     swap_axes: bool,
     crop_ratio: crate::crop::CropRatio,
+    pan_override: bool,
 }
 
 fn render_crop_dimensions_and_move(
@@ -5134,6 +5171,7 @@ fn render_crop_dimensions_and_move(
         crop_uv,
         swap_axes,
         crop_ratio,
+        pan_override,
     } = overlay;
     let Some((pixel_x, pixel_y, pixel_width, pixel_height)) =
         crop_pixel_bounds(image_size, crop_uv, swap_axes, crop_ratio)
@@ -5186,6 +5224,9 @@ fn render_crop_dimensions_and_move(
         rect.intersect(image_viewport)
     };
     if !semantic_rect.is_positive() {
+        return;
+    }
+    if pan_override {
         return;
     }
     let response = ui.interact(
@@ -5275,6 +5316,7 @@ fn render_crop_handles(
     painter: &egui::Painter,
     rect: Rect,
     language: Language,
+    pan_override: bool,
     actions: &mut Vec<UiAction>,
 ) {
     let colors = chrome_colors(ui);
@@ -5329,6 +5371,9 @@ fn render_crop_handles(
             Stroke::new(1.0, colors.accent_ink),
             egui::StrokeKind::Outside,
         );
+        if pan_override {
+            continue;
+        }
         let hit_rect = Rect::from_center_size(center, Vec2::splat(20.0));
         let response = ui
             .interact(
@@ -5358,18 +5403,15 @@ fn render_crop_handles(
 }
 
 fn apply_cursor(ui: &mut egui::Ui, frame: &UiFrameOwned) {
-    if ui.ctx().is_pointer_over_egui() {
+    if !ui.is_enabled() || ui.ctx().is_pointer_over_egui() {
         return;
     }
-    if frame.is_cropping || frame.dock.heal_active {
-        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
-    } else if frame.is_panning {
-        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-    } else if frame.space_held {
-        ui.ctx().set_cursor_icon(CursorIcon::Grab);
-    } else {
-        ui.ctx().set_cursor_icon(CursorIcon::Default);
-    }
+    let cursor = match canvas_tool(frame.is_cropping, frame.dock.heal_active, frame.space_held) {
+        CanvasTool::Pan if frame.is_panning => CursorIcon::Grabbing,
+        CanvasTool::Pan => CursorIcon::Grab,
+        CanvasTool::Crop | CanvasTool::SpotHeal => CursorIcon::Crosshair,
+    };
+    ui.ctx().set_cursor_icon(cursor);
 }
 
 #[cfg(test)]
@@ -7853,7 +7895,7 @@ mod tests {
                 .iter()
                 .map(|(_, node)| node)
                 .find(|node| {
-                    node.value() == Some(value)
+                    (node.value() == Some(value) || node.label() == Some(value))
                         && node.bounds().is_some_and(|bounds| {
                             bounds.y0 >= 0.0 && bounds.y1 <= f64::from(TOP_BAR_HEIGHT)
                         })
@@ -7864,7 +7906,7 @@ mod tests {
         };
         let name = bounds_for("current.png");
         let dimensions = bounds_for("1920 × 1080");
-        let zoom = bounds_for("100%");
+        let zoom = bounds_for("Image zoom: 100%");
         let rating = bounds_for("Rating: Unrated");
         let position = bounds_for("1 / 2");
 
@@ -8096,7 +8138,12 @@ mod tests {
             frame.toast = Some(visual_toast(&endless));
             let (update, _, name_width) = strip_with_notice(&frame, 1_270.0);
             let help = node_bounds(&update, "Help").expect("Help menu title");
-            for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", "100%"] {
+            for value in [
+                "Page 2 of 3",
+                "1 / 2",
+                "Rating: Unrated",
+                "Image zoom: 100%",
+            ] {
                 let chip = node_bounds(&update, value)
                     .unwrap_or_else(|| panic!("{value} stays visible in {mode:?}"));
                 assert!(
@@ -8233,6 +8280,175 @@ mod tests {
                 .any(|action| matches!(action, UiAction::StepSequence(1))),
             "clicking the strip step must request the next page"
         );
+    }
+
+    #[test]
+    fn image_zoom_is_localized_and_reachable_in_the_minimum_window() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            for width in [640.0, 720.0, 1200.0] {
+                let context = egui::Context::default();
+                context.enable_accesskit();
+                let mut frame = accessibility_test_frame();
+                frame.language = language;
+                frame.pixel_scale = 64.0;
+                frame.is_opening = true;
+                frame.is_loading = true;
+                frame.selected_file_name = Some(format!("{}.png", "x".repeat(92)));
+                let label = language.fill(tr!("Image zoom: {value}"), &[("value", "6400%")]);
+                let mut update = None;
+                for _ in 0..2 {
+                    let mut input = accessibility_input();
+                    input.screen_rect = Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 480.0),
+                    ));
+                    let output = context.run_ui(input, |ui| {
+                        let _ = render(ui, &frame);
+                    });
+                    update = output.platform_output.accesskit_update;
+                }
+                let update = update.expect("AccessKit update");
+                let zoom = update
+                    .nodes
+                    .iter()
+                    .map(|(_, node)| node)
+                    .find(|node| node.label() == Some(label.as_str()))
+                    .expect("localized zoom button");
+                assert_eq!(zoom.role(), egui::accesskit::Role::Button);
+                assert!(zoom.supports_action(egui::accesskit::Action::Click));
+                assert!(zoom.supports_action(egui::accesskit::Action::Focus));
+                for (_, node) in &update.nodes {
+                    if node.role() != egui::accesskit::Role::Button {
+                        continue;
+                    }
+                    let Some(bounds) = node.bounds() else {
+                        continue;
+                    };
+                    if bounds.y0 > f64::from(TOP_BAR_HEIGHT) {
+                        continue;
+                    }
+                    assert!(
+                        bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width),
+                        "top control {:?} escaped {width}: {bounds:?}",
+                        node.label()
+                    );
+                }
+            }
+        }
+    }
+
+    fn click_zoom_test_control(
+        context: &egui::Context,
+        frame: &UiFrameOwned,
+        label: &str,
+    ) -> Vec<UiAction> {
+        let mut update = None;
+        for _ in 0..2 {
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            update = output.platform_output.accesskit_update;
+        }
+        let update = update.expect("AccessKit update");
+        let bounds = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.label().is_some_and(|text| text.starts_with(label)))
+            .and_then(egui::accesskit::Node::bounds)
+            .unwrap_or_else(|| panic!("missing {label}"));
+        let center = egui::pos2(
+            f64::midpoint(bounds.x0, bounds.x1) as f32,
+            f64::midpoint(bounds.y0, bounds.y1) as f32,
+        );
+        let mut actions = Vec::new();
+        for pressed in [true, false] {
+            let mut input = accessibility_input();
+            input.events = vec![
+                egui::Event::PointerMoved(center),
+                egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            let _ = context.run_ui(input, |ui| actions.extend(render(ui, frame)));
+        }
+        actions
+    }
+
+    #[test]
+    fn image_zoom_popup_routes_every_choice_and_closes_after_selection() {
+        for (index, label) in ["Fit Image to View", "Actual Size", "Zoom In", "Zoom Out"]
+            .into_iter()
+            .enumerate()
+        {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let frame = accessibility_test_frame();
+            assert!(click_zoom_test_control(&context, &frame, "Image zoom: 100%").is_empty());
+            assert!(egui::Popup::is_any_open(&context));
+            let actions = click_zoom_test_control(&context, &frame, label);
+            assert_eq!(actions.len(), 1, "one action for {label}");
+            assert!(
+                matches!(
+                    (index, &actions[0]),
+                    (0, UiAction::FitToView)
+                        | (1, UiAction::ActualSize)
+                        | (2, UiAction::ZoomIn)
+                        | (3, UiAction::ZoomOut)
+                ),
+                "unexpected action for {label}"
+            );
+            assert!(
+                !egui::Popup::is_any_open(&context),
+                "selection closes zoom menu"
+            );
+        }
+    }
+
+    #[test]
+    fn image_zoom_popup_opens_and_closes_from_the_keyboard() {
+        let context = egui::Context::default();
+        let frame = accessibility_test_frame();
+        let mut focus = true;
+        for key in [None, Some(egui::Key::Enter), None, Some(egui::Key::Escape)] {
+            let mut input = accessibility_input();
+            if let Some(key) = key {
+                input.events.push(egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            let _ = context.run_ui(input, |ui| {
+                let mut actions = Vec::new();
+                let response = super::render_image_zoom(
+                    ui,
+                    &mut actions,
+                    &frame,
+                    frame.chrome_view_model(),
+                    super::chrome_colors(ui),
+                );
+                if focus {
+                    response.request_focus();
+                }
+                assert!(actions.is_empty());
+            });
+            focus = false;
+            if key == Some(egui::Key::Enter) {
+                assert!(egui::Popup::is_any_open(&context));
+            }
+        }
+        assert!(!egui::Popup::is_any_open(&context));
     }
 
     /// Text the pseudo language cannot mark because it is data rather than
@@ -8464,6 +8680,143 @@ mod tests {
         assert!(
             (context.zoom_factor() - 1.0).abs() < f32::EPSILON,
             "the interface kept its operating-system scale"
+        );
+    }
+
+    fn canvas_cursor_at(frame: &UiFrameOwned, pointer: egui::Pos2) -> egui::CursorIcon {
+        let context = egui::Context::default();
+        let mut cursor = egui::CursorIcon::Default;
+        for _ in 0..3 {
+            let mut input = accessibility_input();
+            input.events.push(egui::Event::PointerMoved(pointer));
+            cursor = context
+                .run_ui(input, |ui| {
+                    let _ = render(ui, frame);
+                })
+                .platform_output
+                .cursor_icon;
+        }
+        cursor
+    }
+
+    #[test]
+    fn canvas_hand_and_edit_cursors_follow_the_active_tool() {
+        use egui::CursorIcon::{Crosshair, Default, Grab, Grabbing};
+        let mut frame = accessibility_test_frame();
+        let canvas = egui::pos2(600.0, 400.0);
+        assert_eq!(canvas_cursor_at(&frame, canvas), Grab);
+        frame.is_panning = true;
+        assert_eq!(canvas_cursor_at(&frame, canvas), Grabbing);
+        frame.is_panning = false;
+        for healing in [false, true] {
+            frame.is_cropping = !healing;
+            frame.dock.heal_active = healing;
+            assert_eq!(canvas_cursor_at(&frame, canvas), Crosshair);
+            frame.space_held = true;
+            assert_eq!(canvas_cursor_at(&frame, canvas), Grab);
+            frame.is_panning = true;
+            assert_eq!(canvas_cursor_at(&frame, canvas), Grabbing);
+            frame.is_panning = false;
+            frame.space_held = false;
+            assert_eq!(canvas_cursor_at(&frame, canvas), Crosshair);
+        }
+        frame.is_cropping = false;
+        frame.dock.heal_active = false;
+        assert_eq!(canvas_cursor_at(&frame, egui::pos2(20.0, 20.0)), Default);
+        frame.show_about = true;
+        assert_eq!(canvas_cursor_at(&frame, canvas), Default);
+        frame.show_about = false;
+        frame.dock.has_image = false;
+        assert!(
+            !matches!(canvas_cursor_at(&frame, canvas), Grab | Grabbing),
+            "the empty-state card keeps its own pointer behavior"
+        );
+    }
+
+    #[test]
+    fn docked_chrome_leaves_canvas_pointer_input_for_the_viewer() {
+        let frame = accessibility_test_frame();
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            let mut input = accessibility_input();
+            input
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(600.0, 400.0)));
+            let _ = context.run_ui(input, |ui| {
+                let _ = render(ui, &frame);
+            });
+        }
+        assert!(
+            !context.is_pointer_over_egui(),
+            "the pointer is over the photo"
+        );
+        assert!(
+            !context.egui_wants_pointer_input(),
+            "pan and zoom reach the viewer"
+        );
+    }
+
+    #[test]
+    fn space_pan_owns_crop_interior_and_handles_without_editing_the_selection() {
+        for pointer in [egui::pos2(600.0, 400.0), egui::pos2(200.0, 150.0)] {
+            let mut frame = accessibility_test_frame();
+            frame.dock.show_tools = false;
+            frame.dock.show_image_info = false;
+            frame.dock.show_filmstrip = false;
+            frame.is_cropping = true;
+            frame.space_held = true;
+            frame.crop_screen = Some([200.0, 150.0, 800.0, 600.0]);
+            frame.crop_uv = Some([0.1, 0.1, 0.9, 0.9]);
+            assert_eq!(canvas_cursor_at(&frame, pointer), egui::CursorIcon::Grab);
+            let context = egui::Context::default();
+            let mut actions = Vec::new();
+            for (point, pressed) in [
+                (pointer, Some(true)),
+                (pointer + egui::vec2(30.0, 20.0), None),
+                (pointer, Some(false)),
+            ] {
+                let mut input = accessibility_input();
+                input.events.push(egui::Event::PointerMoved(point));
+                if let Some(pressed) = pressed {
+                    input.events.push(egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                }
+                let _ = context.run_ui(input, |ui| actions.extend(render(ui, &frame)));
+            }
+            assert!(
+                !actions.iter().any(|action| matches!(
+                    action,
+                    UiAction::MoveCrop { .. } | UiAction::ResizeCrop { .. }
+                )),
+                "temporary pan must not move or resize the crop"
+            );
+        }
+    }
+
+    #[test]
+    fn crop_interior_and_resize_handles_keep_their_own_cursors() {
+        let mut frame = accessibility_test_frame();
+        frame.dock.show_tools = false;
+        frame.dock.show_image_info = false;
+        frame.dock.show_filmstrip = false;
+        frame.is_cropping = true;
+        frame.crop_screen = Some([200.0, 150.0, 800.0, 600.0]);
+        frame.crop_uv = Some([0.1, 0.1, 0.9, 0.9]);
+        assert_eq!(
+            canvas_cursor_at(&frame, egui::pos2(600.0, 400.0)),
+            egui::CursorIcon::Grab
+        );
+        assert_eq!(
+            canvas_cursor_at(&frame, egui::pos2(200.0, 150.0)),
+            egui::CursorIcon::ResizeNwSe
+        );
+        assert_eq!(
+            canvas_cursor_at(&frame, egui::pos2(850.0, 650.0)),
+            egui::CursorIcon::Crosshair
         );
     }
 
@@ -8759,6 +9112,10 @@ mod tests {
             "F5  Reload file",
             "T G I  Panels",
             "Space  Fit; hold to pan",
+            "Drag to pan",
+            "Wheel or trackpad to zoom",
+            "Double-click for Fit / Actual Size",
+            "Back / Forward buttons browse images",
             "U  Undo Trash",
         ] {
             assert!(
@@ -8807,35 +9164,45 @@ mod tests {
 
     #[test]
     fn about_close_stays_inside_the_minimum_window() {
-        let context = egui::Context::default();
-        context.enable_accesskit();
-        let mut frame = accessibility_test_frame();
-        frame.show_about = true;
         let screen_rect =
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(640.0, 480.0));
-        let mut input = accessibility_input();
-        input.screen_rect = Some(screen_rect);
-        let output = context.run_ui(input, |ui| {
-            let _ = render(ui, &frame);
-        });
-        let update = output
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit update should be generated");
-        let close = update
-            .nodes
-            .iter()
-            .map(|(_, node)| node)
-            .find(|node| node.label() == Some("Close"))
-            .expect("About Close button");
-        let bounds = close.bounds().expect("About Close bounds");
-        assert!(
-            bounds.x0 >= f64::from(screen_rect.left())
-                && bounds.x1 <= f64::from(screen_rect.right())
-                && bounds.y0 >= f64::from(screen_rect.top())
-                && bounds.y1 <= f64::from(screen_rect.bottom()),
-            "About Close escaped the minimum window: {bounds:?}"
-        );
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut frame = accessibility_test_frame();
+            frame.show_about = true;
+            frame.language = language;
+            for _ in 0..2 {
+                let mut input = accessibility_input();
+                input.screen_rect = Some(screen_rect);
+                let output = context.run_ui(input, |ui| {
+                    let _ = render(ui, &frame);
+                });
+                let update = output
+                    .platform_output
+                    .accesskit_update
+                    .expect("AccessKit update should be generated");
+                let close = update
+                    .nodes
+                    .iter()
+                    .map(|(_, node)| node)
+                    .find(|node| node.label() == Some(language.text(tr!("Close"))))
+                    .expect("About Close button");
+                let bounds = close.bounds().expect("About Close bounds");
+                assert!(
+                    bounds.x0 >= f64::from(screen_rect.left())
+                        && bounds.x1 <= f64::from(screen_rect.right())
+                        && bounds.y0 >= f64::from(screen_rect.top())
+                        && bounds.y1 <= f64::from(screen_rect.bottom()),
+                    "About Close escaped the minimum window in {language:?}: {bounds:?}"
+                );
+            }
+        }
     }
 
     #[test]

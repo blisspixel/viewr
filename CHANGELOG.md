@@ -5,6 +5,26 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+### Viewing controls
+
+- The zoom percentage now opens Fit, Actual Size, Zoom In, and Zoom Out. It
+  remains visible at the minimum window size, with a translated accessible name
+  and keyboard activation.
+- Panning keeps at least 32 logical pixels of each image axis reachable inside
+  the area between docked panels, or the complete axis when it is smaller.
+  Zoom, rotation, window resizing, and panel changes recheck these bounds.
+- Image view now defaults to an open hand. Drag directly to pan, with a closed
+  hand during the drag. Crop and Spot Heal keep their editing gestures; holding
+  Space temporarily pans in either tool, including over crop handles.
+- Dragging no longer primes a subsequent double-click Fit/Actual Size toggle.
+  Moving from chrome into the image keeps the pan origin current, and releasing
+  Space restores the active edit tool without continuing to pan.
+- Docked chrome no longer causes the UI layer to claim the whole image canvas,
+  which could swallow pan and wheel zoom before they reached the viewer.
+- Help now lists mouse pan, wheel and trackpad zoom, double-click Fit/Actual Size,
+  and Back/Forward side-button navigation in every bundled language. Shortcut
+  text wraps so translated Help keeps Close reachable at the minimum window size.
+
 ### Storage and folder performance
 
 - Added single-call Win32 metadata, identity, and version querying in

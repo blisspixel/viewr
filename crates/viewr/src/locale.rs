@@ -970,6 +970,36 @@ const MESSAGES: &[Message] = &[
         german: "Einpassen; halten zum Verschieben",
     },
     Message {
+        english: "Mouse",
+        spanish: "Ratón",
+        french: "Souris",
+        german: "Maus",
+    },
+    Message {
+        english: "Drag to pan",
+        spanish: "Arrastra para desplazar",
+        french: "Glisser pour déplacer",
+        german: "Ziehen zum Verschieben",
+    },
+    Message {
+        english: "Wheel or trackpad to zoom",
+        spanish: "Rueda o panel táctil para ampliar",
+        french: "Molette ou pavé tactile pour zoomer",
+        german: "Mausrad oder Touchpad zum Zoomen",
+    },
+    Message {
+        english: "Double-click for Fit / Actual Size",
+        spanish: "Doble clic para ajustar / tamaño real",
+        french: "Double-clic pour ajuster / taille réelle",
+        german: "Doppelklick für Einpassen / Originalgröße",
+    },
+    Message {
+        english: "Back / Forward buttons browse images",
+        spanish: "Botones Atrás / Adelante para recorrer imágenes",
+        french: "Boutons Précédent / Suivant pour parcourir les images",
+        german: "Zurück / Vorwärts zum Durchblättern",
+    },
+    Message {
         english: "Fit",
         spanish: "Ajustar",
         french: "Ajuster",
@@ -3342,6 +3372,12 @@ const MESSAGES: &[Message] = &[
         spanish: "Ajustar imagen a la vista",
         french: "Ajuster l’image à la vue",
         german: "Bild an Ansicht anpassen",
+    },
+    Message {
+        english: "Image zoom: {value}",
+        spanish: "Zoom de imagen: {value}",
+        french: "Zoom de l’image : {value}",
+        german: "Bildzoom: {value}",
     },
     Message {
         english: "Actual Size",

@@ -134,6 +134,11 @@ automatically.
 
 ## Essential controls
 
+Current development uses a hand cursor and direct drag-to-pan in image view.
+The zoom percentage opens Fit, Actual Size, and zoom controls. Pan limits keep
+part of the photo reachable. The published v0.7.2 preview still requires holding
+Space to pan and has a display-only zoom percentage.
+
 | Action | Control |
 | --- | --- |
 | Open file | `O`, `Ctrl/Cmd+O`, or drop a file |
@@ -143,10 +148,12 @@ automatically.
 | Folder order | File > Preferences or View > Folder Sort; Latest First is the initial default |
 | Interface language | File > Preferences; System is the initial default |
 | Previous or next page or frame | `[` / `]` |
-| Fit, pan, or actual size | Space tap fits; hold Space to pan; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
+| Pan | Drag the image; hold Space for temporary pan in Crop or Spot Heal |
+| Fit or actual size | Space tap fits; double-click toggles Fit/100%; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
 | Fullscreen | `F` or `F11`; Escape leaves after crop and Spot Heal |
 | Full-image collage | Up or `Shift+G` enters; Left/Right selects; Down, Enter, or click opens; Page Up/Page Down changes groups; Delete stays in the group; Escape returns |
-| Zoom | `+`, `-`, wheel or trackpad |
+| Zoom | `+`, `-`, wheel or trackpad; wheel zoom stays anchored under the pointer |
+| Browse with the mouse | Back/Forward side buttons |
 | Tools, folder previews, image information | `T`, `G`, `I` |
 | Rate or clear rating | `1` through `5`, `0` |
 | Crop or Spot Heal | `C`, `J` |

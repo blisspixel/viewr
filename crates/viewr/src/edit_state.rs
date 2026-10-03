@@ -1,10 +1,41 @@
-//! Pure recovery copy for edit presentation failures.
+//! Pure canvas-tool policy and recovery copy for edit presentation failures.
 //!
 //! The event loop owns GPU presentation, history mutation, and source reload.
-//! This module owns only path-free user messages derived from failure class.
+//! This module owns tool selection and path-free messages derived from failure class.
 
 use crate::heal::PatchPresentationError;
 use crate::locale::Language;
+
+/// Pointer interaction on the image canvas. Space temporarily overrides an edit tool.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CanvasTool {
+    Pan,
+    Crop,
+    SpotHeal,
+}
+
+#[must_use]
+pub(crate) const fn canvas_tool(
+    is_cropping: bool,
+    is_healing: bool,
+    space_held: bool,
+) -> CanvasTool {
+    if space_held {
+        CanvasTool::Pan
+    } else if is_healing {
+        CanvasTool::SpotHeal
+    } else if is_cropping {
+        CanvasTool::Crop
+    } else {
+        CanvasTool::Pan
+    }
+}
+
+/// A drag beyond the click tolerance cannot become the first half of a double-click.
+#[must_use]
+pub(crate) fn within_click_distance(start: (f64, f64), pointer: (f64, f64)) -> bool {
+    (pointer.0 - start.0).hypot(pointer.1 - start.1) < 6.0
+}
 
 /// Which edit failed to present. Typed so a caller cannot pass an untranslated phrase.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +105,25 @@ mod tests {
     use crate::locale::is_cataloged;
 
     const EN: Language = Language::English;
+
+    #[test]
+    fn the_image_defaults_to_pan_and_edit_tools_require_explicit_activation() {
+        assert_eq!(canvas_tool(false, false, false), CanvasTool::Pan);
+        assert_eq!(canvas_tool(true, false, false), CanvasTool::Crop);
+        assert_eq!(canvas_tool(false, true, false), CanvasTool::SpotHeal);
+        for (cropping, healing) in [(false, false), (true, false), (false, true)] {
+            assert_eq!(canvas_tool(cropping, healing, true), CanvasTool::Pan);
+        }
+    }
+
+    #[test]
+    fn dragging_does_not_prime_a_double_click() {
+        let start = (100.0, 200.0);
+        assert!(within_click_distance(start, start));
+        assert!(within_click_distance(start, (103.0, 204.0)));
+        assert!(!within_click_distance(start, (106.0, 200.0)));
+        assert!(!within_click_distance(start, (96.0, 195.0)));
+    }
 
     #[test]
     fn every_edit_message_is_cataloged() {

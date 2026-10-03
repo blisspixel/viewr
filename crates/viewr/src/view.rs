@@ -305,6 +305,48 @@ pub fn pan_after_zoom_at_cursor(offset: [f32; 2], cursor_ndc: [f32; 2], factor: 
     ]
 }
 
+/// Keep a reachable portion of the placed image inside the image-safe viewport.
+///
+/// Motion within these bounds is unchanged. The minimum overlap is measured in
+/// physical pixels and shrinks for images or viewports smaller than that amount.
+/// Returns `None` when geometry cannot be displayed.
+pub(crate) fn reachable_pan_offset(
+    viewport: (u32, u32),
+    insets: ViewportInsets,
+    placement: Placement,
+    minimum_visible: f32,
+) -> Option<[f32; 2]> {
+    let safe = safe_viewport_rect(viewport, insets)?;
+    if !minimum_visible.is_finite()
+        || minimum_visible <= 0.0
+        || !placement
+            .scale
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+        || !placement.offset.iter().all(|value| value.is_finite())
+    {
+        return None;
+    }
+    let lower = cursor_to_ndc(
+        (f64::from(safe.x), f64::from(safe.y + safe.height)),
+        viewport,
+    )?;
+    let upper = cursor_to_ndc(
+        (f64::from(safe.x + safe.width), f64::from(safe.y)),
+        viewport,
+    )?;
+    Some(std::array::from_fn(|axis| {
+        let extent = if axis == 0 { viewport.0 } else { viewport.1 } as f32;
+        let visible = (minimum_visible * 2.0 / extent)
+            .min(placement.scale[axis] * 2.0)
+            .min(upper[axis] - lower[axis]);
+        placement.offset[axis].clamp(
+            lower[axis] - placement.scale[axis] + visible,
+            upper[axis] + placement.scale[axis] - visible,
+        )
+    }))
+}
+
 /// Convert a physical-pixel cursor position to NDC (y up).
 #[must_use]
 pub fn cursor_to_ndc(cursor_px: (f64, f64), viewport: (u32, u32)) -> Option<[f32; 2]> {
@@ -322,7 +364,7 @@ mod tests {
     use super::{
         PhysicalViewport, ViewportInsets, cursor_to_ndc, fit_pixel_scale, fit_to_physical_viewport,
         fit_to_viewport, fit_to_window, pan_after_zoom_at_cursor, physical_rect_to_logical,
-        safe_viewport_rect, uv_transform,
+        reachable_pan_offset, safe_viewport_rect, uv_transform,
     };
 
     fn is_zero(v: [f32; 2]) -> bool {
@@ -636,6 +678,109 @@ mod tests {
         ];
         assert!((old_rel[0] - new_rel[0]).abs() < 1e-5);
         assert!((old_rel[1] - new_rel[1]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pan_limits_preserve_free_motion_until_the_image_becomes_unreachable() {
+        let mut placement = fit_to_window((800, 600), (800, 600), false);
+        placement.offset = [0.2, -0.1];
+        assert_eq!(
+            reachable_pan_offset((800, 600), ViewportInsets::default(), placement, 32.0),
+            Some(placement.offset)
+        );
+        placement.offset = [10.0, -10.0];
+        let offset = reachable_pan_offset((800, 600), ViewportInsets::default(), placement, 32.0)
+            .expect("valid geometry");
+        assert!((offset[0] - 1.92).abs() < 1e-5);
+        assert!((offset[1] + (2.0 - 64.0 / 600.0)).abs() < 1e-5);
+        placement.offset = offset;
+        assert_eq!(
+            reachable_pan_offset((800, 600), ViewportInsets::default(), placement, 32.0),
+            Some(offset),
+            "rechecking a bounded pan does not drift"
+        );
+    }
+
+    #[test]
+    fn pan_limits_keep_rotated_and_tiny_images_reachable_behind_docked_chrome() {
+        let viewport = (1200, 900);
+        let insets = ViewportInsets {
+            left: 200.0,
+            right: 100.0,
+            top: 48.0,
+            bottom: 160.0,
+        };
+        let safe = safe_viewport_rect(viewport, insets).expect("viewport");
+        for image in [(2400, 1600), (12, 8), (1, 1)] {
+            for rotated in [false, true] {
+                for zoom in [0.05, 1.0, 4.0, 64.0] {
+                    for desired in [[-100.0, -100.0], [100.0, 100.0], [-100.0, 100.0]] {
+                        let mut placement = fit_to_viewport(viewport, image, rotated, insets);
+                        placement.scale = placement.scale.map(|value| value * zoom);
+                        placement.offset = desired;
+                        let offset = reachable_pan_offset(viewport, insets, placement, 64.0)
+                            .expect("valid placement");
+                        let center = [(offset[0] + 1.0) * 600.0, (1.0 - offset[1]) * 450.0];
+                        let half = [placement.scale[0] * 600.0, placement.scale[1] * 450.0];
+                        for (axis, start, extent) in
+                            [(0, safe.x, safe.width), (1, safe.y, safe.height)]
+                        {
+                            let overlap = (center[axis] + half[axis]).min((start + extent) as f32)
+                                - (center[axis] - half[axis]).max(start as f32);
+                            let required = 64.0_f32.min(half[axis] * 2.0).min(extent as f32);
+                            assert!(
+                                overlap + 0.01 >= required,
+                                "image={image:?} rotated={rotated} zoom={zoom} axis={axis}: {overlap} < {required}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pan_limits_reject_hidden_or_invalid_geometry() {
+        let placement = fit_to_window((800, 600), (800, 600), false);
+        for viewport in [(0, 600), (800, 0)] {
+            assert_eq!(
+                reachable_pan_offset(viewport, ViewportInsets::default(), placement, 32.0),
+                None
+            );
+        }
+        assert_eq!(
+            reachable_pan_offset(
+                (800, 600),
+                ViewportInsets {
+                    left: 800.0,
+                    ..ViewportInsets::default()
+                },
+                placement,
+                32.0
+            ),
+            None
+        );
+        for margin in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(
+                reachable_pan_offset((800, 600), ViewportInsets::default(), placement, margin),
+                None
+            );
+        }
+        for (scale, offset) in [
+            ([0.0, 1.0], [0.0, 0.0]),
+            ([1.0, f32::NAN], [0.0, 0.0]),
+            ([1.0, 1.0], [f32::INFINITY, 0.0]),
+        ] {
+            let invalid = super::Placement {
+                scale,
+                offset,
+                ..placement
+            };
+            assert_eq!(
+                reachable_pan_offset((800, 600), ViewportInsets::default(), invalid, 32.0),
+                None
+            );
+        }
     }
 
     #[test]

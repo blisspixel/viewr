@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## 0.7.3 candidate
+## 0.7.3 - 2026-10-03
 
 ### Viewing controls
 

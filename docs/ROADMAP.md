@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.2](https://github.com/blisspixel/viewr/releases/tag/v0.7.2), the in-window path fallback patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.3`, prepared for the focused viewer-polish patch; not yet published |
+| Workspace version | `0.7.3`, tag-ready after the verified focused viewer-polish candidate; publication pending |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
-| Next version update | The v0.7.3 patch update precedes its exact candidate. Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.3** after the complete automated patch-release gate and explicit preview limits. v0.8.0 remains the next minor milestone; uncollected hardware or screen-reader rows stay open |
+| Next version update | The v0.7.3 patch candidate is verified. Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
+| Next tag allowed | **v0.7.3**, tag-ready pending green CI and fuzz on the final tag commit. v0.8.0 remains the next minor milestone; uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -107,7 +107,7 @@ v0.7.1  Rating scan and installer recovery patch [released, acceptance rows open
 
 v0.7.2  Launch fallback patch             [released, acceptance rows open]
 
-v0.7.3  Focused viewer polish patch       [candidate, acceptance rows open]
+v0.7.3  Focused viewer polish patch       [tag-ready, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -206,7 +206,7 @@ activity history.
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
 | Public release | `0.7.2` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
-| Focused patch candidate | `0.7.3` | Full commit SHA plus one non-publishing candidate run | Complete the automated release gate and publish explicit preview limits without closing v0.8 |
+| Focused patch tag-ready | `0.7.3` | Commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe` and [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410) | Verified four archives and fixture; Windows candidate passes the native suite. Require final-commit CI and fuzz before tagging, with explicit preview limits and v0.8 still open |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 

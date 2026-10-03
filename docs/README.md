@@ -4,8 +4,8 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): current source builds, current v0.7.2
-  one-command installers, manual downloads, default-app setup, platform
+- [Install and update](INSTALL.md): current source builds, tag-ready v0.7.3
+  one-command installers pending publication, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
   Trash and Undo, and other interaction rules.
@@ -39,7 +39,7 @@ Start with the document that matches the task.
   ordered next steps, completed phases, and explicit non-goals.
 - [v0.7.2 release notes](releases/v0.7.2.md): the current launch fallback
   patch.
-- [v0.7.3 release notes](releases/v0.7.3.md): the focused viewer-polish candidate
+- [v0.7.3 release notes](releases/v0.7.3.md): the tag-ready focused viewer-polish
   patch and its explicit evidence limits.
 - [v0.7.1 release notes](releases/v0.7.1.md): the previous rating scan and
   installer recovery patch.

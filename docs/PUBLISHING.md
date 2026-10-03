@@ -98,11 +98,11 @@ workflow results, and release assets remain the source of truth:
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.2. README and INSTALL call this the install target until a
-   later release actually exists.
+   currently v0.7.2. The tag-ready README and INSTALL label their intended v0.7.3
+   links as pending publication; those assets are not public yet.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.3`, prepared for the focused viewer-polish patch and not yet published.
+   `0.7.3`, tag-ready for the focused viewer-polish patch and not yet published.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -448,6 +448,21 @@ passed on tag-ready commit `64d811f59b33cfbc13c04a9c295117a0f2dab5a9`.
 repeated quality and fuzzing, rebuilt all four archives, and published the
 immutable 12-asset [v0.7.2 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.2).
 Representative-hardware and native screen-reader acceptance remain uncollected.
+
+For v0.7.3, [main CI run 37109104903](https://github.com/blisspixel/viewr/actions/runs/37109104903),
+[fuzz run 37109104889](https://github.com/blisspixel/viewr/actions/runs/37109104889),
+and [CodeQL run 37109104533](https://github.com/blisspixel/viewr/actions/runs/37109104533)
+passed on commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe`.
+One non-publishing [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410)
+passed quality, fuzzing, and all four archive builds on that exact commit. All
+four downloaded archives passed the official verifier with 51-file manifests;
+the fixture manifest and complete fixture set also verified. The candidate
+Windows archive has SHA-256
+`39b0e2446fe070bc4b72ec187126d320c0e30131b59cfe8c34ab9e60ecefe01d`
+and passed the full native Windows suite, including 319-image navigation,
+compact cursor inspection, ratings, Trash and Undo, recovery, and Exit.
+The patch is tag-ready, not yet published. Representative-hardware and native
+screen-reader acceptance remain uncollected.
 
 ## Required before a broadly recommended 1.0
 

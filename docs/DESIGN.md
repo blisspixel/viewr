@@ -21,6 +21,16 @@ disappears. This spec is the converged result of two rounds of design critique
 
 ## Layout
 
+- The empty card always includes a named, editable image or folder path field
+  and Open button, alongside native choosers and Paste Path. File > Open Path
+  exposes the same input while an image is open. Enter opens the input; normal
+  viewer shortcuts never consume its typing. Invalid paths stay editable with
+  complete, wrapped inline feedback. This session input is cleared after a
+  successful request and is never persisted.
+- A chooser returning no path shows neutral recovery guidance. Cancellation
+  and an unavailable Linux portal share that native API outcome, so viewr does
+  not invent a failure diagnosis. Native choosers are parented to the viewer.
+
 - The image is scaled to fit the window (aspect preserved) and centered. The
   letterbox area is the solid theme background. Windowed Fit shrinks a large
   image and leaves a small one at actual size. Fullscreen Fit enlarges a small

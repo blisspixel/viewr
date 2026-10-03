@@ -24,6 +24,14 @@ results arrive through bounded channels or user events, and each requested rende
 pass draws the current state through the wgpu pipeline. There is no second store
 or independently mutable UI model.
 
+Native window loss retires the renderer before input or accessibility receives
+the destroyed handle. Frame geometry uses the last resize event, avoiding live
+X11 geometry queries during presentation. The confined `display_probe` hook
+routes only a BadDrawable XPutImage for this window and connection through the
+existing application event loop. Accepted rating, Save As, and curation work
+still completes; a terminal failure without a window produces a path-free
+process error. An unconfirmed disclosure starts no write.
+
 ```
             ┌────────────┐   Message    ┌────────────┐
  input ───▶ │   update   │ ◀─────────── │  workers   │

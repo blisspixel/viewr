@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- Retire a destroyed native window before accessibility, input, or rendering
+  can query its geometry. On X11, externally destroying the window while the
+  rating disclosure is open now exits cleanly. Unconfirmed ratings stay unwritten;
+  already accepted file work completes before the process exits.
+  Frame geometry uses observed resize dimensions, and a software-GL upload to
+  this window's lost X11 drawable follows the same close policy instead of
+  contaminating winit's input-context cleanup. Other native errors stay visible.
+  Failures after window loss report a path-free process error instead of
+  disappearing into an invisible toast; waiting does not retain an expired
+  repaint deadline.
+  A queued Trash move that cannot start is treated as a failure even when its
+  preceding move succeeded, retaining visible recovery guidance on normal close.
+- Add an editable image or folder path to the empty card and File > Open Path.
+  Enter submits without triggering viewer shortcuts. Missing paths stay editable
+  with wrapped inline feedback. Path input is session-only and cleared after
+  a successful request.
+- Parent native Open File and Open Folder choosers to the viewer. Returning
+  without a selection now shows recovery guidance, including while viewing,
+  without treating cancellation as a diagnosed portal failure.
+- Unsupported formats no longer show a selected Unrated radio in the Rating
+  menu. Page and icon navigation have at least 24px hit widths and heights.
+- Separate the filename and status when an error has no displayed image facts.
+- Add a real X11 close regression to CI using a synthetic JPEG. It checks
+  Ctrl+Q and external window destruction with an unconfirmed rating and requires
+  a clean exit, silent stderr, and unchanged source bytes.
+
 ## 0.7.3 - 2026-10-03
 
 ### Viewing controls

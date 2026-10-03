@@ -29,6 +29,26 @@ const ALL_COPY: &[&str] = &[
     SAVE_RECOVERY_STATUS,
 ];
 
+/// Accepted file work still needs an observable terminal result when its
+/// native window has already disappeared. A later success cannot hide failure.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum WindowLossResult {
+    #[default]
+    Clean,
+    FileWorkFailed,
+}
+
+impl WindowLossResult {
+    #[must_use]
+    pub(crate) const fn observe(self, window_present: bool, succeeded: bool) -> Self {
+        if !window_present && !succeeded {
+            Self::FileWorkFailed
+        } else {
+            self
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CloseDisposition {
     Exit,
@@ -125,6 +145,16 @@ pub(crate) const fn folder_scan_blocks_save(purpose: Option<&ScanPurpose>) -> bo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn window_loss_retains_failed_work_without_reclassifying_visible_errors() {
+        use super::WindowLossResult::{Clean, FileWorkFailed};
+        assert_eq!(Clean.observe(true, false), Clean);
+        assert_eq!(Clean.observe(false, true), Clean);
+        let failed = Clean.observe(false, false);
+        assert_eq!(failed, FileWorkFailed);
+        assert_eq!(failed.observe(false, true), FileWorkFailed);
+        assert_eq!(failed.observe(true, true), FileWorkFailed);
+    }
     use super::*;
     use crate::locale::{Language, is_cataloged};
     use crate::playlist::ScanPurpose;

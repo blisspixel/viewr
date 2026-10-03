@@ -3,7 +3,7 @@
 //! phases add the neighbor texture cache and zoom/pan on top of this.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use winit::window::Window;
 
@@ -31,6 +31,8 @@ pub struct Renderer {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    window_size: winit::dpi::PhysicalSize<u32>,
+    ui_started: Instant,
     clear: wgpu::Color,
     adapter_report: GpuAdapterReport,
     max_dim: u32,
@@ -193,6 +195,8 @@ impl Renderer {
             queue,
             surface,
             config,
+            window_size: size,
+            ui_started: Instant::now(),
             clear: palette_to_color(theme::palette_for(mode)),
             adapter_report,
             max_dim,
@@ -220,6 +224,12 @@ impl Renderer {
     #[must_use]
     pub fn window(&self) -> &Arc<Window> {
         &self.window
+    }
+
+    /// Last native resize event, without a synchronous geometry query.
+    #[must_use]
+    pub fn window_size(&self) -> winit::dpi::PhysicalSize<u32> {
+        self.window_size
     }
 
     /// Read clipboard text through the windowing state.
@@ -625,6 +635,7 @@ impl Renderer {
     /// configuration never fails when the window is minimized or larger than the
     /// GPU's maximum texture size.
     pub fn resize(&mut self, width: u32, height: u32) {
+        self.window_size = winit::dpi::PhysicalSize::new(width, height);
         self.config.width = width.clamp(1, self.max_dim);
         self.config.height = height.clamp(1, self.max_dim);
         self.surface.configure(&self.device, &self.config);
@@ -676,7 +687,16 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut raw_input = self.egui_state.take_egui_input(self.window.as_ref());
+        // egui-winit's convenience method queries live window geometry, which
+        // can panic if X11 destroys the drawable during this frame. Take its
+        // accumulated input and use the resize facts we already own instead.
+        let mut raw_input = crate::ui::prepare_frame_input(
+            self.egui_state.egui_input_mut().take(),
+            (self.window_size.width, self.window_size.height),
+            self.window.scale_factor() as f32,
+            self.egui_ctx.zoom_factor(),
+            self.ui_started.elapsed().as_secs_f64(),
+        );
         self.append_accessibility_actions(&mut raw_input);
         let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
             app_ui(ui);

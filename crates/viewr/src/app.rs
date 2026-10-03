@@ -40,7 +40,7 @@ use crate::crop_state::{
 use crate::curate::{GuardedActionError, TrashRestoreDisposition, TrashedFile};
 use crate::curation_state::{
     CurationCloseDisposition, CurationKind, CurationRecovery, CurationTerminalState,
-    GuardedSourceAction, RestoreOutcomeCounts, curation_close_disposition,
+    GuardedSourceAction, RestoreOutcomeCounts, TrashQueueProgress, curation_close_disposition,
     curation_recovery_message, curation_status, guarded_source_action_failure_message,
     permanent_delete_action, permanent_delete_confirmed, permanent_delete_description,
     permanent_delete_success_message, removal_unready_message, restore_result_message,
@@ -97,8 +97,8 @@ use crate::rating_state::{
     reconcile_rating_write, settled_write_view,
 };
 use crate::save_state::{
-    CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, close_disposition,
-    folder_scan_blocks_save, save_close_disposition, save_start_blocker,
+    CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, WindowLossResult,
+    close_disposition, folder_scan_blocks_save, save_close_disposition, save_start_blocker,
     save_start_blocker_message,
 };
 use crate::session::{
@@ -276,6 +276,8 @@ fn run_internal(
         show_update: false,
         show_preferences: false,
         show_file_associations: false,
+        open_path_text: String::new(),
+        open_path_error: None,
         external_edit_pending: false,
         source_gone: false,
         modifiers: ModifiersState::default(),
@@ -301,6 +303,7 @@ fn run_internal(
         event_proxy,
         performance_probe,
         startup_failure: None,
+        window_loss_result: WindowLossResult::Clean,
     };
     if let Some(path) = app.session.selected_path.clone() {
         app.open_path_request(path);
@@ -308,6 +311,9 @@ fn run_internal(
     event_loop.run_app(&mut app)?;
     if let Some(failure) = app.startup_failure.take() {
         return Err(failure);
+    }
+    if app.window_loss_result == WindowLossResult::FileWorkFailed {
+        return Err(Error::Shutdown);
     }
     let Some(probe) = app.performance_probe else {
         return Ok(None);
@@ -389,6 +395,9 @@ fn host_display_session() -> crate::display_state::DisplaySession {
 pub(crate) enum UserEvent {
     /// Background work completed and the event loop should poll its channels.
     Wake,
+    /// A software OpenGL upload found the owned X11 window already destroyed.
+    #[cfg(target_os = "linux")]
+    NativeDrawableLost,
     /// An operating-system assistive technology requested the accessibility
     /// tree or invoked an accessible control.
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
@@ -1187,6 +1196,10 @@ struct App {
     show_preferences: bool,
     /// Whether the accessible opt-in file-association guide is open.
     show_file_associations: bool,
+    /// Session-only path entry and recovery feedback, never persisted.
+    open_path_text: String,
+    open_path_error: Option<Localized>,
+    window_loss_result: WindowLossResult,
     /// Whether another app may have changed the source since the last accepted decode.
     external_edit_pending: bool,
     /// Whether the selected path no longer names the presented file.
@@ -1478,11 +1491,14 @@ impl App {
         }
         self.cancel_open_with_check();
         let extensions = crate::fs::supported_extensions().collect::<Vec<_>>();
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Images", &extensions)
-            .pick_file()
-        {
+        let mut dialog = rfd::FileDialog::new().add_filter("Images", &extensions);
+        if let Some(renderer) = &self.renderer {
+            dialog = dialog.set_parent(renderer.window().as_ref());
+        }
+        if let Some(path) = dialog.pick_file() {
             self.load_and_scan(path);
+        } else {
+            self.show_picker_fallback();
         }
     }
 
@@ -1491,8 +1507,46 @@ impl App {
             return;
         }
         self.cancel_open_with_check();
-        if let Some(directory) = rfd::FileDialog::new().pick_folder() {
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(renderer) = &self.renderer {
+            dialog = dialog.set_parent(renderer.window().as_ref());
+        }
+        if let Some(directory) = dialog.pick_folder() {
             self.start_folder_scan(directory, ScanPurpose::OpenFolder);
+        } else {
+            self.show_picker_fallback();
+        }
+    }
+
+    fn show_picker_fallback(&mut self) {
+        // The native API uses None for both cancellation and portal failure.
+        self.show_status_toast(self.language.localize(tr!(
+            "No path selected. Use Open Path in the File menu, Paste Path, or drop an image or folder."
+        )));
+    }
+
+    fn open_entered_path(&mut self) {
+        if self.block_action_while_curating(BlockedAction::OpenAnotherImage) {
+            return;
+        }
+        match crate::entry_state::parse_clipboard_path(&self.open_path_text) {
+            crate::entry_state::ClipboardPathResult::Empty => {}
+            crate::entry_state::ClipboardPathResult::Path(path) => {
+                if path.exists() {
+                    self.open_path_error = None;
+                    self.open_path_text.clear();
+                    self.open_path_request(path);
+                    if let Some(renderer) = &self.renderer {
+                        egui::Popup::close_all(&renderer.egui_ctx);
+                    }
+                } else {
+                    self.open_path_error = Some(self.language.fill(
+                        tr!("Could not find path: {path}"),
+                        &[("path", &path.display().to_string())],
+                    ));
+                    self.request_redraw();
+                }
+            }
         }
     }
 
@@ -2984,10 +3038,10 @@ impl App {
             log::error!("rating write worker panicked after terminal channel state");
         }
         let result = reconcile_rating_write(terminal, worker_panicked);
-        let terminal_error = result.as_ref().err().copied();
+        self.record_file_work_result(result.is_ok());
         let close_disposition = rating_close_disposition(
             std::mem::take(&mut self.close_after_rating_write),
-            terminal_error,
+            result.as_ref().err().copied(),
         );
         let presented_is_written = self.session.presented_path.as_ref() == Some(&worker.path);
         let view = settled_write_view(
@@ -3873,8 +3927,7 @@ impl App {
             return;
         };
         let window = renderer
-            .window()
-            .inner_size()
+            .window_size()
             .to_logical::<f64>(renderer.window().scale_factor());
         renderer.set_interface_scale(crate::system_accessibility::effective_interface_scale(
             requested,
@@ -3895,7 +3948,7 @@ impl App {
 
     fn screen_to_uv(&self, x: f64, y: f64) -> Option<(f32, f32)> {
         let renderer = self.renderer.as_ref()?;
-        let win_size = renderer.window().inner_size();
+        let win_size = renderer.window_size();
         if win_size.width == 0 || win_size.height == 0 {
             return None;
         }
@@ -3980,6 +4033,12 @@ impl App {
                 )));
             }
         }
+    }
+
+    fn record_file_work_result(&mut self, succeeded: bool) {
+        self.window_loss_result = self
+            .window_loss_result
+            .observe(self.renderer.is_some(), succeeded);
     }
 
     fn toggle_fullscreen(&mut self) {
@@ -4404,7 +4463,7 @@ impl App {
         let Some(renderer) = self.renderer.as_ref() else {
             return (Vec::new(), None);
         };
-        let size = renderer.window().inner_size();
+        let size = renderer.window_size();
         let Some(viewport) = crate::view::safe_viewport_rect(
             (size.width, size.height),
             crate::view::ViewportInsets::default(),
@@ -5060,16 +5119,16 @@ impl App {
         )
     }
 
-    fn start_next_pending_trash(&mut self) -> bool {
+    fn start_next_pending_trash(&mut self) -> TrashQueueProgress {
         let Some(pending) = self.pending_trash.pop_front() else {
-            return false;
+            return TrashQueueProgress::Finished;
         };
         let submitted = pending.context.clone();
         if self.start_trash_worker(
             pending,
             tr!("Could not start the next queued move to Trash. That file was not moved."),
         ) {
-            return true;
+            return TrashQueueProgress::Running;
         }
         self.revert_submitted_removal(&submitted);
         let abandoned = std::mem::take(&mut self.pending_trash);
@@ -5093,7 +5152,7 @@ impl App {
             };
             self.show_toast(message);
         }
-        false
+        TrashQueueProgress::Failed
     }
 
     fn revert_abandoned_trash_queue(&mut self) -> usize {
@@ -5105,12 +5164,19 @@ impl App {
         count
     }
 
-    fn reconcile_pending_trash_after_terminal(&mut self, terminal: CurationTerminalState) -> bool {
+    fn reconcile_pending_trash_after_terminal(
+        &mut self,
+        kind: CurationKind,
+        terminal: CurationTerminalState,
+    ) -> Option<CurationTerminalState> {
+        if !matches!(kind, CurationKind::Trash) {
+            return Some(terminal);
+        }
         if matches!(terminal, CurationTerminalState::Succeeded) {
-            return self.start_next_pending_trash();
+            return self.start_next_pending_trash().terminal_after(terminal);
         }
         if self.pending_trash.is_empty() {
-            return false;
+            return Some(terminal);
         }
         let abandoned = self.revert_abandoned_trash_queue();
         log::warn!("queued Trash submissions stopped after failed move: abandoned={abandoned}");
@@ -5126,7 +5192,7 @@ impl App {
             &failure,
             abandoned,
         ));
-        false
+        Some(terminal)
     }
 
     fn finish_disconnected_curation(&mut self, context: &CurationContext, submitted: usize) {
@@ -5659,7 +5725,7 @@ impl App {
         if renderer.image_texture_size() != Some((image.width, image.height)) {
             return None;
         }
-        let size = renderer.window().inner_size();
+        let size = renderer.window_size();
         let viewport =
             crate::view::safe_viewport_rect((size.width, size.height), self.viewport_insets())?;
         let left = f64::from(viewport.x);
@@ -6018,7 +6084,7 @@ impl App {
     /// Project image UV to screen pixels (inverse of [`Self::screen_to_uv`]).
     fn uv_to_screen(&self, uv_x: f32, uv_y: f32) -> Option<(f32, f32)> {
         let renderer = self.renderer.as_ref()?;
-        let win_size = renderer.window().inner_size();
+        let win_size = renderer.window_size();
         if win_size.width == 0 || win_size.height == 0 {
             return None;
         }
@@ -6148,7 +6214,7 @@ impl App {
         let Some(image) = renderer.image_size() else {
             return;
         };
-        let size = renderer.window().inner_size();
+        let size = renderer.window_size();
         let viewport = (size.width, size.height);
         let insets = self.viewport_insets();
         let base = crate::view::fit_to_viewport_for_mode(
@@ -6179,7 +6245,7 @@ impl App {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        let win = renderer.window().inner_size();
+        let win = renderer.window_size();
         let Some(image_size) = renderer.image_size() else {
             return;
         };
@@ -6225,7 +6291,7 @@ impl App {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        let size = renderer.window().inner_size();
+        let size = renderer.window_size();
         let Some(viewport) =
             crate::view::safe_viewport_rect((size.width, size.height), self.viewport_insets())
         else {
@@ -6387,7 +6453,7 @@ impl App {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        let win = renderer.window().inner_size();
+        let win = renderer.window_size();
         let Some(image) = renderer.image_size() else {
             return;
         };
@@ -7257,6 +7323,7 @@ impl App {
         if matches!(terminal, SaveTerminalState::Succeeded) {
             self.refresh_folder_membership();
         }
+        self.record_file_work_result(matches!(terminal, SaveTerminalState::Succeeded));
         match save_close_disposition(close_requested, terminal, self.curation_worker.is_some()) {
             SaveCloseDisposition::StayOpen => {}
             SaveCloseDisposition::Exit => event_loop.exit(),
@@ -7288,6 +7355,7 @@ impl App {
         if let Some(join) = worker.join.take()
             && join.join().is_err()
         {
+            self.record_file_work_result(false);
             log::error!(
                 "curation worker panicked after terminal channel state: operation={kind:?}, submitted={submitted}"
             );
@@ -7332,16 +7400,17 @@ impl App {
                         let message = curation_recovery_message(self.language, kind);
                         self.curation_recovery.record(kind);
                         self.show_toast(Localized::from_translated_seam(message));
+                        self.record_file_work_result(false);
                         return;
                     }
                 };
                 log::info!("curation worker reconciled: operation={kind:?}, submitted={submitted}");
                 self.request_redraw();
-                if matches!(kind, CurationKind::Trash)
-                    && self.reconcile_pending_trash_after_terminal(terminal)
-                {
+                let Some(terminal) = self.reconcile_pending_trash_after_terminal(kind, terminal)
+                else {
                     return;
-                }
+                };
+                self.record_file_work_result(matches!(terminal, CurationTerminalState::Succeeded));
                 match curation_close_disposition(
                     std::mem::take(&mut self.close_after_curation),
                     terminal,
@@ -7356,6 +7425,7 @@ impl App {
                 }
             }
             WorkerPoll::Disconnected => {
+                self.record_file_work_result(false);
                 self.finish_disconnected_curation(&worker.context, submitted);
             }
             WorkerPoll::Pending => unreachable!("pending workers return before being taken"),
@@ -7929,6 +7999,8 @@ impl ApplicationHandler<UserEvent> for App {
         let mode = self
             .theme_preference
             .resolve(window.theme(), self.system_accessibility.high_contrast);
+        #[cfg(target_os = "linux")]
+        crate::display_probe::install_x11_drawable_hook(window.as_ref(), self.event_proxy.clone());
         let max_base_pixels = if self.performance_probe.is_some() {
             crate::gpu::PERFORMANCE_PROBE_GPU_BASE_PIXELS
         } else {
@@ -8006,8 +8078,26 @@ impl ApplicationHandler<UserEvent> for App {
             .as_ref()
             .is_some_and(|renderer| renderer.window().id() == window_id);
 
+        if !is_own_window {
+            return;
+        }
+        if matches!(&event, WindowEvent::Destroyed) {
+            // X11 can destroy the drawable without first requesting a close.
+            // Retire every window consumer before egui can schedule a redraw
+            // that would query its now-invalid geometry. Accepted file work
+            // still finishes through the normal close policy.
+            self.renderer = None;
+            self.request_close(event_loop);
+            return;
+        }
+        if matches!(&event, WindowEvent::CloseRequested) {
+            self.request_close(event_loop);
+            return;
+        }
+
         let mut egui_consumed = false;
         let mut egui_popup_open = false;
+        let mut text_input_owns_event = false;
         let mut egui_requested_repaint = false;
         if let Some(renderer) = &mut self.renderer
             && renderer.window().id() == window_id
@@ -8025,6 +8115,7 @@ impl ApplicationHandler<UserEvent> for App {
                 window.request_redraw();
             }
             egui_consumed = response.consumed;
+            text_input_owns_event = crate::ui::path_input_has_focus(&renderer.egui_ctx);
             egui_popup_open = widget_popup_owns_event(
                 popup_was_open,
                 egui::Popup::is_any_open(&renderer.egui_ctx),
@@ -8067,10 +8158,12 @@ impl ApplicationHandler<UserEvent> for App {
                             self.space_held,
                         )
                         || (event.state == winit::event::ElementState::Pressed
+                            && !text_input_owns_event
                             && escape_press_reaches_app(event.repeat, egui_popup_open)
                             && matches!(&event.logical_key, Key::Named(NamedKey::Escape))
                             && escape_action(self.escape_context()) != EscapeAction::None)
                         || (self.mosaic.is_active()
+                            && !text_input_owns_event
                             && event.state == winit::event::ElementState::Pressed
                             && mosaic_key_reaches_app(&event.logical_key))
                         || (!application_shortcuts_blocked([
@@ -8082,6 +8175,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.pending_rating_write.is_some(),
                             egui_popup_open,
                             self.context_menu_pos.is_some(),
+                            text_input_owns_event,
                         ]) && route_consumed_keyboard_key_in_context(
                             &event.logical_key,
                             self.escape_context(),
@@ -8335,7 +8429,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let dx = position.x - last_x;
                     let dy = position.y - last_y;
                     if let Some(renderer) = self.renderer.as_mut() {
-                        let win_size = renderer.window().inner_size();
+                        let win_size = renderer.window_size();
                         self.transform.offset_x += (dx as f32) / (win_size.width as f32 / 2.0);
                         self.transform.offset_y -= (dy as f32) / (win_size.height as f32 / 2.0);
                         renderer.window().request_redraw();
@@ -8375,6 +8469,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.pending_rating_write.is_some(),
                     egui_popup_open,
                     self.context_menu_pos.is_some(),
+                    text_input_owns_event,
                 ]);
                 if is_space && !pressed {
                     if self.space_held {
@@ -8392,6 +8487,7 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 if pressed
+                    && !text_input_owns_event
                     && escape_press_reaches_app(repeat, egui_popup_open)
                     && matches!(&logical_key, Key::Named(NamedKey::Escape))
                     && !self.show_about
@@ -8787,7 +8883,7 @@ impl ApplicationHandler<UserEvent> for App {
                     crate::chrome::DockViewModel::new(dock).layout(scale_factor),
                 );
                 let pixel_scale = self.renderer.as_ref().and_then(|renderer| {
-                    let size = renderer.window().inner_size();
+                    let size = renderer.window_size();
                     let image = renderer.image_size()?;
                     let rotated90 = rot_steps.rem_euclid(2) != 0;
                     Some(
@@ -8801,7 +8897,7 @@ impl ApplicationHandler<UserEvent> for App {
                     )
                 });
                 let image_viewport = self.renderer.as_ref().and_then(|renderer| {
-                    let size = renderer.window().inner_size();
+                    let size = renderer.window_size();
                     crate::view::safe_viewport_rect((size.width, size.height), viewport_insets)
                 });
                 let logical_image_viewport =
@@ -8825,7 +8921,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let placement = if mosaic_ui.is_none()
                     && let Some(size) = renderer.image_size()
                 {
-                    let win_size = renderer.window().inner_size();
+                    let win_size = renderer.window_size();
                     let rotated90 = rot_steps.rem_euclid(2) != 0;
                     let mut p = crate::view::fit_to_viewport_for_mode(
                         (win_size.width, win_size.height),
@@ -8855,6 +8951,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let heal_supported =
                     image_is_fully_displayed(source_image_size, renderer.image_texture_size());
                 let frame = crate::ui::UiFrameOwned {
+                    open_path_text: self.open_path_text.clone(),
+                    open_path_error: self.open_path_error.clone().map(Localized::into_string),
                     dock,
                     retain_exif,
                     background_override: bg_override,
@@ -9007,6 +9105,11 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     match action {
                         crate::ui::UiAction::Exit => self.request_close(event_loop),
+                        crate::ui::UiAction::SetOpenPathText(text) => {
+                            self.open_path_text = text;
+                            self.open_path_error = None;
+                        }
+                        crate::ui::UiAction::OpenEnteredPath => self.open_entered_path(),
                         crate::ui::UiAction::Open => {
                             self.open_image_dialog();
                         }
@@ -9274,10 +9377,16 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        let _ = event_loop;
         match event {
             UserEvent::OpenFile(path) => self.open_path_request(path),
             UserEvent::Wake => {}
+            #[cfg(target_os = "linux")]
+            UserEvent::NativeDrawableLost => {
+                self.renderer = None;
+                self.request_close(event_loop);
+            }
             #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             UserEvent::AccessKit(event) => {
                 let Some(renderer) = self.renderer.as_mut() else {
@@ -9318,6 +9427,17 @@ impl ApplicationHandler<UserEvent> for App {
         self.poll_crop_result();
         self.poll_save_result(event_loop);
         self.poll_foreground_image_load();
+
+        if self.renderer.is_none() {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            if self.rating_write_worker.is_none()
+                && self.curation_worker.is_none()
+                && self.save_job.is_none()
+            {
+                event_loop.exit();
+            }
+            return;
+        }
 
         if self.poll_folder_scan()
             && let Some(renderer) = self.renderer.as_ref()

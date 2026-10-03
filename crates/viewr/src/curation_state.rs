@@ -232,6 +232,28 @@ pub(crate) enum CurationTerminalState {
     NeedsAttention,
 }
 
+/// A queued submission can fail to start after the preceding move succeeded.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TrashQueueProgress {
+    Finished,
+    Running,
+    Failed,
+}
+
+impl TrashQueueProgress {
+    #[must_use]
+    pub(crate) const fn terminal_after(
+        self,
+        previous: CurationTerminalState,
+    ) -> Option<CurationTerminalState> {
+        match self {
+            Self::Running => None,
+            Self::Finished => Some(previous),
+            Self::Failed => Some(CurationTerminalState::NeedsAttention),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CurationCloseDisposition {
     StayOpen,
@@ -542,6 +564,40 @@ pub(crate) fn restore_result_message(language: Language, counts: RestoreOutcomeC
 mod tests {
     use super::*;
     use crate::locale::is_cataloged;
+
+    #[test]
+    fn queued_spawn_failure_overrides_success_and_prevents_a_clean_close() {
+        use crate::save_state::WindowLossResult;
+
+        let terminal = TrashQueueProgress::Failed
+            .terminal_after(CurationTerminalState::Succeeded)
+            .unwrap();
+        assert_eq!(terminal, CurationTerminalState::NeedsAttention);
+        for save_active in [false, true] {
+            assert_eq!(
+                curation_close_disposition(true, terminal, save_active),
+                CurationCloseDisposition::CancelDeferredClose,
+            );
+        }
+        assert_eq!(
+            WindowLossResult::Clean.observe(false, terminal == CurationTerminalState::Succeeded),
+            WindowLossResult::FileWorkFailed,
+        );
+        for previous in [
+            CurationTerminalState::Succeeded,
+            CurationTerminalState::NeedsAttention,
+        ] {
+            assert_eq!(TrashQueueProgress::Running.terminal_after(previous), None);
+            assert_eq!(
+                TrashQueueProgress::Finished.terminal_after(previous),
+                Some(previous)
+            );
+            assert_eq!(
+                TrashQueueProgress::Failed.terminal_after(previous),
+                Some(CurationTerminalState::NeedsAttention)
+            );
+        }
+    }
 
     /// Assertions below state the English copy, so the seam is called with it.
     const EN: Language = Language::English;

@@ -79,6 +79,16 @@ test members.
 
 Platform package and optional C-decoder checks require their documented local
 SDKs or system libraries. A skipped platform check is an evidence gap, not a pass.
+The Linux performance job also runs `bash scripts/linux-gui-smoke.sh
+target/release/viewr` under a private Xvfb display. A synthetic JPEG is rated
+without confirming, then closed by Ctrl+Q and by external X11 destruction.
+Both routes must exit cleanly, leave stderr empty, and preserve the JPEG bytes.
+The harness waits for the synthetic image's center pixel, then requires the
+rating disclosure to cover it before exercising either close route.
+The frame uses observed resize dimensions, and the confined Xlib hook admits
+only BadDrawable from XPutImage to this window on its own connection.
+This catches native-window lifetime defects beyond the pure close-policy tests;
+it does not replace human Linux desktop or portal acceptance.
 The Windows installer smoke test uses disposable files and mocked downloads. It
 checks a clean install, reinstall, and a forced activation failure after the old
 directory is moved aside. The failure must restore every prior file byte for byte

@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.3](https://github.com/blisspixel/viewr/releases/tag/v0.7.3), the focused viewer-polish patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.3`, matching the published focused viewer-polish patch |
+| Workspace version | `0.7.4`, preparing the bounded Linux entry and window-loss patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its release-readiness gates close, with explicit preview limits. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.7.4** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.

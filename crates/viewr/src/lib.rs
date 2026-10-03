@@ -31,6 +31,7 @@ pub mod fs;
 pub mod gpu;
 mod gpu_image;
 mod gpu_policy;
+mod hand_cursor;
 pub mod heal;
 pub mod image_info;
 pub(crate) mod job;
@@ -59,6 +60,7 @@ mod startup;
 mod system_accessibility;
 pub mod theme;
 pub mod thumbs;
+mod typography;
 /// The main user interface module built with egui.
 pub mod ui;
 pub mod view;

@@ -171,6 +171,7 @@ impl Renderer {
         let sampler = build_image_sampler(&device);
         let mipmap_blitter = build_mipmap_blitter(&device);
         let egui_ctx = egui::Context::default();
+        egui_ctx.set_fonts(crate::typography::font_definitions());
         let viewport_id = egui_ctx.viewport_id();
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
@@ -639,6 +640,7 @@ impl Renderer {
     #[allow(clippy::too_many_lines)] // wgpu + egui frame path is one pipeline sequence
     pub(crate) fn render(
         &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         placement: Option<crate::view::Placement>,
         image_viewport: Option<crate::view::PhysicalViewport>,
         mosaic: &[MosaicDraw],
@@ -684,9 +686,17 @@ impl Renderer {
             .get(&egui::ViewportId::ROOT)
             .map_or(Duration::MAX, |output| output.repaint_delay);
         let mut platform_output = full_output.platform_output;
+        platform_output.cursor_image = crate::hand_cursor::image(
+            &self.egui_ctx,
+            self.window.scale_factor(),
+            platform_output.cursor_icon,
+        );
         self.publish_accessibility_update(&mut platform_output);
-        self.egui_state
-            .handle_platform_output(self.window.as_ref(), platform_output);
+        self.egui_state.handle_platform_output_with_event_loop(
+            self.window.as_ref(),
+            event_loop,
+            platform_output,
+        );
 
         let tris = self
             .egui_ctx

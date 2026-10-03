@@ -22,12 +22,11 @@ disappears. This spec is the converged result of two rounds of design critique
 ## Layout
 
 - The image is scaled to fit the window (aspect preserved) and centered. The
-  letterbox area is the solid theme background, nothing else. Fit shrinks a
-  large image and leaves a small one alone: it never enlarges past 100 percent,
-  because scaling a 64px by 64px source to fill the window is arithmetically
-  honest and visually wrong, and a soft interpolated wall no longer reads as a
-  small image. A source smaller than the viewport therefore rests at actual
-  size, and enlarging it is something the player asks for with zoom.
+  letterbox area is the solid theme background. Windowed Fit shrinks a large
+  image and leaves a small one at actual size. Fullscreen Fit enlarges a small
+  image to the available viewport while preserving its complete aspect ratio.
+  Actual Size remains one source pixel per physical display pixel in either
+  mode.
 - Loading an image never changes the application-window dimensions. The initial
   1000px by 720px logical window, or the dimensions the user chooses by resizing,
   remains stable while image fit and zoom resolve inside its viewport.
@@ -51,9 +50,11 @@ disappears. This spec is the converged result of two rounds of design critique
   physical zoom control, where 100 percent means one source pixel per physical
   display pixel. When space permits it also shows filename and dimensions. Filename, dimensions,
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
-  spacing. Long names truncate with the full value available as a tooltip. Routine
-  three-second outcomes, including Move to Trash, use this status area instead of
-  covering the image. Each status item keeps a fixed allocation, except that in
+  spacing. Long names truncate with the full value available as a tooltip.
+  Ratings without a reader or writer do not add a persistent format-scope badge;
+  Edit > Rating keeps that explanation. JPEG rating state and errors stay visible.
+  Routine three-second outcomes, including Move to Trash, use this status area
+  instead of covering the image. Each status item keeps a fixed allocation, except that in
   windows at least 720px wide the outcome or navigation notice, always drawn
   last, receives all the width the metadata chips and a 120px filename slice do
   not need. A sticky explanation such as a missing-image substitution therefore
@@ -87,8 +88,8 @@ disappears. This spec is the converged result of two rounds of design critique
   single-photo selection unless a removal already selected a surviving photo.
   Complete
   photos reflow as they become ready. Tile-local scaling may enlarge a complete
-  small source to its aspect-ratio tile; the single-photo 100 percent Fit cap is
-  unchanged. Opening a selected photo loads its full-resolution source. The
+  small source to its aspect-ratio tile; windowed single-photo Fit remains
+  capped at 100 percent. Opening a selected photo loads its full-resolution source. The
   current full decode and collage display images share a 640 MiB transient cache
   budget. If admission still fails, the status says how many fit safely.
 - Image Information: an optional 304px panel contains file facts and the explicit
@@ -116,12 +117,15 @@ disappears. This spec is the converged result of two rounds of design critique
 - Zoom is focal-point anchored (pixel under cursor stays put). Trackpad pixel
   deltas and wheel detents both supported.
 - Image view defaults to the hand tool: the resting cursor is Grab and left-drag
-  pans directly, with Grabbing during the drag. Crop and Spot Heal explicitly
+  pans directly, with Grabbing during the drag. Windows uses outlined open and
+  closed hand silhouettes inside a 24 logical pixel cursor canvas, rasterized at
+  the window's display DPI; macOS and Linux keep their native hand cursors. Crop and Spot Heal explicitly
   select editing gestures. Space held + drag temporarily pans in either tool,
   including over crop handles; releasing Space restores the edit tool. Space tap
   without drag resets fit. Fit clears zoom and pan only; rotation, flip, and an
   in-progress crop stay. Chrome keeps its own pointer behavior.
-- Fullscreen (`F` or `F11`) is immersive: the top bar and docked panels hide, and
+- Fullscreen (`F` or `F11`) starts at Fit and refits on return to the window.
+  It is immersive: the top bar and docked panels hide, and
   the photo uses the whole window. Stored panel flags are unchanged, so exiting
   restores them. Spot Heal still docks its inspector while it is active. Escape
   closes a context menu, then cancels crop, then leaves Spot Heal, then leaves the
@@ -130,6 +134,10 @@ disappears. This spec is the converged result of two rounds of design critique
 
 ## Language
 
+- File ends with Exit, or Quit viewr on macOS. Ctrl+Q or Cmd+Q requests the
+  same close as the native window control, including while a popup owns focus.
+  Active rating, Save As, and curation writes finish through the existing close
+  policy before the window exits.
 - File > Preferences follows the operating-system language by default and offers
   explicit English, Spanish, French, and German choices. The choice applies live
   and is stored as one validated word through same-directory atomic replacement.
@@ -205,8 +213,20 @@ disappears. This spec is the converged result of two rounds of design critique
 
 ## Typography and icons
 
-- System font stack (`-apple-system`, `Segoe UI`, `system-ui`). Filename ~13.5px
-  at weight 550; counter ~12.5px muted, tabular figures.
+- Standard appearances prefer installed platform interface fonts: Segoe UI
+  Variable, then Segoe UI on Windows; San Francisco, then Helvetica on macOS;
+  Adwaita Sans, Inter, Noto Sans, then DejaVu Sans in common Linux font locations.
+  Regular variable faces use weight 400 and optical size 14 for compact chrome.
+  Console prefers Consolas, Menlo, or Adwaita Mono/DejaVu Sans Mono and keeps
+  monospaced interface type. The bounded font list is read once at renderer
+  startup, with an 8 MiB ceiling per file, regular-file and font-validity checks,
+  and the bundled egui fonts kept as glyph and missing-font fallbacks. No fonts
+  are downloaded or redistributed, and no font directories are crawled.
+  Filename type is about 13.5 logical pixels; counters are about 12.5 pixels.
+- Console's phosphor accent is a restrained `#7CC991`, with softer `#ADD8B7`
+  primary text, dark green control surfaces, and a 1.5 pixel collage selection
+  outline. Crop handles draw as 6 pixel squares while retaining 20 pixel drag
+  targets.
 - Icons: single consistent stroke weight (~1.75px at 24px), rounded joins, drawn
   on a 24px grid. Icon-only buttons with tooltips, except the zoom value.
 

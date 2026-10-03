@@ -180,6 +180,30 @@ public static class ViewrAccessibilityNativeMethods {
         return text.ToString();
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo {
+        public uint Size;
+        public uint Flags;
+        public IntPtr Handle;
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetCursorInfo(ref CursorInfo info);
+
+    public static IntPtr VisibleCursor() {
+        var info = new CursorInfo { Size = (uint)Marshal.SizeOf<CursorInfo>() };
+        if (!GetCursorInfo(ref info) || (info.Flags & 1) == 0) {
+            throw new InvalidOperationException("the native cursor is not visible");
+        }
+        return info.Handle;
+    }
+
+    public static bool HoverScreenPoint(IntPtr hwnd, int x, int y) {
+        return FocusWindowForInput(hwnd) && SetCursorPos(x, y);
+    }
+
     public static bool SendKeyPress(IntPtr hwnd, ushort virtualKey) {
         if (!FocusWindowForInput(hwnd)) {
             return PostKeyPress(hwnd, virtualKey);
@@ -204,6 +228,24 @@ public static class ViewrAccessibilityNativeMethods {
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
         if (sent == (uint)inputs.Length) return true;
         return sent == 0 && PostKeyPress(hwnd, virtualKey);
+    }
+
+    public static bool SendControlKeyPress(IntPtr hwnd, ushort virtualKey) {
+        if (!FocusWindowForInput(hwnd)) return false;
+        var keys = new ushort[] { 0x11, virtualKey, virtualKey, 0x11 };
+        var inputs = new Input[keys.Length];
+        for (var index = 0; index < keys.Length; index++) {
+            inputs[index] = new Input {
+                Type = 1,
+                Value = new InputValue {
+                    Keyboard = new KeyboardInput {
+                        VirtualKey = keys[index],
+                        Flags = index >= 2 ? 0x0002u : 0u
+                    }
+                }
+            };
+        }
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length;
     }
 
     public static bool ClickScreenPoint(IntPtr hwnd, int screenX, int screenY) {
@@ -1045,6 +1087,7 @@ $firstImage = Join-Path $testDirectory "first.png"
 $secondImage = Join-Path $testDirectory "second.png"
 $ratedImage = Join-Path $testDirectory "rated.jpg"
 $collageDirectory = Join-Path $testDirectory "collage"
+$navigationDirectory = Join-Path $testDirectory "navigation"
 $appearanceDirectory = Join-Path $testDirectory "viewr"
 $appearanceFile = Join-Path $appearanceDirectory "appearance"
 $folderSortFile = Join-Path $appearanceDirectory "folder-sort"
@@ -1805,6 +1848,79 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
 
+    Stop-TestApplication
+    Add-Type -AssemblyName System.Drawing
+    [IO.Directory]::CreateDirectory($navigationDirectory) | Out-Null
+    [IO.File]::WriteAllText($folderSortFile, "name")
+    for ($index = 1; $index -le 319; $index++) {
+        $bitmap = [Drawing.Bitmap]::new(100 + $index, 60)
+        try {
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            try {
+                $graphics.Clear([Drawing.Color]::FromArgb($index % 255, 80, 200))
+            }
+            finally { $graphics.Dispose() }
+            $bitmap.Save((Join-Path $navigationDirectory ("image{0:D3}.png" -f $index)))
+        }
+        finally { $bitmap.Dispose() }
+    }
+    Start-TestApplication -ImagePath (Join-Path $navigationDirectory "image017.png")
+    $previousNavigationIndex = $null
+    foreach ($index in @(17, 18, 19, 18, 17, 16)) {
+        if ($null -ne $previousNavigationIndex) {
+            $key = if ($index -gt $previousNavigationIndex) { 0x27 } else { 0x25 }
+            Send-ApplicationKey -VirtualKey $key
+        }
+        Wait-ForElement -Name ("image{0:D3}.png" -f $index) | Out-Null
+        Wait-ForElement -Name ("{0} {1} 60" -f (100 + $index), [char]0xD7) | Out-Null
+        Wait-ForElement -Name "$index / 319" | Out-Null
+        Wait-ForElementAbsent -Name "Could not open" -Prefix | Out-Null
+        $previousNavigationIndex = $index
+    }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:Window)
+    $bounds = $root.Current.BoundingRectangle
+    $centerX = [int]($bounds.Left + $bounds.Width / 2)
+    $centerY = [int]($bounds.Top + $bounds.Height / 2)
+    if (-not [ViewrAccessibilityNativeMethods]::HoverScreenPoint($script:Window, $centerX, $centerY)) {
+        throw "could not hover the synthetic image canvas"
+    }
+    Start-Sleep -Milliseconds 300
+    $openHand = [ViewrAccessibilityNativeMethods]::VisibleCursor()
+    $client = Get-ApplicationClientSize
+    $pointer = [IntPtr](([int]($client.Width / 2)) -bor (([int]($client.Height / 2)) -shl 16))
+    try {
+        [void][ViewrAccessibilityNativeMethods]::PostMessage($script:Window, 0x0201, [IntPtr]1, $pointer)
+        Start-Sleep -Milliseconds 300
+        $closedHand = [ViewrAccessibilityNativeMethods]::VisibleCursor()
+        if ($openHand -eq $closedHand) {
+            throw "Windows pan did not change from an open to a closed hand"
+        }
+    }
+    finally {
+        [void][ViewrAccessibilityNativeMethods]::PostMessage($script:Window, 0x0202, [IntPtr]::Zero, $pointer)
+    }
+
+    Activate-Element -Element (Wait-ForElement -Name "File")
+    $exit = Wait-ForElement -Name "Exit" -Prefix
+    if ($exit.Current.Name -notlike "*Ctrl+Q") {
+        throw "Exit did not expose its keyboard shortcut"
+    }
+    Activate-Element -Element $exit
+    if (-not $script:Process.WaitForExit(5000) -or $script:Process.ExitCode -ne 0) {
+        throw "File Exit did not close viewr cleanly"
+    }
+    Stop-TestApplication
+    Start-TestApplication -ImagePath (Join-Path $navigationDirectory "image017.png")
+    Wait-ForElement -Name "image017.png" | Out-Null
+    Activate-Element -Element (Wait-ForElement -Name "File")
+    Wait-ForElement -Name "Exit" -Prefix | Out-Null
+    if (-not [ViewrAccessibilityNativeMethods]::SendControlKeyPress($script:Window, 0x51)) {
+        throw "could not deliver Ctrl+Q to the test application"
+    }
+    if (-not $script:Process.WaitForExit(5000) -or $script:Process.ExitCode -ne 0) {
+        throw "Ctrl+Q did not close viewr cleanly with a menu open"
+    }
+
     Write-Output (
         "accessibility-smoke: PASS; native UIA tree, focusability, panel state, " +
         "actions, first-run scope, stable initial window size, conventional Trash " +
@@ -1815,6 +1931,7 @@ try {
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
         "external file replacement with unsaved edits, last-good-frame after delete, " +
         "twelve large-photo collage load, group paging, Escape, Enter, and Down navigation, " +
+        "direct-file navigation across 319 images, distinct Windows pan cursors, menu Exit and Ctrl+Q, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )
 }
@@ -1842,6 +1959,13 @@ finally {
             }
         }
         [IO.Directory]::Delete($collageDirectory, $false)
+    }
+    if ([IO.Directory]::Exists($navigationDirectory)) {
+        for ($index = 1; $index -le 319; $index++) {
+            $photo = Join-Path $navigationDirectory ("image{0:D3}.png" -f $index)
+            if ([IO.File]::Exists($photo)) { [IO.File]::Delete($photo) }
+        }
+        [IO.Directory]::Delete($navigationDirectory, $false)
     }
     if ([IO.Directory]::Exists($testDirectory)) {
         [IO.Directory]::Delete($testDirectory, $false)

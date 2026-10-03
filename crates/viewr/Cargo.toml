@@ -40,6 +40,8 @@ viewr-protocol = { path = "../viewr-protocol" }
 egui = "0.35"
 egui-winit = "0.35"
 egui-wgpu = "0.35"
+# The same parser already used by egui validates bounded local system fonts.
+skrifa = "0.42.1"
 bytemuck = "1.25.2"
 # Pure-Rust SVG rasterizer (STACK Decision 4 / Phase 6 vector support).
 # Default features off: skip system fonts / text shaping so we do not pull

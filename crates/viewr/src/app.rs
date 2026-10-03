@@ -3905,11 +3905,12 @@ impl App {
         let ndc_y = 1.0 - (y as f32 / win_size.height as f32) * 2.0;
 
         let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
-        let mut p = crate::view::fit_to_viewport(
+        let mut p = crate::view::fit_to_viewport_for_mode(
             (win_size.width, win_size.height),
             image_size,
             rotated90,
             self.viewport_insets(),
+            self.is_fullscreen,
         );
 
         p.scale[0] *= self.transform.zoom;
@@ -3938,11 +3939,56 @@ impl App {
         Some((uv_x, uv_y))
     }
 
-    fn toggle_fullscreen(&mut self) {
-        let Some(renderer) = self.renderer.as_ref() else {
+    fn request_close(&mut self, event_loop: &ActiveEventLoop) {
+        if self.rating_write_worker.is_some() {
+            self.close_after_rating_write = true;
+            self.show_toast(
+                self.language
+                    .localize(tr!("Finishing the rating update before closing...")),
+            );
             return;
-        };
+        }
+        match close_disposition(self.save_job.is_some(), self.curation_worker.is_some()) {
+            CloseDisposition::Exit => event_loop.exit(),
+            CloseDisposition::WaitForSave => {
+                self.close_after_save = true;
+                self.show_toast(
+                    self.language
+                        .localize(tr!("Finishing Save As before closing...")),
+                );
+            }
+            CloseDisposition::WaitForCuration => {
+                if !self.close_after_curation {
+                    let worker = self
+                        .curation_worker
+                        .as_ref()
+                        .expect("active close disposition retains curation worker");
+                    log::info!(
+                        "close deferred for curation: operation={:?}, submitted={}",
+                        worker.context.kind(),
+                        worker.context.submitted()
+                    );
+                }
+                self.close_after_curation = true;
+                self.request_redraw();
+            }
+            CloseDisposition::WaitForSaveAndCuration => {
+                self.close_after_save = true;
+                self.close_after_curation = true;
+                self.show_toast(self.language.localize(tr!(
+                    "Finishing Save As and the file operation before closing..."
+                )));
+            }
+        }
+    }
+
+    fn toggle_fullscreen(&mut self) {
+        if self.renderer.is_none() {
+            return;
+        }
         self.is_fullscreen = !self.is_fullscreen;
+        self.fit_to_view();
+        let renderer = self.renderer.as_ref().expect("fullscreen has a renderer");
         if self.is_fullscreen {
             renderer
                 .window()
@@ -5978,11 +6024,12 @@ impl App {
         }
         let image_size = renderer.image_size()?;
         let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
-        let mut place = crate::view::fit_to_viewport(
+        let mut place = crate::view::fit_to_viewport_for_mode(
             (win_size.width, win_size.height),
             image_size,
             rotated90,
             self.viewport_insets(),
+            self.is_fullscreen,
         );
         place.scale[0] *= self.transform.zoom;
         place.scale[1] *= self.transform.zoom;
@@ -6061,6 +6108,12 @@ impl App {
 
     fn update_cursor_icon(&self) {
         if let Some(renderer) = self.renderer.as_ref() {
+            // The frame's final cursor request includes crop and chrome overrides.
+            // Windows native Grab and Grabbing are the same four-way arrow.
+            if cfg!(target_os = "windows") {
+                renderer.window().request_redraw();
+                return;
+            }
             if renderer.egui_ctx.is_pointer_over_egui() {
                 return;
             }
@@ -6098,11 +6151,12 @@ impl App {
         let size = renderer.window().inner_size();
         let viewport = (size.width, size.height);
         let insets = self.viewport_insets();
-        let base = crate::view::fit_to_viewport(
+        let base = crate::view::fit_to_viewport_for_mode(
             viewport,
             image,
             self.transform.rotation_steps.rem_euclid(2) != 0,
             insets,
+            self.is_fullscreen,
         );
         let mut placement = base;
         placement.scale = base.scale.map(|value| value * self.transform.zoom);
@@ -6133,18 +6187,26 @@ impl App {
             return;
         };
         let old = self.transform.zoom;
-        let new_zoom = (old * factor).clamp(0.05, 64.0);
-        let applied = new_zoom / old;
-        if (applied - 1.0).abs() < 1e-6 {
-            return;
-        }
         let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
-        let base = crate::view::fit_to_viewport(
+        let base = crate::view::fit_to_viewport_for_mode(
             (win.width, win.height),
             image_size,
             rotated90,
             self.viewport_insets(),
+            self.is_fullscreen,
         );
+        let fit_scale = crate::view::fit_pixel_scale_for_mode(
+            (win.width, win.height),
+            image_size,
+            rotated90,
+            self.viewport_insets(),
+            self.is_fullscreen,
+        );
+        let new_zoom = crate::view::zoom_after_step(old, factor, fit_scale);
+        let applied = new_zoom / old;
+        if (applied - 1.0).abs() < 1e-6 {
+            return;
+        }
         let total_offset = [
             base.offset[0] + self.transform.offset_x,
             base.offset[1] + self.transform.offset_y,
@@ -6330,11 +6392,12 @@ impl App {
             return;
         };
         let rotated90 = self.transform.rotation_steps.rem_euclid(2) != 0;
-        let fit_scale = crate::view::fit_pixel_scale(
+        let fit_scale = crate::view::fit_pixel_scale_for_mode(
             (win.width, win.height),
             image,
             rotated90,
             self.viewport_insets(),
+            self.is_fullscreen,
         );
         let actual_zoom = if fit_scale > 0.0 {
             1.0 / fit_scale
@@ -7909,7 +7972,7 @@ impl ApplicationHandler<UserEvent> for App {
                     .renderer
                     .as_mut()
                     .unwrap()
-                    .render(None, None, &[], |_| {});
+                    .render(event_loop, None, None, &[], |_| {});
                 {
                     let window = self.renderer.as_ref().unwrap().window();
                     window.set_visible(true);
@@ -7997,7 +8060,12 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
                     use winit::keyboard::{Key, NamedKey};
-                    space_release_must_unwind(&event.logical_key, event.state, self.space_held)
+                    crate::keyboard_route::is_exit_shortcut(&event.logical_key, self.modifiers)
+                        || space_release_must_unwind(
+                            &event.logical_key,
+                            event.state,
+                            self.space_held,
+                        )
                         || (event.state == winit::event::ElementState::Pressed
                             && escape_press_reaches_app(event.repeat, egui_popup_open)
                             && matches!(&event.logical_key, Key::Named(NamedKey::Escape))
@@ -8064,48 +8132,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.transform.is_panning = false;
                 self.transform.crop_start = None;
             }
-            WindowEvent::CloseRequested => {
-                if self.rating_write_worker.is_some() {
-                    self.close_after_rating_write = true;
-                    self.show_toast(
-                        self.language
-                            .localize(tr!("Finishing the rating update before closing...")),
-                    );
-                    return;
-                }
-                match close_disposition(self.save_job.is_some(), self.curation_worker.is_some()) {
-                    CloseDisposition::Exit => event_loop.exit(),
-                    CloseDisposition::WaitForSave => {
-                        self.close_after_save = true;
-                        self.show_toast(
-                            self.language
-                                .localize(tr!("Finishing Save As before closing...")),
-                        );
-                    }
-                    CloseDisposition::WaitForCuration => {
-                        if !self.close_after_curation {
-                            let worker = self
-                                .curation_worker
-                                .as_ref()
-                                .expect("active close disposition retains curation worker");
-                            log::info!(
-                                "close deferred for curation: operation={:?}, submitted={}",
-                                worker.context.kind(),
-                                worker.context.submitted()
-                            );
-                        }
-                        self.close_after_curation = true;
-                        self.request_redraw();
-                    }
-                    CloseDisposition::WaitForSaveAndCuration => {
-                        self.close_after_save = true;
-                        self.close_after_curation = true;
-                        self.show_toast(self.language.localize(tr!(
-                            "Finishing Save As and the file operation before closing..."
-                        )));
-                    }
-                }
-            }
+            WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::DroppedFile(path) => {
                 self.open_path_request(path);
             }
@@ -8332,6 +8359,13 @@ impl ApplicationHandler<UserEvent> for App {
                 use winit::keyboard::{Key, NamedKey};
                 let pressed = state == winit::event::ElementState::Pressed;
                 let is_space = is_space_key(&logical_key);
+                if pressed
+                    && !repeat
+                    && crate::keyboard_route::is_exit_shortcut(&logical_key, self.modifiers)
+                {
+                    self.request_close(event_loop);
+                    return;
+                }
                 let shortcuts_blocked = application_shortcuts_blocked([
                     self.show_about,
                     self.show_update,
@@ -8757,11 +8791,12 @@ impl ApplicationHandler<UserEvent> for App {
                     let image = renderer.image_size()?;
                     let rotated90 = rot_steps.rem_euclid(2) != 0;
                     Some(
-                        crate::view::fit_pixel_scale(
+                        crate::view::fit_pixel_scale_for_mode(
                             (size.width, size.height),
                             image,
                             rotated90,
                             viewport_insets,
+                            self.is_fullscreen,
                         ) * zoom_t,
                     )
                 });
@@ -8792,11 +8827,12 @@ impl ApplicationHandler<UserEvent> for App {
                 {
                     let win_size = renderer.window().inner_size();
                     let rotated90 = rot_steps.rem_euclid(2) != 0;
-                    let mut p = crate::view::fit_to_viewport(
+                    let mut p = crate::view::fit_to_viewport_for_mode(
                         (win_size.width, win_size.height),
                         size,
                         rotated90,
                         viewport_insets,
+                        self.is_fullscreen,
                     );
 
                     p.scale[0] *= zoom_t;
@@ -8894,7 +8930,7 @@ impl ApplicationHandler<UserEvent> for App {
 
                 let presents_image = placement.is_some() || !mosaic_draws.is_empty();
                 let frame_output =
-                    renderer.render(placement, image_viewport, &mosaic_draws, |ui| {
+                    renderer.render(event_loop, placement, image_viewport, &mosaic_draws, |ui| {
                         ui_actions = crate::ui::render(ui, &frame);
                     });
                 match frame_output.result {
@@ -8970,6 +9006,7 @@ impl ApplicationHandler<UserEvent> for App {
                         continue;
                     }
                     match action {
+                        crate::ui::UiAction::Exit => self.request_close(event_loop),
                         crate::ui::UiAction::Open => {
                             self.open_image_dialog();
                         }

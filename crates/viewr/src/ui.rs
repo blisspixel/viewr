@@ -111,6 +111,8 @@ const IMAGE_CANVAS_NODE: &str = "viewr image canvas";
 
 /// Actions dispatched from the UI to be handled by the main application logic.
 pub(crate) enum UiAction {
+    /// Request the same safe close as the native window close control.
+    Exit,
     /// Open a new image file dialog.
     Open,
     /// Open a folder with explicit user consent for sibling navigation.
@@ -911,13 +913,28 @@ fn render_mosaic_overlay(
             actions.push(UiAction::OpenMosaicPhoto(cell.catalog_index));
         }
         let stroke = if cell.selected {
-            egui::Stroke::new(3.0, colors.accent)
+            egui::Stroke::new(
+                if colors == chrome_colors_for(crate::theme::Mode::Console) {
+                    1.5
+                } else {
+                    3.0
+                },
+                colors.accent,
+            )
         } else if response.hovered() {
             egui::Stroke::new(2.0, colors.text)
         } else {
             egui::Stroke::NONE
         };
         if stroke != egui::Stroke::NONE {
+            if cell.selected && colors == chrome_colors_for(crate::theme::Mode::Console) {
+                painter.rect_stroke(
+                    rect,
+                    3.0,
+                    Stroke::new(3.0, colors.panel),
+                    egui::StrokeKind::Inside,
+                );
+            }
             painter.rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
         }
     }
@@ -1141,6 +1158,13 @@ fn apply_chrome_theme(ctx: &egui::Context, mode: crate::theme::Mode) {
     visuals.window_stroke = Stroke::new(1.0, colors.border);
     visuals.widgets.noninteractive.fg_stroke.color = colors.text;
     visuals.widgets.inactive.fg_stroke.color = colors.text;
+    visuals.widgets.inactive.bg_fill = colors.raised;
+    visuals.widgets.inactive.weak_bg_fill = colors.panel;
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, colors.border);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, colors.border);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, colors.accent);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, colors.accent);
+    visuals.widgets.open.bg_stroke = Stroke::new(1.0, colors.accent);
     visuals.widgets.hovered.fg_stroke.color = colors.text;
     visuals.widgets.hovered.bg_fill = colors.raised;
     visuals.widgets.hovered.weak_bg_fill = colors.raised;
@@ -1203,6 +1227,7 @@ fn configure_top_menu_widgets(ui: &mut egui::Ui, colors: ChromeColors) {
     ui.spacing_mut().button_padding = Vec2::new(MENU_TITLE_PADDING_X, 4.0);
     ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
     ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
     ui.visuals_mut().widgets.hovered.bg_fill = colors.raised;
     ui.visuals_mut().widgets.hovered.weak_bg_fill = colors.raised;
     ui.visuals_mut().widgets.active.bg_fill = colors.active;
@@ -1610,7 +1635,9 @@ fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewM
     if !frame.dock.has_image {
         return reserve;
     }
-    reserve += chip(&chrome.rating_menu_label());
+    if let Some(label) = chrome.rating_strip_label() {
+        reserve += chip(&label);
+    }
     reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5)
         + 2.0 * ui.spacing().button_padding.x
         + TOP_METADATA_SPACING;
@@ -1652,17 +1679,13 @@ fn render_top_image_facts(
     chrome: ChromeViewModel,
     colors: ChromeColors,
 ) {
-    if frame.dock.has_image {
+    if let Some(label) = chrome.rating_strip_label() {
         Frame::new()
             .fill(colors.raised)
             .corner_radius(CornerRadius::same(6))
             .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
-                ui.label(
-                    RichText::new(chrome.rating_menu_label())
-                        .size(12.5)
-                        .color(colors.muted),
-                );
+                ui.label(RichText::new(label).size(12.5).color(colors.muted));
             });
         ui.add_space(TOP_METADATA_GAP);
     }
@@ -1816,9 +1839,37 @@ fn file_menu(
             }
             ui.separator();
             removal_menu_items(ui, actions, frame, chrome);
+            ui.separator();
+            exit_menu_item(ui, actions, frame.language);
         },
     )
     .response
+}
+
+fn exit_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, language: Language) {
+    let shortcut = format!("{PRIMARY_MODIFIER}+Q");
+    let label = if cfg!(target_os = "macos") {
+        tr!("Quit viewr")
+    } else {
+        tr!("Exit")
+    };
+    let response = ui.add(egui::Button::new(language.text(label)).shortcut_text(&shortcut));
+    // Some native accessibility backends omit keyboard_shortcut, so include
+    // the visible accelerator in the name as other menu commands do.
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Button,
+            true,
+            format!("{} {shortcut}", language.text(label)),
+        )
+    });
+    response.ctx.accesskit_node_builder(response.id, |node| {
+        node.set_keyboard_shortcut(shortcut.as_str());
+    });
+    if response.clicked() {
+        actions.push(UiAction::Exit);
+        ui.close();
+    }
 }
 
 fn removal_menu_items(
@@ -5363,7 +5414,7 @@ fn render_crop_handles(
         ),
     ];
     for (index, (center, cursor, name)) in centers.into_iter().enumerate() {
-        let visual = Rect::from_center_size(center, Vec2::splat(8.0));
+        let visual = Rect::from_center_size(center, Vec2::splat(6.0));
         painter.rect_filled(visual, CornerRadius::same(1), colors.text);
         painter.rect_stroke(
             visual,
@@ -8347,9 +8398,23 @@ mod tests {
         frame: &UiFrameOwned,
         label: &str,
     ) -> Vec<UiAction> {
+        click_test_control_at_size(context, frame, label, egui::vec2(1200.0, 800.0))
+    }
+
+    fn click_test_control_at_size(
+        context: &egui::Context,
+        frame: &UiFrameOwned,
+        label: &str,
+        size: egui::Vec2,
+    ) -> Vec<UiAction> {
+        let input = || {
+            let mut input = accessibility_input();
+            input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size));
+            input
+        };
         let mut update = None;
         for _ in 0..2 {
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = context.run_ui(input(), |ui| {
                 let _ = render(ui, frame);
             });
             update = output.platform_output.accesskit_update;
@@ -8368,7 +8433,7 @@ mod tests {
         );
         let mut actions = Vec::new();
         for pressed in [true, false] {
-            let mut input = accessibility_input();
+            let mut input = input();
             input.events = vec![
                 egui::Event::PointerMoved(center),
                 egui::Event::PointerButton {
@@ -8381,6 +8446,77 @@ mod tests {
             let _ = context.run_ui(input, |ui| actions.extend(render(ui, frame)));
         }
         actions
+    }
+
+    #[test]
+    fn file_menu_exit_is_localized_reachable_and_routes_safe_close() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            let context = egui::Context::default();
+            context.set_fonts(crate::typography::font_definitions());
+            context.enable_accesskit();
+            let mut frame = accessibility_test_frame();
+            frame.language = language;
+            let label = if cfg!(target_os = "macos") {
+                tr!("Quit viewr")
+            } else {
+                tr!("Exit")
+            };
+            assert!(
+                click_test_control_at_size(
+                    &context,
+                    &frame,
+                    language.text(tr!("File")),
+                    egui::vec2(640.0, 480.0)
+                )
+                .is_empty()
+            );
+            assert!(egui::Popup::is_any_open(&context));
+            let mut input = accessibility_input();
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 480.0),
+            ));
+            let output = context.run_ui(input, |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("menu accessibility");
+            let exit = update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| {
+                    node.label()
+                        .is_some_and(|name| name.starts_with(language.text(label)))
+                })
+                .expect("localized Exit");
+            assert_eq!(
+                exit.keyboard_shortcut(),
+                Some(format!("{}+Q", super::PRIMARY_MODIFIER).as_str())
+            );
+            assert!(!exit.is_disabled());
+            let bounds = exit.bounds().expect("Exit bounds");
+            assert!(
+                bounds.y1 <= 480.0 && bounds.x1 <= 640.0,
+                "Exit is reachable: {bounds:?}"
+            );
+            let actions = click_test_control_at_size(
+                &context,
+                &frame,
+                language.text(label),
+                egui::vec2(640.0, 480.0),
+            );
+            assert_eq!(actions.len(), 1);
+            assert!(matches!(actions[0], UiAction::Exit));
+            assert!(!egui::Popup::is_any_open(&context));
+        }
     }
 
     #[test]
@@ -9039,6 +9175,39 @@ mod tests {
             "visible text or accessible names bypassed the catalog:\n{}",
             failures.join("\n")
         );
+    }
+
+    #[test]
+    fn read_only_format_does_not_add_a_rating_scope_badge_to_the_viewer() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut frame = accessibility_test_frame();
+            frame.language = language;
+            frame.rating.capability = crate::ratings::RatingWriteCapability::ReadOnlyFormat;
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output.platform_output.accesskit_update.unwrap();
+            let badge = language.text(tr!("Rating: JPEG only"));
+            assert!(
+                !update
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(badge) || node.value() == Some(badge))
+            );
+            assert!(
+                update
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(language.text(tr!("File"))))
+            );
+        }
     }
 
     #[test]

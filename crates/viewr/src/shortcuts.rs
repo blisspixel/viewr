@@ -131,6 +131,10 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
                 action: "Save As",
             },
             ShortcutSpec {
+                keys: "{primary}+Q",
+                action: "Exit",
+            },
+            ShortcutSpec {
                 keys: "F10",
                 action: "Open the File menu",
             },

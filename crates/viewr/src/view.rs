@@ -159,13 +159,9 @@ pub fn uv_transform(rotation_steps: i32, flip_h: bool, flip_v: bool) -> [f32; 4]
 
 /// The largest scale fit will apply, in physical display pixels per source pixel.
 ///
-/// Fit shrinks a large image and leaves a small one alone. Enlarging a 64 by 64
-/// source to fill a 1000 pixel viewport is arithmetically honest and visually
-/// wrong: the result is a soft interpolated wall that no longer reads as a small
-/// image. Established viewers leave a small image at actual size and let the
-/// player enlarge it deliberately, so fit stops at one source pixel per physical
-/// display pixel, the same 100 percent the zoom readout reports. Explicit zoom
-/// is unaffected and still reaches its own limits.
+/// Windowed Fit leaves a small image at actual size. Fullscreen Fit can enlarge
+/// it to the available viewport; Actual Size still means one physical display
+/// pixel per source pixel in either mode.
 const MAX_FIT_SCALE: f32 = 1.0;
 
 /// Scale the image to fit entirely within the viewport, preserving aspect ratio
@@ -190,7 +186,20 @@ pub fn fit_to_viewport(
     rotated90: bool,
     insets: ViewportInsets,
 ) -> Placement {
-    fit_to_viewport_with_limit(viewport, image, rotated90, insets, MAX_FIT_SCALE)
+    fit_to_viewport_for_mode(viewport, image, rotated90, insets, false)
+}
+
+/// Fullscreen fills its available viewport, including when the source is small.
+#[must_use]
+pub(crate) fn fit_to_viewport_for_mode(
+    viewport: (u32, u32),
+    image: (u32, u32),
+    rotated90: bool,
+    insets: ViewportInsets,
+    fullscreen: bool,
+) -> Placement {
+    let limit = if fullscreen { f32::MAX } else { MAX_FIT_SCALE };
+    fit_to_viewport_with_limit(viewport, image, rotated90, insets, limit)
 }
 
 fn fit_to_viewport_with_limit(
@@ -243,7 +252,7 @@ fn fit_to_viewport_with_limit(
 
 /// Fit a complete image inside an arbitrary physical-pixel collage tile.
 ///
-/// Unlike single-photo Fit, this may enlarge a small source because the tile is
+/// Like fullscreen Fit, this may enlarge a small source because the tile is
 /// already derived from that photo's aspect ratio. It never crops or distorts.
 #[must_use]
 pub fn fit_to_physical_viewport(
@@ -283,12 +292,34 @@ pub fn fit_pixel_scale(
     rotated90: bool,
     insets: ViewportInsets,
 ) -> f32 {
+    fit_pixel_scale_for_mode(viewport, image, rotated90, insets, false)
+}
+
+/// Physical pixel scale at Fit, including fullscreen enlargement.
+#[must_use]
+pub(crate) fn fit_pixel_scale_for_mode(
+    viewport: (u32, u32),
+    image: (u32, u32),
+    rotated90: bool,
+    insets: ViewportInsets,
+    fullscreen: bool,
+) -> f32 {
     let source_width = if rotated90 { image.1 } else { image.0 } as f32;
     if source_width <= 0.0 || viewport.0 == 0 {
         return 0.0;
     }
-    let placement = fit_to_viewport(viewport, image, rotated90, insets);
+    let placement = fit_to_viewport_for_mode(viewport, image, rotated90, insets, fullscreen);
     placement.scale[0] * viewport.0 as f32 / source_width
+}
+
+/// Keep wheel steps continuous from Actual Size when fullscreen Fit enlarges.
+#[must_use]
+pub(crate) fn zoom_after_step(current: f32, factor: f32, fit_pixel_scale: f32) -> f32 {
+    if !factor.is_finite() || factor <= 0.0 {
+        return current;
+    }
+    let minimum = 0.05 / fit_pixel_scale.max(1.0);
+    (current * factor).clamp(minimum, 64.0)
 }
 
 /// Apply a multiplicative zoom while keeping the NDC point under the cursor fixed.
@@ -543,6 +574,70 @@ mod tests {
             },
         );
         assert!((docked - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fullscreen_fits_small_and_large_images_without_cropping() {
+        for image in [(64, 64), (100, 60), (60, 100), (6000, 4000)] {
+            for rotated in [false, true] {
+                let insets = ViewportInsets {
+                    left: 300.0,
+                    ..ViewportInsets::default()
+                };
+                let placed =
+                    super::fit_to_viewport_for_mode((1920, 1080), image, rotated, insets, true);
+                let width = placed.scale[0] * 1920.0;
+                let height = placed.scale[1] * 1080.0;
+                assert!(width <= 1620.01 && height <= 1080.01);
+                assert!((width - 1620.0).abs() < 0.01 || (height - 1080.0).abs() < 0.01);
+                let (source_width, source_height) =
+                    if rotated { (image.1, image.0) } else { image };
+                assert!((width / height - source_width as f32 / source_height as f32).abs() < 1e-5);
+                assert!((placed.offset[0] - 300.0 / 1920.0).abs() < 1e-6);
+                let fit_scale =
+                    super::fit_pixel_scale_for_mode((1920, 1080), image, rotated, insets, true);
+                assert!((width / fit_scale - source_width as f32).abs() < 0.01);
+                assert!((height / fit_scale - source_height as f32).abs() < 0.01);
+            }
+        }
+        let windowed_scale = super::fit_pixel_scale_for_mode(
+            (1920, 1080),
+            (64, 64),
+            false,
+            ViewportInsets::default(),
+            false,
+        );
+        assert!((windowed_scale - 1.0).abs() < 1e-6);
+        let hidden = super::fit_to_viewport_for_mode(
+            (0, 0),
+            (64, 64),
+            false,
+            ViewportInsets::default(),
+            true,
+        );
+        assert!(hidden.scale.iter().all(|value| value.abs() < f32::EPSILON));
+    }
+
+    #[test]
+    fn zoom_steps_from_actual_size_remain_small_after_fullscreen_enlargement() {
+        for fit_scale in [1.0, 10.0, 1080.0] {
+            let actual = 1.0 / fit_scale;
+            for factor in [1.15, 1.0 / 1.15] {
+                let stepped = super::zoom_after_step(actual, factor, fit_scale);
+                assert!((stepped * fit_scale - factor).abs() < 1e-6);
+            }
+            assert!((super::zoom_after_step(0.0, 0.5, fit_scale) * fit_scale - 0.05).abs() < 1e-6);
+        }
+        assert_eq!(
+            super::zoom_after_step(64.0, 1.15, 1.0).to_bits(),
+            64.0_f32.to_bits()
+        );
+        for invalid in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
+            assert_eq!(
+                super::zoom_after_step(1.0, invalid, 1.0).to_bits(),
+                1.0_f32.to_bits()
+            );
+        }
     }
 
     #[test]

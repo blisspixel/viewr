@@ -53,7 +53,9 @@ use crate::current_work::{
     trash_submission_work_blocker,
 };
 use crate::decode::{DecodedImage, LoadedImage};
-use crate::edit_state::{EditAction, edit_transaction_failure_message};
+use crate::edit_state::{
+    CanvasTool, EditAction, canvas_tool, edit_transaction_failure_message, within_click_distance,
+};
 use crate::entry_state::{
     FolderScanDisposition, FolderScanSuccess, PathEntry, committed_scan_path_is_admissible,
     folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
@@ -6059,16 +6061,24 @@ impl App {
 
     fn update_cursor_icon(&self) {
         if let Some(renderer) = self.renderer.as_ref() {
-            let cursor = if self.space_held {
-                if self.mouse_left_down {
+            if renderer.egui_ctx.is_pointer_over_egui() {
+                return;
+            }
+            let cursor = if renderer.image_size().is_none() {
+                winit::window::CursorIcon::Default
+            } else if canvas_tool(
+                self.transform.is_cropping,
+                self.heal.active,
+                self.space_held,
+            ) == CanvasTool::Pan
+            {
+                if self.transform.is_panning {
                     winit::window::CursorIcon::Grabbing
                 } else {
                     winit::window::CursorIcon::Grab
                 }
-            } else if self.transform.is_cropping || self.heal.active {
-                winit::window::CursorIcon::Crosshair
             } else {
-                winit::window::CursorIcon::Default
+                winit::window::CursorIcon::Crosshair
             };
             renderer.window().set_cursor(cursor);
         }
@@ -6076,6 +6086,39 @@ impl App {
 
     fn zoom_at_cursor(&mut self, factor: f32) {
         self.zoom_at_screen_position(factor, self.cursor_pos);
+    }
+
+    fn constrain_pan(&mut self) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        let Some(image) = renderer.image_size() else {
+            return;
+        };
+        let size = renderer.window().inner_size();
+        let viewport = (size.width, size.height);
+        let insets = self.viewport_insets();
+        let base = crate::view::fit_to_viewport(
+            viewport,
+            image,
+            self.transform.rotation_steps.rem_euclid(2) != 0,
+            insets,
+        );
+        let mut placement = base;
+        placement.scale = base.scale.map(|value| value * self.transform.zoom);
+        placement.offset = [
+            base.offset[0] + self.transform.offset_x,
+            base.offset[1] + self.transform.offset_y,
+        ];
+        if let Some(offset) = crate::view::reachable_pan_offset(
+            viewport,
+            insets,
+            placement,
+            32.0 * renderer.ui_scale_factor() as f32,
+        ) {
+            self.transform.offset_x = offset[0] - base.offset[0];
+            self.transform.offset_y = offset[1] - base.offset[1];
+        }
     }
 
     fn zoom_at_screen_position(&mut self, factor: f32, screen_position: (f64, f64)) {
@@ -6110,6 +6153,7 @@ impl App {
         self.transform.zoom = new_zoom;
         self.transform.offset_x = next_total[0] - base.offset[0];
         self.transform.offset_y = next_total[1] - base.offset[1];
+        self.constrain_pan();
         if let Some(r) = self.renderer.as_mut() {
             r.window().request_redraw();
         }
@@ -7946,7 +7990,11 @@ impl ApplicationHandler<UserEvent> for App {
                     button: winit::event::MouseButton::Left,
                     ..
                 } => true,
-                WindowEvent::CursorMoved { .. } if self.heal.painting => true,
+                WindowEvent::CursorMoved { .. }
+                    if self.heal.painting || self.transform.is_panning =>
+                {
+                    true
+                }
                 WindowEvent::KeyboardInput { event, .. } => {
                     use winit::keyboard::{Key, NamedKey};
                     space_release_must_unwind(&event.logical_key, event.state, self.space_held)
@@ -7974,6 +8022,10 @@ impl ApplicationHandler<UserEvent> for App {
                 _ => false,
             };
             if !application_must_handle {
+                if let WindowEvent::CursorMoved { position, .. } = &event {
+                    self.cursor_pos = (position.x, position.y);
+                    self.transform.last_cursor = Some(self.cursor_pos);
+                }
                 return;
             }
         }
@@ -8104,7 +8156,6 @@ impl ApplicationHandler<UserEvent> for App {
                         self.context_menu_pos = None;
                     }
                     self.mouse_left_down = pressed;
-                    self.update_cursor_icon();
                     if !pressed {
                         self.transform.is_panning = false;
                     }
@@ -8112,22 +8163,28 @@ impl ApplicationHandler<UserEvent> for App {
                         let now = Instant::now();
                         let pos = self.cursor_pos;
                         if let Some((t, (lx, ly))) = self.last_click {
-                            let near = (pos.0 - lx).hypot(pos.1 - ly) < 6.0;
+                            let near = within_click_distance((lx, ly), pos);
                             if near && now.duration_since(t) < Duration::from_millis(350) {
                                 self.toggle_fit_actual();
                                 self.last_click = None;
+                                self.update_cursor_icon();
                                 return;
                             }
                         }
                         self.last_click = Some((now, pos));
                     }
+                    let tool = canvas_tool(
+                        self.transform.is_cropping,
+                        self.heal.active,
+                        self.space_held,
+                    );
                     if !pressed && self.heal.painting {
                         self.finish_heal_stroke();
-                    } else if self.heal.active && !self.space_held {
+                    } else if tool == CanvasTool::SpotHeal {
                         if pressed {
                             self.begin_heal_stroke();
                         }
-                    } else if self.transform.is_cropping && !self.space_held {
+                    } else if tool == CanvasTool::Crop {
                         if pressed {
                             if let Some((x, y)) = self.transform.last_cursor {
                                 self.transform.crop_start = self.screen_to_uv(x, y);
@@ -8138,11 +8195,10 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             self.transform.crop_start = None;
                         }
-                    } else if self.space_held {
-                        self.transform.is_panning = pressed;
                     } else {
-                        self.transform.is_panning = false;
+                        self.transform.is_panning = pressed && self.current_image.is_some();
                     }
+                    self.update_cursor_icon();
                 } else if pressed
                     && matches!(
                         button,
@@ -8180,6 +8236,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.continue_heal_stroke();
                     self.request_redraw();
                 } else if self.transform.is_cropping
+                    && !self.space_held
                     && let Some(start) = self.transform.crop_start
                     && let Some(end) = self.screen_to_uv(position.x, position.y)
                 {
@@ -8232,9 +8289,19 @@ impl ApplicationHandler<UserEvent> for App {
                         renderer.window().request_redraw();
                     }
                 } else if self.mouse_left_down
-                    && (self.transform.is_panning || self.space_held)
+                    && self.transform.is_panning
+                    && canvas_tool(
+                        self.transform.is_cropping,
+                        self.heal.active,
+                        self.space_held,
+                    ) == CanvasTool::Pan
                     && let Some((last_x, last_y)) = self.transform.last_cursor
                 {
+                    if let Some((_, (click_x, click_y))) = self.last_click
+                        && !within_click_distance((click_x, click_y), (position.x, position.y))
+                    {
+                        self.last_click = None;
+                    }
                     if self.space_held {
                         self.space_dragged = true;
                     }
@@ -8246,6 +8313,7 @@ impl ApplicationHandler<UserEvent> for App {
                         self.transform.offset_y -= (dy as f32) / (win_size.height as f32 / 2.0);
                         renderer.window().request_redraw();
                     }
+                    self.constrain_pan();
                 }
                 self.transform.last_cursor = Some((position.x, position.y));
 
@@ -8277,6 +8345,10 @@ impl ApplicationHandler<UserEvent> for App {
                 if is_space && !pressed {
                     if self.space_held {
                         self.space_held = false;
+                        self.transform.is_panning = self.mouse_left_down
+                            && self.current_image.is_some()
+                            && canvas_tool(self.transform.is_cropping, self.heal.active, false)
+                                == CanvasTool::Pan;
                         self.update_cursor_icon();
                         if space_tap_fits(self.space_dragged, shortcuts_blocked) {
                             self.fit_to_view();
@@ -8333,8 +8405,11 @@ impl ApplicationHandler<UserEvent> for App {
                         if self.heal.painting {
                             self.finish_heal_stroke();
                         }
+                        self.transform.crop_start = None;
                         self.space_held = true;
                         self.space_dragged = false;
+                        self.transform.is_panning =
+                            self.mouse_left_down && self.current_image.is_some();
                         self.update_cursor_icon();
                     }
                     return;
@@ -8516,6 +8591,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 let mut ui_actions = Vec::new();
                 self.toast.expire(Instant::now());
+                self.constrain_pan();
                 // Snapshot UI/transform state before exclusive borrow of the renderer.
                 let scale_factor = self
                     .renderer

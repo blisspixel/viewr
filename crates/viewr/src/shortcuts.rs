@@ -72,7 +72,7 @@ pub(crate) struct EmptyStateCopy {
 /// One Help shortcut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ShortcutSpec {
-    /// Key text. `{primary}` is replaced with Ctrl or Cmd.
+    /// Key text. `{primary}` is replaced with Ctrl or Cmd. Empty for mouse gestures.
     pub keys: &'static str,
     /// What the keys do.
     pub action: &'static str,
@@ -220,6 +220,27 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
             ShortcutSpec {
                 keys: "U",
                 action: "Undo Trash",
+            },
+        ],
+    },
+    ShortcutGroup {
+        heading: "Mouse",
+        items: &[
+            ShortcutSpec {
+                keys: "",
+                action: "Drag to pan",
+            },
+            ShortcutSpec {
+                keys: "",
+                action: "Wheel or trackpad to zoom",
+            },
+            ShortcutSpec {
+                keys: "",
+                action: "Double-click for Fit / Actual Size",
+            },
+            ShortcutSpec {
+                keys: "",
+                action: "Back / Forward buttons browse images",
             },
         ],
     },

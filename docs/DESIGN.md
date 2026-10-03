@@ -47,9 +47,9 @@ disappears. This spec is the converged result of two rounds of design critique
   Edit, View, Tools, and Help. Each menu title carries 8px of padding on each
   side and no spacing between titles, so titles sit about 16px apart and
   neighboring highlights meet instead of leaving a dead seam for a pointer
-  crossing an open menu bar. The right side shows a stable folder counter and, when space
-  permits, the filename, dimensions, and physical zoom percentage, where 100
-  percent means one source pixel per physical display pixel. Filename, dimensions,
+  crossing an open menu bar. The right side shows a stable folder counter and
+  physical zoom control, where 100 percent means one source pixel per physical
+  display pixel. When space permits it also shows filename and dimensions. Filename, dimensions,
   and zoom use dedicated 8px reading gaps rather than inheriting the compact menu
   spacing. Long names truncate with the full value available as a tooltip. Routine
   three-second outcomes, including Move to Trash, use this status area instead of
@@ -115,10 +115,12 @@ disappears. This spec is the converged result of two rounds of design critique
   Esc cancels; Enter applies.
 - Zoom is focal-point anchored (pixel under cursor stays put). Trackpad pixel
   deltas and wheel detents both supported.
-- Space held + drag = temporary pan (classic hand tool); Space tap without drag
-  resets fit. Fit clears zoom and pan only; rotation, flip, and an in-progress
-  crop stay. Left-drag without Space does not pan. The resting cursor over the
-  photo is the arrow; Grab appears only while Space is held.
+- Image view defaults to the hand tool: the resting cursor is Grab and left-drag
+  pans directly, with Grabbing during the drag. Crop and Spot Heal explicitly
+  select editing gestures. Space held + drag temporarily pans in either tool,
+  including over crop handles; releasing Space restores the edit tool. Space tap
+  without drag resets fit. Fit clears zoom and pan only; rotation, flip, and an
+  in-progress crop stay. Chrome keeps its own pointer behavior.
 - Fullscreen (`F` or `F11`) is immersive: the top bar and docked panels hide, and
   the photo uses the whole window. Stored panel flags are unchanged, so exiting
   restores them. Spot Heal still docks its inspector while it is active. Escape
@@ -274,12 +276,24 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Zoom and pan
 - Wheel zoom is focal-point anchored: the pixel under the cursor stays under the
-  cursor. This is non-negotiable and is half of what makes the viewer feel correct.
+  cursor within the reachable-image bounds. Only a move that would lose the
+  reachable portion of the image is constrained.
 - Zoom steps are geometric (x1.15 per wheel detent). Trackpad pixel deltas map to
-  bounded continuous steps. `0` fits, `1` selects exact physical pixels, and `+`
-  or `-` zooms around the image-safe viewport center.
-- Pan follows the pointer directly with no inertia or rubber banding. Holding Space
-  temporarily selects pan; tapping Space without dragging resets fit.
+  bounded continuous steps. `Ctrl/Cmd+0` fits, `Ctrl/Cmd+1` selects exact physical
+  pixels, and `+` or `-` zooms around the image-safe viewport center.
+  The percentage in top chrome opens the same Fit, Actual Size, Zoom In, and
+  Zoom Out actions. It stays visible at 640 by 480, supports keyboard focus,
+  Enter to open, and Escape to dismiss, and has a translated accessible name.
+- Pan follows the pointer directly with no inertia or rubber banding. It is the
+  default image interaction. Holding Space temporarily selects pan in Crop and
+  Spot Heal; tapping Space without dragging resets fit. Double-click toggles Fit
+  and Actual Size. A drag cannot become the first click of that toggle. Mouse
+  Back and Forward buttons browse the folder. Help lists these mouse gestures
+  alongside the keyboard controls.
+- A pan stops before the image becomes unreachable. At least 32 logical pixels
+  of each image axis remain inside the image-safe viewport; an axis smaller than
+  that stays fully visible. Window resizing, dock changes, rotation, and zoom
+  recheck these limits. Fit remains a one-action return to the centered view.
 - Key auto-repeat is reserved for continuous navigation, Crop nudging, page or
   frame stepping, and zoom. Dialogs, toggles, transforms, Escape, reload, delete,
   and undo or redo run once per physical key press. One held Escape therefore

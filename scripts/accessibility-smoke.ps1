@@ -115,8 +115,17 @@ public static class ViewrAccessibilityNativeMethods {
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point { public int X; public int Y; }
+
     [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
+    private static extern bool SetPhysicalCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetPhysicalCursorPos(out Point point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPhysicalPoint(Point point);
 
     private static bool FocusWindowForInput(IntPtr hwnd) {
         if (GetForegroundWindow() == hwnd) return true;
@@ -201,7 +210,18 @@ public static class ViewrAccessibilityNativeMethods {
     }
 
     public static bool HoverScreenPoint(IntPtr hwnd, int x, int y) {
-        return FocusWindowForInput(hwnd) && SetCursorPos(x, y);
+        // UIA bounds are physical pixels even when the test host is DPI-unaware.
+        if (!FocusWindowForInput(hwnd) || !SetPhysicalCursorPos(x, y)) return false;
+        if (WindowFromPhysicalPoint(new Point { X = x, Y = y }) != hwnd) return false;
+        // Real mouse motion wakes cursor presentation on keyboard-only CI desktops
+        // and produces a move event even if the requested point was already current.
+        var inputs = new[] {
+            new Input { Type = 0, Value = new InputValue { Mouse = new MouseInput { Dx = 1, Flags = 0x0001 } } },
+            new Input { Type = 0, Value = new InputValue { Mouse = new MouseInput { Dx = -1, Flags = 0x0001 } } }
+        };
+        return SendInput(2, inputs, Marshal.SizeOf<Input>()) == 2 &&
+            SetPhysicalCursorPos(x, y) &&
+            WindowFromPhysicalPoint(new Point { X = x, Y = y }) == hwnd;
     }
 
     public static bool SendKeyPress(IntPtr hwnd, ushort virtualKey) {
@@ -249,8 +269,7 @@ public static class ViewrAccessibilityNativeMethods {
     }
 
     public static bool ClickScreenPoint(IntPtr hwnd, int screenX, int screenY) {
-        if (!FocusWindowForInput(hwnd)) return false;
-        if (!SetCursorPos(screenX, screenY)) return false;
+        if (!HoverScreenPoint(hwnd, screenX, screenY)) return false;
         Thread.Sleep(20);
         var inputs = new[] {
             new Input {
@@ -271,12 +290,26 @@ public static class ViewrAccessibilityNativeMethods {
     }
 
     public static bool ScrollScreenPoint(IntPtr hwnd, int screenX, int screenY, int delta) {
-        if (!FocusWindowForInput(hwnd) || !SetCursorPos(screenX, screenY)) return false;
+        if (!HoverScreenPoint(hwnd, screenX, screenY)) return false;
         var inputs = new[] {
             new Input {
                 Type = 0,
                 Value = new InputValue {
                     Mouse = new MouseInput { MouseData = unchecked((uint)delta), Flags = 0x0800 }
+                }
+            }
+        };
+        return SendInput(1, inputs, Marshal.SizeOf<Input>()) == 1;
+    }
+
+    public static bool SendLeftButton(IntPtr hwnd, bool pressed) {
+        if (pressed && (!FocusWindowForInput(hwnd) ||
+            !GetPhysicalCursorPos(out var point) || WindowFromPhysicalPoint(point) != hwnd)) return false;
+        var inputs = new[] {
+            new Input {
+                Type = 0,
+                Value = new InputValue {
+                    Mouse = new MouseInput { Flags = pressed ? 0x0002u : 0x0004u }
                 }
             }
         };
@@ -1912,19 +1945,26 @@ try {
     }
     Start-Sleep -Milliseconds 300
     $openHand = [ViewrAccessibilityNativeMethods]::VisibleCursor()
-    $client = Get-ApplicationClientSize
-    $pointer = [IntPtr](([int]($client.Width / 2)) -bor (([int]($client.Height / 2)) -shl 16))
     try {
-        [void][ViewrAccessibilityNativeMethods]::PostMessage($script:Window, 0x0201, [IntPtr]1, $pointer)
-        Start-Sleep -Milliseconds 300
-        $closedHand = [ViewrAccessibilityNativeMethods]::VisibleCursor()
-        if ($openHand -eq $closedHand) {
-            throw "Windows pan did not change from an open to a closed hand"
+        if (-not [ViewrAccessibilityNativeMethods]::SendLeftButton($script:Window, $true)) {
+            throw "could not press the pan button"
         }
+        Wait-ForResult -Description "a distinct closed hand while panning" -Probe {
+            $cursor = [ViewrAccessibilityNativeMethods]::VisibleCursor()
+            if ($cursor -ne $openHand) { return $cursor }
+            return $null
+        } | Out-Null
     }
     finally {
-        [void][ViewrAccessibilityNativeMethods]::PostMessage($script:Window, 0x0202, [IntPtr]::Zero, $pointer)
+        if (-not [ViewrAccessibilityNativeMethods]::SendLeftButton($script:Window, $false)) {
+            throw "could not release the pan button"
+        }
     }
+    Wait-ForResult -Description "the open hand after releasing pan" -Probe {
+        $cursor = [ViewrAccessibilityNativeMethods]::VisibleCursor()
+        if ($cursor -eq $openHand) { return $cursor }
+        return $null
+    } | Out-Null
 
     Activate-Element -Element (Wait-ForElement -Name "File")
     $exit = Wait-ForElement -Name "Exit" -Prefix

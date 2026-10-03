@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.7.3](https://github.com/blisspixel/viewr/releases/tag/v0.7.3), the focused viewer-polish patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.4`, verified candidate and tag-ready Linux entry and window-loss patch |
+| Published install target | Immutable [v0.7.4](https://github.com/blisspixel/viewr/releases/tag/v0.7.4), the Linux entry and window-loss patch with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.4`, the published Linux entry and window-loss patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.4** after green exact-commit tag-ready CI and fuzz; its complete candidate gate passed; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.7.3 archives. The v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.4 archives. The v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -56,10 +56,10 @@ Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
 
-Current development addresses the v0.7.3 Linux entry and window-loss feedback:
+v0.7.4 addresses the v0.7.3 Linux entry and window-loss feedback:
 an always-available typed path, visible chooser recovery guidance, and retiring
 a destroyed native drawable while accepted file work finishes. Issue
-[137](https://github.com/blisspixel/viewr/issues/137) tracks this bounded patch;
+[137](https://github.com/blisspixel/viewr/issues/137) records this shipped patch;
 the published v0.7.3 assets retain their original behavior.
 
 ## Order of operations to 1.0
@@ -114,6 +114,7 @@ v0.7.1  Rating scan and installer recovery patch [released, acceptance rows open
 v0.7.2  Launch fallback patch             [released, acceptance rows open]
 
 v0.7.3  Focused viewer polish patch       [released, acceptance rows open]
+v0.7.4  Linux entry and window-loss patch [released, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -211,9 +212,9 @@ activity history.
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.7.3` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Public release | `0.7.4` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
 | Focused patch released | `0.7.3` | Candidate commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe`, [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410), and tag commit `10002a0f8e13de160b41bf95978ab96df2e404a9` | [Release run 37112869774](https://github.com/blisspixel/viewr/actions/runs/37112869774) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; v0.8 remains open |
-| Patch tag-ready | `0.7.4` | Candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a` and [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754) | Complete automated gate, all four archives, and fixture verified; public target remains v0.7.3 until publication |
+| Linux entry patch released | `0.7.4` | Candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a`, [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754), and tag commit `e9c12c336da0a8a6cb4284ae94c2739ddcf7cafc` | [Release run 37152808216](https://github.com/blisspixel/viewr/actions/runs/37152808216) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
@@ -249,7 +250,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped through v0.7.3; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
+| Integrated product quality | Shipped through v0.7.4; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
 | Release readiness | Open for v0.8 | Automate clean install, update, uninstall, rollback, association, and provenance checks. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -294,7 +295,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.7.3; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.4; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -620,7 +621,7 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set from the current release line. v0.6.0 through v0.7.3 were
+  candidate set from the current release line. v0.6.0 through v0.7.4 were
   tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.

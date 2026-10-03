@@ -1,16 +1,16 @@
 # Product quality
 
-**Status:** open, and still open after the v0.7.3 tag. This matrix is the
+**Status:** open, and still open after the v0.7.4 tag. This matrix is the
 executable contract for first-time, power-user, admin, failure-recovery, and
 visual-polish paths. It does not close v0.6.
 Representative Windows, macOS, and Linux hardware still have to pass the same rows
 using the checksummed archives and synthetic fixture artifact from one retained
 candidate workflow run.
 
-v0.6.0 through v0.7.3 were published before any of those rows were recorded. The
+v0.6.0 through v0.7.4 were published before any of those rows were recorded. The
 released archives therefore carry no representative-hardware evidence, the
 release notes state that limit, and this matrix is carried forward as open work
-that remains unverified after the v0.7.3 preview unless its candidate-bound
+that remains unverified after the v0.7.4 preview unless its candidate-bound
 records are completed. The missing rows are disclosed in release notes and do
 not halt the explicitly limited preview.
 
@@ -357,5 +357,5 @@ bytes change, the record no longer closes the gate.
 Do not claim representative-hardware acceptance while any required platform row
 is unrecorded. A known critical or high-severity product-quality defect still
 blocks publication. v0.6.0 through v0.6.5 were tagged without these records,
-and the v0.7.3 preview discloses the same gap. Automated gates do not substitute
+and the v0.7.4 preview discloses the same gap. Automated gates do not substitute
 for the hardware records.

@@ -92,23 +92,25 @@ workflow results, and release assets remain the source of truth:
 - [x] Publish and verify annotated tag `v0.7.2`, the in-window path fallback
   patch. The immutable [v0.7.2 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.2)
   discloses the same open acceptance rows and unsigned status.
+- [x] Publish and verify annotated tag `v0.7.3`, the focused viewer-polish
+  patch. The immutable [v0.7.3 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.3)
+  discloses the same open acceptance rows and unsigned status.
 
 ## Version state policy
 
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.2. The tag-ready README and INSTALL label their intended v0.7.3
-   links as pending publication; those assets are not public yet.
+   currently v0.7.3. README and INSTALL use this fixed immutable install target.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.3`, tag-ready for the focused viewer-polish patch and not yet published.
+   `0.7.3`, matching the published focused viewer-polish patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
    archive name or version string alone.
 4. **Intended tag:** the next version selected for publication after its gates
-   close. The next patch is v0.7.3; the next minor milestone remains v0.8.0.
+   close. The next minor milestone is v0.8.0 after its release-readiness gates.
 
 Advance the workspace version once, before collecting evidence for the intended
 tag. That release-preparation change updates `Cargo.toml`, `Cargo.lock`,
@@ -126,7 +128,7 @@ and attestations. Their notes disclose the uncollected representative-hardware
 rows. Those exceptions did not close the carried v0.6 evidence gate or begin
 v0.7 accessibility evidence.
 
-The v0.7.3 candidate is the same narrow patch exception for viewing-control,
+The v0.7.3 patch used the same narrow patch exception for viewing-control,
 folder-navigation, and closely related visual fixes. It includes reviewed patch
 dependency maintenance, requires the full automated release procedure, and
 carries the open hardware, native assistive-technology, and v0.8 acceptance work.
@@ -461,7 +463,21 @@ Windows archive has SHA-256
 `39b0e2446fe070bc4b72ec187126d320c0e30131b59cfe8c34ab9e60ecefe01d`
 and passed the full native Windows suite, including 319-image navigation,
 compact cursor inspection, ratings, Trash and Undo, recovery, and Exit.
-The patch is tag-ready, not yet published. Representative-hardware and native
+
+[Main CI run 37112203407](https://github.com/blisspixel/viewr/actions/runs/37112203407),
+[fuzz run 37112218398](https://github.com/blisspixel/viewr/actions/runs/37112218398),
+and [CodeQL run 37112203203](https://github.com/blisspixel/viewr/actions/runs/37112203203)
+passed on tag commit `10002a0f8e13de160b41bf95978ab96df2e404a9`.
+[Tag release run 37112869774](https://github.com/blisspixel/viewr/actions/runs/37112869774)
+repeated quality and fuzzing, rebuilt all four archives, and published the
+immutable twelve-asset [v0.7.3 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.3)
+on 2026-10-03. All twelve downloaded assets passed checksum and exact-tag
+provenance verification; all four archives passed the official manifest verifier.
+The public Windows archive has SHA-256
+`76980e5cbc8a02b1055c6e2945c1b4aa111401edf6eeb63b46787e6c2e0da5ab`.
+Both installed executables matched that archive on Windows. The doctor probe
+passed, existing preferences were preserved, and the Start menu and user PATH
+continue to point to the installed viewer. Representative-hardware and native
 screen-reader acceptance remain uncollected.
 
 ## Required before a broadly recommended 1.0
@@ -488,9 +504,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.7.2 is public, immutable, checksummed, and attested, and v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.7.3 is public, immutable, checksummed, and attested, and v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
+  known-issues note. v0.7.3, v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
   acceptance evidence, which their release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.

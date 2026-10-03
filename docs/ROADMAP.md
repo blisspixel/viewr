@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.7.2](https://github.com/blisspixel/viewr/releases/tag/v0.7.2), the in-window path fallback patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.3`, tag-ready after the verified focused viewer-polish candidate; publication pending |
+| Published install target | Immutable [v0.7.3](https://github.com/blisspixel/viewr/releases/tag/v0.7.3), the focused viewer-polish patch with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.3`, matching the published focused viewer-polish patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
-| Next version update | The v0.7.3 patch candidate is verified. Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.3**, tag-ready pending green CI and fuzz on the final tag commit. v0.8.0 remains the next minor milestone; uncollected hardware or screen-reader rows stay open |
+| Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
+| Next tag allowed | **v0.8.0** after its release-readiness gates close, with explicit preview limits. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.7.2 archives. The v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.3 archives. The v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -107,7 +107,7 @@ v0.7.1  Rating scan and installer recovery patch [released, acceptance rows open
 
 v0.7.2  Launch fallback patch             [released, acceptance rows open]
 
-v0.7.3  Focused viewer polish patch       [tag-ready, acceptance rows open]
+v0.7.3  Focused viewer polish patch       [released, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -185,16 +185,16 @@ or accessibility evidence gates.
 
 | Item | State | Acceptance |
 | --- | --- | --- |
-| Default hand interaction | Implemented, unreleased | Image view shows a distinct open hand and drags directly to pan, closing the hand during a drag. Windows uses a compact DPI-scaled bitmap rather than its four-way native fallback. Space temporarily pans in Crop and Spot Heal without moving a crop handle or painting. Release restores the edit tool. Chrome retains its own gestures. |
-| Platform typography and Console restraint | Implemented, unreleased | Installed platform sans and monospace fonts load once through bounded local reads with validated bundled fallbacks. Localized menus stay reachable. Console uses softer phosphor colors, themed controls, a thinner collage selection border, and smaller crop visuals with unchanged drag targets. |
-| Quiet rating status | Implemented, unreleased | Unsupported formats keep their JPEG-only scope note in the rating menu. The viewing strip keeps actionable JPEG ratings and errors. |
-| Explicit Exit | Implemented, unreleased | File exposes Exit or Quit viewr and Ctrl+Q or Cmd+Q. Menu, shortcut, and native window close share pending-write completion behavior. |
-| Fullscreen Fit | Implemented, unreleased | Entering fullscreen fits the complete image to the available viewport, including small sources. Returning refits the window. Actual Size remains exact and subsequent wheel zoom remains continuous. Rotation, flips, and crop selection survive fitting. |
-| Direct-file folder navigation | Implemented, unreleased | Windows folder scan and decode agree on child identity and version evidence after a legacy directory probe. An unchanged scanned neighbor opens; changed or substituted sources remain rejected. Synthetic direct-file navigation is checked with 319 images. |
-| Mouse-control discoverability | Implemented, unreleased | Localized Help lists drag-to-pan, wheel/trackpad zoom, double-click Fit/Actual Size, and Back/Forward navigation. |
-| Canvas background accuracy | Implemented, unreleased | Theme and inspection backgrounds decode sRGB once before clearing the sRGB surface. Displayed Dark, Light, Console, and high-contrast colors match their specified palette values. |
-| Pan recovery and bounds | Implemented, unreleased | Keep at least 32 logical pixels of each image axis reachable, or the complete axis when smaller. Recheck after zoom, rotation, resize, and dock changes. Preserve direct motion within bounds. Fit remains a one-action recovery. Tests cover rotated and tiny images and docked viewports. |
-| Zoom readout as a control | Implemented, unreleased | The existing percentage opens Fit, Actual Size, Zoom In, and Zoom Out. It remains visible at 640 by 480, supports keyboard focus and activation, and exposes translated accessible names. |
+| Default hand interaction | Shipped v0.7.3 | Image view shows a distinct open hand and drags directly to pan, closing the hand during a drag. Windows uses a compact DPI-scaled bitmap rather than its four-way native fallback. Space temporarily pans in Crop and Spot Heal without moving a crop handle or painting. Release restores the edit tool. Chrome retains its own gestures. |
+| Platform typography and Console restraint | Shipped v0.7.3 | Installed platform sans and monospace fonts load once through bounded local reads with validated bundled fallbacks. Localized menus stay reachable. Console uses softer phosphor colors, themed controls, a thinner collage selection border, and smaller crop visuals with unchanged drag targets. |
+| Quiet rating status | Shipped v0.7.3 | Unsupported formats keep their JPEG-only scope note in the rating menu. The viewing strip keeps actionable JPEG ratings and errors. |
+| Explicit Exit | Shipped v0.7.3 | File exposes Exit or Quit viewr and Ctrl+Q or Cmd+Q. Menu, shortcut, and native window close share pending-write completion behavior. |
+| Fullscreen Fit | Shipped v0.7.3 | Entering fullscreen fits the complete image to the available viewport, including small sources. Returning refits the window. Actual Size remains exact and subsequent wheel zoom remains continuous. Rotation, flips, and crop selection survive fitting. |
+| Direct-file folder navigation | Shipped v0.7.3 | Windows folder scan and decode agree on child identity and version evidence after a legacy directory probe. An unchanged scanned neighbor opens; changed or substituted sources remain rejected. Synthetic direct-file navigation is checked with 319 images. |
+| Mouse-control discoverability | Shipped v0.7.3 | Localized Help lists drag-to-pan, wheel/trackpad zoom, double-click Fit/Actual Size, and Back/Forward navigation. |
+| Canvas background accuracy | Shipped v0.7.3 | Theme and inspection backgrounds decode sRGB once before clearing the sRGB surface. Displayed Dark, Light, Console, and high-contrast colors match their specified palette values. |
+| Pan recovery and bounds | Shipped v0.7.3 | Keep at least 32 logical pixels of each image axis reachable, or the complete axis when smaller. Recheck after zoom, rotation, resize, and dock changes. Preserve direct motion within bounds. Fit remains a one-action recovery. Tests cover rotated and tiny images and docked viewports. |
+| Zoom readout as a control | Shipped v0.7.3 | The existing percentage opens Fit, Actual Size, Zoom In, and Zoom Out. It remains visible at 640 by 480, supports keyboard focus and activation, and exposes translated accessible names. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
 
 Clipboard image open/copy, touch gestures, and slideshow remain separately
@@ -205,8 +205,8 @@ activity history.
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.7.2` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
-| Focused patch tag-ready | `0.7.3` | Commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe` and [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410) | Verified four archives and fixture; Windows candidate passes the native suite. Require final-commit CI and fuzz before tagging, with explicit preview limits and v0.8 still open |
+| Public release | `0.7.3` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Focused patch released | `0.7.3` | Candidate commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe`, [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410), and tag commit `10002a0f8e13de160b41bf95978ab96df2e404a9` | [Release run 37112869774](https://github.com/blisspixel/viewr/actions/runs/37112869774) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; v0.8 remains open |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
@@ -242,7 +242,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped through v0.7.2; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
+| Integrated product quality | Shipped through v0.7.3; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
 | Release readiness | Open for v0.8 | Automate clean install, update, uninstall, rollback, association, and provenance checks. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -287,7 +287,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.7.2; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.3; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -613,7 +613,7 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set from the current release line. v0.6.0 through v0.7.2 were
+  candidate set from the current release line. v0.6.0 through v0.7.3 were
   tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.

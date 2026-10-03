@@ -1,9 +1,8 @@
 # Installing viewr
 
-viewr is pre-1.0. v0.7.3 is the tag-ready preview, a focused viewer-polish patch.
-Publication is pending; the commands below become available when its GitHub
-Release is published. Candidate archives are checksummed and manifest-verified;
-published assets will also be attested, but the Windows
+viewr is pre-1.0. v0.7.3 is the current public GitHub Release, a focused
+viewer-polish patch. Its portable archives are checksummed, manifest-verified,
+and attested, but the Windows
 artifacts are not Authenticode-signed and the macOS artifacts are not Developer
 ID-signed or notarized. Normal operating-system trust warnings may appear.
 Installation is per user and never requires elevation. The
@@ -86,7 +85,7 @@ configuration. The installer reports this without editing profile files.
 ## Review before running
 
 Pipe-to-shell commands are convenient but execute installer code. The commands
-above target the intended immutable `v0.7.3` release rather than a moving branch.
+above are fixed to the immutable `v0.7.3` release rather than a moving branch.
 To review it first:
 
 ```sh

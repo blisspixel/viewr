@@ -49,10 +49,8 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.3 is the tag-ready preview. Publication is pending; the commands below become
-available when its GitHub Release is published. Candidate archives are checksummed and
-manifest-verified; published assets will also be attested. They are
-not Authenticode-signed on Windows or notarized on macOS.
+v0.7.3 is the current public preview. Its portable archives are checksummed and
+attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
@@ -77,7 +75,7 @@ curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.3/install.
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-Once published, the command downloads the v0.7.3 installer, which installs the v0.7.3
+The published command downloads the v0.7.3 installer, which installs the v0.7.3
 archive after verifying its SHA-256 sidecar and internal manifest, without
 giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
@@ -136,17 +134,15 @@ automatically.
 
 ## Essential controls
 
-The v0.7.3 candidate includes File > Exit (Quit viewr on macOS), with Ctrl+Q
+v0.7.3 includes File > Exit (Quit viewr on macOS), with Ctrl+Q
 or Cmd+Q, and installed platform interface fonts with bundled fallbacks.
 Console uses softer phosphor-green text and selection outlines.
 
-The v0.7.3 candidate uses a compact open-hand cursor and direct drag-to-pan in
+v0.7.3 uses a compact open-hand cursor and direct drag-to-pan in
 image view, with a closed hand while dragging. The zoom percentage opens Fit,
 Actual Size, and zoom controls. Pan limits keep part of the photo reachable.
 Fullscreen starts at Fit and enlarges small images to the available screen area;
-Actual Size remains available for exact pixel inspection. The published v0.7.2
-preview still requires holding Space to pan, has a display-only zoom percentage,
-and retains its existing zoom when entering fullscreen.
+Actual Size remains available for exact pixel inspection.
 
 | Action | Control |
 | --- | --- |
@@ -189,22 +185,23 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 
 Image Background independently offers Theme Default, Black, Neutral Gray, and
 White. Appearance changes interface chrome and canvas only, never image pixels.
-The v0.7.3 candidate corrects overly light canvas backgrounds in the published
+v0.7.3 corrects overly light canvas backgrounds in the previous
 v0.7.2 preview so they match the specified appearance colors.
 Windows Text size and GNOME text scaling enlarge the interface when the window
 has room; image zoom does not change.
 
 ## Project status
 
-v0.7.2 is the current public preview and install target, not a percentage-complete
-score or a claim that the product is finished. It retains the operating-system
-contrast, text sizing, and twelve-photo collage work from v0.7.0, and improves
-folder rating scans, installer recovery, and empty-launch fallback.
+v0.7.3 is the current public preview and install target. It ships focused viewing
+and navigation fixes, platform typography, quieter chrome, and accurate canvas
+backgrounds. The representative-hardware and screen-reader acceptance rows remain
+open; this patch does not complete the v0.8 release-readiness milestone.
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, v0.6.1 through v0.6.5, and v0.7.1 remain published. `main` continues the logical order in the
+v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.2 remain
+published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.8.0** release
 readiness through v0.9 publisher authentication, then v1.0.
-The [current release notes](docs/releases/v0.7.2.md) state the exact published
+The [current release notes](docs/releases/v0.7.3.md) state the exact published
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
 Unpublished candidates are identified by exact commit and workflow run. The

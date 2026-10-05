@@ -68,7 +68,9 @@ disappears. This spec is the converged result of two rounds of design critique
   windows at least 720px wide the outcome or navigation notice, always drawn
   last, receives all the width the metadata chips and a 120px filename slice do
   not need. A sticky explanation such as a missing-image substitution therefore
-  reads whole whenever the window has room. Immersive
+  reads whole whenever the window has room. On main, notices can use two lines
+  within the fixed bar height; longer copy truncates with its complete tooltip
+  and accessible text retained. Immersive
   fullscreen and the full-image collage have no top
   chrome, so the same bounded notice temporarily uses their compact overlay.
 - Tools: hidden by default for a clean image-first surface. View > Panels or `T`

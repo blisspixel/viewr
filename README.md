@@ -138,6 +138,8 @@ An editable image or folder path is available on the empty card
 and File > Open Path while viewing. Enter opens it; a missing path stays editable
 with a complete inline explanation. A native chooser that returns no selection
 points to these alternatives. Path input stays in memory for this session.
+If a native chooser does not appear on your desktop, use the path field or
+File > Open Path to keep opening images and folders.
 
 v0.7.3 includes File > Exit (Quit viewr on macOS), with Ctrl+Q
 or Cmd+Q, and installed platform interface fonts with bundled fallbacks.
@@ -153,6 +155,7 @@ Actual Size remains available for exact pixel inspection.
 | --- | --- |
 | Open file | `O`, `Ctrl/Cmd+O`, or drop a file |
 | Open folder | `Ctrl/Cmd+Shift+O`, or drop a folder |
+| Open typed path | Empty-card Image or folder path field, or File > Open Path; Enter opens |
 | Paste path | `Ctrl/Cmd+V` |
 | Previous or next image | Left/Right, Home/End, Page Up/Page Down |
 | Folder order | File > Preferences or View > Folder Sort; Latest First is the initial default |

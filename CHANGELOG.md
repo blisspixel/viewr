@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- Allow top-bar notices to wrap onto two lines within the existing bar height.
+  Missing-image recovery guidance remains readable beside page, rating, and
+  filename controls when native fonts make a single line too wide. Longer
+  messages retain a complete hover tooltip.
+
 ## 0.7.4 - 2026-10-03
 
 - Retire a destroyed native window before accessibility, input, or rendering

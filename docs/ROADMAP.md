@@ -202,6 +202,8 @@ or accessibility evidence gates.
 | Canvas background accuracy | Shipped v0.7.3 | Theme and inspection backgrounds decode sRGB once before clearing the sRGB surface. Displayed Dark, Light, Console, and high-contrast colors match their specified palette values. |
 | Pan recovery and bounds | Shipped v0.7.3 | Keep at least 32 logical pixels of each image axis reachable, or the complete axis when smaller. Recheck after zoom, rotation, resize, and dock changes. Preserve direct motion within bounds. Fit remains a one-action recovery. Tests cover rotated and tiny images and docked viewports. |
 | Zoom readout as a control | Shipped v0.7.3 | The existing percentage opens Fit, Actual Size, Zoom In, and Zoom Out. It remains visible at 640 by 480, supports keyboard focus and activation, and exposes translated accessible names. |
+| Reliable path entry | Shipped v0.7.4 | Keep the editable Image or folder path field on the empty card and File > Open Path while viewing. Enter opens without consuming viewer shortcuts. Native chooser cancellation or unavailability points to path entry, Paste Path, and drop. |
+| Recovery notice readability | Implemented on main, unreleased | Top-bar notices use up to two lines within the existing height. Render tests use platform fonts, inspect painted text for clipping, and cover long filenames, page and rating controls, and translated recovery copy. Complete hover and accessible text remain available for longer messages. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
 
 Clipboard image open/copy, touch gestures, and slideshow remain separately

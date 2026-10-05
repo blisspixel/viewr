@@ -1650,7 +1650,9 @@ fn strip_text_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
 /// its minimum legible slice. The status may use whatever remains, so a long
 /// explanation is shown whole whenever the window has room for it.
 fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewModel) -> f32 {
-    let measure = |text: &str, size: f32| strip_text_width(ui, text, size);
+    // Widgets round their allocations separately. Reserve each text width
+    // upward so accumulated fractions cannot clip the final filename.
+    let measure = |text: &str, size: f32| strip_text_width(ui, text, size).ceil();
     // A chip is its text, its 8px side margins, the strip spacing, and the
     // reading gap added after it.
     let chip = |text: &str| measure(text, 12.5) + 16.0 + TOP_METADATA_SPACING + TOP_METADATA_GAP;
@@ -2159,11 +2161,19 @@ fn add_top_toast(
     );
     ui.scope(|ui| {
         ui.set_max_width(max_width);
-        let response = ui.add(
-            egui::Label::new(RichText::new(message).size(12.5).color(colors.muted))
-                .truncate()
-                .show_tooltip_when_elided(true),
+        let family = ui.style().text_styles[&egui::TextStyle::Body]
+            .family
+            .clone();
+        let mut text = egui::text::LayoutJob::simple(
+            message.to_owned(),
+            egui::FontId::new(12.5, family),
+            colors.muted,
+            max_width,
         );
+        // Two lines fit inside the fixed strip. A single-line cap clipped
+        // recovery guidance even in wide windows with native fonts.
+        text.wrap.max_rows = 2;
+        let response = ui.add(egui::Label::new(text).wrap().show_tooltip_when_elided(true));
         if announcement == ToastAnnouncement::PoliteStatus {
             mark_as_polite_status(&response);
         }
@@ -8328,15 +8338,20 @@ mod tests {
         "The selected image is no longer available. Opening the first image in the folder.";
 
     /// Render twice so a changed appearance has applied its fonts, then return
-    /// the second frame's tree, the notice's unelided width, and the
+    /// the second frame's tree, the notice's painted galley, and the
     /// filename's unelided width in that style.
     fn strip_with_notice(
         frame: &UiFrameOwned,
         width: f32,
-    ) -> (egui::accesskit::TreeUpdate, f32, f32) {
+    ) -> (
+        egui::accesskit::TreeUpdate,
+        std::sync::Arc<egui::Galley>,
+        f32,
+    ) {
         let context = egui::Context::default();
+        context.set_fonts(crate::typography::font_definitions());
         context.enable_accesskit();
-        let mut notice_width = 0.0;
+        let mut notice_galley = None;
         let mut name_width = 0.0;
         let mut update = None;
         for _ in 0..2 {
@@ -8347,14 +8362,38 @@ mod tests {
             ));
             let output = context.run_ui(input, |ui| {
                 let _ = render(ui, frame);
-                notice_width = super::strip_text_width(ui, MISSING_NOTICE, 12.5);
-                name_width = super::strip_text_width(ui, "current.png", 13.5);
+                name_width =
+                    egui::WidgetText::from(egui::RichText::new("current.png").size(13.5).strong())
+                        .into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Extend),
+                            f32::INFINITY,
+                            egui::FontSelection::Default,
+                        )
+                        .size()
+                        .x;
             });
+            let message = &frame.toast.as_ref().expect("notice fixture").text;
+            for shape in &output.shapes {
+                if let egui::epaint::Shape::Text(text) = &shape.shape
+                    && text.galley.job.text == *message
+                {
+                    let bounds = text.galley.rect.translate(text.pos.to_vec2());
+                    assert!(
+                        shape.clip_rect.contains_rect(bounds),
+                        "painted notice is clipped: {bounds:?} vs {:?}",
+                        shape.clip_rect
+                    );
+                    assert!(bounds.top() >= 0.0 && bounds.bottom() <= TOP_BAR_HEIGHT);
+                    assert!(text.galley.rows.len() <= 2);
+                    notice_galley = Some(std::sync::Arc::clone(&text.galley));
+                }
+            }
             update = output.platform_output.accesskit_update;
         }
         (
             update.expect("top-bar AccessKit update"),
-            notice_width,
+            notice_galley.expect("painted notice"),
             name_width,
         )
     }
@@ -8373,15 +8412,15 @@ mod tests {
     }
 
     fn assert_notice_whole_beside_metadata(frame: &UiFrameOwned, width: f32) {
-        let (update, notice_width, _) = strip_with_notice(frame, width);
+        let (update, galley, _) = strip_with_notice(frame, width);
         let notice = node_bounds(&update, MISSING_NOTICE).expect("notice in the top strip");
-        assert!(
-            notice.x1 - notice.x0 + 0.5 >= f64::from(notice_width),
-            "notice elided at {width} px: {notice:?} narrower than {notice_width}"
-        );
+        assert!(!galley.elided, "notice elided at {width} px: {notice:?}");
         assert!(notice.x1 <= f64::from(width));
         let help = node_bounds(&update, "Help").expect("Help menu title");
-        for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", "current.png"] {
+        let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(
+            frame.file_path.as_ref().expect("filename fixture"),
+        ));
+        for value in ["Page 2 of 3", "1 / 2", "Rating: Unrated", &name] {
             let other = node_bounds(&update, value)
                 .unwrap_or_else(|| panic!("{value} stays in the strip beside the notice"));
             assert!(
@@ -8406,13 +8445,51 @@ mod tests {
     }
 
     #[test]
+    fn navigation_notice_with_a_long_filename_fits_wide_windows() {
+        for width in [1_260.0, 1_600.0] {
+            let mut frame = page_frame(true, true);
+            frame.file_path = Some(format!("C:/photos/{}.jpg", "long-name-".repeat(12)));
+            frame.toast = Some(visual_toast(MISSING_NOTICE));
+            assert_notice_whole_beside_metadata(&frame, width);
+            frame.theme_mode = crate::theme::Mode::Console;
+            assert_notice_whole_beside_metadata(&frame, width);
+        }
+    }
+
+    #[test]
+    fn translated_navigation_notices_fit_with_platform_fonts() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Console] {
+                let mut frame = page_frame(true, true);
+                frame.language = language;
+                frame.theme_mode = mode;
+                frame.toast = Some(visual_toast(language.text(tr!(
+                    "The selected image is no longer available. Opening the first image in the folder."
+                ))));
+                let (_, galley, _) = strip_with_notice(&frame, 1_600.0);
+                assert!(
+                    !galley.elided,
+                    "{language:?} {mode:?}: clipped recovery copy"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn an_unbounded_notice_never_displaces_the_metadata() {
         let endless = "The selected image is no longer available. ".repeat(12);
         for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Console] {
             let mut frame = page_frame(true, true);
             frame.theme_mode = mode;
             frame.toast = Some(visual_toast(&endless));
-            let (update, _, name_width) = strip_with_notice(&frame, 1_270.0);
+            let (update, galley, name_width) = strip_with_notice(&frame, 1_270.0);
+            assert!(galley.elided);
+            assert_eq!(galley.job.text, endless);
             let help = node_bounds(&update, "Help").expect("Help menu title");
             for value in [
                 "Page 2 of 3",
@@ -8443,10 +8520,10 @@ mod tests {
         frame.toast = Some(visual_toast(MISSING_NOTICE));
         frame.selected_file_name = Some(format!("{}.png", "long-name-".repeat(12)));
         frame.load_error = Some("Could not decode this image".to_owned());
-        let (update, notice_width, _) = strip_with_notice(&frame, 1_270.0);
+        let (update, galley, _) = strip_with_notice(&frame, 1_270.0);
         let notice = node_bounds(&update, MISSING_NOTICE).expect("notice beside Retry");
         assert!(
-            notice.x1 - notice.x0 + 0.5 >= f64::from(TOP_STATUS_MAX_WIDTH.min(notice_width)),
+            galley.job.wrap.max_width >= TOP_STATUS_MAX_WIDTH,
             "a long failure status must not starve the notice: {notice:?}"
         );
     }

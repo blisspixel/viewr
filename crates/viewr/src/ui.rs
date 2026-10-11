@@ -3207,7 +3207,7 @@ fn render_platform_file_association_steps(
     }
     #[cfg(target_os = "linux")]
     {
-        const COMMANDS: &str = "xdg-mime default com.github.blisspixel.viewr.desktop image/png\nxdg-mime default com.github.blisspixel.viewr.desktop image/jpeg";
+        const COMMANDS: &str = "xdg-mime default io.github.blisspixel.viewr.desktop image/png\nxdg-mime default io.github.blisspixel.viewr.desktop image/jpeg";
         ui.label(
             RichText::new(language.text(tr!("Use your desktop's file properties or Default Applications screen to choose viewr for PNG and JPEG. The viewr installer registers the desktop entry but does not change a default.")))
             .size(13.0)

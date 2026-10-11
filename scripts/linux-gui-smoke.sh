@@ -83,7 +83,7 @@ try:
     if not class_hint.res_name or not class_hint.res_class:
         raise RuntimeError('viewer X11 window class is incomplete')
     names = (ctypes.string_at(class_hint.res_name), ctypes.string_at(class_hint.res_class))
-    if names != (b'viewr', b'com.github.blisspixel.viewr'):
+    if names != (b'viewr', b'io.github.blisspixel.viewr'):
         raise RuntimeError('viewer X11 window class does not match its desktop entry')
 finally:
     x11.XFree(class_hint.res_name)

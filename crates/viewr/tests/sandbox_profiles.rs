@@ -139,7 +139,7 @@ fn plist_value_for_key<'a, 'input>(
 
 #[test]
 fn flatpak_profile_has_only_reviewed_runtime_grants() {
-    let source = read_repository_file("packaging/flatpak/com.github.blisspixel.viewr.yml");
+    let source = read_repository_file("packaging/flatpak/io.github.blisspixel.viewr.yml");
     assert_eq!(
         source
             .lines()
@@ -150,7 +150,7 @@ fn flatpak_profile_has_only_reviewed_runtime_grants() {
     );
     assert_eq!(
         yaml_scalar(&source, "app-id"),
-        Some("com.github.blisspixel.viewr")
+        Some("io.github.blisspixel.viewr")
     );
     assert_eq!(yaml_scalar(&source, "runtime-version"), Some("25.08"));
 
@@ -176,8 +176,8 @@ fn flatpak_profile_has_only_reviewed_runtime_grants() {
         "append-path: /usr/lib/sdk/rust-stable/bin",
         "CARGO_HOME: /run/build/viewr/cargo",
         "cargo --offline build --locked --release --workspace",
-        "install -Dm644 assets/linux/viewr.desktop /app/share/applications/com.github.blisspixel.viewr.desktop",
-        "install -Dm644 assets/icon.svg /app/share/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg",
+        "install -Dm644 assets/linux/viewr.desktop /app/share/applications/io.github.blisspixel.viewr.desktop",
+        "install -Dm644 assets/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.blisspixel.viewr.svg",
         "- cargo-sources.json",
     ] {
         assert!(
@@ -201,10 +201,10 @@ fn linux_desktop_entry_advertises_only_core_formats_without_taking_over_defaults
     let source = read_repository_file("assets/linux/viewr.desktop");
     let fields = desktop_fields(&source);
     assert_eq!(fields.get("Exec"), Some(&"viewr %f"));
-    assert_eq!(fields.get("Icon"), Some(&"com.github.blisspixel.viewr"));
+    assert_eq!(fields.get("Icon"), Some(&"io.github.blisspixel.viewr"));
     assert_eq!(
         fields.get("StartupWMClass"),
-        Some(&"com.github.blisspixel.viewr")
+        Some(&"io.github.blisspixel.viewr")
     );
     assert_eq!(fields.get("Terminal"), Some(&"false"));
 

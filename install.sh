@@ -296,6 +296,13 @@ if [ "$os" = "Linux" ]; then
         [ -f "$source_root/$required" ] && [ ! -L "$source_root/$required" ] ||
             fail "release archive is missing a required regular file: $required"
     done
+    # Older verified archives retain their identity when explicitly rolled back.
+    desktop_id=$(sed -n 's/^Icon=//p' "$source_root/assets/linux/viewr.desktop")
+    case "$desktop_id" in
+        io.github.blisspixel.viewr) previous_id=com.github.blisspixel.viewr ;;
+        com.github.blisspixel.viewr) previous_id=io.github.blisspixel.viewr ;;
+        *) fail "release desktop entry has an unsupported application identity" ;;
+    esac
 fi
 
 releases_dir="$INSTALL_ROOT/releases"
@@ -405,9 +412,10 @@ if [ "$os" = "Linux" ] && [ -f "$source_root/assets/linux/viewr.desktop" ]; then
     icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
     mkdir -p "$applications_dir" "$icons_dir"
     install -m 0644 "$source_root/assets/linux/viewr.desktop" \
-        "$applications_dir/com.github.blisspixel.viewr.desktop"
+        "$applications_dir/$desktop_id.desktop"
     install -m 0644 "$source_root/assets/icon.svg" \
-        "$icons_dir/com.github.blisspixel.viewr.svg"
+        "$icons_dir/$desktop_id.svg"
+    rm -f -- "$applications_dir/$previous_id.desktop" "$icons_dir/$previous_id.svg"
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
     fi

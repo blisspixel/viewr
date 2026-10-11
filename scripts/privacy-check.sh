@@ -11,7 +11,7 @@ cargo deny --locked check --hide-inclusion-graph -D warnings \
 
 echo "== packaging artifacts must omit network grants =="
 # Only flag real finish-args, not comments that say "do NOT add --share=network".
-if grep -v '^\s*#' packaging/flatpak/com.github.blisspixel.viewr.yml | grep -q -- '--share=network'; then
+if grep -v '^\s*#' packaging/flatpak/io.github.blisspixel.viewr.yml | grep -q -- '--share=network'; then
   echo "Flatpak manifest must not grant --share=network" >&2
   exit 1
 fi

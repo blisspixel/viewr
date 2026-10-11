@@ -10,7 +10,7 @@ import unittest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY_ROOT / "scripts" / "ci-install-flatpak-sdk.sh"
 WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
-MANIFEST = REPOSITORY_ROOT / "packaging" / "flatpak" / "com.github.blisspixel.viewr.yml"
+MANIFEST = REPOSITORY_ROOT / "packaging" / "flatpak" / "io.github.blisspixel.viewr.yml"
 TOOLCHAIN = REPOSITORY_ROOT / "rust-toolchain.toml"
 ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(\d+)$")
 CHANNEL = re.compile(r'^channel\s*=\s*"([^"]+)"\s*$', re.MULTILINE)

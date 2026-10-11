@@ -100,10 +100,10 @@ source list, then perform the same clean build and in-sandbox worker probe as CI
 python3 scripts/generate-flatpak-cargo-sources.py
 flatpak-builder --force-clean --disable-rofiles-fuse \
   target/profile-check/flatpak \
-  packaging/flatpak/com.github.blisspixel.viewr.yml
+  packaging/flatpak/io.github.blisspixel.viewr.yml
 flatpak-builder --run \
   target/profile-check/flatpak \
-  packaging/flatpak/com.github.blisspixel.viewr.yml \
+  packaging/flatpak/io.github.blisspixel.viewr.yml \
 viewr doctor
 ```
 

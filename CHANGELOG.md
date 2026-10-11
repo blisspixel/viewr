@@ -5,6 +5,9 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Set the Linux window identity to `com.github.blisspixel.viewr` on Wayland and
+  X11 so window rules, launchers, and taskbars can match the desktop entry and
+  icon. Document optional per-user launcher setup for Linux source builds.
 - Allow top-bar notices to wrap onto two lines within the existing bar height.
   Missing-image recovery guidance remains readable beside page, rating, and
   filename controls when native fonts make a single line too wide. Longer

@@ -6456,7 +6456,7 @@ used_by:
   jxl-oxide 0.12.6
   jxl-threadpool 1.0.0
   jxl-vardct 0.11.1
-  libc 0.2.189
+  libc 0.2.190
   linebender_resource_handle 0.1.1
   litrs 1.0.0
   miniz_oxide 0.8.9

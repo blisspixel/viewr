@@ -10,3 +10,4 @@ Categories=Graphics;Viewer;RasterGraphics;
 MimeType=image/bmp;image/gif;image/jpeg;image/jxl;image/png;image/qoi;image/svg+xml;image/tiff;image/vnd.microsoft.icon;image/vnd.ms-dds;image/vnd.radiance;image/webp;image/x-exr;image/x-farbfeld;image/x-portable-anymap;image/x-portable-bitmap;image/x-portable-graymap;image/x-portable-pixmap;image/x-tga;
 Keywords=image;photo;picture;viewer;
 StartupNotify=true
+StartupWMClass=com.github.blisspixel.viewr

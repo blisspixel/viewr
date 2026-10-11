@@ -146,6 +146,28 @@ The binaries are written to `target/release`. Keep the main executable and worke
 from the same build together. On Linux, the build also needs the normal Wayland/X11
 development packages listed in `.github/workflows/ci.yml`.
 
+On Linux, building alone does not install a launcher or register viewr in Open
+With. To add both for the current user, run these optional commands from the
+repository root after building:
+
+```sh
+install -Dm755 target/release/viewr "$HOME/.local/bin/viewr"
+install -Dm755 target/release/viewr-decode "$HOME/.local/bin/viewr-decode"
+install -Dm644 assets/linux/viewr.desktop \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/com.github.blisspixel.viewr.desktop"
+install -Dm644 assets/icon.svg \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg"
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+fi
+```
+
+Ensure `$HOME/.local/bin` is on the graphical session's `PATH`. These commands
+replace any existing viewr binaries at that location; repeat both binary copies
+together after rebuilding. They add an available application without changing
+default image handlers. The desktop entry and icon match viewr's Wayland
+application ID and X11 window class, `com.github.blisspixel.viewr`.
+
 Maintainers can exercise the canonical release-archive contract for one supported
 target without publishing anything. Build with an explicit target, then package
 and independently verify the resulting archive:

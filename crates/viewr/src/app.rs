@@ -7976,6 +7976,14 @@ impl ApplicationHandler<UserEvent> for App {
             .with_theme(self.theme_preference.window_theme())
             .with_visible(false);
 
+        #[cfg(target_os = "linux")]
+        {
+            use winit::platform::wayland::WindowAttributesExtWayland;
+
+            // winit shares this name between Wayland app_id and X11 WM_CLASS.
+            attrs = attrs.with_name("com.github.blisspixel.viewr", "viewr");
+        }
+
         if let (Some(monitor), Some(monitor_size)) = (monitor.as_ref(), monitor_size) {
             attrs = placed_window_attributes(attrs, monitor, monitor_size, window_size);
         }

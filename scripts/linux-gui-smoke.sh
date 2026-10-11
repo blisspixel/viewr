@@ -57,8 +57,14 @@ import time
 
 x11 = ctypes.CDLL('libX11.so.6')
 pointer, integer, unsigned, long = ctypes.c_void_p, ctypes.c_int, ctypes.c_uint, ctypes.c_ulong
+
+class ClassHint(ctypes.Structure):
+    _fields_ = [('res_name', pointer), ('res_class', pointer)]
+
 x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
 x11.XOpenDisplay.restype = pointer
+x11.XGetClassHint.argtypes = [pointer, long, ctypes.POINTER(ClassHint)]
+x11.XFree.argtypes = [pointer]
 x11.XGetGeometry.argtypes = [pointer, long, ctypes.POINTER(long), ctypes.POINTER(integer), ctypes.POINTER(integer), ctypes.POINTER(unsigned), ctypes.POINTER(unsigned), ctypes.POINTER(unsigned), ctypes.POINTER(unsigned)]
 x11.XGetImage.argtypes = [pointer, long, integer, integer, unsigned, unsigned, long, integer]
 x11.XGetImage.restype = pointer
@@ -70,6 +76,18 @@ display = x11.XOpenDisplay(None)
 if not display:
     raise RuntimeError('could not connect to the private X display')
 window = int(sys.argv[1])
+class_hint = ClassHint()
+if not x11.XGetClassHint(display, window, ctypes.byref(class_hint)):
+    raise RuntimeError('viewer has no X11 window class')
+try:
+    if not class_hint.res_name or not class_hint.res_class:
+        raise RuntimeError('viewer X11 window class is incomplete')
+    names = (ctypes.string_at(class_hint.res_name), ctypes.string_at(class_hint.res_class))
+    if names != (b'viewr', b'com.github.blisspixel.viewr'):
+        raise RuntimeError('viewer X11 window class does not match its desktop entry')
+finally:
+    x11.XFree(class_hint.res_name)
+    x11.XFree(class_hint.res_class)
 root, x, y = long(), integer(), integer()
 width, height, border, depth = unsigned(), unsigned(), unsigned(), unsigned()
 if not x11.XGetGeometry(display, window, ctypes.byref(root), ctypes.byref(x), ctypes.byref(y), ctypes.byref(width), ctypes.byref(height), ctypes.byref(border), ctypes.byref(depth)):

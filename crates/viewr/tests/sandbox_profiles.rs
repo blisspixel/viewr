@@ -202,6 +202,10 @@ fn linux_desktop_entry_advertises_only_core_formats_without_taking_over_defaults
     let fields = desktop_fields(&source);
     assert_eq!(fields.get("Exec"), Some(&"viewr %f"));
     assert_eq!(fields.get("Icon"), Some(&"com.github.blisspixel.viewr"));
+    assert_eq!(
+        fields.get("StartupWMClass"),
+        Some(&"com.github.blisspixel.viewr")
+    );
     assert_eq!(fields.get("Terminal"), Some(&"false"));
 
     let mime_types: Vec<_> = fields

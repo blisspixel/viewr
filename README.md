@@ -82,6 +82,10 @@ Run the same command again for an explicit update. For review-first installation
 manual archive verification, uninstall steps, platform prerequisites, or a source
 build, see [Installing viewr](docs/INSTALL.md).
 
+Linux source builds use the unreleased `io.github.blisspixel.viewr` desktop ID.
+Existing source installs should follow the launcher's
+[identity migration steps](docs/INSTALL.md#linux-identity-migration).
+
 ## What it does
 
 - Opens JPEG, PNG, GIF, WebP, TIFF, SVG, JPEG XL, OpenEXR, and common bitmap

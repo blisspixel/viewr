@@ -7981,7 +7981,7 @@ impl ApplicationHandler<UserEvent> for App {
             use winit::platform::wayland::WindowAttributesExtWayland;
 
             // winit shares this name between Wayland app_id and X11 WM_CLASS.
-            attrs = attrs.with_name("com.github.blisspixel.viewr", "viewr");
+            attrs = attrs.with_name("io.github.blisspixel.viewr", "viewr");
         }
 
         if let (Some(monitor), Some(monitor_size)) = (monitor.as_ref(), monitor_size) {

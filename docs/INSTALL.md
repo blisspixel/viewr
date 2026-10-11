@@ -154,8 +154,11 @@ repository root after building:
 install -Dm755 target/release/viewr "$HOME/.local/bin/viewr"
 install -Dm755 target/release/viewr-decode "$HOME/.local/bin/viewr-decode"
 install -Dm644 assets/linux/viewr.desktop \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/com.github.blisspixel.viewr.desktop"
+  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.github.blisspixel.viewr.desktop" &&
 install -Dm644 assets/icon.svg \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/io.github.blisspixel.viewr.svg" &&
+rm -f -- \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/applications/com.github.blisspixel.viewr.desktop" \
   "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/com.github.blisspixel.viewr.svg"
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "${XDG_DATA_HOME:-$HOME/.local/share}/applications"
@@ -166,7 +169,9 @@ Ensure `$HOME/.local/bin` is on the graphical session's `PATH`. These commands
 replace any existing viewr binaries at that location; repeat both binary copies
 together after rebuilding. They add an available application without changing
 default image handlers. The desktop entry and icon match viewr's Wayland
-application ID and X11 window class, `com.github.blisspixel.viewr`.
+application ID and X11 window class, `io.github.blisspixel.viewr`. Removing only
+the previous viewr launcher and icon avoids duplicate entries after a source
+upgrade. See Linux identity migration below for existing associations and rules.
 
 Maintainers can exercise the canonical release-archive contract for one supported
 target without publishing anything. Build with an explicit target, then package
@@ -261,18 +266,43 @@ aborting inside the dynamic loader or failing without a reason.
 not running. viewr uses the X server named by `DISPLAY` in that case rather than
 failing, and says so in the doctor report.
 
-The installer registers `com.github.blisspixel.viewr.desktop` as an available image
-viewer. It never changes a default. File > Default Image Viewer repeats this
-boundary and offers copyable PNG and JPEG commands. To opt in explicitly:
+The published v0.7.4 installer registers `com.github.blisspixel.viewr.desktop`.
+Current source builds use `io.github.blisspixel.viewr.desktop`; this identity
+change is unreleased. Neither installation changes a default. File > Default
+Image Viewer offers commands matching its build. For current source builds,
+opt in explicitly:
 
 ```sh
-xdg-mime default com.github.blisspixel.viewr.desktop image/png
-xdg-mime default com.github.blisspixel.viewr.desktop image/jpeg
+xdg-mime default io.github.blisspixel.viewr.desktop image/png
+xdg-mime default io.github.blisspixel.viewr.desktop image/jpeg
 ```
 
 Run similar commands only for MIME types you deliberately choose. Linux startup
 requires standard seccomp support and local Unix D-Bus for accessibility. It exits
 rather than running with a weakened network boundary.
+
+For the published v0.7.4 archive, use `com.github.blisspixel.viewr.desktop` in
+those commands instead.
+
+#### Linux identity migration
+
+The Linux desktop ID is now `io.github.blisspixel.viewr`, following the
+[code-hosted application naming rule](https://docs.flathub.org/docs/for-app-authors/requirements#application-id).
+This is local identity maintenance, not a Flathub submission. macOS and Windows
+package identifiers remain unchanged.
+
+When installing an archive, the current installer uses the identity declared in
+that verified archive's desktop entry and removes the other viewr launcher and
+icon after installing the replacements. This also avoids duplicate entries on
+an explicit rollback to an older archive. Source installations should use the
+copy-and-cleanup commands above. Only the two named viewr files are removed.
+
+Existing MIME defaults are left untouched. If an association points to the
+removed desktop filename, choose viewr again in desktop settings or repeat the
+`xdg-mime default` command for each format you want to associate. Update any
+window rules keyed on the previous ID, and unpin and repin stale launchers.
+Wayland app_id, X11 WM_CLASS, StartupWMClass, desktop filename, and icon name
+match the new ID in current builds; the X11 instance name stays `viewr`.
 
 ### macOS
 
@@ -306,8 +336,9 @@ only the two viewr executables.
 On macOS or Linux, first confirm that `~/.local/bin/viewr` points inside the
 installer-owned viewr releases directory, then remove that symlink and the
 `${XDG_DATA_HOME:-$HOME/.local/share}/viewr` directory. Linux users may also remove
-the `com.github.blisspixel.viewr.desktop` and `com.github.blisspixel.viewr.svg`
-files from their user data directories.
+the `io.github.blisspixel.viewr.desktop` and `io.github.blisspixel.viewr.svg`
+files from their user data directories, plus the corresponding
+`com.github.blisspixel.viewr` files if an older installation remains.
 
 Uninstalling viewr never changes or deletes photos.
 

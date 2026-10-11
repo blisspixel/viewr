@@ -53,6 +53,7 @@ class UnixInstallerTests(unittest.TestCase):
         *,
         doctor_passes: bool = True,
         extra_member: bool = False,
+        desktop_id: str = "io.github.blisspixel.viewr",
     ) -> tuple[Path, Path]:
         prefix = f"viewr-{VERSION}-{TARGET}"
         viewr = """#!/bin/sh
@@ -68,7 +69,11 @@ esac
             "README.md": b"# test release\n",
             "THIRD_PARTY_LICENSES.txt": b"viewr third-party licenses\n",
             "assets/icon.svg": b"<svg xmlns='http://www.w3.org/2000/svg'/>\n",
-            "assets/linux/viewr.desktop": b"[Desktop Entry]\nName=viewr\n",
+            "assets/linux/viewr.desktop": (
+                REPOSITORY_ROOT / "assets" / "linux" / "viewr.desktop"
+            )
+            .read_bytes()
+            .replace(b"io.github.blisspixel.viewr", desktop_id.encode("ascii")),
             "bin/viewr": self.executable(viewr),
             "bin/viewr-decode": self.executable("#!/bin/sh\nexit 0\n"),
         }
@@ -220,6 +225,7 @@ exec /bin/mv "$@"
                 "TMPDIR": str(self.temp_dir),
                 "VIEWR_BIN_DIR": str(self.bin_dir),
                 "VIEWR_INSTALL_ROOT": str(self.install_root),
+                "XDG_DATA_HOME": str(self.home / "custom-data"),
             }
         )
         return subprocess.run(
@@ -265,6 +271,76 @@ exec /bin/mv "$@"
         self.assertEqual(notes.read_bytes(), b"keep these notes")
         self.assertEqual(os.readlink(self.bin_dir / "viewr"), command_target)
         self.assertEqual(list((self.install_root / "releases").glob(".backup-*")), [])
+
+    def test_identity_migration_replaces_only_previous_viewr_launcher_and_icon(
+        self,
+    ) -> None:
+        data = self.home / "custom-data"
+        applications = data / "applications"
+        icons = data / "icons" / "hicolor" / "scalable" / "apps"
+        for directory in (applications, icons):
+            directory.mkdir(parents=True)
+        old_desktop = applications / "com.github.blisspixel.viewr.desktop"
+        old_icon = icons / "com.github.blisspixel.viewr.svg"
+        old_desktop.write_bytes(b"previous launcher")
+        old_icon.write_bytes(b"previous icon")
+        unrelated = applications / "other.desktop"
+        unrelated.write_bytes(b"keep another application")
+        defaults = applications / "mimeapps.list"
+        defaults.write_bytes(
+            b"[Default Applications]\nimage/png=com.github.blisspixel.viewr.desktop\n"
+        )
+
+        result = self.run_installer()
+
+        self.assertIn("Installed viewr 1.2.3", result.stdout)
+        self.assertFalse(old_desktop.exists())
+        self.assertFalse(old_icon.exists())
+        self.assertEqual(
+            (applications / "io.github.blisspixel.viewr.desktop").read_bytes(),
+            (REPOSITORY_ROOT / "assets" / "linux" / "viewr.desktop").read_bytes(),
+        )
+        self.assertEqual(
+            (icons / "io.github.blisspixel.viewr.svg").read_bytes(),
+            b"<svg xmlns='http://www.w3.org/2000/svg'/>\n",
+        )
+        self.assertEqual(unrelated.read_bytes(), b"keep another application")
+        self.assertEqual(
+            defaults.read_bytes(),
+            b"[Default Applications]\nimage/png=com.github.blisspixel.viewr.desktop\n",
+        )
+
+    def test_explicit_rollback_keeps_the_archived_desktop_identity(self) -> None:
+        self.run_installer()
+        archive, sidecar = self.make_release(desktop_id="com.github.blisspixel.viewr")
+
+        self.run_installer(archive=archive, sidecar=sidecar)
+
+        data = self.home / "custom-data"
+        applications = data / "applications"
+        icons = data / "icons" / "hicolor" / "scalable" / "apps"
+        self.assertTrue(
+            (applications / "com.github.blisspixel.viewr.desktop").is_file()
+        )
+        self.assertTrue((icons / "com.github.blisspixel.viewr.svg").is_file())
+        self.assertFalse((applications / "io.github.blisspixel.viewr.desktop").exists())
+        self.assertFalse((icons / "io.github.blisspixel.viewr.svg").exists())
+
+    def test_unsupported_desktop_identity_preserves_the_previous_install(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        previous = {path.name: path.read_bytes() for path in release.iterdir()}
+        command_target = os.readlink(self.bin_dir / "viewr")
+        archive, sidecar = self.make_release(desktop_id="unrelated.application")
+
+        result = self.run_installer(archive=archive, sidecar=sidecar, check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported application identity", result.stderr)
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in release.iterdir()}, previous
+        )
+        self.assertEqual(os.readlink(self.bin_dir / "viewr"), command_target)
 
     def test_reinstall_preserves_an_unexpected_hidden_directory(self) -> None:
         self.run_installer()

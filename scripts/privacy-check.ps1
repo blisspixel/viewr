@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "== packaging artifacts must omit network grants =="
 # Only flag real finish-args, not comments that say "do NOT add --share=network".
-$flatpakLines = Get-Content "packaging/flatpak/com.github.blisspixel.viewr.yml"
+$flatpakLines = Get-Content "packaging/flatpak/io.github.blisspixel.viewr.yml"
 foreach ($line in $flatpakLines) {
     $t = $line.Trim()
     if ($t.StartsWith("#")) { continue }

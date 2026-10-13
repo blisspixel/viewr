@@ -76,7 +76,25 @@ if ($LASTEXITCODE -ne 0) { throw "could not export HKCU\Software\Classes" }
 & "$PSScriptRoot\..\install.ps1" -Version 0.7.4 -InstallDir $installDir -NoPath -NoShortcut -LocalRelease $candidateDir
 
 $installed = Join-Path $installDir "viewr.exe"
-$reported = (& $installed --version).Trim()
+# viewr is a Windows GUI binary. The call operator does not capture its
+# stdout. Redirect the handles the same way the installer probes --version.
+$startInfo = [Diagnostics.ProcessStartInfo]::new()
+$startInfo.FileName = $installed
+$startInfo.Arguments = "--version"
+$startInfo.WorkingDirectory = Split-Path -Parent $installed
+$startInfo.UseShellExecute = $false
+$startInfo.CreateNoWindow = $true
+$startInfo.RedirectStandardOutput = $true
+$startInfo.RedirectStandardError = $true
+$process = [Diagnostics.Process]::new()
+$process.StartInfo = $startInfo
+if (-not $process.Start()) { throw "could not start $installed" }
+$stdoutTask = $process.StandardOutput.ReadToEndAsync()
+$stderrTask = $process.StandardError.ReadToEndAsync()
+if (-not $process.WaitForExit(15000)) { throw "version probe timed out for $installed" }
+$stderr = $stderrTask.GetAwaiter().GetResult()
+$reported = $stdoutTask.GetAwaiter().GetResult().Trim()
+if ($process.ExitCode -ne 0) { throw "version probe failed ($($process.ExitCode)): $stderr" }
 if ($reported -cne "viewr 0.7.4") {
     throw "installed version was '$reported'"
 }

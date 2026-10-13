@@ -137,7 +137,7 @@ v1.0.0  Broadly recommended release
 | **v0.5.0** | Format-contract preview | Format breadth without honest page and color contracts misleads users | Multi-page and multi-frame containers expose bounded, identifiable navigation. The format table distinguishes decode, animation, page, metadata, and color behavior. Camera RAW either meets the isolated-worker bar or is explicitly deferred from 1.0. |
 | **v0.6.0** | Integrated product-quality beta | Isolated green checks do not prove the product feels right | Primary first-time, power-user, admin, failure-recovery, and visual-polish paths pass on representative Windows, macOS, and Linux hardware. Startup, navigation, memory, mixed-DPI, multi-monitor, empty, loading, and error states meet budgets with no unresolved high-severity product-quality issue. |
 | **v0.7.0** | Accessibility preview | Implementation can be green while real AT fails | Automated semantic, contrast, keyboard, native Windows UI Automation, and cross-platform build checks pass. Release notes disclose missing Narrator, VoiceOver, Orca, and representative-hardware evidence. A known critical or high-severity defect still blocks publication. |
-| **v0.8.0** | Release-readiness beta | Install and update must be boring before trust theater | Automate clean-install, reinstall, explicit update, uninstall, rollback, file-association, and provenance checks where the platform permits. Keep missing representative-hardware and assistive-technology rows visible without claiming acceptance. Unsigned candidates remain acceptable only with an explicit trust boundary. |
+| **v0.8.0** | Release-readiness beta | Install and update must be boring before trust theater | The release workflow verifies attestations before a draft is published, and CI installs published v0.7.4 and updates it to the candidate on Linux and Windows. Uninstall, rollback, macOS update, and full file-association acceptance remain open. Keep missing representative-hardware and assistive-technology rows visible without claiming acceptance. Unsigned candidates remain acceptable only with an explicit trust boundary. |
 | **v0.9.0** | Publisher-authenticated release candidate | Signing is last because scope must be frozen first | Windows Authenticode-signed delivery; macOS Developer ID-signed, hardened, notarized, and stapled; normal Linux package verified on Wayland and X11. Full security, dependency, fuzz, coverage, performance, privacy, accessibility, packaging, upgrade, rollback, documentation, and hardware matrices pass on the exact candidate. |
 | **v1.0.0** | Broadly recommended release | Not a new feature tranche after v0.9 | Proven v0.9 scope ships. Docs match artifacts. Normal workflows need no developer tools. No known critical or high-severity defect remains. |
 
@@ -255,7 +255,7 @@ but completed history does not override an open gate here.
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
 | Integrated product quality | Shipped through v0.7.4; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
-| Release readiness | Open for v0.8 | Automate clean install, update, uninstall, rollback, association, and provenance checks. Keep uncollected manual acceptance rows visible as separate claims. |
+| Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI updates published v0.7.4 to the candidate on Linux and Windows, including the Linux launcher identity. Clean install on macOS, uninstall, rollback, and file-association acceptance remain open. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
 
 The first public pre-1.0 release may remain clearly labeled as unsigned. A broadly
@@ -672,7 +672,11 @@ broad feature category. They prove and refine the accumulated viewer.
   multi-monitor, and profiled-display acceptance on representative hardware.
 - [ ] Prove clean install, same-version reinstall, update from each supported
   pre-1.0 line, uninstall, file-association opt-in, and injected rollback on the
-  signed release candidates.
+  signed release candidates. CI installs published v0.7.4 and updates it to the
+  candidate on Linux and Windows. That job checks the Linux launcher migration,
+  preserved preferences, staging cleanup, an unchanged Linux image handler, and
+  an unchanged Windows `HKCU\Software\Classes` tree. The other lines here remain
+  open.
 - [ ] Evaluate launcher-provided neighboring-file order without inventing a
   cross-platform promise. A future Windows packaged delivery may consume the
   documented neighboring-files query. macOS and Linux may preserve an explicit

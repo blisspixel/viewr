@@ -213,4 +213,67 @@ jobs:
           fi
 
           gh release upload "$tag" "${assets[@]}" --clobber
+          # Fail closed before publication. Attestations are visible by digest, so
+          # this checks the local files just attested by this workflow and tag.
+          verify_asset_attestation() {
+            asset=$1
+            attempt=1
+            while [ "$attempt" -le 6 ]; do
+              if gh attestation verify "$asset" \
+                --repo blisspixel/viewr \
+                --signer-workflow blisspixel/viewr/.github/workflows/release.yml \
+                --source-ref "refs/tags/$tag" \
+                --deny-self-hosted-runners; then
+                return 0
+              fi
+              if [ "$attempt" -eq 6 ]; then
+                echo "attestation verification failed: $asset" >&2
+                return 1
+              fi
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+          }
+          for asset in "${assets[@]}"; do
+            verify_asset_attestation "$asset"
+          done
           gh release edit "$tag" --draft=false --latest
+
+  verify-published:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    name: Verify the published release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      attestations: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download public assets and verify them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          dest="${RUNNER_TEMP}/published-release"
+          mkdir -p "$dest"
+          gh release verify "$tag" --repo blisspixel/viewr
+          gh release download "$tag" --repo blisspixel/viewr --dir "$dest" --clobber
+          mapfile -t files < <(find "$dest" -maxdepth 1 -type f -print | sort)
+          if [ "${#files[@]}" -ne 12 ]; then
+            echo "published release did not contain exactly 12 assets" >&2
+            printf '%s\n' "${files[@]}" >&2
+            exit 1
+          fi
+          for asset in "${files[@]}"; do
+            gh release verify-asset "$tag" "$asset" --repo blisspixel/viewr
+            case "$asset" in
+              *.zip)
+                python -B scripts/release_artifact.py verify "$asset"
+                ;;
+            esac
+          done

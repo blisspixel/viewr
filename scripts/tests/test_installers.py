@@ -213,6 +213,7 @@ exec /bin/mv "$@"
         sidecar: Path | None = None,
         fail_move: str | None = None,
         check: bool = True,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update(
@@ -228,6 +229,8 @@ exec /bin/mv "$@"
                 "XDG_DATA_HOME": str(self.home / "custom-data"),
             }
         )
+        if extra_env:
+            environment.update(extra_env)
         return subprocess.run(
             ["sh", str(INSTALLER)],
             check=check,
@@ -256,6 +259,49 @@ exec /bin/mv "$@"
         self.assertEqual(
             list((self.install_root / "releases").glob(".installing-*")), []
         )
+
+    def test_local_release_skips_the_network(self) -> None:
+        release_dir = self.root / "local-release"
+        release_dir.mkdir()
+        (release_dir / self.archive.name).write_bytes(self.archive.read_bytes())
+        (release_dir / self.sidecar.name).write_bytes(self.sidecar.read_bytes())
+        curl = self.fake_bin / "curl"
+        curl.write_text(
+            "#!/bin/sh\necho curl-called >&2\nexit 1\n",
+            encoding="utf-8",
+        )
+        curl.chmod(0o755)
+
+        result = self.run_installer(
+            extra_env={
+                "VIEWR_LOCAL_RELEASE": str(release_dir),
+                "VIEWR_VERSION": VERSION,
+            }
+        )
+
+        self.assertIn("Installed viewr 1.2.3", result.stdout)
+        self.assertNotIn("curl-called", result.stderr)
+        self.assertIn("Reading local viewr 1.2.3", result.stdout)
+
+    def test_relative_local_release_is_rejected_before_download(self) -> None:
+        curl = self.fake_bin / "curl"
+        curl.write_text(
+            "#!/bin/sh\necho curl-called >&2\nexit 1\n",
+            encoding="utf-8",
+        )
+        curl.chmod(0o755)
+
+        result = self.run_installer(
+            check=False,
+            extra_env={
+                "VIEWR_LOCAL_RELEASE": "relative/release",
+                "VIEWR_VERSION": VERSION,
+            },
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("VIEWR_LOCAL_RELEASE must be an absolute path", result.stderr)
+        self.assertNotIn("curl-called", result.stderr)
 
     def test_reinstall_preserves_an_unexpected_file(self) -> None:
         self.run_installer()

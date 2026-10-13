@@ -220,21 +220,43 @@ production environment.
 
 9. Let the tag workflow rerun CI and fuzzing, build the exact four-target archive
    set, verify every archive and SHA-256 sidecar, add the fixed-version installer
-   scripts and their sidecars, attest all 12 assets, and publish only that exact
-   set. A manual workflow run is inspection-only and must never publish.
+   scripts and their sidecars, attest all 12 assets, and verify each attestation
+   before the draft is cleared. Publication happens only after that verification
+   succeeds, and a following job downloads the public assets and checks them
+   again. A manual workflow run is inspection-only and must never publish.
 10. Verify the public release and attestations, then land the status-only roadmap
     and documentation update that records the immutable release and advances the
     immediate focus to the next gate.
 
 ## Release verification
 
-After publication:
+The tag workflow verifies every attested asset before it clears the draft:
+
+```text
+gh attestation verify <asset> --repo blisspixel/viewr \
+  --signer-workflow blisspixel/viewr/.github/workflows/release.yml \
+  --source-ref refs/tags/<tag> --deny-self-hosted-runners
+```
+
+If any asset fails, the job fails and the release stays a draft. After publication,
+a separate job downloads the 12 public assets and runs `gh release verify`,
+`gh release verify-asset` on each file, and `scripts/release_artifact.py verify`
+on each archive. That job failing does not unpublish the release; fix the asset
+set in a new tag.
+
+Manual fallback after publication:
 
 ```text
 gh release view v0.6.1 --repo blisspixel/viewr
 gh release verify v0.6.1 --repo blisspixel/viewr
-gh attestation verify viewr-0.6.1-x86_64-pc-windows-msvc.zip \
+gh release download v0.6.1 --repo blisspixel/viewr \
+  --pattern 'viewr-0.6.1-x86_64-pc-windows-msvc.zip'
+gh release verify-asset v0.6.1 viewr-0.6.1-x86_64-pc-windows-msvc.zip \
   --repo blisspixel/viewr
+gh attestation verify viewr-0.6.1-x86_64-pc-windows-msvc.zip \
+  --repo blisspixel/viewr \
+  --signer-workflow blisspixel/viewr/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.6.1 --deny-self-hosted-runners
 ```
 
 `gh release verify` and `gh attestation` need GitHub CLI 2.49 or newer. Older

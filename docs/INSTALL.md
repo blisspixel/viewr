@@ -187,6 +187,12 @@ python -B scripts/release_artifact.py verify target/release-artifacts/viewr-<ver
 installation. The builder also verifies the archive before returning, while the
 last command demonstrates the standalone verification path used after download.
 
+CI installs published v0.7.4 with that release's own installer, then installs
+the candidate over it. The candidate step sets `VIEWR_LOCAL_RELEASE` (or
+`-LocalRelease` on Windows) to the absolute directory that contains the archive
+and its `.sha256` sidecar, together with an explicit version. Checksum, manifest,
+version, and doctor checks still run. An empty value keeps the public download.
+
 Optional AVIF and HEIC support requires native libheif dependencies and a separate
 worker build:
 

@@ -69,7 +69,25 @@ case "$os:$arch" in
         ;;
 esac
 
-if [ "$REQUESTED_VERSION" = "latest" ]; then
+# Maintainers and CI set VIEWR_LOCAL_RELEASE to an absolute directory that already
+# holds one verified archive and its sidecar. The checksum, manifest, version, and
+# doctor checks below still run. An unset variable keeps the public download.
+local_release=${VIEWR_LOCAL_RELEASE:-}
+if [ -n "$local_release" ]; then
+    case "$local_release" in
+        /*) ;;
+        *) fail "VIEWR_LOCAL_RELEASE must be an absolute path" ;;
+    esac
+    [ -d "$local_release" ] && [ ! -L "$local_release" ] ||
+        fail "VIEWR_LOCAL_RELEASE is not a regular directory"
+    [ "$REQUESTED_VERSION" != "latest" ] ||
+        fail "VIEWR_LOCAL_RELEASE requires an explicit VIEWR_VERSION"
+    tag=$REQUESTED_VERSION
+    case "$tag" in
+        v*) ;;
+        *) tag="v$tag" ;;
+    esac
+elif [ "$REQUESTED_VERSION" = "latest" ]; then
     latest_url=$(curl --proto '=https' --tlsv1.2 -fsSL \
         -o /dev/null -w '%{url_effective}' "$RELEASES_URL/latest") ||
         fail "could not resolve the latest official GitHub release"
@@ -106,13 +124,25 @@ trap 'exit 1' HUP INT TERM
 
 archive_path="$temporary/$archive"
 checksum_path="$temporary/$archive.sha256"
-printf 'Downloading viewr %s for %s...\n' "$version" "$target"
-curl --proto '=https' --tlsv1.2 -fL --connect-timeout 15 --retry 3 \
-    -o "$archive_path" "$download_base/$archive" ||
-    fail "release archive download failed"
-curl --proto '=https' --tlsv1.2 -fL --connect-timeout 15 --retry 3 \
-    -o "$checksum_path" "$download_base/$archive.sha256" ||
-    fail "release checksum download failed"
+if [ -n "$local_release" ]; then
+    printf 'Reading local viewr %s for %s...\n' "$version" "$target"
+    [ -f "$local_release/$archive" ] && [ ! -L "$local_release/$archive" ] ||
+        fail "local release archive was not found: $local_release/$archive"
+    [ -f "$local_release/$archive.sha256" ] && [ ! -L "$local_release/$archive.sha256" ] ||
+        fail "local release checksum was not found: $local_release/$archive.sha256"
+    cp "$local_release/$archive" "$archive_path" ||
+        fail "could not read the local release archive"
+    cp "$local_release/$archive.sha256" "$checksum_path" ||
+        fail "could not read the local release checksum"
+else
+    printf 'Downloading viewr %s for %s...\n' "$version" "$target"
+    curl --proto '=https' --tlsv1.2 -fL --connect-timeout 15 --retry 3 \
+        -o "$archive_path" "$download_base/$archive" ||
+        fail "release archive download failed"
+    curl --proto '=https' --tlsv1.2 -fL --connect-timeout 15 --retry 3 \
+        -o "$checksum_path" "$download_base/$archive.sha256" ||
+        fail "release checksum download failed"
+fi
 
 checksum_line=$(tr -d '\r' < "$checksum_path")
 set -- $checksum_line

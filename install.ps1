@@ -5,7 +5,8 @@ param(
     [string]$Version = "latest",
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\viewr",
     [switch]$NoPath,
-    [switch]$NoShortcut
+    [switch]$NoShortcut,
+    [string]$LocalRelease = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,43 +92,76 @@ $headers = @{
     "X-GitHub-Api-Version" = "2022-11-28"
 }
 
-try {
+# Maintainers and CI pass -LocalRelease, or set VIEWR_LOCAL_RELEASE, to an absolute
+# directory that already holds one verified archive and its sidecar. Checksum,
+# manifest, version, and doctor checks still run. An empty value keeps the download.
+if ([string]::IsNullOrWhiteSpace($LocalRelease) -and -not [string]::IsNullOrWhiteSpace($env:VIEWR_LOCAL_RELEASE)) {
+    $LocalRelease = $env:VIEWR_LOCAL_RELEASE
+}
+$usingLocalRelease = -not [string]::IsNullOrWhiteSpace($LocalRelease)
+$localRoot = $null
+if ($usingLocalRelease) {
     if ($Version -eq "latest") {
-        $requestedTag = $null
-        $release = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "$apiBase/releases/latest"
+        Stop-Install "a local release requires an explicit Version"
     }
-    else {
-        $requestedTag = if ($Version.StartsWith("v")) { $Version } else { "v$Version" }
-        $release = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "$apiBase/releases/tags/$requestedTag"
+    if (-not [IO.Path]::IsPathRooted($LocalRelease)) {
+        Stop-Install "LocalRelease must be an absolute path"
     }
+    $localRoot = [IO.Path]::GetFullPath($LocalRelease)
+    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) {
+        Stop-Install "LocalRelease is not an existing directory"
+    }
+    $localItem = Get-Item -LiteralPath $localRoot
+    if ($localItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        Stop-Install "LocalRelease must be a regular directory"
+    }
+    $tag = if ($Version.StartsWith("v")) { $Version } else { "v$Version" }
+    if ($tag -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$') {
+        Stop-Install "local release tag is not a supported semantic version"
+    }
+    $releaseVersion = $tag.Substring(1)
+    $archiveName = "viewr-$releaseVersion-$target.zip"
+    $checksumName = "$archiveName.sha256"
 }
-catch {
-    Stop-Install "could not resolve the selected official GitHub release"
-}
+else {
+    try {
+        if ($Version -eq "latest") {
+            $requestedTag = $null
+            $release = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "$apiBase/releases/latest"
+        }
+        else {
+            $requestedTag = if ($Version.StartsWith("v")) { $Version } else { "v$Version" }
+            $release = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "$apiBase/releases/tags/$requestedTag"
+        }
+    }
+    catch {
+        Stop-Install "could not resolve the selected official GitHub release"
+    }
 
-$tag = [string]$release.tag_name
-if ($tag -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$') {
-    Stop-Install "GitHub returned an invalid release tag"
-}
-if ([bool]$release.draft -or [bool]$release.prerelease) {
-    Stop-Install "the selected release is not a published stable release"
-}
-if ($null -ne $requestedTag -and $tag -cne $requestedTag) {
-    Stop-Install "GitHub returned a release other than the requested version"
-}
-$releaseVersion = $tag.Substring(1)
-$archiveName = "viewr-$releaseVersion-$target.zip"
-$checksumName = "$archiveName.sha256"
-$expectedDownloadPrefix = "$releaseBase/download/$tag/"
-$archiveAsset = @($release.assets | Where-Object { $_.name -ceq $archiveName })
-$checksumAsset = @($release.assets | Where-Object { $_.name -ceq $checksumName })
-if ($archiveAsset.Count -ne 1 -or $checksumAsset.Count -ne 1) {
-    Stop-Install "the release does not contain exactly one Windows archive and checksum"
-}
-foreach ($asset in @($archiveAsset[0], $checksumAsset[0])) {
-    $expectedAssetUrl = "$expectedDownloadPrefix$([string]$asset.name)"
-    if ([string]$asset.browser_download_url -cne $expectedAssetUrl) {
-        Stop-Install "GitHub returned an unexpected release asset URL"
+    $tag = [string]$release.tag_name
+    if ($tag -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$') {
+        Stop-Install "GitHub returned an invalid release tag"
+    }
+    if ([bool]$release.draft -or [bool]$release.prerelease) {
+        Stop-Install "the selected release is not a published stable release"
+    }
+    if ($null -ne $requestedTag -and $tag -cne $requestedTag) {
+        Stop-Install "GitHub returned a release other than the requested version"
+    }
+    $releaseVersion = $tag.Substring(1)
+    $archiveName = "viewr-$releaseVersion-$target.zip"
+    $checksumName = "$archiveName.sha256"
+    $expectedDownloadPrefix = "$releaseBase/download/$tag/"
+    $archiveAsset = @($release.assets | Where-Object { $_.name -ceq $archiveName })
+    $checksumAsset = @($release.assets | Where-Object { $_.name -ceq $checksumName })
+    if ($archiveAsset.Count -ne 1 -or $checksumAsset.Count -ne 1) {
+        Stop-Install "the release does not contain exactly one Windows archive and checksum"
+    }
+    foreach ($asset in @($archiveAsset[0], $checksumAsset[0])) {
+        $expectedAssetUrl = "$expectedDownloadPrefix$([string]$asset.name)"
+        if ([string]$asset.browser_download_url -cne $expectedAssetUrl) {
+            Stop-Install "GitHub returned an unexpected release asset URL"
+        }
     }
 }
 
@@ -136,9 +170,24 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) ("viewr-install-" + [Guid]::Ne
 try {
     $archivePath = Join-Path $temporary $archiveName
     $checksumPath = Join-Path $temporary $checksumName
-    Write-Host "Downloading viewr $releaseVersion for Windows x64..."
-    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $archiveAsset[0].browser_download_url -OutFile $archivePath
-    Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $checksumAsset[0].browser_download_url -OutFile $checksumPath
+    if ($usingLocalRelease) {
+        Write-Host "Reading local viewr $releaseVersion for Windows x64..."
+        $localArchive = Join-Path $localRoot $archiveName
+        $localChecksum = Join-Path $localRoot $checksumName
+        foreach ($required in @($localArchive, $localChecksum)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf) -or
+                ((Get-Item -LiteralPath $required).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                Stop-Install "local release is missing a regular file: $required"
+            }
+        }
+        Copy-Item -LiteralPath $localArchive -Destination $archivePath
+        Copy-Item -LiteralPath $localChecksum -Destination $checksumPath
+    }
+    else {
+        Write-Host "Downloading viewr $releaseVersion for Windows x64..."
+        Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $archiveAsset[0].browser_download_url -OutFile $archivePath
+        Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $checksumAsset[0].browser_download_url -OutFile $checksumPath
+    }
 
     $checksumText = [IO.File]::ReadAllText($checksumPath).Replace("`r", "")
     $checksumMatch = [regex]::Match(

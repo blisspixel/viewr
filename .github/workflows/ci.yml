@@ -55,13 +55,15 @@ jobs:
 
       - name: Validate Unix installer syntax
         if: runner.os != 'Windows'
-        run: sh -n install.sh
+        run: |
+          sh -n install.sh
+          bash -n scripts/ci-update-from-v0.7.4.sh
 
       - name: Validate Windows installer syntax
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "scripts/install-windows-smoke.ps1")) {
+          foreach ($file in @("install.ps1", "scripts/install-windows-smoke.ps1", "scripts/ci-update-from-v0.7.4.ps1")) {
             $tokens = $null
             $errors = $null
             [Management.Automation.Language.Parser]::ParseFile(
@@ -312,3 +314,78 @@ jobs:
 
       - name: privacy-check (packaging + tree)
         run: bash scripts/privacy-check.sh
+
+  update-from-v074-linux:
+    if: github.event_name != 'schedule'
+    name: Update from published v0.7.4 (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      attestations: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux runtime packages
+        timeout-minutes: 15
+        run: |
+          bash scripts/ci-install-packages.sh xdg-utils libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - name: Set up Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: update-from-v074-linux
+
+      - name: Build the candidate
+        run: cargo build --release --workspace --locked
+
+      - name: Package the candidate archive
+        run: |
+          python -B scripts/release_artifact.py build \
+            --target x86_64-unknown-linux-gnu \
+            --binary-dir target/release \
+            --expected-tag v0.7.4
+
+      - name: Install published v0.7.4 and update to the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-update-from-v0.7.4.sh
+
+  update-from-v074-windows:
+    if: github.event_name != 'schedule'
+    name: Update from published v0.7.4 (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      attestations: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: update-from-v074-windows
+
+      - name: Build the candidate
+        run: cargo build --release --workspace --locked
+
+      - name: Package the candidate archive
+        shell: pwsh
+        run: |
+          python -B scripts/release_artifact.py build `
+            --target x86_64-pc-windows-msvc `
+            --binary-dir target/release `
+            --expected-tag v0.7.4
+
+      - name: Install published v0.7.4 and update to the candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-update-from-v0.7.4.ps1

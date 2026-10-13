@@ -694,6 +694,22 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("install.sh.sha256", workflow)
         self.assertIn("Attest every release asset", workflow)
         self.assertIn("Release assets do not match the exact expected set", workflow)
+        attest = workflow.index('gh attestation verify "$asset"')
+        undraft = workflow.index('gh release edit "$tag" --draft=false --latest')
+        self.assertLess(attest, undraft)
+        self.assertIn("--deny-self-hosted-runners", workflow)
+        self.assertIn(
+            "--signer-workflow blisspixel/viewr/.github/workflows/release.yml",
+            workflow,
+        )
+        self.assertIn("name: Verify the published release", workflow)
+        self.assertLess(undraft, workflow.index("name: Verify the published release"))
+        self.assertIn('gh release verify "$tag" --repo blisspixel/viewr', workflow)
+        self.assertIn(
+            'gh release verify-asset "$tag" "$asset" --repo blisspixel/viewr',
+            workflow,
+        )
+        self.assertIn("scripts/release_artifact.py verify", workflow)
 
     def test_public_and_compiled_installers_use_immutable_release_assets(
         self,

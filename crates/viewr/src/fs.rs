@@ -219,9 +219,7 @@ fn modified_time_cmp(left: FileVersion, right: FileVersion) -> Ordering {
     left.last_write_time.cmp(&right.last_write_time)
 }
 
-#[cfg(target_os = "windows")]
 const SHA256_BYTES: usize = 32;
-#[cfg(target_os = "windows")]
 pub(crate) const CONTENT_WITNESS_CHUNK_BYTES: usize = 64 * 1024;
 
 #[cfg(target_os = "windows")]
@@ -421,12 +419,13 @@ fn cng_status_error(status: i32) -> io::Error {
 ///
 /// The open handle prevents object-identifier reuse while the source is presented,
 /// cached, or prepared for a guarded action. Identity values and paths are deliberately never exposed.
+/// An accepted source may also retain an in-memory SHA-256 of its bytes. That
+/// digest is not an identifier and is never logged or written.
 pub(crate) struct ImageSource {
     file: std::fs::File,
     cursor: Mutex<()>,
     identity: Option<FileIdentity>,
     version: Option<FileVersion>,
-    #[cfg(target_os = "windows")]
     content_digest: Option<[u8; SHA256_BYTES]>,
     accepted_path: Option<PathBuf>,
     markable: bool,
@@ -472,7 +471,6 @@ impl PathIdentitySource {
             cursor: Mutex::new(()),
             identity: Some(identity),
             version: Some(version),
-            #[cfg(target_os = "windows")]
             content_digest: None,
             accepted_path: None,
             markable: true,
@@ -692,7 +690,6 @@ impl ImageSource {
         }
         let identity = file_identity(&file, &opened).ok();
         let version = file_version(&file, &opened).ok();
-        #[cfg(target_os = "windows")]
         let content_digest = if capture_content_witness {
             Some(sha256_file_while(
                 &file,
@@ -702,15 +699,12 @@ impl ImageSource {
         } else {
             None
         };
-        #[cfg(not(target_os = "windows"))]
-        let _ = capture_content_witness;
         ensure_source_work_current(&mut keep_going)?;
         Ok(Self {
             file,
             cursor: Mutex::new(()),
             identity,
             version,
-            #[cfg(target_os = "windows")]
             content_digest,
             accepted_path,
             markable,
@@ -764,12 +758,6 @@ impl ImageSource {
         matches && keep_going()
     }
 
-    #[cfg(not(target_os = "windows"))]
-    fn retained_version_is_current_while(&self, keep_going: &mut impl FnMut() -> bool) -> bool {
-        self.native_version_is_current_while(keep_going)
-    }
-
-    #[cfg(target_os = "windows")]
     fn retained_version_is_current_while(&self, keep_going: &mut impl FnMut() -> bool) -> bool {
         let Some(expected_version) = self.version else {
             return false;
@@ -909,7 +897,6 @@ impl ImageSource {
             if !keep_going() {
                 return ImageSourceMatch::Unavailable;
             }
-            #[cfg(target_os = "windows")]
             match self.content_matches_while(&file, keep_going) {
                 Ok(true) => {}
                 Ok(false) => return ImageSourceMatch::Changed,
@@ -938,7 +925,6 @@ impl ImageSource {
         }
     }
 
-    #[cfg(target_os = "windows")]
     fn content_matches_while(
         &self,
         file: &std::fs::File,
@@ -1597,18 +1583,207 @@ fn file_version(file: &std::fs::File, metadata: &std::fs::Metadata) -> io::Resul
     Err(io::Error::last_os_error())
 }
 
-#[cfg(all(target_os = "windows", test))]
+#[cfg(test)]
 fn sha256_file(file: &std::fs::File) -> io::Result<[u8; SHA256_BYTES]> {
     sha256_file_while(file, MAX_ACCEPTED_SOURCE_BYTES, || true)
 }
 
+trait WitnessDigest {
+    fn absorb(&mut self, bytes: &[u8]) -> io::Result<()>;
+    fn finalize_digest(&mut self) -> io::Result<[u8; SHA256_BYTES]>;
+}
+
 #[cfg(target_os = "windows")]
+impl WitnessDigest for Sha256Hash {
+    fn absorb(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.update(bytes)
+    }
+
+    fn finalize_digest(&mut self) -> io::Result<[u8; SHA256_BYTES]> {
+        self.finish()
+    }
+}
+
+/// In-tree SHA-256 for platforms without the Windows CNG witness.
+///
+/// Linux change time can stay unchanged across a same-length rewrite that
+/// lands inside one coarse timestamp tick. This digest closes that gap without
+/// adding a hashing crate. It is a content witness, not a password hash.
+#[cfg(any(test, not(target_os = "windows")))]
+struct ContentSha256 {
+    state: [u32; 8],
+    buffer: [u8; 64],
+    buffered: usize,
+    bytes: u64,
+}
+
+#[cfg(any(test, not(target_os = "windows")))]
+impl ContentSha256 {
+    fn new() -> Self {
+        Self {
+            state: [
+                0x6a09_e667,
+                0xbb67_ae85,
+                0x3c6e_f372,
+                0xa54f_f53a,
+                0x510e_527f,
+                0x9b05_688c,
+                0x1f83_d9ab,
+                0x5be0_cd19,
+            ],
+            buffer: [0; 64],
+            buffered: 0,
+            bytes: 0,
+        }
+    }
+
+    fn update(&mut self, mut data: &[u8]) {
+        while !data.is_empty() {
+            let space = self.buffer.len() - self.buffered;
+            let take = space.min(data.len());
+            self.buffer[self.buffered..self.buffered + take].copy_from_slice(&data[..take]);
+            self.buffered += take;
+            data = &data[take..];
+            if self.buffered == self.buffer.len() {
+                self.compress();
+                self.buffered = 0;
+                self.bytes = self.bytes.saturating_add(64);
+            }
+        }
+    }
+
+    fn finish(&mut self) -> [u8; SHA256_BYTES] {
+        let total_bytes = self
+            .bytes
+            .saturating_add(u64::try_from(self.buffered).unwrap_or(0));
+        let bit_len = total_bytes.saturating_mul(8);
+        self.buffer[self.buffered] = 0x80;
+        self.buffered += 1;
+        if self.buffered > 56 {
+            self.buffer[self.buffered..].fill(0);
+            self.compress();
+            self.buffer.fill(0);
+        } else {
+            self.buffer[self.buffered..].fill(0);
+        }
+        self.buffer[56..].copy_from_slice(&bit_len.to_be_bytes());
+        self.compress();
+        let mut digest = [0_u8; SHA256_BYTES];
+        for (index, word) in self.state.iter().enumerate() {
+            let start = index * 4;
+            digest[start..start + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        digest
+    }
+
+    #[allow(clippy::many_single_char_names, clippy::unreadable_literal)]
+    fn compress(&mut self) {
+        const K: [u32; 64] = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+            0xc67178f2,
+        ];
+        let mut schedule = [0_u32; 64];
+        for (index, word) in schedule.iter_mut().enumerate().take(16) {
+            let start = index * 4;
+            let mut bytes = [0_u8; 4];
+            bytes.copy_from_slice(&self.buffer[start..start + 4]);
+            *word = u32::from_be_bytes(bytes);
+        }
+        for index in 16..64 {
+            let s0 = schedule[index - 15].rotate_right(7)
+                ^ schedule[index - 15].rotate_right(18)
+                ^ (schedule[index - 15] >> 3);
+            let s1 = schedule[index - 2].rotate_right(17)
+                ^ schedule[index - 2].rotate_right(19)
+                ^ (schedule[index - 2] >> 10);
+            schedule[index] = schedule[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(schedule[index - 7])
+                .wrapping_add(s1);
+        }
+        let mut a = self.state[0];
+        let mut b = self.state[1];
+        let mut c = self.state[2];
+        let mut d = self.state[3];
+        let mut e = self.state[4];
+        let mut f = self.state[5];
+        let mut g = self.state[6];
+        let mut h = self.state[7];
+        for index in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choose = (e & f) ^ (!e & g);
+            let temp1 = h
+                .wrapping_add(s1)
+                .wrapping_add(choose)
+                .wrapping_add(K[index])
+                .wrapping_add(schedule[index]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(majority);
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+        self.state[0] = self.state[0].wrapping_add(a);
+        self.state[1] = self.state[1].wrapping_add(b);
+        self.state[2] = self.state[2].wrapping_add(c);
+        self.state[3] = self.state[3].wrapping_add(d);
+        self.state[4] = self.state[4].wrapping_add(e);
+        self.state[5] = self.state[5].wrapping_add(f);
+        self.state[6] = self.state[6].wrapping_add(g);
+        self.state[7] = self.state[7].wrapping_add(h);
+    }
+}
+
+#[cfg(any(test, not(target_os = "windows")))]
+impl WitnessDigest for ContentSha256 {
+    fn absorb(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.update(bytes);
+        Ok(())
+    }
+
+    fn finalize_digest(&mut self) -> io::Result<[u8; SHA256_BYTES]> {
+        Ok(self.finish())
+    }
+}
+
 fn sha256_file_while(
     file: &std::fs::File,
     max_bytes: u64,
     mut keep_going: impl FnMut() -> bool,
 ) -> io::Result<[u8; SHA256_BYTES]> {
-    ensure_source_work_current(&mut keep_going)?;
+    #[cfg(target_os = "windows")]
+    {
+        let algorithm = Sha256Algorithm::open()?;
+        let hash = Sha256Hash::new(&algorithm)?;
+        digest_witness(file, max_bytes, &mut keep_going, hash)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        digest_witness(file, max_bytes, &mut keep_going, ContentSha256::new())
+    }
+}
+
+fn digest_witness(
+    file: &std::fs::File,
+    max_bytes: u64,
+    keep_going: &mut impl FnMut() -> bool,
+    mut hash: impl WitnessDigest,
+) -> io::Result<[u8; SHA256_BYTES]> {
+    ensure_source_work_current(keep_going)?;
     let declared_bytes = file.metadata()?.len();
     if declared_bytes > max_bytes {
         return Err(io::Error::new(
@@ -1616,34 +1791,32 @@ fn sha256_file_while(
             "image source exceeds the content-witness limit",
         ));
     }
-    let algorithm = Sha256Algorithm::open()?;
-    let hash = Sha256Hash::new(&algorithm)?;
     let mut reader = file.try_clone()?;
     reader.seek(SeekFrom::Start(0))?;
     let digest = (|| {
         let mut buffer = vec![0_u8; CONTENT_WITNESS_CHUNK_BYTES];
         let mut remaining = declared_bytes;
         while remaining != 0 {
-            ensure_source_work_current(&mut keep_going)?;
+            ensure_source_work_current(keep_going)?;
             let buffer_bytes = u64::try_from(buffer.len()).unwrap_or(u64::MAX);
             let chunk = usize::try_from(remaining.min(buffer_bytes))
                 .map_err(|_| io::Error::other("content-witness chunk is not representable"))?;
             let read = reader.read(&mut buffer[..chunk])?;
-            ensure_source_work_current(&mut keep_going)?;
+            ensure_source_work_current(keep_going)?;
             if read == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "image source shrank while its content witness was computed",
                 ));
             }
-            hash.update(&buffer[..read])?;
+            hash.absorb(&buffer[..read])?;
             let read = u64::try_from(read)
                 .map_err(|_| io::Error::other("content-witness read is not representable"))?;
             remaining = remaining
                 .checked_sub(read)
                 .ok_or_else(|| io::Error::other("content-witness read exceeded its bound"))?;
         }
-        ensure_source_work_current(&mut keep_going)?;
+        ensure_source_work_current(keep_going)?;
         let mut extra = [0_u8; 1];
         if reader.read(&mut extra)? != 0 {
             return Err(io::Error::new(
@@ -1651,8 +1824,8 @@ fn sha256_file_while(
                 "image source grew while its content witness was computed",
             ));
         }
-        ensure_source_work_current(&mut keep_going)?;
-        hash.finish()
+        ensure_source_work_current(keep_going)?;
+        hash.finalize_digest()
     })();
     let rewind = reader.seek(SeekFrom::Start(0));
     match (digest, rewind) {
@@ -2744,7 +2917,6 @@ mod tests {
         assert_eq!(source.matches_path(&path), super::ImageSourceMatch::Changed);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn strong_match_rejects_rewritten_content_after_native_evidence_is_rebased() {
         let workspace = TempWorkspace::new("source_content_witness").unwrap();
@@ -2763,7 +2935,6 @@ mod tests {
         assert_eq!(source.matches_path(&path), super::ImageSourceMatch::Changed);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn destination_identity_does_not_capture_a_content_witness() {
         let workspace = TempWorkspace::new("destination_identity").unwrap();
@@ -2814,9 +2985,52 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_sha256_matches_the_standard_vector_and_rewinds() {
+    fn content_sha256_matches_standard_vectors() {
+        fn digest(bytes: &[u8]) -> [u8; 32] {
+            let mut hasher = super::ContentSha256::new();
+            hasher.update(bytes);
+            hasher.finish()
+        }
+
+        assert_eq!(
+            digest(b""),
+            [
+                0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+                0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+                0x78, 0x52, 0xb8, 0x55,
+            ]
+        );
+        assert_eq!(
+            digest(b"abc"),
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+        assert_eq!(
+            digest(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            [
+                0x24, 0x8d, 0x6a, 0x61, 0xd2, 0x06, 0x38, 0xb8, 0xe5, 0xc0, 0x26, 0x93, 0x0c, 0x3e,
+                0x60, 0x39, 0xa3, 0x3c, 0xe4, 0x59, 0x64, 0xff, 0x21, 0x67, 0xf6, 0xec, 0xed, 0xd4,
+                0x19, 0xdb, 0x06, 0xc1,
+            ]
+        );
+        assert_eq!(
+            digest(
+                b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
+            ),
+            [
+                0xcf, 0x5b, 0x16, 0xa7, 0x78, 0xaf, 0x83, 0x80, 0x03, 0x6c, 0xe5, 0x9e, 0x7b, 0x04,
+                0x92, 0x37, 0x0b, 0x24, 0x9b, 0x11, 0xe8, 0xf0, 0x7a, 0x51, 0xaf, 0xac, 0x45, 0x03,
+                0x7a, 0xfe, 0xe9, 0xd1,
+            ]
+        );
+    }
+
+    #[test]
+    fn sha256_matches_the_standard_vector_and_rewinds() {
         let workspace = TempWorkspace::new("sha256_vector").unwrap();
         let path = workspace.path().join("source.bin");
         fs::write(&path, b"abc").unwrap();
@@ -2834,9 +3048,8 @@ mod tests {
         assert_eq!(file.stream_position().unwrap(), 0);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_sha256_stops_between_bounded_chunks_and_rewinds() {
+    fn sha256_stops_between_bounded_chunks_and_rewinds() {
         let workspace = TempWorkspace::new("sha256_cancel").unwrap();
         let path = workspace.path().join("source.bin");
         fs::write(&path, vec![0x5a; 3 * super::CONTENT_WITNESS_CHUNK_BYTES]).unwrap();
@@ -2854,9 +3067,8 @@ mod tests {
         assert_eq!(file.stream_position().unwrap(), 0);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_sha256_rejects_growth_past_the_declared_bound_and_rewinds() {
+    fn sha256_rejects_growth_past_the_declared_bound_and_rewinds() {
         let workspace = TempWorkspace::new("sha256_growth").unwrap();
         let path = workspace.path().join("source.bin");
         fs::write(&path, b"abc").unwrap();
@@ -2880,7 +3092,6 @@ mod tests {
         assert_eq!(file.stream_position().unwrap(), 0);
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn rating_scan_source_cannot_pass_a_full_content_witness_check() {
         let workspace = TempWorkspace::new("rating_scan_capability").unwrap();

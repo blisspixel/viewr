@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.7.5 - 2026-10-21
 
 - Explain a failed open in one short sentence. A damaged, unsupported, or
   oversized file does not offer Retry. Permission, a missing file, a missing

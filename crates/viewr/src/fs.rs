@@ -2334,9 +2334,7 @@ mod tests {
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
     use std::fs;
-    use std::io::{self, Read};
-    #[cfg(windows)]
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::{self, Read, Seek, SeekFrom, Write};
     use std::path::Path;
     use std::sync::{Arc, Barrier};
 

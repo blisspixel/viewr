@@ -62,7 +62,6 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/releases/v0.7.2.md",
     "docs/releases/v0.7.3.md",
     "docs/releases/v0.7.4.md",
-    "docs/releases/v0.7.5.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-dark-example.png",
@@ -776,6 +775,14 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn('"viewr 0.7.5"', windows)
         self.assertNotIn('"viewr 0.7.4"', windows)
         self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
+
+    def test_unpublished_notes_are_not_required_in_a_published_archive(self) -> None:
+        published = release_artifact._archive_documentation_paths("0.7.4")
+        candidate = release_artifact._archive_documentation_paths("0.7.5")
+        self.assertIn("docs/releases/v0.7.4.md", published)
+        self.assertNotIn("docs/releases/v0.7.5.md", published)
+        self.assertIn("docs/releases/v0.7.5.md", candidate)
+        self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.5.md").is_file())
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

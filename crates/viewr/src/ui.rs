@@ -397,6 +397,10 @@ pub(crate) struct UiFrameOwned {
     pub is_opening: bool,
     /// Most recent decode failure for the selected path.
     pub load_error: Option<String>,
+    /// Raw decoder or I/O line for Image Information. Absent for status text.
+    pub decoder_detail: Option<String>,
+    /// Whether Retry can help the current load error. Status text keeps this true.
+    pub load_retry_allowed: bool,
     /// An explicit Save As encode is running.
     pub save_busy: bool,
     /// An existing captured destination awaits app-owned overwrite consent.
@@ -1389,14 +1393,16 @@ fn render_top_operation_status(
         ui.add(egui::Spinner::new().size(14.0).color(colors.accent));
         add_status(ui, frame.text(tr!("Reading folder ratings...")));
     } else if frame.dock.has_image && frame.load_error.is_some() {
-        ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RetryLoad), |ui| {
-            add_retry_button(
-                ui,
-                actions,
-                frame.language,
-                frame.selected_file_name.as_deref(),
-            );
-        });
+        if frame.load_retry_allowed {
+            ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RetryLoad), |ui| {
+                add_retry_button(
+                    ui,
+                    actions,
+                    frame.language,
+                    frame.selected_file_name.as_deref(),
+                );
+            });
+        }
         if frame.save_recovery_unsettled {
             add_status(ui, frame.text(SAVE_RECOVERY_STATUS));
         } else if frame.crop_recovery_unsettled {
@@ -2273,6 +2279,16 @@ fn add_retry_button(
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     if response.clicked() {
         actions.push(UiAction::RetryLoad);
+    }
+}
+
+fn empty_card_button(label: &str, primary: bool, colors: ChromeColors) -> egui::Button<'_> {
+    if primary {
+        egui::Button::new(RichText::new(label).color(colors.accent_ink))
+            .fill(colors.accent)
+            .min_size(Vec2::new(116.0, 36.0))
+    } else {
+        egui::Button::new(label).min_size(Vec2::new(116.0, 36.0))
     }
 }
 
@@ -3575,6 +3591,7 @@ fn render_empty_state(
             frame.language,
             is_opening,
             load_error,
+            frame.load_retry_allowed,
             selected_file_name,
         )
     };
@@ -3598,7 +3615,11 @@ fn render_empty_state(
                         } else {
                             let (icon_rect, _) =
                                 ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
-                            paint_empty_image_icon(ui.painter(), icon_rect, colors);
+                            if load_error.is_some() {
+                                paint_failed_image_icon(ui.painter(), icon_rect, colors);
+                            } else {
+                                paint_empty_image_icon(ui.painter(), icon_rect, colors);
+                            }
                         }
                         ui.add_space(12.0);
                         let heading_response = ui.add(
@@ -3645,9 +3666,10 @@ fn render_empty_state_actions(
 ) {
     let load_error = frame.load_error.as_deref();
     let selected_file_name = frame.selected_file_name.as_deref();
+    let show_retry = load_error.is_some() && frame.load_retry_allowed;
     ui.add_space(16.0);
     ui.horizontal(|ui| {
-        if load_error.is_some() {
+        if show_retry {
             ui.add_enabled_ui(
                 chrome.is_enabled(ChromeControl::OpenSource)
                     && chrome.is_enabled(ChromeControl::RetryLoad),
@@ -3659,7 +3681,11 @@ fn render_empty_state_actions(
         let open_file = ui
             .add_enabled(
                 chrome.is_enabled(ChromeControl::OpenSource),
-                egui::Button::new(frame.text(tr!("Open File"))).min_size(Vec2::new(116.0, 36.0)),
+                empty_card_button(
+                    frame.text(tr!("Open File")),
+                    load_error.is_some() && !show_retry,
+                    colors,
+                ),
             )
             .on_hover_text(frame.text(OPEN_FILE_SCOPE_HELP));
         if open_file.clicked() {
@@ -3761,22 +3787,36 @@ pub(crate) fn path_input_has_focus(ctx: &egui::Context) -> bool {
 }
 
 fn paint_empty_image_icon(painter: &egui::Painter, rect: Rect, colors: ChromeColors) {
-    let frame = rect.shrink(3.0);
-    painter.rect_filled(frame, CornerRadius::same(8), colors.raised);
-    painter.rect_stroke(
-        frame,
-        CornerRadius::same(8),
-        Stroke::new(1.5, colors.muted),
-        egui::StrokeKind::Inside,
-    );
+    let frame = paint_image_icon_frame(painter, rect, colors);
     let mountain = [
         frame.left_bottom() + Vec2::new(7.0, -8.0),
         frame.center() + Vec2::new(-3.0, 2.0),
         frame.center() + Vec2::new(3.0, -3.0),
         frame.right_bottom() + Vec2::new(-6.0, -8.0),
     ];
-    painter.line(mountain.to_vec(), Stroke::new(1.5, colors.muted));
-    painter.circle_filled(frame.right_top() + Vec2::new(-9.0, 9.0), 3.0, colors.accent);
+    painter.line(mountain.to_vec(), Stroke::new(1.75, colors.muted));
+    painter.circle_filled(frame.right_top() + Vec2::new(-9.0, 9.0), 3.0, colors.muted);
+}
+
+fn paint_failed_image_icon(painter: &egui::Painter, rect: Rect, colors: ChromeColors) {
+    let frame = paint_image_icon_frame(painter, rect, colors);
+    let inset = frame.shrink(8.0);
+    painter.line_segment(
+        [inset.left_top(), inset.right_bottom()],
+        Stroke::new(1.75, colors.muted),
+    );
+}
+
+fn paint_image_icon_frame(painter: &egui::Painter, rect: Rect, colors: ChromeColors) -> Rect {
+    let frame = rect.shrink(3.0);
+    painter.rect_filled(frame, CornerRadius::same(8), colors.raised);
+    painter.rect_stroke(
+        frame,
+        CornerRadius::same(8),
+        Stroke::new(1.75, colors.muted),
+        egui::StrokeKind::Inside,
+    );
+    frame
 }
 
 fn render_image_info_panel(
@@ -3866,6 +3906,16 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
         )
         .color(colors.muted),
     );
+    if let Some(detail) = frame.decoder_detail.as_deref() {
+        let visible = crate::shortcuts::bound_user_error(detail);
+        let line = frame
+            .language
+            .fill(tr!("Decoder: {detail}"), &[("detail", visible.as_str())]);
+        let response = ui.label(RichText::new(line.as_str()).color(colors.muted));
+        if visible.as_str() != detail {
+            let _ = response.on_hover_text(detail);
+        }
+    }
     render_animation_controls(ui, actions, frame, colors);
     render_page_controls(ui, actions, frame, colors);
 }
@@ -5778,6 +5828,8 @@ mod tests {
             is_loading: false,
             is_opening: false,
             load_error: None,
+            decoder_detail: None,
+            load_retry_allowed: true,
             save_busy: false,
             save_overwrite_pending: false,
             save_recovery_unsettled: false,
@@ -6159,7 +6211,8 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
-        frame.load_error = Some("Could not decode: malformed image".to_owned());
+        frame.load_error = Some("viewr doesn't have permission to read this file.".to_owned());
+        frame.load_retry_allowed = true;
         frame.preview_recovery_unsettled = true;
 
         assert!(control_enabled(&frame, ChromeControl::RetryLoad));
@@ -6974,6 +7027,123 @@ mod tests {
                 .iter()
                 .any(|text| text.contains("Display · sRGB, display profile applied")),
             "missing applied display-profile status; exposed: {applied:?}"
+        );
+    }
+
+    #[test]
+    fn image_information_shows_the_decoder_line_only_for_a_decode_failure() {
+        fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            output
+                .platform_output
+                .accesskit_update
+                .expect("decoder-line AccessKit update should be generated")
+                .nodes
+                .iter()
+                .flat_map(|(_, node)| [node.label(), node.value()])
+                .flatten()
+                .map(str::to_owned)
+                .collect()
+        }
+
+        let quiet = exposed_text(&accessibility_test_frame());
+        assert!(
+            quiet.iter().all(|text| !text.starts_with("Decoder:")),
+            "a successful image published a decoder line: {quiet:?}"
+        );
+
+        let mut frame = accessibility_test_frame();
+        frame.decoder_detail = Some("Format error decoding Png: invalid PNG signature".to_owned());
+        let shown = exposed_text(&frame);
+        assert!(
+            shown.iter().any(|text| {
+                text == "Decoder: Format error decoding Png: invalid PNG signature"
+            }),
+            "missing decoder line; exposed: {shown:?}"
+        );
+
+        let long = format!("Format error {}", "x".repeat(200));
+        frame.decoder_detail = Some(long.clone());
+        let bounded = crate::shortcuts::bound_user_error(&long);
+        let expected = format!("Decoder: {bounded}");
+        let truncated = exposed_text(&frame);
+        assert!(
+            truncated.iter().any(|text| text == &expected),
+            "missing bounded decoder line {expected}; exposed: {truncated:?}"
+        );
+        assert!(
+            truncated.iter().all(|text| !text.contains(&long)),
+            "Image Information published the unbounded decoder line: {truncated:?}"
+        );
+    }
+
+    #[test]
+    fn retry_is_offered_only_when_a_later_open_can_succeed() {
+        fn labels(frame: &UiFrameOwned) -> Vec<String> {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            output
+                .platform_output
+                .accesskit_update
+                .expect("retry-policy AccessKit update should be generated")
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| node.label().map(str::to_owned))
+                .collect()
+        }
+
+        let mut damaged = accessibility_test_frame();
+        damaged.load_error = Some("The file is damaged or incomplete.".to_owned());
+        damaged.load_retry_allowed = false;
+        let damaged_labels = labels(&damaged);
+        assert!(
+            damaged_labels.iter().all(|label| !label.contains("Retry")),
+            "a damaged file offered Retry beside the previous image: {damaged_labels:?}"
+        );
+
+        let mut allowed = accessibility_test_frame();
+        allowed.load_error = Some("viewr doesn't have permission to read this file.".to_owned());
+        let allowed_labels = labels(&allowed);
+        assert!(
+            allowed_labels
+                .iter()
+                .any(|label| label == "Retry opening current.png"),
+            "a permission failure hid Retry: {allowed_labels:?}"
+        );
+
+        let mut card = accessibility_test_frame();
+        card.dock.has_image = false;
+        card.file_path = None;
+        card.playlist_pos = None;
+        card.filmstrip.clear();
+        card.selected_file_name = Some("night.png".to_owned());
+        card.load_error = Some("The file is damaged or incomplete.".to_owned());
+        card.load_retry_allowed = false;
+        let card_labels = labels(&card);
+        assert!(
+            card_labels.iter().all(|label| !label.contains("Retry")),
+            "a damaged empty card offered Retry: {card_labels:?}"
+        );
+        assert!(
+            card_labels.iter().any(|label| label == "Open File"),
+            "Open File left the damaged card: {card_labels:?}"
+        );
+
+        card.load_retry_allowed = true;
+        card.load_error = Some("viewr doesn't have permission to read this file.".to_owned());
+        let retry_card = labels(&card);
+        assert!(
+            retry_card
+                .iter()
+                .any(|label| label == "Retry opening night.png"),
+            "a permission card hid Retry: {retry_card:?}"
         );
     }
 
@@ -8178,6 +8348,7 @@ mod tests {
             frame.language,
             frame.is_opening,
             frame.load_error.as_deref(),
+            frame.load_retry_allowed,
             frame.selected_file_name.as_deref(),
         )
         .heading

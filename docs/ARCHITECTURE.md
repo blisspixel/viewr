@@ -188,9 +188,11 @@ Shipped:
   closes scheduling and drops pending work so its completion loss remains
   observable even after owner replacement. Endpoint loss becomes persistent,
   visible recovery state rather than false busy state or scheduling into a dead
-  executor. Retry is disabled only while the current load specifically requires
-  that lost executor; a later ordinary decode failure remains retryable. A typed
-  output contract admits only matching RGBA8 sRGB working pixels and an sRGB
+  executor. Retry is disabled while the current load specifically requires that
+  lost executor. A later decode failure offers Retry only when a later try can
+  succeed: permission, a missing file, a missing helper, or an unrecognized
+  failure. A damaged, unsupported, or oversized file does not. A typed output
+  contract admits only matching RGBA8 sRGB working pixels and an sRGB
   presentation surface; unsupported surface formats fail explicitly instead of
   changing the transfer function. A Spot Heal patch updates the base level and
   regenerates dependent mips. No scene graph.

@@ -18,8 +18,12 @@ env:
 jobs:
   quality:
     uses: ./.github/workflows/ci.yml
+    # The update jobs verify published attestations. A reusable caller cannot
+    # grant less than those nested jobs request, or the run fails before it starts.
     permissions:
+      attestations: read
       contents: read
+      id-token: write
 
   fuzz:
     uses: ./.github/workflows/fuzz.yml

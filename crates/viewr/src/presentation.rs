@@ -225,15 +225,15 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
     }
     if text.contains("permission denied")
         || text.contains("access is denied")
-        || text.contains("os error 5")
-        || text.contains("os error 13")
+        || contains_os_error(&text, "5")
+        || contains_os_error(&text, "13")
     {
         return OpenFailureCause::Permission;
     }
     if text.contains("no such file")
         || text.contains("cannot find the file")
         || text.contains("system cannot find the file")
-        || text.contains("os error 2")
+        || contains_os_error(&text, "2")
     {
         return OpenFailureCause::Gone;
     }
@@ -267,6 +267,26 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
         return OpenFailureCause::Damaged;
     }
     OpenFailureCause::Other
+}
+
+/// True when `text` names this operating-system code and not a longer one.
+///
+/// `os error 5` is a prefix of `os error 50`. The next character has to end
+/// the number, or a supported-request failure would be called a permission error.
+fn contains_os_error(text: &str, code: &str) -> bool {
+    let marker = "os error ";
+    let mut rest = text;
+    while let Some(index) = rest.find(marker) {
+        let after = &rest[index + marker.len()..];
+        if let Some(stripped) = after.strip_prefix(code) {
+            match stripped.chars().next() {
+                Some(ch) if ch.is_ascii_digit() => {}
+                _ => return true,
+            }
+        }
+        rest = &rest[index + marker.len()..];
+    }
+    false
 }
 
 /// Toast for a classified failure. Retry is named only when a later try can help.
@@ -632,6 +652,29 @@ mod tests {
                     "{language:?} must not show the raw decoder line"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn os_error_codes_match_only_the_exact_number() {
+        let permission = explain_open_failure(Language::English, "Permission denied (os error 13)");
+        assert_eq!(permission.cause, OpenFailureCause::Permission);
+        assert!(permission.allows_retry());
+        let missing = explain_open_failure(Language::English, "read failed (os error 2)");
+        assert_eq!(missing.cause, OpenFailureCause::Gone);
+        let windows_missing = explain_open_failure(
+            Language::English,
+            "The system cannot find the file specified. (os error 2)",
+        );
+        assert_eq!(windows_missing.cause, OpenFailureCause::Gone);
+        for error in [
+            "The request is not supported. (os error 50)",
+            "not a directory (os error 20)",
+            "identifier removed (os error 132)",
+        ] {
+            let failure = explain_open_failure(Language::English, error);
+            assert_eq!(failure.cause, OpenFailureCause::Other, "{error}");
+            assert!(failure.allows_retry(), "{error}");
         }
     }
 

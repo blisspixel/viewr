@@ -5,6 +5,12 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Color `viewr doctor` status tags by role on a terminal, and keep piped output,
+  `NO_COLOR`, and `TERM=dumb` plain. Tags share one lowercase form and one
+  column. Doctor rows and help wrap to the terminal width, keeping the hanging
+  indent, and a parenthetical graphics explanation stays on its own line. A
+  failed report counts critical checks and warnings. The install sentence uses
+  "item" or "items" to match the number of failed window rows.
 - Reject a same-length in-place rewrite when the filesystem leaves the change
   time unchanged. Accepted sources keep an in-memory SHA-256 witness on every
   platform, matching the existing Windows check, and fail closed before a rating

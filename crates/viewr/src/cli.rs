@@ -3,13 +3,17 @@
 //! Subcommands never open the network. `viewr update` only prints the official
 //! release and installer locations; it does not download anything.
 
-#![allow(unsafe_code)] // Windows AttachConsole / AllocConsole for CLI under GUI subsystem
+#![allow(unsafe_code)] // Windows console attach, and the stdout width read used by doctor
 
+use std::collections::VecDeque;
 use std::ffi::OsStr;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
-use std::{io, io::Write};
+use std::{io, mem};
+
+use crate::startup::{DOCTOR_FAIL, DOCTOR_NOTE, DOCTOR_OK, DOCTOR_WARN};
 
 use crate::decode::DecodedImage;
 
@@ -239,12 +243,15 @@ Try `viewr help` for usage, or `viewr open <path>` for a path."
 pub fn run(inv: Invocation) -> ExitCode {
     let stdout = io::stdout();
     let stderr = io::stderr();
+    let mut stdout = stdout.lock();
+    let style = ReportStyle::detect(&stdout);
     let explicit_worker = std::env::var_os("VIEWR_DECODE_BIN");
     run_with_io(
         inv,
-        &mut stdout.lock(),
+        &mut stdout,
         &mut stderr.lock(),
         explicit_worker.as_deref(),
+        style,
     )
     .unwrap_or(ExitCode::FAILURE)
 }
@@ -254,11 +261,13 @@ fn run_with_io(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
     explicit_worker: Option<&OsStr>,
+    style: ReportStyle,
 ) -> io::Result<ExitCode> {
     match inv {
         Invocation::Gui { .. } => Ok(ExitCode::FAILURE), // caller should launch GUI
         Invocation::Help(topic) => {
-            write!(stdout, "{}", help_text(topic, example_image_path()))?;
+            let text = help_text(topic, example_image_path());
+            write!(stdout, "{}", wrap_text(&text, style.width))?;
             Ok(ExitCode::SUCCESS)
         }
         Invocation::Version => {
@@ -266,7 +275,7 @@ fn run_with_io(
             Ok(ExitCode::SUCCESS)
         }
         Invocation::Doctor => {
-            if doctor_to(stdout, explicit_worker)? {
+            if doctor_to(stdout, explicit_worker, style)? {
                 Ok(ExitCode::SUCCESS)
             } else {
                 Ok(ExitCode::from(1))
@@ -449,12 +458,338 @@ There is no `viewr update --download`.
     )
 }
 
+/// How doctor and help present themselves.
+///
+/// Color is independent of width. A pipe is 80 columns and plain. A terminal
+/// uses its measured width, or `COLUMNS` when that measurement is unavailable,
+/// and colors tags unless `NO_COLOR` is non-empty or `TERM` is `dumb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReportStyle {
+    width: usize,
+    color: bool,
+}
+
+impl ReportStyle {
+    #[cfg(test)]
+    fn plain(width: usize) -> Self {
+        Self {
+            width,
+            color: false,
+        }
+    }
+
+    fn detect(stdout: &impl IsTerminal) -> Self {
+        let terminal = stdout.is_terminal();
+        style_for(
+            terminal,
+            no_color_disables(std::env::var_os("NO_COLOR").as_deref()),
+            std::env::var("TERM").ok().as_deref(),
+            std::env::var("COLUMNS").ok().as_deref(),
+            terminal.then(console_columns).flatten(),
+        )
+    }
+}
+
+/// `NO_COLOR` disables color when it is present and not empty.
+fn no_color_disables(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| !value.is_empty())
+}
+
+fn parse_columns(columns: Option<&str>) -> Option<usize> {
+    let width = columns?.parse::<usize>().ok()?;
+    (20..=500).contains(&width).then_some(width)
+}
+
+fn style_for(
+    terminal: bool,
+    no_color: bool,
+    term: Option<&str>,
+    columns: Option<&str>,
+    measured: Option<usize>,
+) -> ReportStyle {
+    let color = terminal && !no_color && term != Some("dumb");
+    let width = if terminal {
+        measured
+            .filter(|width| (20..=500).contains(width))
+            .or_else(|| parse_columns(columns))
+            .unwrap_or(80)
+    } else {
+        80
+    };
+    ReportStyle { width, color }
+}
+
+/// Visible console columns, when stdout is a real console.
+///
+/// Unix uses `COLUMNS` instead of a new ioctl. The Windows read stays beside
+/// the existing console attach.
+fn console_columns() -> Option<usize> {
+    #[cfg(windows)]
+    {
+        // SAFETY: this reads the process stdout console rectangle. It does not
+        // allocate a console or change its mode. A pipe or a closed handle
+        // fails the call and the caller keeps the default width.
+        unsafe {
+            use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+            use windows_sys::Win32::System::Console::{
+                CONSOLE_SCREEN_BUFFER_INFO, GetConsoleScreenBufferInfo, GetStdHandle,
+                STD_OUTPUT_HANDLE,
+            };
+            let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+                return None;
+            }
+            let mut info = mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>();
+            if GetConsoleScreenBufferInfo(handle, &raw mut info) == 0 {
+                return None;
+            }
+            let width = i32::from(info.srWindow.Right) - i32::from(info.srWindow.Left) + 1;
+            usize::try_from(width)
+                .ok()
+                .filter(|width| (20..=500).contains(width))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+fn split_prefix(line: &str) -> (&str, &str, String) {
+    for tag in [DOCTOR_OK, DOCTOR_WARN, DOCTOR_FAIL, DOCTOR_NOTE] {
+        if let Some(body) = line.strip_prefix(tag) {
+            return (tag, body, " ".repeat(tag.chars().count()));
+        }
+    }
+    let indent_chars = line.chars().take_while(|ch| *ch == ' ').count();
+    let indent_bytes = line
+        .char_indices()
+        .nth(indent_chars)
+        .map_or(line.len(), |(index, _)| index);
+    let indent = &line[..indent_bytes];
+    (indent, &line[indent_bytes..], indent.to_owned())
+}
+
+/// Break one token so each piece fits `budget`, preferring a path separator.
+fn split_overlong(token: &str, budget: usize) -> Vec<String> {
+    let budget = budget.max(1);
+    if token.chars().count() <= budget {
+        return vec![token.to_owned()];
+    }
+    let mut parts = Vec::new();
+    let mut rest = token;
+    while rest.chars().count() > budget {
+        let mut end = 0;
+        let mut last_sep = None;
+        let mut used = 0;
+        for (index, ch) in rest.char_indices() {
+            used += 1;
+            if used > budget {
+                break;
+            }
+            end = index + ch.len_utf8();
+            if ch == '/' || ch == '\\' {
+                last_sep = Some(end);
+            }
+        }
+        if let Some(sep) = last_sep {
+            end = sep;
+        }
+        if end == 0 {
+            end = rest.chars().next().map_or(rest.len(), char::len_utf8);
+        }
+        parts.push(rest[..end].to_owned());
+        rest = &rest[end..];
+    }
+    if !rest.is_empty() {
+        parts.push(rest.to_owned());
+    }
+    parts
+}
+
+fn content_width(words: &[String]) -> usize {
+    words.iter().map(|word| word.chars().count()).sum::<usize>() + words.len().saturating_sub(1)
+}
+
+/// Wrap one logical row. A tag or existing indent is the hanging indent.
+fn wrap_logical_line(line: &str, width: usize) -> Vec<String> {
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+    let (prefix, body, continuation) = split_prefix(line);
+    let mut pending: VecDeque<String> = body.split_whitespace().map(str::to_owned).collect();
+    if pending.is_empty() {
+        return vec![prefix.trim_end().to_owned()];
+    }
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut words = Vec::new();
+    let mut first = true;
+    while let Some(word) = pending.pop_front() {
+        let head_len = if first {
+            prefix.chars().count()
+        } else {
+            continuation.chars().count()
+        };
+        let limit = width.saturating_sub(head_len).max(1);
+        let gap = usize::from(!words.is_empty());
+        let room = limit.saturating_sub(content_width(&words) + gap);
+        if word.chars().count() <= room {
+            words.push(word);
+            continue;
+        }
+        if !words.is_empty() {
+            lines.push(finish_line(
+                if first { prefix } else { &continuation },
+                &words,
+            ));
+            words.clear();
+            first = false;
+            pending.push_front(word);
+            continue;
+        }
+        let mut pieces = split_overlong(&word, limit);
+        let first_piece = pieces.remove(0);
+        words.push(first_piece);
+        for extra in pieces.into_iter().rev() {
+            pending.push_front(extra);
+        }
+        let head = if first { prefix } else { continuation.as_str() };
+        lines.push(finish_line(head, &words));
+        words.clear();
+        first = false;
+    }
+    if !words.is_empty() {
+        let head = if first { prefix } else { continuation.as_str() };
+        lines.push(finish_line(head, &words));
+    }
+    lines
+}
+
+fn finish_line(head: &str, words: &[String]) -> String {
+    let text = words.join(" ");
+    format!("{head}{text}")
+}
+
+/// Wrap a help screen at the write site. `help_text` itself stays unwrapped.
+fn wrap_text(text: &str, width: usize) -> String {
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        let logical = line.trim_end_matches(['\r', '\n']);
+        for physical in wrap_logical_line(logical, width) {
+            out.push_str(&physical);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Color only a status tag, after its padding spaces, so columns stay aligned.
+fn paint_tag(line: &str) -> String {
+    const ROLES: [(&str, &str); 4] = [
+        (DOCTOR_OK, "32"),
+        (DOCTOR_WARN, "33"),
+        (DOCTOR_FAIL, "31"),
+        (DOCTOR_NOTE, "2"),
+    ];
+    for (tag, code) in ROLES {
+        if let Some(rest) = line.strip_prefix(tag) {
+            return format!("\u{1b}[{code}m{tag}\u{1b}[0m{rest}");
+        }
+    }
+    line.to_owned()
+}
+
+fn write_report_line(out: &mut impl Write, line: &str, style: ReportStyle) -> io::Result<()> {
+    for physical in wrap_logical_line(line, style.width) {
+        let painted = if style.color {
+            paint_tag(&physical)
+        } else {
+            physical
+        };
+        writeln!(out, "{painted}")?;
+    }
+    Ok(())
+}
+
+fn count_tag_rows(lines: &[String], tag: &str) -> usize {
+    lines.iter().filter(|line| line.starts_with(tag)).count()
+}
+
+/// Failure footer. The install sentence follows window `[fail]` rows only.
+fn doctor_closing(
+    passed: bool,
+    critical: usize,
+    warnings: usize,
+    window_fails: usize,
+) -> Vec<String> {
+    if passed {
+        return vec![
+            "doctor: critical checks passed".to_owned(),
+            "doctor: no window was opened here; run `viewr <path>` to see the picture or the exact failure"
+                .to_owned(),
+        ];
+    }
+    let checks = if critical == 1 {
+        "1 critical check failed".to_owned()
+    } else {
+        format!("{critical} critical checks failed")
+    };
+    let warnings = if warnings == 1 {
+        "1 warning".to_owned()
+    } else {
+        format!("{warnings} warnings")
+    };
+    let mut lines = vec![format!("doctor: {checks}, {warnings}")];
+    let install = match window_fails {
+        0 => None,
+        1 => Some("doctor: this host cannot open a viewr window until the item above is installed"),
+        _ => {
+            Some("doctor: this host cannot open a viewr window until the items above are installed")
+        }
+    };
+    if let Some(install) = install {
+        lines.push(install.to_owned());
+    }
+    lines
+}
+
+struct DoctorReport<'a, W> {
+    out: &'a mut W,
+    style: ReportStyle,
+    critical: usize,
+    warnings: usize,
+}
+
+impl<W: Write> DoctorReport<'_, W> {
+    fn plain(&mut self, line: &str) -> io::Result<()> {
+        write_report_line(self.out, line, self.style)
+    }
+
+    fn row(&mut self, line: &str) -> io::Result<()> {
+        if line.starts_with(DOCTOR_FAIL) {
+            self.critical += 1;
+        } else if line.starts_with(DOCTOR_WARN) {
+            self.warnings += 1;
+        }
+        self.plain(line)
+    }
+
+    /// Count a warning that also fails doctor, then print its warning tag.
+    fn failing_warning(&mut self, line: &str) -> io::Result<()> {
+        self.critical += 1;
+        self.row(line)
+    }
+}
+
 /// Run diagnostics. Returns `true` if all critical checks passed.
 #[must_use]
 pub fn doctor() -> bool {
     let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    let style = ReportStyle::detect(&stdout);
     let explicit_worker = std::env::var_os("VIEWR_DECODE_BIN");
-    doctor_to(&mut stdout.lock(), explicit_worker.as_deref()).unwrap_or(false)
+    doctor_to(&mut stdout, explicit_worker.as_deref(), style).unwrap_or(false)
 }
 
 /// Window-presentation readiness for the current platform.
@@ -470,18 +805,18 @@ fn window_readiness() -> crate::startup::WindowReadiness {
 ///
 /// Returns whether every critical layout check passed and whether a worker is
 /// available for the IPC probe.
-fn report_binary_layout(
-    stdout: &mut impl Write,
+fn report_binary_layout<W: Write>(
+    report: &mut DoctorReport<'_, W>,
     explicit_worker: Option<&OsStr>,
 ) -> io::Result<(bool, bool)> {
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
-            writeln!(stdout, "[FAIL] cannot resolve current_exe: {e}")?;
+            report.row(&format!("{DOCTOR_FAIL}cannot resolve current_exe: {e}"))?;
             return Ok((false, false));
         }
     };
-    writeln!(stdout, "[ok]   executable: {}", exe.display())?;
+    report.row(&format!("{DOCTOR_OK}executable: {}", exe.display()))?;
 
     let mut worker = exe;
     worker.set_file_name(if cfg!(windows) {
@@ -490,113 +825,113 @@ fn report_binary_layout(
         "viewr-decode"
     });
     if worker.is_file() {
-        writeln!(stdout, "[ok]   worker beside exe: {}", worker.display())?;
+        report.row(&format!(
+            "{DOCTOR_OK}worker beside exe: {}",
+            worker.display()
+        ))?;
         return Ok((true, true));
     }
     if let Some(explicit) = explicit_worker {
         let explicit = Path::new(explicit);
         if explicit.is_file() {
-            writeln!(
-                stdout,
-                "[ok]   worker via VIEWR_DECODE_BIN: {}",
+            report.row(&format!(
+                "{DOCTOR_OK}worker via VIEWR_DECODE_BIN: {}",
                 explicit.display()
-            )?;
+            ))?;
             return Ok((true, true));
         }
-        writeln!(
-            stdout,
-            "[WARN] VIEWR_DECODE_BIN set but missing: {}",
+        report.failing_warning(&format!(
+            "{DOCTOR_WARN}VIEWR_DECODE_BIN set but missing: {}",
             explicit.display()
-        )?;
+        ))?;
         return Ok((false, false));
     }
     // Not a hard failure: core pure-Rust formats still work.
-    writeln!(
-        stdout,
-        "[WARN] viewr-decode not found beside exe
-       Release archives ship bin/viewr and bin/viewr-decode together; keep the pair.
-       Core formats still open. Optional AVIF and HEIC files report an error."
+    report.row(&format!("{DOCTOR_WARN}viewr-decode not found beside exe"))?;
+    report.plain(
+        "       Release archives ship bin/viewr and bin/viewr-decode together; keep the pair.",
     )?;
+    report
+        .plain("       Core formats still open. Optional AVIF and HEIC files report an error.")?;
     Ok((true, false))
 }
 
-fn doctor_to(stdout: &mut impl Write, explicit_worker: Option<&OsStr>) -> io::Result<bool> {
-    writeln!(stdout, "viewr doctor {VERSION}")?;
-    writeln!(stdout, "{}", "-".repeat(48))?;
-    writeln!(stdout, "Binaries, decode, and privacy")?;
+fn doctor_to(
+    stdout: &mut impl Write,
+    explicit_worker: Option<&OsStr>,
+    style: ReportStyle,
+) -> io::Result<bool> {
+    let mut report = DoctorReport {
+        out: stdout,
+        style,
+        critical: 0,
+        warnings: 0,
+    };
+    report.plain(&format!("viewr doctor {VERSION}"))?;
+    report.plain(&"-".repeat(48))?;
+    report.plain("Binaries, decode, and privacy")?;
 
-    let (mut ok, worker_available) = report_binary_layout(stdout, explicit_worker)?;
+    let (mut ok, worker_available) = report_binary_layout(&mut report, explicit_worker)?;
 
     if worker_available {
         match crate::sandbox::probe_worker() {
-            Ok(()) => writeln!(stdout, "[ok]   worker IPC: bounded in-memory probe passed")?,
+            Ok(()) => report.row(&format!(
+                "{DOCTOR_OK}worker IPC: bounded in-memory probe passed"
+            ))?,
             Err(error) => {
-                writeln!(stdout, "[FAIL] worker IPC: {error}")?;
+                report.row(&format!("{DOCTOR_FAIL}worker IPC: {error}"))?;
                 ok = false;
             }
         }
     }
 
-    writeln!(
-        stdout,
-        "[ok]   platform: {} / {}",
+    report.row(&format!(
+        "{DOCTOR_OK}platform: {} / {}",
         std::env::consts::OS,
         std::env::consts::ARCH
-    )?;
-    writeln!(
-        stdout,
-        "[ok]   privacy: no network, no log files, doctor is in-memory (zero temp)"
-    )?;
+    ))?;
+    report.row(&format!(
+        "{DOCTOR_OK}privacy: no network, no log files, doctor is in-memory (zero temp)"
+    ))?;
 
-    // --- decode self-test ---
     match decode_self_test() {
         Ok((w, h, ms)) => {
-            writeln!(stdout, "[ok]   decode self-test: {w}x{h} PNG in {ms:.2} ms")?;
+            report.row(&format!(
+                "{DOCTOR_OK}decode self-test: {w}x{h} PNG in {ms:.2} ms"
+            ))?;
         }
         Err(e) => {
-            writeln!(stdout, "[FAIL] decode self-test: {e}")?;
+            report.row(&format!("{DOCTOR_FAIL}decode self-test: {e}"))?;
             ok = false;
         }
     }
 
-    // --- optional source-tree checks ---
     if Path::new("deny.toml").is_file() {
-        writeln!(
-            stdout,
-            "[ok]   source tree: deny.toml present (run `cargo deny check` in CI)"
-        )?;
+        report.row(&format!(
+            "{DOCTOR_OK}source tree: deny.toml present (run `cargo deny check` in CI)"
+        ))?;
     }
     if Path::new("docs/PRIVACY.md").is_file() {
-        writeln!(stdout, "[ok]   source tree: docs/PRIVACY.md present")?;
+        report.row(&format!("{DOCTOR_OK}source tree: docs/PRIVACY.md present"))?;
     }
 
-    // --- window presentation ---
     let readiness = window_readiness();
-    writeln!(stdout)?;
-    writeln!(stdout, "Window presentation")?;
+    let window_fails = count_tag_rows(&readiness.lines, DOCTOR_FAIL);
+    report.plain("")?;
+    report.plain("Window presentation")?;
     for line in &readiness.lines {
-        writeln!(stdout, "{line}")?;
+        report.row(line)?;
     }
     if !readiness.critical_ok {
         ok = false;
     }
+    if !ok && report.critical == 0 {
+        report.critical = 1;
+    }
 
-    writeln!(stdout, "{}", "-".repeat(48))?;
-    if ok {
-        writeln!(stdout, "doctor: critical checks passed")?;
-        // The last line a stranger reads must not imply more than was proven.
-        writeln!(
-            stdout,
-            "doctor: no window was opened here; run `viewr <path>` to see the picture or the exact failure"
-        )?;
-    } else {
-        writeln!(stdout, "doctor: one or more critical checks failed")?;
-        if !readiness.critical_ok {
-            writeln!(
-                stdout,
-                "doctor: this host cannot open a viewr window until the item above is installed"
-            )?;
-        }
+    report.plain(&"-".repeat(48))?;
+    for line in doctor_closing(ok, report.critical, report.warnings, window_fails) {
+        report.plain(&line)?;
     }
     Ok(ok)
 }
@@ -778,24 +1113,56 @@ pub fn ensure_console() {
 #[cfg(test)]
 mod tests {
     use super::{
-        HelpTopic, Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL,
-        UNIX_INSTALL_COMMAND, WINDOWS_INSTALL_COMMAND, benchmark_to, decode_self_test, help_text,
-        median, parse_args, parse_args_with, run_with_io, window_readiness,
+        HelpTopic, Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL, ReportStyle,
+        UNIX_INSTALL_COMMAND, WINDOWS_INSTALL_COMMAND, benchmark_to, console_columns,
+        count_tag_rows, decode_self_test, doctor_closing, doctor_to, help_text, median,
+        no_color_disables, paint_tag, parse_args, parse_args_with, run_with_io, style_for,
+        window_readiness, wrap_logical_line, wrap_text,
     };
     use crate::ephemeral::TempWorkspace;
+    use crate::startup::DOCTOR_FAIL;
+    use std::ffi::OsStr;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
     fn invoke(invocation: Invocation) -> (ExitCode, String, String) {
+        invoke_with(invocation, ReportStyle::plain(80))
+    }
+
+    fn invoke_with(invocation: Invocation, style: ReportStyle) -> (ExitCode, String, String) {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let code = run_with_io(invocation, &mut stdout, &mut stderr, None).unwrap();
+        let code = run_with_io(invocation, &mut stdout, &mut stderr, None, style).unwrap();
         (
             code,
             String::from_utf8(stdout).unwrap(),
             String::from_utf8(stderr).unwrap(),
         )
+    }
+
+    fn flattened(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn strip_ansi(text: &str) -> String {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if next.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+            out.push(ch);
+        }
+        out
     }
 
     #[test]
@@ -1032,18 +1399,268 @@ mod tests {
         assert!(output.contains("Binaries, decode, and privacy"));
         assert!(output.contains("decode self-test: 64x48 PNG"));
         assert!(output.contains("Window presentation"));
+        assert!(!output.contains("[FAIL]"));
+        assert!(!output.contains("[WARN]"));
+        assert!(!output.contains('\u{1b}'));
+        let flat = flattened(&output);
         for line in &readiness.lines {
-            assert!(output.contains(line), "missing doctor line: {line}");
+            assert!(
+                flat.contains(&flattened(line)),
+                "missing doctor line: {line}"
+            );
         }
         // Doctor is honest about what it did not prove.
-        assert!(output.contains("proven only when viewr opens a window"));
+        assert!(flat.contains("proven only when viewr opens a window"));
         if readiness.critical_ok {
             assert_eq!(code, ExitCode::SUCCESS);
             assert!(output.contains("doctor: critical checks passed"));
         } else {
             assert_eq!(code, ExitCode::from(1));
-            assert!(output.contains("doctor: one or more critical checks failed"));
+            assert!(output.contains("critical check"));
             assert!(output.contains("cannot open a viewr window"));
+            let window_fails = count_tag_rows(&readiness.lines, DOCTOR_FAIL);
+            if window_fails == 1 {
+                assert!(output.contains("the item above is installed"));
+            } else if window_fails > 1 {
+                assert!(output.contains("the items above are installed"));
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_doctor_and_help_keep_the_hanging_indent() {
+        let source = help_text(HelpTopic::Overview, "photos/IMG_001.jpg");
+        assert!(
+            source.lines().any(|line| line.chars().count() > 60),
+            "help_text stays unwrapped so the write site owns wrapping"
+        );
+        let (code, help, error) = invoke_with(
+            Invocation::Help(HelpTopic::Overview),
+            ReportStyle::plain(60),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(error.is_empty());
+        assert!(!help.contains('\u{1b}'));
+        for line in help.lines() {
+            assert!(line.chars().count() <= 60, "{line}");
+        }
+        assert!(help.lines().any(|line| line.starts_with("  `update`")));
+        assert!(
+            help.lines()
+                .filter(|line| {
+                    line.contains("downloads")
+                        || line.contains("instructions")
+                        || line.contains("manual")
+                })
+                .all(|line| line.starts_with("  "))
+        );
+
+        let (_code, doctor, doctor_error) = invoke_with(Invocation::Doctor, ReportStyle::plain(60));
+        assert!(doctor_error.is_empty());
+        assert!(!doctor.contains('\u{1b}'));
+        for line in doctor.lines() {
+            assert!(line.chars().count() <= 60, "{line}");
+        }
+        assert!(doctor.contains("GPU surface") || doctor.contains("not by doctor"));
+        assert!(flattened(&doctor).contains("not by doctor"));
+    }
+
+    #[test]
+    fn a_long_path_breaks_on_a_separator_under_the_tag() {
+        let path = format!("C:\\{}", ["photos"].repeat(12).join("\\"));
+        let line = format!("[ok]   executable: {path}");
+        let wrapped = wrap_logical_line(&line, 60);
+        assert!(wrapped.len() > 1);
+        assert!(wrapped.iter().all(|row| row.chars().count() <= 60));
+        assert!(wrapped[0].starts_with("[ok]   executable:"));
+        assert!(wrapped[1].starts_with("       "));
+        assert!(
+            wrapped
+                .iter()
+                .any(|row| row.ends_with('\\') || row.contains("photos"))
+        );
+    }
+
+    #[test]
+    fn the_gpu_explanation_hangs_under_the_failure_tag() {
+        let rows = [
+            "[fail] gpu runtime: no usable Vulkan or OpenGL runtime, so no GPU surface can be created",
+            "       (EGL absent, Vulkan loader present without a driver)",
+            "       OpenGL through EGL:",
+            "         Debian or Ubuntu: sudo apt install libegl1 libegl-mesa0",
+        ];
+        let mut rendered = String::new();
+        for row in rows {
+            for physical in wrap_logical_line(row, 60) {
+                rendered.push_str(&physical);
+                rendered.push('\n');
+            }
+        }
+        for line in rendered.lines() {
+            assert!(line.chars().count() <= 60, "{line}");
+        }
+        let lines: Vec<_> = rendered.lines().collect();
+        assert!(lines[0].starts_with("[fail] gpu runtime:"));
+        assert!(lines[1].starts_with("       "));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.trim_start().starts_with("(EGL absent,"))
+        );
+        assert!(
+            lines.iter().any(
+                |line| line.starts_with("         Debian") || line.starts_with("         sudo")
+            )
+        );
+    }
+
+    #[test]
+    fn colored_tags_cover_only_the_padded_tag() {
+        let rows = [
+            "[ok]   platform: windows / x86_64",
+            "[warn] viewr-decode not found beside exe",
+            "[fail] decode self-test: boom",
+            "[note] a GPU surface is proven only when viewr opens a window, not by doctor",
+            "       continuation keeps the remedy indent",
+        ];
+        let mut plain = String::new();
+        let mut colored = String::new();
+        for row in rows {
+            for physical in wrap_logical_line(row, 60) {
+                plain.push_str(&physical);
+                plain.push('\n');
+                colored.push_str(&paint_tag(&physical));
+                colored.push('\n');
+            }
+        }
+        assert_eq!(strip_ansi(&colored), plain);
+        assert!(colored.contains("\u{1b}[32m[ok]   \u{1b}[0mplatform"));
+        assert!(colored.contains("\u{1b}[33m[warn] \u{1b}[0mviewr-decode"));
+        assert!(colored.contains("\u{1b}[31m[fail] \u{1b}[0mdecode"));
+        assert!(colored.contains("\u{1b}[2m[note] \u{1b}[0m"));
+        let plain_colored = strip_ansi(&colored);
+        assert_eq!(plain_colored.find("platform"), Some(7));
+        let fail_at = plain_colored.find("[fail] ").unwrap();
+        assert_eq!(plain_colored[fail_at..].find("decode self-test"), Some(7));
+        for line in colored.lines() {
+            if !line.starts_with('\u{1b}') {
+                assert!(!line.contains('\u{1b}'), "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_pipe_and_no_color_are_plain_and_match_at_the_same_width() {
+        assert!(no_color_disables(Some(OsStr::new("1"))));
+        assert!(!no_color_disables(Some(OsStr::new(""))));
+        assert!(!no_color_disables(None));
+
+        let piped = style_for(false, false, Some("xterm-256color"), Some("60"), Some(60));
+        let no_color = style_for(true, true, Some("xterm-256color"), None, None);
+        let dumb = style_for(true, false, Some("dumb"), Some("60"), None);
+        let colored = style_for(true, false, Some("xterm-256color"), None, Some(60));
+        assert_eq!(
+            piped,
+            ReportStyle {
+                width: 80,
+                color: false
+            }
+        );
+        assert_eq!(
+            no_color,
+            ReportStyle {
+                width: 80,
+                color: false
+            }
+        );
+        assert_eq!(piped, no_color);
+        assert!(!dumb.color);
+        assert_eq!(dumb.width, 60);
+        assert!(colored.color);
+        assert_eq!(colored.width, 60);
+        assert_eq!(
+            style_for(true, false, Some("xterm-256color"), Some("40"), Some(100)).width,
+            100
+        );
+        assert_eq!(style_for(true, false, None, Some("10"), None).width, 80);
+        assert_eq!(style_for(true, false, None, Some("900"), None).width, 80);
+        assert_eq!(style_for(true, false, None, Some("nope"), None).width, 80);
+
+        let fixture = "[fail] gpu runtime: no usable Vulkan or OpenGL runtime, so no GPU surface can be created\n";
+        assert_eq!(
+            wrap_text(fixture, piped.width),
+            wrap_text(fixture, no_color.width)
+        );
+        assert!(!wrap_text(fixture, piped.width).contains('\u{1b}'));
+        let painted: String = wrap_logical_line(fixture.trim_end(), colored.width)
+            .into_iter()
+            .map(|line| paint_tag(&line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(painted.contains('\u{1b}'));
+        assert_eq!(
+            strip_ansi(&painted),
+            wrap_text(fixture, colored.width).trim_end()
+        );
+
+        if let Some(width) = console_columns() {
+            assert!((20..=500).contains(&width));
+        }
+    }
+
+    #[test]
+    fn the_footer_counts_checks_and_matches_the_install_sentence() {
+        let two = doctor_closing(false, 2, 1, 2);
+        let two = two.join("\n");
+        assert!(two.contains("2 critical checks failed, 1 warning"));
+        assert!(two.contains("items above are installed"));
+        assert!(!two.contains("item above is"));
+
+        let one = doctor_closing(false, 1, 0, 1).join("\n");
+        assert!(one.contains("1 critical check failed, 0 warnings"));
+        assert!(one.contains("the item above is installed"));
+        assert!(!one.contains("items above"));
+
+        let worker = doctor_closing(false, 1, 1, 0);
+        assert_eq!(
+            worker,
+            vec!["doctor: 1 critical check failed, 1 warning".to_owned()]
+        );
+
+        let passed = doctor_closing(true, 0, 1, 0);
+        assert_eq!(passed[0], "doctor: critical checks passed");
+        assert!(passed[1].contains("no window was opened here"));
+
+        let rows = [
+            "[fail] windowing library: libxkbcommon-x11.so.0 is missing".to_owned(),
+            "       Debian or Ubuntu: sudo apt install libxkbcommon-x11-0".to_owned(),
+            "[fail] gpu runtime: no usable Vulkan or OpenGL runtime, so no GPU surface can be created"
+                .to_owned(),
+            "       (EGL absent, Vulkan absent)".to_owned(),
+            "[warn] display session: none".to_owned(),
+        ];
+        assert_eq!(count_tag_rows(&rows, "[fail] "), 2);
+        assert_eq!(count_tag_rows(&rows, "[warn] "), 1);
+    }
+
+    #[test]
+    fn a_missing_explicit_worker_fails_and_is_counted() {
+        let mut stdout = Vec::new();
+        let ok = doctor_to(
+            &mut stdout,
+            Some(OsStr::new("definitely_missing_viewr_decode_bin")),
+            ReportStyle::plain(60),
+        )
+        .unwrap();
+        assert!(!ok);
+        let output = String::from_utf8(stdout).unwrap();
+        assert!(output.contains("[warn] VIEWR_DECODE_BIN set but missing"));
+        assert!(output.contains("critical check"));
+        assert!(output.contains("warning"));
+        assert!(!output.contains("[WARN]"));
+        assert!(!output.contains("[FAIL]"));
+        for line in output.lines() {
+            assert!(line.chars().count() <= 60, "{line}");
         }
     }
 

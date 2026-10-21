@@ -37,6 +37,11 @@ code, and where possible it's enforced in CI so it can't quietly regress.
   privacy and security rules. viewr constructs no shell command, remembers no
   editor choice, and retains no handoff history. The operating system may record
   paths in its recent-item, quick-access, or jump-list data according to policy.
+- **Clipboard image copy.** Edit > Copy, the image right-click action, and
+  Ctrl/Cmd+C place the on-screen pixels on the operating-system clipboard when
+  the user asks. That includes unsaved rotation, flips, applied crop, and Spot
+  Heal. viewr does not write a file, log the copy, or choose a destination app.
+  An application the user pastes into receives those pixels under its own rules.
 - **Memory boundary.** Decoded pixels and thumbnails stay in bounded process and
   GPU memory rather than a viewr disk cache. The operating system may page process
   memory, GPU drivers may retain copies, and viewr does not claim secure erasure

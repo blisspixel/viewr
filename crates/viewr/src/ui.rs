@@ -118,6 +118,8 @@ const PASTE_PATH_SCOPE_HELP: &str = tr!("Open an image or folder path from the c
 const OPEN_WITH_HELP: &str = tr!(
     "Opens the original file, including embedded metadata, in an app you choose. Unsaved viewr edits are not included. That app's privacy rules apply. If the other app changes the file, viewr reloads it when that is safe, or asks you to press F5 when unsaved edits would be lost."
 );
+const COPY_IMAGE_HELP: &str =
+    tr!("Copies the image on screen, including unsaved rotation, flips, crop, and Spot Heal.");
 const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.";
 const APPEARANCE_SCOPE_HELP: &str = tr!(
     "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately."
@@ -142,6 +144,8 @@ pub(crate) enum UiAction {
     OpenFolder,
     /// Open an image or folder path copied to the clipboard.
     PastePath,
+    /// Copy the on-screen image, including unsaved view edits, to the clipboard.
+    CopyImage,
     /// Change the session-only typed path, without opening or persisting it.
     SetOpenPathText(String),
     /// Open the typed path through the same file/folder entry policy.
@@ -1114,6 +1118,10 @@ fn render_context_menu(
                 }
             }
             ui.separator();
+            if context_copy_button(ui, frame, chrome) {
+                actions.push(UiAction::CopyImage);
+                close = true;
+            }
             let enabled = chrome.is_enabled(ChromeControl::OpenWith);
             let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
             open_with
@@ -1135,6 +1143,23 @@ fn render_context_menu(
     if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
         actions.push(UiAction::CloseContextMenu);
     }
+}
+
+fn context_copy_button(ui: &mut egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewModel) -> bool {
+    let copy_enabled = chrome.is_enabled(ChromeControl::CopyImage);
+    let copy_shortcut = format!("{PRIMARY_MODIFIER}+C");
+    let copy = ui.add_enabled(
+        copy_enabled,
+        egui::Button::new(frame.text(tr!("Copy"))).shortcut_text(&copy_shortcut),
+    );
+    copy.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Button, copy_enabled, frame.text(tr!("Copy")))
+    });
+    copy.ctx.accesskit_node_builder(copy.id, |node| {
+        node.set_keyboard_shortcut(copy_shortcut.as_str());
+        node.set_description(frame.text(COPY_IMAGE_HELP));
+    });
+    copy.on_hover_text(frame.text(COPY_IMAGE_HELP)).clicked()
 }
 
 fn menu_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Response {
@@ -1966,6 +1991,22 @@ fn edit_menu(
             .color(colors.text),
         |ui| {
             ui.set_min_width(210.0);
+            let copy_shortcut = format!("{PRIMARY_MODIFIER}+C");
+            let copy = ui
+                .add_enabled(
+                    chrome.is_enabled(ChromeControl::CopyImage),
+                    egui::Button::new(frame.text(tr!("Copy"))).shortcut_text(&copy_shortcut),
+                )
+                .on_hover_text(frame.text(COPY_IMAGE_HELP));
+            copy.ctx.accesskit_node_builder(copy.id, |node| {
+                node.set_keyboard_shortcut(copy_shortcut.as_str());
+                node.set_description(frame.text(COPY_IMAGE_HELP));
+            });
+            if copy.clicked() {
+                actions.push(UiAction::CopyImage);
+                ui.close();
+            }
+            ui.separator();
             let crop = chrome.crop_control();
             if menu_tool_button(ui, crop).clicked() {
                 actions.push(UiAction::ToggleCrop);
@@ -5616,15 +5657,15 @@ mod tests {
 
     use super::Language;
     use super::{
-        APPEARANCE_SCOPE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput, DockSide,
-        EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem, LOCAL_PRIVACY_SUMMARY,
-        MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS,
-        PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT, TOP_STATUS_COMPACT_MAX_WIDTH,
-        TOP_STATUS_MAX_WIDTH, UiAction, UiFrameOwned, actions_owned_by_modal,
-        add_top_status_with_external_edit, appearance_menu, chrome_colors_for, context_tool_button,
-        crop_pixel_bounds, folder_sort_menu, image_open_status, menu_tool_button, mosaic_status,
-        panels_menu, rating_filter_menu, rating_menu, render, retry_open_label,
-        top_toast_max_width, undo_trash_menu_item,
+        APPEARANCE_SCOPE_HELP, COPY_IMAGE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput,
+        DockSide, EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem,
+        LOCAL_PRIVACY_SUMMARY, MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP,
+        PREVIEW_RECOVERY_STATUS, PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
+        TOP_STATUS_COMPACT_MAX_WIDTH, TOP_STATUS_MAX_WIDTH, UiAction, UiFrameOwned,
+        actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
+        chrome_colors_for, context_tool_button, crop_pixel_bounds, folder_sort_menu,
+        image_open_status, menu_tool_button, mosaic_status, panels_menu, rating_filter_menu,
+        rating_menu, render, retry_open_label, top_toast_max_width, undo_trash_menu_item,
     };
     use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
     use super::{path_input_has_focus, render_path_entry};
@@ -6353,6 +6394,7 @@ mod tests {
     fn ui_action_variants_exist_for_toolbar() {
         let _ = UiAction::OpenFolder;
         let _ = UiAction::PastePath;
+        let _ = UiAction::CopyImage;
         let _ = UiAction::Reload;
         let _ = UiAction::ConfirmSaveOverwrite;
         let _ = UiAction::CancelSaveOverwrite;
@@ -7763,6 +7805,50 @@ mod tests {
             nodes
                 .iter()
                 .any(|node| node.value() == Some(OPEN_WITH_HELP))
+        );
+    }
+
+    #[test]
+    fn context_copy_publishes_the_on_screen_image_action() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.context_menu_pos = Some([100.0, 100.0]);
+        assert!(control_enabled(&frame, ChromeControl::CopyImage));
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let copy = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Copy")
+            })
+            .expect("accessible Copy action");
+        assert_eq!(copy.keyboard_shortcut(), Some("Ctrl+C"));
+        assert_eq!(copy.description(), Some(COPY_IMAGE_HELP));
+
+        frame.crop_busy = true;
+        assert!(!control_enabled(&frame, ChromeControl::CopyImage));
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        assert!(
+            update.nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Copy")
+                    && node.keyboard_shortcut() == Some("Ctrl+C")
+            }),
+            "Copy stays in the right-click menu while a crop is applying"
         );
     }
 

@@ -539,6 +539,7 @@ pub(crate) enum ChromeControl {
     HealRefreshSource,
     EditTransform,
     ViewImage,
+    CopyImage,
     UndoEdit,
     RedoEdit,
     RetryLoad,
@@ -565,6 +566,7 @@ impl ChromeControl {
         Self::HealRefreshSource,
         Self::EditTransform,
         Self::ViewImage,
+        Self::CopyImage,
         Self::UndoEdit,
         Self::RedoEdit,
         Self::RetryLoad,
@@ -695,6 +697,13 @@ impl ChromeViewModel {
             ChromeControl::RedoEdit => self.input.has_redo_edit && self.edit_history_action_ready(),
             ChromeControl::RetryLoad => !self.input.preview_retry_blocked,
             ChromeControl::ViewImage => self.input.dock.has_image,
+            ChromeControl::CopyImage => {
+                self.input.dock.has_image
+                    && !self.input.heal_busy
+                    && !self.input.heal_painting
+                    && !self.input.crop_busy
+                    && !self.input.crop_recovery_unsettled
+            }
             ChromeControl::RatingMenu => !self.input.rating_write_busy,
             ChromeControl::RatingChoice => {
                 self.exclusive_current_action_ready()
@@ -1335,11 +1344,40 @@ mod tests {
     #[test]
     fn ready_state_defines_every_control_without_windowing() {
         let model = ChromeViewModel::new(ready_input());
-        assert_eq!(ChromeControl::ALL.len(), 21);
+        assert_eq!(ChromeControl::ALL.len(), 22);
         for &control in ChromeControl::ALL {
             let expected = control != ChromeControl::ApplyCrop;
             assert_eq!(model.is_enabled(control), expected, "{control:?}");
         }
+    }
+
+    #[test]
+    fn copy_image_follows_the_visible_frame() {
+        assert!(ChromeViewModel::new(ready_input()).is_enabled(ChromeControl::CopyImage));
+
+        let mut missing = ready_input();
+        missing.dock.has_image = false;
+        assert!(!ChromeViewModel::new(missing).is_enabled(ChromeControl::CopyImage));
+
+        let mut healing = ready_input();
+        healing.heal_busy = true;
+        assert!(!ChromeViewModel::new(healing).is_enabled(ChromeControl::CopyImage));
+
+        let mut painting = ready_input();
+        painting.heal_painting = true;
+        assert!(!ChromeViewModel::new(painting).is_enabled(ChromeControl::CopyImage));
+
+        let mut cropping = ready_input();
+        cropping.crop_busy = true;
+        assert!(!ChromeViewModel::new(cropping).is_enabled(ChromeControl::CopyImage));
+
+        let mut unsettled = ready_input();
+        unsettled.crop_recovery_unsettled = true;
+        assert!(!ChromeViewModel::new(unsettled).is_enabled(ChromeControl::CopyImage));
+
+        let mut loading = ready_input();
+        loading.is_loading = true;
+        assert!(ChromeViewModel::new(loading).is_enabled(ChromeControl::CopyImage));
     }
 
     #[test]

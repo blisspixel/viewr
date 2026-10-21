@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Copy the image on screen from the right-click menu, Edit > Copy, or
+  Ctrl/Cmd+C. The copy includes unsaved rotation, flips, applied crop, and
+  Spot Heal. An image larger than 33554432 pixels is refused before a
+  transformed copy is allocated, and the status explains why. A text field
+  keeps Ctrl/Cmd+C for its own selection.
 - Set the Linux window identity to `io.github.blisspixel.viewr` on Wayland and
   X11 so window rules, launchers, and taskbars can match the desktop entry and
   icon. Use the same identity for the local Flatpak manifest, desktop launcher,

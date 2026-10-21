@@ -245,6 +245,7 @@ fn run_internal(
         last_coherence_action: None,
         pending_save: None,
         save_job: None,
+        copy_job: None,
         close_after_save: false,
         save_recovery_unsettled: false,
         crop_job: None,
@@ -1062,6 +1063,14 @@ impl StatusToast {
     }
 }
 
+type ClipboardJob = OneShotJob<(), Result<egui::ColorImage, crate::edit::ClipboardCopyError>>;
+
+enum CopyPublish {
+    Copied,
+    TooLarge,
+    Failed,
+}
+
 /// The whole application state. Deliberately small.
 #[allow(clippy::struct_excessive_bools)] // independent UI/session mode bits
 struct App {
@@ -1146,6 +1155,8 @@ struct App {
     pending_save: Option<PendingSave>,
     /// At most one explicit Save As encode with bounded completion ownership.
     save_job: Option<OneShotJob<(), SaveResult>>,
+    /// At most one clipboard copy of the on-screen image.
+    copy_job: Option<ClipboardJob>,
     /// A normal close request waiting for Save As to reach a terminal state.
     close_after_save: bool,
     /// An indeterminate Save As worker loss that requires a process restart.
@@ -7210,6 +7221,101 @@ impl App {
         }
     }
 
+    fn copy_current_image(&mut self) {
+        if self.copy_job.is_some() {
+            return;
+        }
+        let Some(image) = self.current_image.clone() else {
+            self.show_status_toast(self.language.localize(tr!("Open an image before copying.")));
+            return;
+        };
+        if self.heal.painting
+            || self.heal.is_busy()
+            || self.crop_job.is_some()
+            || self.crop_recovery_unsettled
+        {
+            self.show_status_toast(
+                self.language
+                    .localize(tr!("Wait for the edit to finish before copying.")),
+            );
+            return;
+        }
+        if image.width == 0 || image.height == 0 {
+            self.show_status_toast(self.language.localize(tr!("Could not copy this image.")));
+            return;
+        }
+        let pixels = u64::from(image.width).saturating_mul(u64::from(image.height));
+        if pixels > crate::edit::MAX_CLIPBOARD_PIXELS {
+            self.show_status_toast(
+                self.language
+                    .localize(tr!("This image is too large to copy.")),
+            );
+            return;
+        }
+        let transform = crate::edit::PixelTransform::new(
+            self.transform.rotation_steps,
+            self.transform.flip_h,
+            self.transform.flip_v,
+        );
+        let event_proxy = self.event_proxy.clone();
+        let (completion, job) = OneShotJob::new((), move || {
+            let _ = event_proxy.send_event(UserEvent::Wake);
+        });
+        let spawn = std::thread::Builder::new()
+            .name("viewr-copy".into())
+            .spawn(move || {
+                let result =
+                    crate::edit::clipboard_image(image.as_ref(), transform).map(|copied| {
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [copied.width as usize, copied.height as usize],
+                            &copied.rgba,
+                        )
+                    });
+                let _ = completion.complete(result);
+            });
+        if let Ok(_handle) = spawn {
+            self.copy_job = Some(job);
+        } else {
+            log::error!("failed to start clipboard copy");
+            self.show_status_toast(self.language.localize(tr!("Could not copy this image.")));
+        }
+    }
+
+    fn poll_copy_result(&mut self) {
+        let Some(job) = self.copy_job.as_ref() else {
+            return;
+        };
+        let polled = job.poll();
+        if matches!(polled, JobPoll::Pending) {
+            return;
+        }
+        self.copy_job
+            .take()
+            .expect("copy job exists after polling it");
+        let outcome = match polled {
+            JobPoll::Ready(Ok(image)) => match self.renderer.as_ref() {
+                Some(renderer) => {
+                    renderer.egui_ctx.copy_image(image);
+                    CopyPublish::Copied
+                }
+                None => CopyPublish::Failed,
+            },
+            JobPoll::Ready(Err(crate::edit::ClipboardCopyError::TooLarge)) => CopyPublish::TooLarge,
+            JobPoll::Ready(Err(crate::edit::ClipboardCopyError::Pixels)) => CopyPublish::Failed,
+            JobPoll::Disconnected => {
+                log::error!("clipboard copy disconnected before publishing a result");
+                CopyPublish::Failed
+            }
+            JobPoll::Pending => unreachable!("pending clipboard copy returned early"),
+        };
+        let message = match outcome {
+            CopyPublish::Copied => tr!("Copied image."),
+            CopyPublish::TooLarge => tr!("This image is too large to copy."),
+            CopyPublish::Failed => tr!("Could not copy this image."),
+        };
+        self.show_status_toast(self.language.localize(message));
+    }
+
     fn confirm_save_overwrite(&mut self) {
         let Some(pending) = self.pending_save.take() else {
             return;
@@ -8628,6 +8734,13 @@ impl ApplicationHandler<UserEvent> for App {
                         self.open_image_dialog();
                     }
                     Key::Character(c)
+                        if (c == "c" || c == "C")
+                            && primary_modifier_pressed(self.modifiers)
+                            && !self.modifiers.shift_key() =>
+                    {
+                        self.copy_current_image();
+                    }
+                    Key::Character(c)
                         if (c == "v" || c == "V") && primary_modifier_pressed(self.modifiers) =>
                     {
                         self.open_clipboard_path();
@@ -9123,6 +9236,10 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         crate::ui::UiAction::OpenFolder => self.open_folder_dialog(),
                         crate::ui::UiAction::PastePath => self.open_clipboard_path(),
+                        crate::ui::UiAction::CopyImage => {
+                            self.context_menu_pos = None;
+                            self.copy_current_image();
+                        }
                         crate::ui::UiAction::Reload => self.reload_current_image(),
                         crate::ui::UiAction::OpenWith => self.open_current_with(),
                         crate::ui::UiAction::SaveAs => self.save_as(),
@@ -9434,6 +9551,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.poll_auxiliary_load();
         self.poll_crop_result();
         self.poll_save_result(event_loop);
+        self.poll_copy_result();
         self.poll_foreground_image_load();
 
         if self.renderer.is_none() {

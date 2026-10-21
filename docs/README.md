@@ -37,6 +37,8 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
+- [v0.7.5 candidate notes](releases/v0.7.5.md): the prepared copy, open-failure,
+  doctor, and Windows path-spelling patch, pending the complete release gate.
 - [v0.7.4 release notes](releases/v0.7.4.md): the Linux entry and window-loss
   patch and its explicit evidence limits.
 - [v0.7.3 release notes](releases/v0.7.3.md): the previous focused viewer-polish

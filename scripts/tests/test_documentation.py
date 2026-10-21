@@ -232,6 +232,13 @@ class DocumentationTests(unittest.TestCase):
                 "notarized",
                 "Representative-hardware",
             ),
+            "docs/releases/v0.7.5.md": (
+                "patch over",
+                "GitHub build-provenance attestations",
+                "not Authenticode-signed",
+                "notarized",
+                "Representative-hardware",
+            ),
             "CHANGELOG.md": (
                 "## 0.7.4 - 2026-10-03",
                 "## 0.7.3 - 2026-10-03",

@@ -62,6 +62,7 @@ EXPECTED_DOCUMENTATION_PATHS = {
     "docs/releases/v0.7.2.md",
     "docs/releases/v0.7.3.md",
     "docs/releases/v0.7.4.md",
+    "docs/releases/v0.7.5.md",
     "docs/ROADMAP.md",
     "docs/SANDBOX_PLAN.md",
     "docs/screenshots/viewr-dark-example.png",
@@ -731,8 +732,50 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("/master/install.sh", combined)
         self.assertIn("/releases/download/v0.7.4/install.ps1", public_commands)
         self.assertIn("/releases/download/v0.7.4/install.sh", public_commands)
-        self.assertIn("/releases/download/v0.7.4/install.ps1", compiled_commands)
-        self.assertIn("/releases/download/v0.7.4/install.sh", compiled_commands)
+        self.assertIn("/releases/download/v0.7.5/install.ps1", compiled_commands)
+        self.assertIn("/releases/download/v0.7.5/install.sh", compiled_commands)
+        self.assertNotIn("/releases/download/v0.7.5/", public_commands)
+
+    def test_update_job_installs_the_workspace_candidate_over_published_v074(
+        self,
+    ) -> None:
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        linux = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.sh").read_text(
+            encoding="utf-8"
+        )
+        windows = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(workflow.count("--expected-tag v0.7.5"), 2)
+        self.assertNotIn("--expected-tag v0.7.4", workflow)
+        self.assertEqual(workflow.count("Update from published v0.7.4"), 2)
+
+        self.assertEqual(linux.count("gh release download v0.7.4"), 1)
+        self.assertEqual(linux.count("viewr-0.7.4-x86_64-unknown-linux-gnu.zip"), 3)
+        self.assertEqual(linux.count("viewr-0.7.5-x86_64-unknown-linux-gnu.zip"), 1)
+        self.assertEqual(linux.count("VIEWR_VERSION=0.7.5"), 1)
+        self.assertNotIn("VIEWR_VERSION=0.7.4", linux)
+        self.assertEqual(linux.count("releases/v0.7.5/viewr"), 2)
+        self.assertNotIn("releases/v0.7.4/viewr", linux)
+        self.assertIn('"viewr 0.7.5"', linux)
+        self.assertEqual(linux.count("--source-ref refs/tags/v0.7.4"), 2)
+
+        self.assertEqual(windows.count("gh release download v0.7.4"), 1)
+        self.assertEqual(
+            windows.count("viewr-0.7.4-x86_64-pc-windows-msvc.zip"),
+            3,
+        )
+        self.assertEqual(
+            windows.count("viewr-0.7.5-x86_64-pc-windows-msvc.zip"),
+            1,
+        )
+        self.assertEqual(windows.count("-Version 0.7.4"), 1)
+        self.assertEqual(windows.count("-Version 0.7.5"), 1)
+        self.assertIn('"viewr 0.7.5"', windows)
+        self.assertNotIn('"viewr 0.7.4"', windows)
+        self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

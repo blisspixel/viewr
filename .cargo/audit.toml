@@ -7,4 +7,7 @@ ignore = [
     "RUSTSEC-2026-0192", # ttf-parser unmaintained; winit Linux decorations, build-time only
     "RUSTSEC-2026-0194", # affected transitive XML paths never consume user XML; ratings use patched 0.41
     "RUSTSEC-2026-0195", # affected transitive paths never use NsReader on user XML; ratings use patched 0.41
+    "RUSTSEC-2026-0370", # zvariant unmaintained after the zbus 6 merge; no safe upgrade while AccessKit stays on zbus 5
+    "RUSTSEC-2026-0371", # zbus_names unmaintained after the zbus 6 merge; same AccessKit and portal constraint
+    "RUSTSEC-2026-0372", # zvariant_derive unmaintained after the zbus 6 merge; same AccessKit and portal constraint
 ]

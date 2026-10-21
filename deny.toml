@@ -37,6 +37,17 @@ ignore = [
     # either dependency removes it; runtime vulnerabilities are never ignored.
     "RUSTSEC-2024-0436",
 
+    # zbus 6 merged the standalone zvariant, zvariant_derive, and zbus_names
+    # crates and left those names unmaintained. This is not a vulnerability.
+    # accesskit_unix 0.24 still links zbus 5, and viewr's reviewed Linux portal
+    # client is zbus 5.18 on that same line. Moving only the direct client to
+    # zbus 6 would duplicate the major version, which the ban above rejects, and
+    # no patched standalone upgrade exists. Reassess when AccessKit publishes a
+    # zbus 6 adapter and the portal calls move with it.
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
+
 ]
 
 [licenses]

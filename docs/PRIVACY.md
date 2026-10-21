@@ -146,9 +146,10 @@ A promise you can verify beats a promise you have to trust.
    Each markable accepted source also retains its selected pathname only in
    memory. Version checks reopen that final entry without following links and
    require the same identity and version, but all image and metadata bytes still
-   come from the accepted handle. Windows additionally keeps a SHA-256 witness of
+   come from the accepted handle. Accepted sources also keep a SHA-256 witness of
    those bytes only in memory because same-length rewrites can preserve every
-   writable timestamp. The witness is never persisted, logged, or exposed.
+   writable timestamp, and Linux change time can stay unchanged inside one coarse
+   tick. The witness is never persisted, logged, or exposed.
    Accepted encoded sources are limited to 512 MiB before witness work, and
    superseded decode work stops between fixed 64 KiB chunks. Folder-rating scans
    use a separate read-only, native-version-bound header reader. It is capped at
@@ -355,7 +356,7 @@ system change-time evidence are checked before and after extraction. A no-follow
 pathname reopen also requires the accepted identity and version, so Windows
 handle metadata caching cannot hide a pathname replacement. A detected rewrite
 or rename fails closed instead of retaining metadata from uncertain bytes. The
-in-memory Windows SHA-256 witness also rejects an in-place rewrite whose length
+in-memory SHA-256 witness also rejects an in-place rewrite whose length
 and writable timestamps were restored. The shared 512 MiB encoded-input limit is
 enforced before hashing, and generation cancellation is checked throughout the
 bounded stream. Replace-latest animation, details, and rating inspection exits

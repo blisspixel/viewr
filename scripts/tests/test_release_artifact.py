@@ -776,6 +776,19 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn('"viewr 0.7.4"', windows)
         self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
 
+    def test_release_caller_grants_the_nested_update_permissions(self) -> None:
+        release = (PROJECT_ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        ci = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        quality = release.split("uses: ./.github/workflows/ci.yml", 1)[1]
+        quality = quality.split("uses: ./.github/workflows/fuzz.yml", 1)[0]
+        for permission in ("attestations: read", "contents: read", "id-token: write"):
+            self.assertIn(permission, quality)
+            self.assertIn(permission, ci)
+
     def test_unpublished_notes_are_not_required_in_a_published_archive(self) -> None:
         published = release_artifact._archive_documentation_paths("0.7.4")
         candidate = release_artifact._archive_documentation_paths("0.7.5")

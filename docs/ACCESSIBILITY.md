@@ -143,6 +143,11 @@ The minimum contract is:
   at its end of the document. Documents never auto-play.
 - Reload and Retry remain reachable and expose progress or failure as semantic
   text without clearing the last good image.
+- Copy is reachable from Edit, the image right-click action, and Ctrl+C or
+  Cmd+C. It copies the on-screen image, including unsaved rotation, flips,
+  applied crop, and Spot Heal. A text field keeps those keys for its own
+  selection. The command is disabled while Spot Heal is painting or finishing
+  and while a crop is being applied.
 - Open With is reachable from both File and the image right-click
   surface. Its help names the original source and external-app trust boundary.
   Successful delegation may reload a later external change when in-memory edits

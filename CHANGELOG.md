@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Copy the image on screen from the right-click menu, Edit > Copy, or
+  Ctrl/Cmd+C. The copy includes unsaved rotation, flips, applied crop, and
+  Spot Heal. An image larger than 33554432 pixels is refused before a
+  transformed copy is allocated, and the status explains why. A text field
+  keeps Ctrl/Cmd+C for its own selection.
 - Color `viewr doctor` status tags by role on a terminal, and keep piped output,
   `NO_COLOR`, and `TERM=dumb` plain. Tags share one lowercase form and one
   column. Doctor rows and help wrap to the terminal width, keeping the hanging

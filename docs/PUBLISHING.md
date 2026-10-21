@@ -107,7 +107,8 @@ Four version states must not be conflated:
    currently v0.7.4. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.4`, the published Linux entry and window-loss patch.
+   `0.7.5`, preparing the bounded copy, open-failure, doctor, and Windows
+   path-spelling patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -141,6 +142,13 @@ The v0.7.4 patch uses the same narrow exception for reproduced Linux
 window-loss and file-entry defects, with related recovery and control fixes.
 It requires the complete automated gate and one exact candidate; it does not
 close hardware, native assistive-technology, or v0.8 acceptance work.
+
+The v0.7.5 preparation uses the same narrow exception for copying the image
+on screen, plain-language open failures, doctor output, Windows path spelling,
+and the related recovery fixes already reviewed on main. It includes the
+reviewed objc2 0.6.5 retain fix. It requires the complete automated gate and
+one exact candidate; it does not close hardware, native assistive-technology,
+or v0.8 acceptance work.
 
 Application source, dependencies, workflows, packaging, or user-facing behavior
 instructions changed after a candidate run invalidate that candidate and all
@@ -177,7 +185,7 @@ production environment.
    validator when the required platform records are available:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.4
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.5
    ```
 
 2. On a feature branch, make the single version transition described in

@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.4](https://github.com/blisspixel/viewr/releases/tag/v0.7.4), the Linux entry and window-loss patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.4`, the published Linux entry and window-loss patch |
+| Workspace version | `0.7.5`, preparing the bounded copy, open-failure, doctor, and Windows path-spelling patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.7.5** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -208,11 +208,14 @@ or accessibility evidence gates.
 | Copy the viewed image | Implemented, unreleased | Right-click, Edit > Copy, and Ctrl/Cmd+C copy the on-screen pixels, including unsaved rotation, flips, applied crop, and Spot Heal. Images larger than 33554432 pixels are refused with an explanation. Opening an image from clipboard pixels stays a candidate. |
 | Doctor report readability | Implemented, unreleased | `viewr doctor` colors only the status tag on a terminal, uses one lowercase tag case, and wraps doctor rows and help to the terminal width while keeping the hanging indent. A failed report counts critical checks and warnings, and the install sentence matches the number of failed window rows. Piped output, `NO_COLOR`, and `TERM=dumb` stay plain. |
 | Plain-language failed opens | Implemented, unreleased | A failed open shows one catalog sentence. Retry appears only when a later try can succeed. Image Information keeps the decoder's own line. `viewr benchmark` prints that sentence, and `--verbose` adds the decoder line. |
+| Windows catalog spelling | Implemented, unreleased | On Windows, a file dialog and a folder listing that differ only in capitalization name the same file. The catalog keeps its rating, Trash and a folder refresh cannot bring that file back under the other spelling, and the session stores the listing's spelling. Other platforms stay case-sensitive. |
+| Same-length rewrite rejection | Implemented, unreleased | A same-length in-place rewrite is rejected when the filesystem leaves the change time unchanged. Accepted sources keep an in-memory SHA-256 witness on every platform and fail closed before a rating or metadata write. The digest is not stored or logged. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
-candidates. Copying the on-screen image, the doctor report, and plain-language
-failed opens are implemented and unreleased. The viewing-control changes add no
+candidates. Copying the on-screen image, the doctor report, plain-language
+failed opens, Windows catalog spelling, and same-length rewrite rejection are
+implemented and unreleased. The viewing-control changes add no
 preference, catalog, or activity history.
 
 ### Version state and update points

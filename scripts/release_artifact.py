@@ -242,6 +242,9 @@ def _load_identity(repository_root: Path) -> tuple[str, str]:
 
 
 def _archive_documentation_paths(version: str) -> tuple[str, ...]:
+    # The static list is also the contract for already published archives.
+    # Notes for a version that is not yet public stay out of that list and
+    # are appended only for the archive being built or checked.
     current_release_notes = f"docs/releases/v{version}.md"
     return tuple(dict.fromkeys((*ARCHIVE_DOCUMENTATION_PATHS, current_release_notes)))
 

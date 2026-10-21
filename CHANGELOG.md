@@ -5,6 +5,10 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Reject a same-length in-place rewrite when the filesystem leaves the change
+  time unchanged. Accepted sources keep an in-memory SHA-256 witness on every
+  platform, matching the existing Windows check, and fail closed before a rating
+  or metadata write. The digest is not stored or logged.
 - Set the Linux window identity to `io.github.blisspixel.viewr` on Wayland and
   X11 so window rules, launchers, and taskbars can match the desktop entry and
   icon. Use the same identity for the local Flatpak manifest, desktop launcher,

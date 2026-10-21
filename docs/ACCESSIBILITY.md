@@ -71,7 +71,8 @@ The minimum contract is:
 - Current filename, folder position, source dimensions, and displayed zoom are
   available as text. During a genuine replacement load, the presented filename
   remains truthful to the visible pixels while a separate bounded filename names
-  the selected target. Failure and Retry name that same target. Derived preview
+  the selected target. Failure names that same target, and Retry does too when
+  it is offered. Derived preview
   work is identified as preview preparation rather than a new file open. Loading,
   failure, and preview-preparation labels use polite AccessKit live-region
   semantics; long target text remains bounded and discoverable when visually
@@ -85,7 +86,8 @@ The minimum contract is:
 - The empty state exposes drop, file-versus-folder session scope, and the
   local-only privacy line as visible text, followed by separately named Open File
   and Open Folder actions. Opening and failure headings name the selected file.
-  Failure copy stays one short line with a named Retry action.
+  Failure copy stays one short sentence. Retry is named only when a later try
+  can succeed. Image Information keeps the decoder's own line.
 - Crop exposes exact source-pixel origin, output dimensions, ratio, eight resize
   handles, and keyboard controls at every positive selection size. If application
   fails while the same source is current, the exact selection returns as the
@@ -257,7 +259,7 @@ Run the same workflow on every platform:
 | Disclosure | Collapse and expand Tools and Folder Previews | The control name changes between Collapse and Expand, remains actionable, and preserves the panel's visible state |
 | Position | Move Tools and Image Information left and right, including both on one side | Selected radio state is announced and controls remain reachable in a coherent order |
 | Navigation | Use Left, Right, Home, End, Page Up, Page Down, and a preview button; change View > Folder Sort between Latest First and Name | Immediate reuse remains quiet; a genuine miss names the selected target while the visible filename remains tied to presented pixels; stale decode completion never announces the wrong image; exactly one folder order is selected and changing it preserves the current image and rating projection |
-| Reload | Invoke File > Reload File and `F5` on a disposable file changed by another app | Reload is announced, the old frame remains until success, and a failed refresh exposes Retry without losing focus |
+| Reload | Invoke File > Reload File and `F5` on a disposable file changed by another app | Reload is announced, the old frame remains until success, and a failed refresh that can succeed on a later try exposes Retry without losing focus |
 | Open With | Inspect File > Open With and the image right-click action; choose and cancel a disposable editor handoff, then make one external change | Both entry points have one clear name and boundary explanation; cancellation is quiet and safe; the selected app receives the original rather than unsaved viewr edits; a safe external change reloads without blanking; unsaved viewr edits keep the last good frame and ask for F5 |
 | File gone | Delete the presented file from outside viewr | The last good image stays visible and a polite status says the selected path no longer names that file |
 | Pending sibling gone | Select a sibling and remove it before its first presentation | The stale entry leaves the folder position, the last good frame remains until a surviving image opens, and recovery or Retry is announced once without exposing a path |
@@ -279,7 +281,7 @@ Run the same workflow on every platform:
 | Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |
 | Save | Open Save As to a new disposable destination and complete or cancel it; then choose an existing disposable destination, inspect the app-owned overwrite modal, cancel once, and repeat to confirm replacement | The native dialog is usable; the modal has an accurate name and recheck disclosure, initially focuses Cancel, exposes only Cancel and Replace file as enabled actions, changes nothing when canceled, replaces only the confirmed destination when accepted, and returns focus predictably after either outcome |
 | Trash | Use File > Move to Trash and repeated `Delete` on fully presented disposable copies while earlier moves are active; press Delete once while the next image is still loading; confirm bare `B`, `M`, and normal-mode `X` do nothing; restore with `U`; inspect settled, active, and uncertain Undo ownership; try Delete during active Spot Heal; inspect a control-character filename in permanent-delete confirmation but cancel | Every fully presented image is accepted and advances without waiting for the prior platform move, platform operations remain serialized, the loading image is not queued and gets a visible wait reason, the removed culling keys trigger no destructive or review action, active work has a specific result, confirmation is path-free and visually unambiguous, cancel is safe, unsettled Undo does not claim settled state, cross-folder Undo does not insert into the unrelated view, and restore uses only the exact receipt. The transient result stays in top chrome outside immersive surfaces and does not cover the photo |
-| Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading, failure, and Retry name only the selected filename; each transition is announced once; menus and recovery actions remain reachable |
+| Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading and failure name only the selected filename. Retry does the same when a later try can succeed. A malformed or unsupported file does not offer Retry. Each transition is announced once; menus and recovery actions remain reachable. Image Information shows the decoder line |
 | Contrast and scale | Repeat key flows at 100%, 150%, and 200% scale in Light, Dark, and Console with white and dark image backgrounds | Focus and text stay visible; no clipping, overlap, or image-covering panel appears |
 
 ## Linux-specific checks

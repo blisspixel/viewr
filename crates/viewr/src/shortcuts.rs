@@ -263,13 +263,15 @@ pub(crate) fn format_shortcut_keys(keys: &str, primary: &str) -> String {
 /// Empty, opening, or failed-open copy for the startup card.
 ///
 /// The file name is substituted after translation so a language can place the
-/// subject where its grammar needs it. Decoder and I/O error text stays in the
-/// words the platform produced.
+/// subject where its grammar needs it. `load_error` is the sentence already
+/// chosen for this failure. `allow_retry` decides whether the card offers
+/// Retry. The decoder's own line stays in Image Information.
 #[must_use]
 pub(crate) fn empty_state_copy(
     language: Language,
     is_opening: bool,
     load_error: Option<&str>,
+    allow_retry: bool,
     selected_file_name: Option<&str>,
 ) -> EmptyStateCopy {
     if is_opening {
@@ -293,7 +295,7 @@ pub(crate) fn empty_state_copy(
                 selected_file_name,
             ),
             description: bound_user_error(error),
-            show_retry: true,
+            show_retry: allow_retry,
         };
     }
     EmptyStateCopy {
@@ -405,22 +407,26 @@ mod tests {
 
     #[test]
     fn headings_substitute_the_file_name_after_translation() {
-        let opening = empty_state_copy(Language::German, true, None, Some("night.png"));
+        let opening = empty_state_copy(Language::German, true, None, true, Some("night.png"));
         assert_eq!(opening.heading, "night.png wird geöffnet");
         assert_eq!(
             opening.description,
             "Lokale Dekodierung, während das Fenster reaktionsfähig bleibt."
         );
 
-        let unnamed = empty_state_copy(Language::Spanish, true, None, None);
+        let unnamed = empty_state_copy(Language::Spanish, true, None, true, None);
         assert_eq!(unnamed.heading, "Abriendo la imagen");
 
-        let failed = empty_state_copy(Language::French, false, Some("truncated"), Some("a.png"));
-        assert_eq!(failed.heading, "Impossible d’ouvrir a.png");
-        assert_eq!(
-            failed.description, "truncated",
-            "decoder text stays as produced"
+        let failed = empty_state_copy(
+            Language::French,
+            false,
+            Some("Le fichier est endommagé ou incomplet."),
+            false,
+            Some("a.png"),
         );
+        assert_eq!(failed.heading, "Impossible d’ouvrir a.png");
+        assert_eq!(failed.description, "Le fichier est endommagé ou incomplet.");
+        assert!(!failed.show_retry);
     }
 
     #[test]
@@ -435,7 +441,7 @@ mod tests {
                 assert_eq!(
                     open_status(language, true, false, name).as_deref(),
                     Some(
-                        empty_state_copy(language, true, None, name)
+                        empty_state_copy(language, true, None, true, name)
                             .heading
                             .as_str()
                     ),
@@ -443,7 +449,7 @@ mod tests {
                 assert_eq!(
                     open_status(language, false, true, name).as_deref(),
                     Some(
-                        empty_state_copy(language, false, Some("failed"), name)
+                        empty_state_copy(language, false, Some("failed"), true, name)
                             .heading
                             .as_str()
                     ),
@@ -505,13 +511,13 @@ mod tests {
 
     #[test]
     fn empty_state_copy_distinguishes_first_run_opening_and_failure() {
-        let first = empty_state_copy(Language::English, false, None, None);
+        let first = empty_state_copy(Language::English, false, None, true, None);
         assert_eq!(first.heading, "Open an image");
         assert_eq!(first.description, FIRST_RUN_SCOPE);
         assert!(first.description.contains("drop a file or folder"));
         assert!(!first.show_retry);
 
-        let opening = empty_state_copy(Language::English, true, None, Some("night.png"));
+        let opening = empty_state_copy(Language::English, true, None, true, Some("night.png"));
         assert_eq!(opening.heading, "Opening night.png");
         assert_eq!(opening.description, OPENING_DESCRIPTION);
         assert!(!opening.show_retry);
@@ -519,12 +525,26 @@ mod tests {
         let failed = empty_state_copy(
             Language::English,
             false,
-            Some("truncated"),
+            Some("The file is damaged or incomplete."),
+            false,
             Some("night.png"),
         );
         assert_eq!(failed.heading, "Could not open night.png");
-        assert_eq!(failed.description, "truncated");
-        assert!(failed.show_retry);
+        assert_eq!(failed.description, "The file is damaged or incomplete.");
+        assert!(!failed.show_retry);
+
+        let retryable = empty_state_copy(
+            Language::English,
+            false,
+            Some("viewr doesn't have permission to read this file."),
+            true,
+            Some("night.png"),
+        );
+        assert_eq!(
+            retryable.description,
+            "viewr doesn't have permission to read this file."
+        );
+        assert!(retryable.show_retry);
     }
 
     #[test]

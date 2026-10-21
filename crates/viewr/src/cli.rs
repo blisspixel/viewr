@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crate::startup::{DOCTOR_FAIL, DOCTOR_NOTE, DOCTOR_OK, DOCTOR_WARN};
-
 use crate::decode::DecodedImage;
+use crate::locale::Language;
+use crate::presentation::explain_open_failure;
+use crate::startup::{DOCTOR_FAIL, DOCTOR_NOTE, DOCTOR_OK, DOCTOR_WARN};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub(crate) const OFFICIAL_RELEASES_URL: &str = "https://github.com/blisspixel/viewr/releases";
@@ -75,6 +76,8 @@ pub enum Invocation {
     Benchmark {
         /// Directory of images; if `None`, a small temp corpus is generated.
         dir: Option<PathBuf>,
+        /// Print the decoder's own line after each skipped file.
+        verbose: bool,
     },
     /// Run the explicit local GUI startup/navigation/memory probe, then exit.
     PerformanceProbe {
@@ -118,6 +121,30 @@ fn looks_like_path(path: &Path, exists: &dyn Fn(&Path) -> bool) -> bool {
         || text.contains('/')
         || text.contains('\\')
         || text.contains(':')
+}
+
+fn parse_benchmark(rest: &[String]) -> Result<Invocation, String> {
+    let mut verbose = false;
+    let mut dir = None;
+    for argument in rest {
+        if argument == "--verbose" {
+            if verbose {
+                return Err(unexpected_argument(argument, "viewr benchmark"));
+            }
+            verbose = true;
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Err(unexpected_argument(argument, "viewr benchmark"));
+        }
+        if dir.is_some() {
+            return Err(
+                "usage: viewr benchmark [--verbose] [dir]. Try `viewr benchmark --help`.".into(),
+            );
+        }
+        dir = Some(PathBuf::from(argument));
+    }
+    Ok(Invocation::Benchmark { dir, verbose })
 }
 
 fn unexpected_argument(argument: &str, command: &str) -> String {
@@ -183,15 +210,7 @@ where
             if asked_for_help {
                 return Ok(Invocation::Help(HelpTopic::Benchmark));
             }
-            if let Some(flag) = rest.first().filter(|argument| argument.starts_with('-')) {
-                return Err(unexpected_argument(flag, "viewr benchmark"));
-            }
-            if rest.len() > 1 {
-                return Err("usage: viewr benchmark [dir]. Try `viewr benchmark --help`.".into());
-            }
-            Ok(Invocation::Benchmark {
-                dir: args.get(1).cloned(),
-            })
+            parse_benchmark(&rest)
         }
         "performance-probe" => {
             if asked_for_help {
@@ -244,6 +263,7 @@ pub fn run(inv: Invocation) -> ExitCode {
     let stderr = io::stderr();
     let mut stdout = stdout.lock();
     let style = ReportStyle::detect(&stdout);
+    let benchmark_detail_color = benchmark_detail_color(&stderr);
     let explicit_worker = std::env::var_os("VIEWR_DECODE_BIN");
     run_with_io(
         inv,
@@ -251,6 +271,7 @@ pub fn run(inv: Invocation) -> ExitCode {
         &mut stderr.lock(),
         explicit_worker.as_deref(),
         style,
+        benchmark_detail_color,
     )
     .unwrap_or(ExitCode::FAILURE)
 }
@@ -261,6 +282,7 @@ fn run_with_io(
     stderr: &mut impl Write,
     explicit_worker: Option<&OsStr>,
     style: ReportStyle,
+    benchmark_detail_color: bool,
 ) -> io::Result<ExitCode> {
     match inv {
         Invocation::Gui { .. } => Ok(ExitCode::FAILURE), // caller should launch GUI
@@ -280,7 +302,13 @@ fn run_with_io(
                 Ok(ExitCode::from(1))
             }
         }
-        Invocation::Benchmark { dir } => match benchmark_to(dir.as_deref(), stdout, stderr) {
+        Invocation::Benchmark { dir, verbose } => match benchmark_to(
+            dir.as_deref(),
+            stdout,
+            stderr,
+            verbose,
+            benchmark_detail_color,
+        ) {
             Ok(()) => Ok(ExitCode::SUCCESS),
             Err(e) => {
                 writeln!(stderr, "benchmark failed: {e}")?;
@@ -374,12 +402,16 @@ proven when viewr opens a window, not by doctor.
 viewr benchmark - time local decoding
 
 Usage:
+  viewr benchmark [--verbose] [dir]
+
   viewr benchmark              Time a small in-memory corpus (no temp files)
   viewr benchmark <dir>        Time supported images in <dir>, read-only
+  viewr benchmark --verbose    Also print the decoder line for a skipped file
 
 Prints file, pixel count, median milliseconds over five decodes, and megapixels
-per second. Files in <dir> are only read. Nothing is written, cached on disk, or
-sent anywhere.
+per second. A skipped file prints one short reason. `--verbose` adds the
+decoder's own line on the next row, dimmed on a color terminal. Files in <dir>
+are only read. Nothing is written, cached on disk, or sent anywhere.
 
 Exit status is 1 when <dir> is not a directory or contains no supported image.
 "
@@ -497,6 +529,18 @@ fn no_color_disables(value: Option<&OsStr>) -> bool {
 fn parse_columns(columns: Option<&str>) -> Option<usize> {
     let width = columns?.parse::<usize>().ok()?;
     (20..=500).contains(&width).then_some(width)
+}
+
+/// Whether a benchmark skip may dim its decoder line. Color follows stderr, not stdout.
+fn benchmark_detail_color(stderr: &impl IsTerminal) -> bool {
+    style_for(
+        stderr.is_terminal(),
+        no_color_disables(std::env::var_os("NO_COLOR").as_deref()),
+        std::env::var("TERM").ok().as_deref(),
+        None,
+        None,
+    )
+    .color
 }
 
 fn style_for(
@@ -951,13 +995,17 @@ fn decode_self_test() -> Result<(u32, u32, f64), String> {
 pub fn benchmark(dir: Option<&Path>) -> Result<(), String> {
     let stdout = io::stdout();
     let stderr = io::stderr();
-    benchmark_to(dir, &mut stdout.lock(), &mut stderr.lock())
+    let mut stderr = stderr.lock();
+    let color_details = benchmark_detail_color(&stderr);
+    benchmark_to(dir, &mut stdout.lock(), &mut stderr, false, color_details)
 }
 
 fn benchmark_to(
     dir: Option<&Path>,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
+    verbose: bool,
+    color_details: bool,
 ) -> Result<(), String> {
     const ITERATIONS: u32 = 5;
 
@@ -984,7 +1032,7 @@ fn benchmark_to(
             return Err("no supported images in the given directory".into());
         }
         for path in entries {
-            bench_one_path(&path, ITERATIONS, stdout, stderr)?;
+            bench_one_path(&path, ITERATIONS, stdout, stderr, verbose, color_details)?;
         }
     } else {
         writeln!(
@@ -998,7 +1046,15 @@ fn benchmark_to(
             ("mem_c.png", 128, 128),
         ] {
             let png = encode_png_memory(w, h).map_err(|e| e.to_string())?;
-            bench_one_bytes(name, &png, ITERATIONS, stdout, stderr)?;
+            bench_one_bytes(
+                name,
+                &png,
+                ITERATIONS,
+                stdout,
+                stderr,
+                verbose,
+                color_details,
+            )?;
         }
     }
     Ok(())
@@ -1009,6 +1065,8 @@ fn bench_one_path(
     iterations: u32,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
+    verbose: bool,
+    color_details: bool,
 ) -> Result<(), String> {
     let mut times = Vec::with_capacity(iterations as usize);
     let mut pixels = 0u64;
@@ -1019,11 +1077,11 @@ fn bench_one_path(
                 times.push(start.elapsed().as_secs_f64() * 1000.0);
                 pixels = u64::from(img.width) * u64::from(img.height);
             }
-            Err(e) => {
+            Err(error) => {
                 let name = path
                     .file_name()
                     .map_or_else(|| "(file)".into(), |s| s.to_string_lossy().into_owned());
-                writeln!(stderr, "skip {name}: {e}").map_err(|e| e.to_string())?;
+                write_benchmark_skip(stderr, &name, &error, verbose, color_details)?;
                 return Ok(());
             }
         }
@@ -1046,6 +1104,8 @@ fn bench_one_bytes(
     iterations: u32,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
+    verbose: bool,
+    color_details: bool,
 ) -> Result<(), String> {
     let mut times = Vec::with_capacity(iterations as usize);
     let mut pixels = 0u64;
@@ -1056,13 +1116,51 @@ fn bench_one_bytes(
                 times.push(start.elapsed().as_secs_f64() * 1000.0);
                 pixels = u64::from(img.width) * u64::from(img.height);
             }
-            Err(e) => {
-                writeln!(stderr, "skip {name}: {e}").map_err(|e| e.to_string())?;
+            Err(error) => {
+                write_benchmark_skip(stderr, name, &error, verbose, color_details)?;
                 return Ok(());
             }
         }
     }
     print_bench_row(name, pixels, &times, stdout).map_err(|e| e.to_string())
+}
+
+/// Print one short skip reason. `--verbose` adds the decoder line, dimmed only
+/// on a color terminal. The reason line itself stays plain.
+fn write_benchmark_skip(
+    stderr: &mut impl Write,
+    name: &str,
+    error: &impl std::fmt::Display,
+    verbose: bool,
+    color_details: bool,
+) -> Result<(), String> {
+    let failure = explain_open_failure(Language::English, error);
+    let reason = benchmark_reason(&failure.sentence);
+    writeln!(stderr, "skip {name}: {reason}").map_err(|error| error.to_string())?;
+    if verbose {
+        let detail = error.to_string();
+        if color_details {
+            writeln!(stderr, "\u{1b}[2m{detail}\u{1b}[0m").map_err(|error| error.to_string())?;
+        } else {
+            writeln!(stderr, "{detail}").map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Lowercase the first character and drop one trailing period.
+fn benchmark_reason(sentence: &str) -> String {
+    let sentence = sentence.trim();
+    let mut chars = sentence.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut reason: String = first.to_lowercase().collect();
+    reason.push_str(chars.as_str());
+    if reason.ends_with('.') {
+        reason.pop();
+    }
+    reason
 }
 
 fn print_bench_row(
@@ -1132,7 +1230,7 @@ mod tests {
     fn invoke_with(invocation: Invocation, style: ReportStyle) -> (ExitCode, String, String) {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let code = run_with_io(invocation, &mut stdout, &mut stderr, None, style).unwrap();
+        let code = run_with_io(invocation, &mut stdout, &mut stderr, None, style, false).unwrap();
         (
             code,
             String::from_utf8(stdout).unwrap(),
@@ -1248,7 +1346,7 @@ mod tests {
         assert!(
             parse_args(["viewr", "benchmark", "corpus", "extra"])
                 .unwrap_err()
-                .contains("usage: viewr benchmark [dir]")
+                .contains("usage: viewr benchmark [--verbose] [dir]")
         );
         assert!(
             parse_args(["viewr", "open", "a.png", "b.png"])
@@ -1262,12 +1360,35 @@ mod tests {
         assert_eq!(
             parse_args(["viewr", "benchmark", "corpus"]).unwrap(),
             Invocation::Benchmark {
-                dir: Some(PathBuf::from("corpus"))
+                dir: Some(PathBuf::from("corpus")),
+                verbose: false,
             }
         );
         assert_eq!(
             parse_args(["viewr", "bench"]).unwrap(),
-            Invocation::Benchmark { dir: None }
+            Invocation::Benchmark {
+                dir: None,
+                verbose: false,
+            }
+        );
+        assert_eq!(
+            parse_args(["viewr", "benchmark", "--verbose", "corpus"]).unwrap(),
+            Invocation::Benchmark {
+                dir: Some(PathBuf::from("corpus")),
+                verbose: true,
+            }
+        );
+        assert_eq!(
+            parse_args(["viewr", "benchmark", "corpus", "--verbose"]).unwrap(),
+            Invocation::Benchmark {
+                dir: Some(PathBuf::from("corpus")),
+                verbose: true,
+            }
+        );
+        assert!(
+            parse_args(["viewr", "benchmark", "--verbose", "--verbose"])
+                .unwrap_err()
+                .contains("unknown option '--verbose'")
         );
     }
 
@@ -1700,7 +1821,7 @@ mod tests {
     fn in_memory_benchmark_decodes_the_synthetic_corpus() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        benchmark_to(None, &mut stdout, &mut stderr).unwrap();
+        benchmark_to(None, &mut stdout, &mut stderr, false, false).unwrap();
 
         let output = String::from_utf8(stdout).unwrap();
         assert!(stderr.is_empty());
@@ -1722,13 +1843,70 @@ mod tests {
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        benchmark_to(Some(workspace.path()), &mut stdout, &mut stderr).unwrap();
+        benchmark_to(
+            Some(workspace.path()),
+            &mut stdout,
+            &mut stderr,
+            false,
+            false,
+        )
+        .unwrap();
 
         let output = String::from_utf8(stdout).unwrap();
         let error = String::from_utf8(stderr).unwrap();
         assert!(output.contains("good.png"));
         assert!(!output.contains("ignored.txt"));
-        assert!(error.contains("skip bad.png"));
+        assert_eq!(
+            error.trim(),
+            "skip bad.png: the file is damaged or incomplete",
+            "{error}"
+        );
+
+        let mut verbose_out = Vec::new();
+        let mut verbose_err = Vec::new();
+        benchmark_to(
+            Some(workspace.path()),
+            &mut verbose_out,
+            &mut verbose_err,
+            true,
+            false,
+        )
+        .unwrap();
+        let verbose = String::from_utf8(verbose_err).unwrap();
+        let mut lines = verbose.lines();
+        assert_eq!(
+            lines.next(),
+            Some("skip bad.png: the file is damaged or incomplete"),
+            "{verbose}"
+        );
+        let raw = lines.next().unwrap_or("");
+        assert!(
+            raw.contains("Format error"),
+            "verbose skip hid the decoder line: {verbose}"
+        );
+        assert!(!verbose.contains('\u{1b}'), "{verbose}");
+
+        let mut colored_err = Vec::new();
+        benchmark_to(
+            Some(workspace.path()),
+            &mut verbose_out,
+            &mut colored_err,
+            true,
+            true,
+        )
+        .unwrap();
+        let colored = String::from_utf8(colored_err).unwrap();
+        assert_eq!(
+            colored.lines().next(),
+            Some("skip bad.png: the file is damaged or incomplete"),
+            "{colored}"
+        );
+        assert!(colored.contains("\u{1b}[2m"), "{colored}");
+        assert!(colored.contains("\u{1b}[0m"), "{colored}");
+        assert!(
+            !colored.lines().next().unwrap_or("").contains('\u{1b}'),
+            "the skip reason was colored: {colored}"
+        );
     }
 
     #[test]
@@ -1740,6 +1918,8 @@ mod tests {
                 Some(Path::new("definitely_missing_viewr_benchmark_dir")),
                 &mut stdout,
                 &mut stderr,
+                false,
+                false,
             )
             .unwrap_err(),
             "not a directory"
@@ -1747,12 +1927,20 @@ mod tests {
 
         let workspace = TempWorkspace::new("cli_benchmark_empty").unwrap();
         assert_eq!(
-            benchmark_to(Some(workspace.path()), &mut stdout, &mut stderr).unwrap_err(),
+            benchmark_to(
+                Some(workspace.path()),
+                &mut stdout,
+                &mut stderr,
+                false,
+                false
+            )
+            .unwrap_err(),
             "no supported images in the given directory"
         );
 
         let (code, output, error) = invoke(Invocation::Benchmark {
             dir: Some(PathBuf::from("definitely_missing_viewr_benchmark_dir")),
+            verbose: false,
         });
         assert_eq!(code, ExitCode::from(1));
         assert!(output.contains("median ms"));

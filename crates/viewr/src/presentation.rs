@@ -95,12 +95,9 @@ const DECODE_ERROR_PREFIXES: &[&str] = &[
     "decode failed: ",
 ];
 
-/// Strip stacked decoder prefixes so the empty card can show one human sentence.
+/// Strip stacked decoder prefixes so one failure can be classified once.
 #[must_use]
-pub(super) fn user_facing_decode_error(
-    language: Language,
-    error: impl std::fmt::Display,
-) -> String {
+pub(super) fn stripped_decode_error(error: impl std::fmt::Display) -> String {
     let raw = error.to_string();
     let mut current = raw.lines().next().unwrap_or(&raw).trim();
     while let Some(next) = DECODE_ERROR_PREFIXES.iter().find_map(|prefix| {
@@ -111,12 +108,215 @@ pub(super) fn user_facing_decode_error(
     }) {
         current = next;
     }
+    current.to_owned()
+}
+
+/// Prefix-stripped decoder text, or the generic sentence when nothing remains.
+///
+/// The card uses [`explain_open_failure`]. This check keeps the empty-line
+/// fallback and the prefix strip honest.
+#[cfg(test)]
+#[must_use]
+pub(super) fn user_facing_decode_error(
+    language: Language,
+    error: impl std::fmt::Display,
+) -> String {
+    let current = stripped_decode_error(error);
     if current.is_empty() {
         language
             .text(tr!("The image could not be decoded"))
             .to_owned()
     } else {
-        current.to_owned()
+        current
+    }
+}
+
+/// Why a selected image did not open, in terms a later try can act on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OpenFailureCause {
+    /// The bytes are corrupt, truncated, or otherwise not a valid image.
+    Damaged,
+    /// The extension or container is outside the decoders viewr ships.
+    Unsupported,
+    /// AVIF or HEIC needs the optional `viewr-decode` helper.
+    WorkerAbsent,
+    /// The operating system refused to read the file.
+    Permission,
+    /// The path no longer names a file.
+    Gone,
+    /// Width, height, or decoded memory is above the safety ceiling.
+    TooLarge,
+    /// A decode failure that does not match a more specific cause.
+    Other,
+}
+
+impl OpenFailureCause {
+    /// Retry can help only when the file, permission, or helper may change.
+    #[must_use]
+    pub(crate) const fn allows_retry(self) -> bool {
+        matches!(
+            self,
+            Self::WorkerAbsent | Self::Permission | Self::Gone | Self::Other
+        )
+    }
+
+    /// Catalog sentence for this cause. The English text is the product copy.
+    #[must_use]
+    pub(crate) fn sentence(self, language: Language) -> String {
+        let english = match self {
+            Self::Damaged => tr!("The file is damaged or incomplete."),
+            Self::Unsupported => tr!("viewr can't read this kind of file."),
+            Self::WorkerAbsent => {
+                tr!("This format needs the viewr-decode helper. Run viewr doctor.")
+            }
+            Self::Permission => tr!("viewr doesn't have permission to read this file."),
+            Self::Gone => tr!("The file was moved or deleted."),
+            Self::TooLarge => tr!("The image is larger than viewr opens safely."),
+            Self::Other => tr!("The image could not be decoded."),
+        };
+        language.text(english).to_owned()
+    }
+}
+
+/// One classified open failure: the card sentence, and the raw decoder line.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OpenFailure {
+    /// Cause used for Retry and the sentence.
+    pub cause: OpenFailureCause,
+    /// Translated sentence shown on the card and in the toast.
+    pub sentence: String,
+    /// First decoder or I/O line, with viewr's own prefixes removed.
+    pub detail: String,
+}
+
+impl OpenFailure {
+    /// Whether a later attempt at the same path can succeed.
+    #[must_use]
+    pub(crate) const fn allows_retry(&self) -> bool {
+        self.cause.allows_retry()
+    }
+}
+
+/// Classify a decode or I/O error into one catalog sentence.
+#[must_use]
+pub(crate) fn explain_open_failure(
+    language: Language,
+    error: impl std::fmt::Display,
+) -> OpenFailure {
+    let detail = stripped_decode_error(error);
+    let cause = open_failure_cause(&detail);
+    let sentence = cause.sentence(language);
+    OpenFailure {
+        cause,
+        sentence,
+        detail,
+    }
+}
+
+fn open_failure_cause(detail: &str) -> OpenFailureCause {
+    let text = detail.to_ascii_lowercase();
+    if text.is_empty() {
+        return OpenFailureCause::Other;
+    }
+    if text.contains("viewr-decode worker executable not found")
+        || text.contains("configured viewr-decode worker executable is unavailable")
+    {
+        return OpenFailureCause::WorkerAbsent;
+    }
+    if text.contains("permission denied")
+        || text.contains("access is denied")
+        || contains_os_error(&text, "5")
+        || contains_os_error(&text, "13")
+    {
+        return OpenFailureCause::Permission;
+    }
+    if text.contains("no such file")
+        || text.contains("cannot find the file")
+        || text.contains("system cannot find the file")
+        || contains_os_error(&text, "2")
+    {
+        return OpenFailureCause::Gone;
+    }
+    if text.contains("exceeds safety limit")
+        || text.contains("exceeds the")
+        || text.contains("exceeds limit")
+        || text.contains("not enough memory")
+        || text.contains("memory limit exceeded")
+        || text.contains("image dimensions exceed")
+        || text.contains("allocation exceeds")
+    {
+        return OpenFailureCause::TooLarge;
+    }
+    if text.contains("unsupported") {
+        return OpenFailureCause::Unsupported;
+    }
+    if text.contains("format error")
+        || text.contains("truncated")
+        || text.contains("corrupt")
+        || text.contains("illegal")
+        || text.contains("malformed")
+        || text.contains("invalid signature")
+        || text.contains("invalid png")
+        || text.contains("invalid pixel dimensions")
+        || text.contains("dimensions must be non-zero")
+        || text.contains("do not match their dimensions")
+        || text.contains("unexpected end")
+        || text.contains("failed to decode")
+        || text.contains("failed to parse")
+    {
+        return OpenFailureCause::Damaged;
+    }
+    OpenFailureCause::Other
+}
+
+/// True when `text` names this operating-system code and not a longer one.
+///
+/// `os error 5` is a prefix of `os error 50`. The next character has to end
+/// the number, or a supported-request failure would be called a permission error.
+fn contains_os_error(text: &str, code: &str) -> bool {
+    let marker = "os error ";
+    let mut rest = text;
+    while let Some(index) = rest.find(marker) {
+        let after = &rest[index + marker.len()..];
+        if let Some(stripped) = after.strip_prefix(code) {
+            match stripped.chars().next() {
+                Some(ch) if ch.is_ascii_digit() => {}
+                _ => return true,
+            }
+        }
+        rest = &rest[index + marker.len()..];
+    }
+    false
+}
+
+/// Toast for a classified failure. Retry is named only when a later try can help.
+///
+/// A sentence with no closing mark gets one period so the next clause stays a
+/// separate sentence. Catalog sentences already end with a period.
+#[must_use]
+pub(crate) fn failure_notice(
+    language: Language,
+    sentence: &str,
+    allows_retry: bool,
+    previous_image_visible: bool,
+) -> Localized {
+    let sentence = ended_sentence(sentence);
+    let template = match (previous_image_visible, allows_retry) {
+        (false, false) => return Localized::from_translated_seam(sentence.into_owned()),
+        (true, true) => tr!("{detail} The previous image remains visible. Retry is available."),
+        (true, false) => tr!("{detail} The previous image remains visible."),
+        (false, true) => tr!("{detail} Retry is available."),
+    };
+    language.fill(template, &[("detail", sentence.as_ref())])
+}
+
+/// Keep a toast sentence closed before the previous-image or Retry clause.
+fn ended_sentence(sentence: &str) -> std::borrow::Cow<'_, str> {
+    let trimmed = sentence.trim();
+    if trimmed.is_empty() || trimmed.ends_with(['.', '!', '?']) {
+        std::borrow::Cow::Borrowed(trimmed)
+    } else {
+        std::borrow::Cow::Owned(format!("{trimmed}."))
     }
 }
 
@@ -128,13 +328,13 @@ pub(super) fn decode_failure_toast(
     error: &str,
     previous_image_visible: bool,
 ) -> Localized {
-    let error = user_facing_decode_error(language, error);
-    let template = if previous_image_visible {
-        tr!("Could not decode: {error}. The previous image remains visible; Retry is available.")
-    } else {
-        tr!("Could not decode: {error}. Retry is available.")
-    };
-    language.fill(template, &[("error", &error)])
+    let failure = explain_open_failure(language, error);
+    failure_notice(
+        language,
+        &failure.sentence,
+        failure.allows_retry(),
+        previous_image_visible,
+    )
 }
 
 pub(super) fn preview_job_matches(
@@ -154,10 +354,11 @@ pub(super) fn preview_job_matches(
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-        decode_failure_toast, durable_presentation_error,
-        external_edit_pending_after_frame_transition, image_open_in_progress,
-        navigation_image_plan, preview_job_matches, user_facing_decode_error,
+        ImageReuseEligibility, NavigationImagePlan, OpenFailureCause, PresentationKind,
+        PresentedFrameTransition, decode_failure_toast, durable_presentation_error,
+        explain_open_failure, external_edit_pending_after_frame_transition, failure_notice,
+        image_open_in_progress, navigation_image_plan, preview_job_matches,
+        user_facing_decode_error,
     };
     use crate::locale::Language;
     use std::path::Path;
@@ -310,6 +511,12 @@ mod tests {
             ),
             "truncated"
         );
+        let unsupported = explain_open_failure(
+            Language::English,
+            "could not open image: unsupported core image format",
+        );
+        assert_eq!(unsupported.cause, OpenFailureCause::Unsupported);
+        assert!(!unsupported.allows_retry());
         assert_eq!(
             decode_failure_toast(
                 Language::English,
@@ -317,21 +524,158 @@ mod tests {
                 false
             )
             .as_str(),
-            "Could not decode: unsupported core image format. Retry is available."
+            "viewr can't read this kind of file."
         );
         assert_eq!(
             decode_failure_toast(Language::English, "format error", true).as_str(),
-            "Could not decode: format error. The previous image remains visible; Retry is available."
+            "The file is damaged or incomplete. The previous image remains visible."
         );
         assert_eq!(
-            decode_failure_toast(Language::English, "Could not decode: format error", false)
-                .as_str(),
-            "Could not decode: format error. Retry is available."
+            decode_failure_toast(
+                Language::English,
+                "viewr-decode worker executable not found beside viewr",
+                false
+            )
+            .as_str(),
+            "This format needs the viewr-decode helper. Run viewr doctor. Retry is available."
         );
         assert_eq!(
             decode_failure_toast(Language::Spanish, "format error", false).as_str(),
-            "No se pudo decodificar: format error. Puede usar Reintentar."
+            "El archivo está dañado o incompleto."
         );
+        // Executor loss is its own status. Classifying that sentence would hide it.
+        assert_eq!(
+            failure_notice(
+                Language::English,
+                "The image decoder stopped unexpectedly",
+                true,
+                true
+            )
+            .as_str(),
+            "The image decoder stopped unexpectedly. The previous image remains visible. Retry is available."
+        );
+    }
+
+    #[test]
+    fn open_failures_use_one_sentence_and_retry_only_when_a_later_try_can_help() {
+        let cases = [
+            (
+                "open/decode failed: Format error decoding Png: invalid PNG signature",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "unsupported core image format",
+                OpenFailureCause::Unsupported,
+                "viewr can't read this kind of file.",
+                false,
+            ),
+            (
+                "configured viewr-decode worker executable is unavailable",
+                OpenFailureCause::WorkerAbsent,
+                "This format needs the viewr-decode helper. Run viewr doctor.",
+                true,
+            ),
+            (
+                "failed to open worker input: Access is denied. (os error 5)",
+                OpenFailureCause::Permission,
+                "viewr doesn't have permission to read this file.",
+                true,
+            ),
+            (
+                "open/decode failed: No such file or directory (os error 2)",
+                OpenFailureCause::Gone,
+                "The file was moved or deleted.",
+                true,
+            ),
+            (
+                "decoder output allocation exceeds safety limit",
+                OpenFailureCause::TooLarge,
+                "The image is larger than viewr opens safely.",
+                false,
+            ),
+            (
+                "image dimensions exceed safety limit",
+                OpenFailureCause::TooLarge,
+                "The image is larger than viewr opens safely.",
+                false,
+            ),
+            (
+                "not enough memory to read worker input",
+                OpenFailureCause::TooLarge,
+                "The image is larger than viewr opens safely.",
+                false,
+            ),
+            (
+                "image dimensions must be non-zero",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "source pixels do not match their dimensions",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "SVG produced invalid pixel dimensions",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "foreground image executor stopped unexpectedly",
+                OpenFailureCause::Other,
+                "The image could not be decoded.",
+                true,
+            ),
+        ];
+        for (error, cause, sentence, retry) in cases {
+            let failure = explain_open_failure(Language::English, error);
+            assert_eq!(failure.cause, cause, "{error}");
+            assert_eq!(failure.sentence, sentence, "{error}");
+            assert_eq!(failure.allows_retry(), retry, "{error}");
+            assert!(!failure.detail.is_empty(), "{error}");
+            for language in [
+                Language::English,
+                Language::Spanish,
+                Language::French,
+                Language::German,
+            ] {
+                let translated = explain_open_failure(language, error);
+                assert_eq!(translated.cause, cause, "{language:?} {error}");
+                assert!(!translated.sentence.is_empty(), "{language:?} {error}");
+                assert_ne!(
+                    translated.sentence, error,
+                    "{language:?} must not show the raw decoder line"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn os_error_codes_match_only_the_exact_number() {
+        let permission = explain_open_failure(Language::English, "Permission denied (os error 13)");
+        assert_eq!(permission.cause, OpenFailureCause::Permission);
+        assert!(permission.allows_retry());
+        let missing = explain_open_failure(Language::English, "read failed (os error 2)");
+        assert_eq!(missing.cause, OpenFailureCause::Gone);
+        let windows_missing = explain_open_failure(
+            Language::English,
+            "The system cannot find the file specified. (os error 2)",
+        );
+        assert_eq!(windows_missing.cause, OpenFailureCause::Gone);
+        for error in [
+            "The request is not supported. (os error 50)",
+            "not a directory (os error 20)",
+            "identifier removed (os error 132)",
+        ] {
+            let failure = explain_open_failure(Language::English, error);
+            assert_eq!(failure.cause, OpenFailureCause::Other, "{error}");
+            assert!(failure.allows_retry(), "{error}");
+        }
     }
 
     #[test]

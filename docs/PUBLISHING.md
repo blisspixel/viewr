@@ -104,11 +104,12 @@ workflow results, and release assets remain the source of truth:
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.4. README and INSTALL use its fixed immutable URLs.
+   currently v0.7.4. README and INSTALL are tag-ready for the intended v0.7.5
+   fixed immutable URLs; publication has not happened yet.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.5`, preparing the bounded copy, open-failure, doctor, and Windows
-   path-spelling patch.
+   `0.7.5`, verified and tag-ready for the bounded copy, open-failure, doctor,
+   and Windows path-spelling patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -143,7 +144,7 @@ window-loss and file-entry defects, with related recovery and control fixes.
 It requires the complete automated gate and one exact candidate; it does not
 close hardware, native assistive-technology, or v0.8 acceptance work.
 
-The v0.7.5 preparation uses the same narrow exception for copying the image
+The v0.7.5 patch uses the same narrow exception for copying the image
 on screen, plain-language open failures, doctor output, Windows path spelling,
 and the related recovery fixes already reviewed on main. It includes the
 reviewed objc2 0.6.5 retain fix. It requires the complete automated gate and
@@ -564,6 +565,32 @@ and doctor probes passed, preferences were preserved, and the existing Start
 menu and user PATH point to that installed viewer. This guarded local update
 does not claim the still-open v0.8 multi-platform installer acceptance matrix.
 Representative-hardware and native screen-reader acceptance remain uncollected.
+
+For v0.7.5, [main CI run 39551372195](https://github.com/blisspixel/viewr/actions/runs/39551372195),
+[fuzz run 39551391650](https://github.com/blisspixel/viewr/actions/runs/39551391650),
+and [CodeQL run 39551372378](https://github.com/blisspixel/viewr/actions/runs/39551372378)
+passed on candidate commit `933e6aa44d961e961b53292306f54c54518d3530`.
+One non-publishing [candidate run 39552315440](https://github.com/blisspixel/viewr/actions/runs/39552315440)
+repeated the complete quality and fuzz gates and built all four archives.
+Publication stayed skipped. All four downloads passed their sidecars and the
+official 53-file manifest verifier. The complete fixture set also verified
+against manifest SHA-256
+`0ca94fd40b372c94fcdf45d7c530829cb2345b597725db7bbbfacc1b07fc12a2`.
+
+| Candidate target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `8081d6c927c92025e91a0f18ef325fce2f93a3fedfcb9a2f6341834e98818e23` |
+| macOS Intel | `5534880e17e84bf115a0a79678d3e72ee37dd6150877f60f36d6f83f67dadbf7` |
+| macOS Apple Silicon | `0fdbb189910ba1e03bfe1cc2bd3b7fb7a03fef381e66c20cd8317983cac02874` |
+| Linux x64 | `953d3b84e925bf562dc606b885dfc63cf7fd2797c64755540a93a7675203e02f` |
+
+The extracted Windows candidate reports `viewr 0.7.5`, and its doctor report
+passed every critical check without opening a window. It was not installed
+over the published v0.7.4 viewer. The tag-ready follow-up changes release
+status, immutable links, and version assertions only. Application source,
+dependencies, workflows, and packaging remain identical to the verified
+candidate. Native screen-reader and carried hardware acceptance rows remain
+uncollected.
 
 ## Required before a broadly recommended 1.0
 

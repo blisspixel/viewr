@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.7.4](https://github.com/blisspixel/viewr/releases/tag/v0.7.4), the Linux entry and window-loss patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.5`, verified candidate and tag-ready copy, open-failure, doctor, and Windows path-spelling patch |
+| Published install target | Immutable [v0.7.5](https://github.com/blisspixel/viewr/releases/tag/v0.7.5), the copy, open-failure, doctor, and Windows path-spelling patch with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.5`, the published copy, open-failure, doctor, and Windows path-spelling patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.5** after green exact-commit tag-ready CI and fuzz; its complete candidate gate passed; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.7.4 archives. The v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.5 archives. The v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -61,6 +61,11 @@ an always-available typed path, visible chooser recovery guidance, and retiring
 a destroyed native drawable while accepted file work finishes. Issue
 [137](https://github.com/blisspixel/viewr/issues/137) records this shipped patch;
 the published v0.7.3 assets retain their original behavior.
+
+v0.7.5 addresses copying the image on screen, plain-language open failures,
+doctor output, and Windows path spelling. It also ships the Linux window
+identity, two-line top-bar notices, and same-length rewrite rejection. The
+published v0.7.4 assets retain their original behavior.
 
 ## Order of operations to 1.0
 
@@ -115,6 +120,7 @@ v0.7.2  Launch fallback patch             [released, acceptance rows open]
 
 v0.7.3  Focused viewer polish patch       [released, acceptance rows open]
 v0.7.4  Linux entry and window-loss patch [released, acceptance rows open]
+v0.7.5  Copy and recovery patch           [released, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -203,29 +209,29 @@ or accessibility evidence gates.
 | Pan recovery and bounds | Shipped v0.7.3 | Keep at least 32 logical pixels of each image axis reachable, or the complete axis when smaller. Recheck after zoom, rotation, resize, and dock changes. Preserve direct motion within bounds. Fit remains a one-action recovery. Tests cover rotated and tiny images and docked viewports. |
 | Zoom readout as a control | Shipped v0.7.3 | The existing percentage opens Fit, Actual Size, Zoom In, and Zoom Out. It remains visible at 640 by 480, supports keyboard focus and activation, and exposes translated accessible names. |
 | Reliable path entry | Shipped v0.7.4 | Keep the editable Image or folder path field on the empty card and File > Open Path while viewing. Enter opens without consuming viewer shortcuts. Native chooser cancellation or unavailability points to path entry, Paste Path, and drop. |
-| Linux desktop identity | Implemented, unreleased | Wayland app_id and X11 WM_CLASS use `io.github.blisspixel.viewr`, matching the desktop entry and icon. Optional source-install instructions add a per-user launcher without changing default handlers. The native X11 smoke check verifies both class names. |
-| Recovery notice readability | Implemented on main, unreleased | Top-bar notices use up to two lines within the existing height. Render tests use platform fonts, inspect painted text for clipping, and cover long filenames, page and rating controls, and translated recovery copy. Complete hover and accessible text remain available for longer messages. |
-| Copy the viewed image | Implemented, unreleased | Right-click, Edit > Copy, and Ctrl/Cmd+C copy the on-screen pixels, including unsaved rotation, flips, applied crop, and Spot Heal. Images larger than 33554432 pixels are refused with an explanation. Opening an image from clipboard pixels stays a candidate. |
-| Doctor report readability | Implemented, unreleased | `viewr doctor` colors only the status tag on a terminal, uses one lowercase tag case, and wraps doctor rows and help to the terminal width while keeping the hanging indent. A failed report counts critical checks and warnings, and the install sentence matches the number of failed window rows. Piped output, `NO_COLOR`, and `TERM=dumb` stay plain. |
-| Plain-language failed opens | Implemented, unreleased | A failed open shows one catalog sentence. Retry appears only when a later try can succeed. Image Information keeps the decoder's own line. `viewr benchmark` prints that sentence, and `--verbose` adds the decoder line. |
-| Windows catalog spelling | Implemented, unreleased | On Windows, a file dialog and a folder listing that differ only in capitalization name the same file. The catalog keeps its rating, Trash and a folder refresh cannot bring that file back under the other spelling, and the session stores the listing's spelling. Other platforms stay case-sensitive. |
-| Same-length rewrite rejection | Implemented, unreleased | A same-length in-place rewrite is rejected when the filesystem leaves the change time unchanged. Accepted sources keep an in-memory SHA-256 witness on every platform and fail closed before a rating or metadata write. The digest is not stored or logged. |
+| Linux desktop identity | Shipped v0.7.5 | Wayland app_id and X11 WM_CLASS use `io.github.blisspixel.viewr`, matching the desktop entry and icon. Optional source-install instructions add a per-user launcher without changing default handlers. The native X11 smoke check verifies both class names. |
+| Recovery notice readability | Shipped v0.7.5 | Top-bar notices use up to two lines within the existing height. Render tests use platform fonts, inspect painted text for clipping, and cover long filenames, page and rating controls, and translated recovery copy. Complete hover and accessible text remain available for longer messages. |
+| Copy the viewed image | Shipped v0.7.5 | Right-click, Edit > Copy, and Ctrl/Cmd+C copy the on-screen pixels, including unsaved rotation, flips, applied crop, and Spot Heal. Images larger than 33554432 pixels are refused with an explanation. Opening an image from clipboard pixels stays a candidate. |
+| Doctor report readability | Shipped v0.7.5 | `viewr doctor` colors only the status tag on a terminal, uses one lowercase tag case, and wraps doctor rows and help to the terminal width while keeping the hanging indent. A failed report counts critical checks and warnings, and the install sentence matches the number of failed window rows. Piped output, `NO_COLOR`, and `TERM=dumb` stay plain. |
+| Plain-language failed opens | Shipped v0.7.5 | A failed open shows one catalog sentence. Retry appears only when a later try can succeed. Image Information keeps the decoder's own line. `viewr benchmark` prints that sentence, and `--verbose` adds the decoder line. |
+| Windows catalog spelling | Shipped v0.7.5 | On Windows, a file dialog and a folder listing that differ only in capitalization name the same file. The catalog keeps its rating, Trash and a folder refresh cannot bring that file back under the other spelling, and the session stores the listing's spelling. Other platforms stay case-sensitive. |
+| Same-length rewrite rejection | Shipped v0.7.5 | A same-length in-place rewrite is rejected when the filesystem leaves the change time unchanged. Accepted sources keep an in-memory SHA-256 witness on every platform and fail closed before a rating or metadata write. The digest is not stored or logged. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
-failed opens, Windows catalog spelling, and same-length rewrite rejection are
-implemented and unreleased. The viewing-control changes add no
-preference, catalog, or activity history.
+failed opens, Windows catalog spelling, same-length rewrite rejection, the
+Linux window identity, and two-line top-bar notices shipped in v0.7.5. The
+viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.7.4` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Public release | `0.7.5` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
 | Focused patch released | `0.7.3` | Candidate commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe`, [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410), and tag commit `10002a0f8e13de160b41bf95978ab96df2e404a9` | [Release run 37112869774](https://github.com/blisspixel/viewr/actions/runs/37112869774) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; v0.8 remains open |
 | Linux entry patch released | `0.7.4` | Candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a`, [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754), and tag commit `e9c12c336da0a8a6cb4284ae94c2739ddcf7cafc` | [Release run 37152808216](https://github.com/blisspixel/viewr/actions/runs/37152808216) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
-| Patch tag-ready | `0.7.5` | Candidate commit `933e6aa44d961e961b53292306f54c54518d3530` and [candidate run 39552315440](https://github.com/blisspixel/viewr/actions/runs/39552315440) | Complete automated gate, all four archives, and fixture verified; public target remains v0.7.4 until publication |
+| Copy and recovery patch released | `0.7.5` | Candidate commit `933e6aa44d961e961b53292306f54c54518d3530`, [candidate run 39552315440](https://github.com/blisspixel/viewr/actions/runs/39552315440), and tag commit `653b0a7f5606b1cafb02cf37ad93f1939a946688` | [Release run 39557759631](https://github.com/blisspixel/viewr/actions/runs/39557759631) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
@@ -261,7 +267,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped through v0.7.4; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
+| Integrated product quality | Shipped through v0.7.5; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
 | Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI updates published v0.7.4 to the candidate on Linux and Windows, including the Linux launcher identity. Clean install on macOS, uninstall, rollback, and file-association acceptance remain open. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -306,7 +312,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.7.4; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.5; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -634,7 +640,7 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set from the current release line. v0.6.0 through v0.7.4 were
+  candidate set from the current release line. v0.6.0 through v0.7.5 were
   tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.

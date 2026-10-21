@@ -358,7 +358,10 @@ viewr doctor
 `doctor` verifies binary placement, the worker protocol, platform identity,
 privacy boundaries, an in-memory decode self-test, and the windowing
 prerequisites of the current desktop session. It performs no network request and
-creates no diagnostic log.
+creates no diagnostic log. On a terminal, only the status tag is colored and
+rows wrap to the terminal width. Piped output, `NO_COLOR`, and `TERM=dumb` stay
+plain. A failing report counts the critical checks and warnings, and its install
+sentence matches the number of missing window prerequisites.
 
 What `doctor` cannot prove is a working GPU surface, because it never opens a
 window. It says so in its report. If viewr then fails to present, the launch

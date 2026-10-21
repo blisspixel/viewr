@@ -24,9 +24,18 @@ pub(crate) struct WindowReadiness {
     pub(crate) critical_ok: bool,
 }
 
+/// Seven-column status tags. Trailing spaces belong to the tag so a colored
+/// tag and a plain tag leave the following text in the same column.
+pub(crate) const DOCTOR_OK: &str = "[ok]   ";
+pub(crate) const DOCTOR_WARN: &str = "[warn] ";
+pub(crate) const DOCTOR_FAIL: &str = "[fail] ";
+pub(crate) const DOCTOR_NOTE: &str = "[note] ";
+
 /// What doctor can honestly say about a GPU surface it never created.
-const SURFACE_NOTE: &str =
-    "[note] a GPU surface is proven only when viewr opens a window, not by doctor";
+const SURFACE_NOTE: &str = concat!(
+    "[note] ",
+    "a GPU surface is proven only when viewr opens a window, not by doctor"
+);
 
 /// Advice for a failed surface on a platform whose graphics stack is linked.
 #[cfg(any(not(target_os = "linux"), test))]
@@ -43,7 +52,7 @@ pub(crate) fn gpu_failure_message(detail: &str, advice: &str) -> String {
 pub(crate) fn native_window_readiness(platform: &str) -> WindowReadiness {
     WindowReadiness {
         lines: vec![
-            format!("[ok]   window system: linked {platform} desktop libraries"),
+            format!("{DOCTOR_OK}window system: linked {platform} desktop libraries"),
             SURFACE_NOTE.to_owned(),
         ],
         critical_ok: true,
@@ -356,7 +365,7 @@ pub(crate) fn window_position(monitor: (f64, f64), window: (f64, f64)) -> (f64, 
 mod unix_desktop {
     use std::fmt::Write as _;
 
-    use super::{SURFACE_NOTE, WindowReadiness};
+    use super::{DOCTOR_FAIL, DOCTOR_NOTE, DOCTOR_OK, DOCTOR_WARN, SURFACE_NOTE, WindowReadiness};
 
     /// Everything the launch and doctor paths need to agree on for this host.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -765,12 +774,13 @@ Install one of them, then run viewr again:\n",
             DisplaySession::None => {
                 if support.compositor_unreachable {
                     lines.push(
-                        "[WARN] display session: WAYLAND_DISPLAY names a compositor that is not running"
-                            .to_owned(),
+                        format!(
+                            "{DOCTOR_WARN}display session: WAYLAND_DISPLAY names a compositor that is not running"
+                        ),
                     );
                 } else {
                     lines.push(format!(
-                        "[WARN] display session: {}",
+                        "{DOCTOR_WARN}display session: {}",
                         support.session.summary()
                     ));
                 }
@@ -780,19 +790,18 @@ Install one of them, then run viewr again:\n",
             }
             DisplaySession::Wayland | DisplaySession::X11 => {
                 lines.push(format!(
-                    "[ok]   display session: {}",
+                    "{DOCTOR_OK}display session: {}",
                     support.session.summary()
                 ));
                 if support.compositor_unreachable {
-                    lines.push(
-                        "[note] WAYLAND_DISPLAY names a compositor that is not running; using X11"
-                            .to_owned(),
-                    );
+                    lines.push(format!(
+                        "{DOCTOR_NOTE}WAYLAND_DISPLAY names a compositor that is not running; using X11"
+                    ));
                 }
                 if let Some(library) = support.missing_library {
                     critical_ok = false;
                     lines.push(format!(
-                        "[FAIL] windowing library: {} is missing ({})",
+                        "{DOCTOR_FAIL}windowing library: {} is missing ({})",
                         library.sonames[0], library.purpose
                     ));
                     lines.extend(install_hint(library, "       ").lines().map(str::to_owned));
@@ -802,7 +811,7 @@ Install one of them, then run viewr again:\n",
                         .map(|library| library.sonames[0])
                         .collect();
                     lines.push(format!(
-                        "[ok]   windowing libraries: {} present",
+                        "{DOCTOR_OK}windowing libraries: {} present",
                         present.join(", ")
                     ));
                 }
@@ -827,8 +836,9 @@ Install one of them, then run viewr again:\n",
         if !egl && !vulkan.usable() {
             *critical_ok = false;
             let mut lines = vec![format!(
-                "[FAIL] gpu runtime: no usable Vulkan or OpenGL runtime, so no GPU surface can be created (EGL absent, {vulkan_state})"
+                "{DOCTOR_FAIL}gpu runtime: no usable Vulkan or OpenGL runtime, so no GPU surface can be created"
             )];
+            lines.push(format!("       (EGL absent, {vulkan_state})"));
             for library in GPU_RUNTIME_LIBRARIES {
                 lines.push(format!("       {}:", library.purpose));
                 lines.extend(
@@ -840,7 +850,9 @@ Install one of them, then run viewr again:\n",
             return lines;
         }
         let egl_state = if egl { "EGL present" } else { "EGL absent" };
-        vec![format!("[ok]   gpu runtime: {egl_state}, {vulkan_state}")]
+        vec![format!(
+            "{DOCTOR_OK}gpu runtime: {egl_state}, {vulkan_state}"
+        )]
     }
 
     #[cfg(test)]
@@ -1147,11 +1159,15 @@ needs it for X11 keyboard layout handling."
                 VulkanRuntime::Missing,
             ));
             assert!(!no_runtime.critical_ok);
+            assert!(no_runtime.lines.iter().any(|line| {
+                line.starts_with("[fail] gpu runtime: no usable Vulkan or OpenGL")
+                    && !line.contains('(')
+            }));
             assert!(
                 no_runtime
                     .lines
                     .iter()
-                    .any(|line| line.starts_with("[FAIL] gpu runtime: no usable Vulkan or OpenGL"))
+                    .any(|line| line == "       (EGL absent, Vulkan absent)")
             );
             assert!(
                 no_runtime
@@ -1174,7 +1190,8 @@ needs it for X11 keyboard layout handling."
                 loader_only
                     .lines
                     .iter()
-                    .any(|line| line.contains("Vulkan loader present without a driver"))
+                    .any(|line| line
+                        == "       (EGL absent, Vulkan loader present without a driver)")
             );
             assert!(
                 loader_only
@@ -1213,7 +1230,7 @@ needs it for X11 keyboard layout handling."
                 broken
                     .lines
                     .iter()
-                    .any(|line| line.starts_with("[FAIL] windowing library: libxkbcommon-x11.so.0"))
+                    .any(|line| line.starts_with("[fail] windowing library: libxkbcommon-x11.so.0"))
             );
             assert!(
                 broken
@@ -1253,7 +1270,7 @@ needs it for X11 keyboard layout handling."
                 VulkanRuntime::Missing,
             ));
             assert!(headless.critical_ok);
-            assert!(headless.lines[0].starts_with("[WARN] display session: none"));
+            assert!(headless.lines[0].starts_with("[warn] display session: none"));
 
             let stale_headless = window_readiness_report(&support(
                 DisplaySession::None,
@@ -1292,14 +1309,47 @@ needs it for X11 keyboard layout handling."
             assert_eq!(EGL.sonames[0], "libEGL.so.1");
             assert_eq!(VULKAN.sonames[0], "libvulkan.so.1");
         }
+
+        #[test]
+        fn two_missing_prerequisites_are_separate_critical_rows() {
+            // A missing windowing library and a missing graphics runtime are two
+            // critical rows. The parenthetical explanation stays on its own line
+            // so a narrow terminal can hang it under the tag.
+            let both = window_readiness_report(&support(
+                DisplaySession::X11,
+                Some(&XKBCOMMON_X11),
+                false,
+                false,
+                VulkanRuntime::Missing,
+            ));
+            assert!(!both.critical_ok);
+            assert_eq!(
+                both.lines
+                    .iter()
+                    .filter(|line| line.starts_with("[fail] "))
+                    .count(),
+                2
+            );
+            assert!(
+                both.lines
+                    .iter()
+                    .any(|line| line == "       (EGL absent, Vulkan absent)")
+            );
+            assert!(
+                both.lines
+                    .iter()
+                    .any(|line| line.starts_with("[fail] gpu runtime:") && !line.contains('('))
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE, PREFERRED_WINDOW_SIZE, default_window_size,
-        gpu_failure_message, native_window_readiness, window_position,
+        DOCTOR_FAIL, DOCTOR_NOTE, DOCTOR_OK, DOCTOR_WARN, MINIMUM_WINDOW_SIZE, NATIVE_GPU_ADVICE,
+        PREFERRED_WINDOW_SIZE, SURFACE_NOTE, default_window_size, gpu_failure_message,
+        native_window_readiness, window_position,
     };
 
     /// The loader probe and the launch decision, exercised on the real host.
@@ -1388,6 +1438,16 @@ mod tests {
             window_position((640.0, 480.0), MINIMUM_WINDOW_SIZE),
             (0.0, 0.0)
         );
+    }
+
+    #[test]
+    fn doctor_tags_share_one_width_and_one_case() {
+        for tag in [DOCTOR_OK, DOCTOR_WARN, DOCTOR_FAIL, DOCTOR_NOTE] {
+            assert_eq!(tag.chars().count(), 7, "{tag}");
+            assert!(tag.starts_with('[') && tag.ends_with(' '), "{tag}");
+            assert!(tag.chars().all(|ch| !ch.is_ascii_uppercase()), "{tag}");
+        }
+        assert!(SURFACE_NOTE.starts_with(DOCTOR_NOTE));
     }
 
     #[test]

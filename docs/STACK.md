@@ -204,16 +204,18 @@ users who explicitly want it.
 
 **Chosen:** decode, inspection, export, rating, and destructive actions consume a
 retained file handle and validate native identity plus version evidence. Unix
-version evidence includes inode change time. Windows adds a streaming SHA-256
-content witness through the operating system CNG implementation because a
-same-length rewrite can preserve every writable timestamp and a retained handle
-can report cached metadata. The digest exists only inside the live source object,
-is never logged or persisted, and is not exposed as an image identifier.
+version evidence includes inode change time. Every platform also keeps a
+streaming SHA-256 content witness because a same-length rewrite can preserve
+every writable timestamp, a retained Windows handle can report cached metadata,
+and Linux change time can stay unchanged inside one coarse timestamp tick. The
+digest exists only inside the live source object, is never logged or persisted,
+and is not exposed as an image identifier.
 
-This uses the existing `windows-sys` boundary rather than adding a hashing crate.
-It uses fixed 64 KiB streaming reads without buffering the image, keeps the
-default dependency graph unchanged, and makes detected mutation fail closed. The
-shared 512 MiB encoded-input ceiling is enforced before hashing. Decode-generation
+Windows hashes through the existing `windows-sys` CNG boundary. Other platforms
+use an in-tree SHA-256 so the dependency graph stays free of a hashing crate.
+Both use fixed 64 KiB streaming reads without buffering the image, and detected
+mutation fails closed. The shared 512 MiB encoded-input ceiling is enforced
+before hashing. Decode-generation
 cancellation is checked between chunks for both initial and comparison witnesses.
 Full comparison witnesses run only on owned background work. UI-only destination
 consent retains a capability that exposes native identity and version but no

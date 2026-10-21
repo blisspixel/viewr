@@ -107,11 +107,12 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // Folder scan, auxiliary, Save As, crop, and display-preview work each has a
-    // one-result, event-loop-owned job.
+    // Folder scan, auxiliary, Save As, clipboard copy, crop, and display-preview
+    // work each has a one-result, event-loop-owned job.
     folder_scan_job: Option<OneShotJob<FolderScanContext, FolderScanResult>>,
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     save_job: Option<OneShotJob<(), SaveResult>>,
+    copy_job: Option<OneShotJob<(), Result<ColorImage, ClipboardCopyError>>>,
     close_after_save: bool,
     save_recovery_unsettled: bool,
     crop_job: Option<OneShotJob<CropJobContext, CropJobResult>>,
@@ -230,9 +231,11 @@ Shipped:
   it still resolves to the accepted identity and version. A successful decoder
   result is discarded if either the retained object changed or its pathname was
   replaced before publication, including an in-place rewrite of the same object
-  while decoding. Because Windows can cache or preserve every writable timestamp
-  across a same-length rewrite, each Windows source also retains an in-memory
-  SHA-256 content witness. It is checked through serialized handle reads and is
+  while decoding. Because a same-length rewrite can preserve every writable
+  timestamp, and Linux change time can stay unchanged inside one coarse tick,
+  each accepted source also retains an in-memory SHA-256 content witness.
+  Windows computes it through CNG and other platforms use the same in-tree
+  digest. It is checked through serialized handle reads and is
   never persisted, exposed, or used as an identifier. Source acceptance enforces
   the shared 512 MiB encoded-input ceiling before that streaming work. Decode
   generation cancellation is checked between fixed 64 KiB chunks, including

@@ -32,7 +32,7 @@ smoke test, and this matrix quote one covered catalog:
 
   `Open File, Open Folder, or drop a file or folder. A dropped file also browses its folder when access allows. Open Folder selects the folder for this session.`
 
-- Decoder and I/O errors on that card stay one short line. Retry remains named.
+- A failed open shows one short catalog sentence. Retry is named only when a later try can succeed. Image Information keeps the decoder's own line.
 - `A` / `D` are not navigation keys. Left and Right, Home and End, and Page Up
   and Page Down own folder browsing.
 
@@ -165,7 +165,7 @@ Run the same workflow on every platform.
 | PQ-FT-03 | Drop `browse/1-red.png`, then the `browse/` folder | The drop is classified the same way as a command-line path: a folder starts the Open Folder browse; a file opens as a file. |
 | PQ-FT-04 | Choose `browse/` with Open Folder, then cite the candidate workflow's `tests/sandbox_profiles.rs` job and `selected_file_scan_outcomes_cover_success_and_limits` in the observation | The portable archive browses the selected folder explicitly. The package-profile checks prove the sandbox grants, while the exact entry-state test proves that a failed sibling scan retains only the selected image until explicit folder consent exists. The portable archive is not misrepresented as a sandbox package. |
 | PQ-FT-05 | Open Help > About viewr | Version, platform, license, privacy, and the grouped shortcut catalog are readable. Background controls cannot activate. Close and Escape dismiss it. On the 640 by 480 minimum window, Close stays reachable. |
-| PQ-FT-06 | Open both files under `failure/` | The card heading names the selected file, the error is one short line, Retry is present, and menus stay usable. |
+| PQ-FT-06 | Open both files under `failure/` | The card heading names the selected file. A damaged or unsupported file shows one short sentence and does not offer Retry. Menus stay usable. Image Information shows the decoder line when a decode was attempted. |
 | PQ-FT-07 | In File > Preferences select System, English, Spanish, French, and German, restarting after each explicit selection | Exactly one language radio is selected. Primary cataloged menus, actions, headings, and their accessible names change immediately, the explicit choice survives restart, accented glyphs render, and uncataloged advanced copy remains readable through the documented English fallback. |
 
 ### Power-user
@@ -195,7 +195,7 @@ Run the same workflow on every platform.
 
 | ID | Action | Required result |
 | --- | --- | --- |
-| PQ-RC-01 | Launch directly with `failure/malformed.png` | The empty canvas does not claim a previous image is visible. Retry stays available. |
+| PQ-RC-01 | Launch directly with `failure/malformed.png` | The empty canvas does not claim a previous image is visible. Retry is not offered for this damaged file. Image Information keeps the decoder line. |
 | PQ-RC-02 | Delete a disposable `editing/source.png` outside viewr | The last good frame stays. A polite status says the selected path no longer names that file. |
 
 ### Candidate automated prerequisites

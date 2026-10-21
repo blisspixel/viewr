@@ -57,10 +57,11 @@ use crate::edit_state::{
     CanvasTool, EditAction, canvas_tool, edit_transaction_failure_message, within_click_distance,
 };
 use crate::entry_state::{
-    FolderScanDisposition, FolderScanSuccess, PathEntry, committed_scan_path_is_admissible,
+    CatalogSpelling, FolderScanDisposition, FolderScanSuccess, PathEntry,
+    catalog_path_set_contains, catalog_spelling, committed_scan_entry_is_admissible,
     folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
-    folder_scan_user_message, path_entry, selected_file_index_by, selected_scan_is_current,
-    sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
+    folder_scan_user_message, path_entry, removal_names_path, selected_file_index_by,
+    selected_scan_is_current, sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
 };
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -85,8 +86,9 @@ use crate::prefetch::{
 };
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-    decode_failure_toast, durable_presentation_error, external_edit_pending_after_frame_transition,
-    image_open_in_progress, navigation_image_plan, preview_job_matches, user_facing_decode_error,
+    decode_failure_toast, durable_presentation_error, explain_open_failure,
+    external_edit_pending_after_frame_transition, failure_notice, image_open_in_progress,
+    navigation_image_plan, preview_job_matches,
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
@@ -1794,12 +1796,7 @@ impl App {
         entries
             .into_iter()
             .filter(|entry| {
-                let path = entry.path();
-                committed_scan_path_is_admissible(
-                    in_flight.contains(path),
-                    unrestored.contains(path),
-                    catalog.contains(path),
-                )
+                committed_scan_entry_is_admissible(entry.path(), &in_flight, &unrestored, &catalog)
             })
             .collect()
     }
@@ -1824,10 +1821,55 @@ impl App {
                 .get(fallback_index.min(entries.len().saturating_sub(1)))
                 .map(|entry| entry.path().to_owned());
             self.replace_playlist_from_scan(entries, fallback_index);
-            let followed_rename = new_path
-                .as_deref()
-                .is_some_and(|path| self.session.selected_path.as_deref() != Some(path));
+            let followed_rename = new_path.as_deref().is_some_and(|path| {
+                match self.session.selected_path.as_deref() {
+                    Some(selected) => {
+                        catalog_spelling(selected, path) == CatalogSpelling::Different
+                    }
+                    None => true,
+                }
+            });
             (new_path, followed_rename)
+        }
+    }
+
+    /// Store the catalog's spelling when Windows only changed the path's case.
+    fn install_scanned_selection(&mut self, new_path: Option<PathBuf>, followed_rename: bool) {
+        let Some(new_path) = new_path else {
+            return;
+        };
+        if followed_rename {
+            self.cancel_rating_disclosure_for_source_change();
+            self.session.selected_path = Some(new_path.clone());
+            if self.session.presented_path.is_some() {
+                self.session.presented_path = Some(new_path);
+            }
+            self.start_coherence_watch();
+            return;
+        }
+        if self
+            .session
+            .selected_path
+            .as_deref()
+            .is_some_and(|selected| catalog_spelling(selected, &new_path) == CatalogSpelling::Adopt)
+        {
+            self.session.selected_path = Some(new_path.clone());
+            if self
+                .session
+                .presented_path
+                .as_deref()
+                .is_some_and(|presented| {
+                    catalog_spelling(presented, &new_path) == CatalogSpelling::Adopt
+                })
+            {
+                self.session.presented_path = Some(new_path);
+            }
+            self.start_coherence_watch();
+            return;
+        }
+        if self.session.selected_path.is_none() {
+            self.session.selected_path = Some(new_path.clone());
+            self.spawn_image_load(new_path);
         }
     }
 
@@ -1881,27 +1923,25 @@ impl App {
     }
 
     fn removal_context_for_path(&self, path: PathBuf) -> RemovalContext {
-        let (playlist_index, rating, provenance) =
-            self.playlist
-                .as_ref()
-                .map_or((0, RatingState::Loading, None), |playlist| {
-                    let index = playlist
-                        .files
-                        .iter()
-                        .position(|entry| entry == &path)
-                        .unwrap_or(playlist.index);
-                    (
-                        index,
-                        playlist.rating_for_path(&path),
-                        playlist.scan_provenance(&path),
-                    )
-                });
+        if let Some(playlist) = self.playlist.as_ref()
+            && let Some(index) = playlist.catalog_index_of(&path)
+        {
+            let stored = playlist.files[index].clone();
+            return RemovalContext {
+                path: stored.clone(),
+                playlist_index: index,
+                scope: self.playlist_scope.clone(),
+                rating: playlist.rating_for_path(&stored),
+                provenance: playlist.scan_provenance(&stored),
+            };
+        }
+        let playlist_index = self.playlist.as_ref().map_or(0, |playlist| playlist.index);
         RemovalContext {
             path,
             playlist_index,
             scope: self.playlist_scope.clone(),
-            rating,
-            provenance,
+            rating: RatingState::Loading,
+            provenance: None,
         }
     }
 
@@ -1915,7 +1955,7 @@ impl App {
             let Some(playlist) = self.playlist.as_mut() else {
                 return;
             };
-            if playlist.files.iter().any(|entry| entry == &context.path) {
+            if playlist.catalog_index_of(&context.path).is_some() {
                 return;
             }
             playlist.insert_path(
@@ -1926,9 +1966,7 @@ impl App {
             );
             if restore_selection {
                 let index = playlist
-                    .files
-                    .iter()
-                    .position(|entry| entry == &context.path)
+                    .catalog_index_of(&context.path)
                     .unwrap_or(context.playlist_index);
                 playlist.select(index);
             }
@@ -2069,23 +2107,11 @@ impl App {
                     .unwrap_or_else(|| selected.clone());
                 let (new_path, followed_rename) =
                     self.adopt_folder_scan_entries(entries, &preferred, index);
-                if let Some(new_path) = new_path {
-                    if followed_rename {
-                        self.cancel_rating_disclosure_for_source_change();
-                        self.session.selected_path = Some(new_path.clone());
-                        if self.session.presented_path.is_some() {
-                            self.session.presented_path = Some(new_path);
-                        }
-                        self.start_coherence_watch();
-                    } else if self.session.selected_path.is_none() {
-                        self.session.selected_path = Some(new_path.clone());
-                        self.spawn_image_load(new_path);
-                    }
-                }
+                self.install_scanned_selection(new_path, followed_rename);
                 let found_same = self
                     .playlist
                     .as_ref()
-                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
+                    .is_some_and(|playlist| playlist.contains_catalog_path(&preferred));
                 self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session
@@ -2111,23 +2137,11 @@ impl App {
                     .unwrap_or_else(|| selected.clone());
                 let (new_path, followed_rename) =
                     self.adopt_folder_scan_entries(entries, &preferred, fallback_index);
-                if let Some(new_path) = new_path {
-                    if followed_rename {
-                        self.cancel_rating_disclosure_for_source_change();
-                        self.session.selected_path = Some(new_path.clone());
-                        if self.session.presented_path.is_some() {
-                            self.session.presented_path = Some(new_path);
-                        }
-                        self.start_coherence_watch();
-                    } else if self.session.selected_path.is_none() {
-                        self.session.selected_path = Some(new_path.clone());
-                        self.spawn_image_load(new_path);
-                    }
-                }
+                self.install_scanned_selection(new_path, followed_rename);
                 let found_same = self
                     .playlist
                     .as_ref()
-                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
+                    .is_some_and(|playlist| playlist.contains_catalog_path(&preferred));
                 self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session
@@ -2144,8 +2158,9 @@ impl App {
                 ScanPurpose::SelectedFile { path: selected, .. },
                 _,
             ) => {
+                let pending_removals = self.pending_source_removal_paths();
                 if self.playlist.is_none()
-                    && !self.pending_source_removal_paths().contains(&selected)
+                    && !catalog_path_set_contains(&pending_removals, &selected)
                 {
                     self.replace_playlist(vec![selected.clone()], 0);
                     self.preserve_presented_source_provenance(&selected);
@@ -2345,11 +2360,8 @@ impl App {
             return;
         }
         self.preview_load_retry_blocked = true;
-        self.session.load_error = Some(
-            self.language
-                .text(crate::ui::PREVIEW_RECOVERY_STATUS)
-                .to_owned(),
-        );
+        self.session
+            .note_status(self.language.text(crate::ui::PREVIEW_RECOVERY_STATUS));
         self.show_toast(self.language.localize(crate::ui::PREVIEW_RECOVERY_STATUS));
     }
 
@@ -2368,7 +2380,7 @@ impl App {
             return;
         }
         if let Some(load_error) = durable_presentation_error(kind, message.as_str()) {
-            self.session.load_error = Some(load_error);
+            self.session.note_status(load_error);
         }
         self.show_toast(message);
     }
@@ -2548,7 +2560,7 @@ impl App {
         self.pages = None;
         self.image_details = None;
         self.auxiliary_job = None;
-        self.session.load_error = None;
+        self.session.clear_load_error();
         self.stop_coherence_watch();
         self.unsaved_crop = false;
         self.pending_gone_notice = false;
@@ -6668,22 +6680,15 @@ impl App {
         CurationTerminalState::Succeeded
     }
 
+    fn forget_image_cache(&mut self, path: &std::path::Path) {
+        self.remove_prefetched_image(path);
+        self.thumb_textures.remove(path);
+        self.prefetch_schedule.allow(path);
+    }
+
     fn after_paths_removed(&mut self, removed: &[PathBuf], old_index: usize) {
         // Keep neighbor prefetch for surviving images. Full cache reset made Delete
         // feel like a cold navigation even when the next image was already decoded.
-        for path in removed {
-            self.remove_prefetched_image(path);
-            self.thumb_textures.remove(path);
-            self.prefetch_schedule.allow(path);
-        }
-        let Some(playlist) = self.playlist.as_mut() else {
-            self.cancel_pending_image_load();
-            self.session.selected_path = None;
-            self.invalidate_displayed_image();
-            self.sync_collage_after_catalog_change();
-            return;
-        };
-
         // Prefer the image the user is already looking at. Trash may finish after
         // they navigated away; never yank them back to the deleted item's slot.
         let selected_before = self
@@ -6693,7 +6698,23 @@ impl App {
             .or_else(|| self.session.presented_path.clone());
         let selected_was_removed = selected_before
             .as_ref()
-            .is_some_and(|path| removed.iter().any(|removed_path| removed_path == path));
+            .is_some_and(|path| removal_names_path(removed, path));
+        for path in removed {
+            self.forget_image_cache(path);
+        }
+        if let Some(path) = selected_before.as_deref()
+            && selected_was_removed
+            && removed.iter().all(|gone| gone.as_path() != path)
+        {
+            self.forget_image_cache(path);
+        }
+        let Some(playlist) = self.playlist.as_mut() else {
+            self.cancel_pending_image_load();
+            self.session.selected_path = None;
+            self.invalidate_displayed_image();
+            self.sync_collage_after_catalog_change();
+            return;
+        };
 
         playlist.remove_paths(removed, old_index);
         if playlist.files.is_empty() {
@@ -6713,12 +6734,13 @@ impl App {
 
         if !selected_was_removed
             && let Some(path) = selected_before
-            && let Some(index) = playlist.files.iter().position(|entry| entry == &path)
+            && let Some(index) = playlist.catalog_index_of(&path)
             && playlist.select(index)
         {
             // Keep the image the user already moved to; only refresh playlist
-            // bookkeeping and neighbor work.
-            self.session.selected_path = Some(path);
+            // bookkeeping and neighbor work. Store the listing's spelling.
+            let stored = playlist.files[index].clone();
+            self.session.selected_path = Some(stored);
             self.kick_prefetch();
             self.sync_collage_after_catalog_change();
             self.request_redraw();
@@ -6741,26 +6763,28 @@ impl App {
             .set_selected_missing(self.language.text(crate::session::MISSING_IMAGE_STATUS));
         self.show_toast(self.language.localize(crate::session::MISSING_IMAGE_STATUS));
 
-        let old_index = self
-            .playlist
-            .as_ref()
-            .and_then(|playlist| playlist.files.iter().position(|entry| entry == &path));
-        let Some(old_index) = old_index else {
+        let located = self.playlist.as_ref().and_then(|playlist| {
+            playlist
+                .catalog_index_of(&path)
+                .map(|index| (index, playlist.files[index].clone()))
+        });
+        let Some((old_index, stored)) = located else {
             self.start_missing_selection_scan(path);
             self.sync_collage_after_catalog_change();
             self.request_redraw();
             return;
         };
 
-        self.remove_prefetched_image(&path);
-        self.thumb_textures.remove(&path);
-        self.prefetch_schedule.allow(&path);
+        self.forget_image_cache(&stored);
+        if stored != path {
+            self.forget_image_cache(&path);
+        }
         let removal = {
             let playlist = self
                 .playlist
                 .as_mut()
                 .expect("located missing selection belongs to the active playlist");
-            playlist.remove_paths(std::slice::from_ref(&path), old_index);
+            playlist.remove_paths(std::slice::from_ref(&stored), old_index);
             if playlist.files.is_empty() {
                 MissingSelectionRemoval::ScanFolder
             } else if playlist.visible_len() == 0 {
@@ -7048,7 +7072,7 @@ impl App {
                 tr!("Could not start image decode: {error}"),
                 &[("error", &error.to_string())],
             );
-            self.session.load_error = Some(message.as_str().to_owned());
+            self.session.note_status(message.as_str());
             self.show_toast(message);
         }
     }
@@ -7064,12 +7088,11 @@ impl App {
                 self.session.receiver = None;
                 let message = self
                     .language
-                    .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS)
-                    .to_owned();
-                self.session.load_error = Some(message.clone());
+                    .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS);
+                self.session.note_status(message);
                 log::error!("foreground image result channel disconnected");
                 if self.current_image.is_some() {
-                    self.show_toast(decode_failure_toast(self.language, &message, true));
+                    self.show_toast(failure_notice(self.language, message, true, true));
                 }
                 self.request_redraw();
                 return;
@@ -7100,10 +7123,14 @@ impl App {
                     ForegroundLoadFailureDisposition::Other(error) => {
                         self.session.selected_missing = false;
                         log::error!("decode failed");
-                        let message = user_facing_decode_error(self.language, error);
-                        self.session.load_error = Some(message.clone());
+                        let failure = explain_open_failure(self.language, &error);
+                        self.session.note_decode_failure(
+                            failure.sentence.clone(),
+                            failure.detail.clone(),
+                            failure.allows_retry(),
+                        );
                         if self.current_image.is_some() {
-                            self.show_toast(decode_failure_toast(self.language, &message, true));
+                            self.show_toast(decode_failure_toast(self.language, &error, true));
                         }
                         self.request_redraw();
                     }
@@ -8897,6 +8924,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
                 let load_error = self.session.load_error.clone();
+                let decoder_detail = self.session.decoder_detail.clone();
+                let load_retry_allowed = self.session.load_retry_allowed;
                 let save_busy = self.save_job.is_some();
                 let save_overwrite_pending = self.pending_save.is_some();
                 let save_recovery_unsettled = self.save_recovery_unsettled;
@@ -9120,6 +9149,8 @@ impl ApplicationHandler<UserEvent> for App {
                     is_loading,
                     is_opening,
                     load_error,
+                    decoder_detail,
+                    load_retry_allowed,
                     save_busy,
                     save_overwrite_pending,
                     save_recovery_unsettled,

@@ -207,11 +207,13 @@ or accessibility evidence gates.
 | Recovery notice readability | Implemented on main, unreleased | Top-bar notices use up to two lines within the existing height. Render tests use platform fonts, inspect painted text for clipping, and cover long filenames, page and rating controls, and translated recovery copy. Complete hover and accessible text remain available for longer messages. |
 | Copy the viewed image | Implemented, unreleased | Right-click, Edit > Copy, and Ctrl/Cmd+C copy the on-screen pixels, including unsaved rotation, flips, applied crop, and Spot Heal. Images larger than 33554432 pixels are refused with an explanation. Opening an image from clipboard pixels stays a candidate. |
 | Doctor report readability | Implemented, unreleased | `viewr doctor` colors only the status tag on a terminal, uses one lowercase tag case, and wraps doctor rows and help to the terminal width while keeping the hanging indent. A failed report counts critical checks and warnings, and the install sentence matches the number of failed window rows. Piped output, `NO_COLOR`, and `TERM=dumb` stay plain. |
+| Plain-language failed opens | Implemented, unreleased | A failed open shows one catalog sentence. Retry appears only when a later try can succeed. Image Information keeps the decoder's own line. `viewr benchmark` prints that sentence, and `--verbose` adds the decoder line. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
-candidates. Copying the on-screen image is implemented and unreleased. The
-viewing-control changes add no preference, catalog, or activity history.
+candidates. Copying the on-screen image, the doctor report, and plain-language
+failed opens are implemented and unreleased. The viewing-control changes add no
+preference, catalog, or activity history.
 
 ### Version state and update points
 

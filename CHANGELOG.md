@@ -5,6 +5,16 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Explain a failed open in one short sentence. A damaged, unsupported, or
+  oversized file does not offer Retry. Permission, a missing file, a missing
+  viewr-decode helper, and an unrecognized failure still do. Image Information
+  keeps the decoder's own line. `viewr benchmark` prints the same sentence for
+  a skipped file, and `--verbose` adds the decoder line.
+- On Windows, keep the opened image selected when a file dialog and the folder
+  listing spell that path with different capitalization. A case-only difference
+  is the same file: the catalog keeps its rating, Trash and a folder refresh
+  cannot bring that file back under the other spelling, and the session adopts
+  the listing's spelling. Other platforms stay case-sensitive.
 - Copy the image on screen from the right-click menu, Edit > Copy, or
   Ctrl/Cmd+C. The copy includes unsaved rotation, flips, applied crop, and
   Spot Heal. An image larger than 33554432 pixels is refused before a

@@ -117,8 +117,9 @@ disappears. This spec is the converged result of two rounds of design critique
   They remain readable on black, gray, white, and theme-driven image backgrounds.
   The empty state explains drop, ambient sibling browsing, and explicit session
   folder selection without adding a confirmation step. Opening names the selected
-  file. A failed open keeps one short error line and Retry. Its measured card
-  geometry is stable across unchanged frames, so no resting content drifts
+  file. A failed open keeps one short sentence. Retry appears only when a later
+  try can succeed, and Image Information keeps the decoder's own line. The card's
+  measured geometry is stable across unchanged frames, so no resting content drifts
   vertically.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws
   a precise border, rule-of-thirds guides, eight visible pointer handles, exact
@@ -217,8 +218,9 @@ disappears. This spec is the converged result of two rounds of design critique
   Image Information reports the sRGB swapchain as operating-system managed, as
   a display profile applied on an unmanaged path, or as a fallback. Unmanaged
   X11 without an admitted profile uses the fallback rather than claiming
-  compositor management. A first-open decode failure says Retry is available;
-  it does not claim a previous image remains visible when the canvas is empty.
+  compositor management. A first-open decode failure uses the same sentence as
+  the card. It names Retry only when a later try can succeed, and it does not
+  claim a previous image remains visible when the canvas is empty.
   This is correct for the current SDR working path, not a claim of preserved
   wide-gamut values, CMYK profile handling, or HDR presentation. Those remain
   later roadmap items.
@@ -282,7 +284,8 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   black/background flash, shimmer, slide, crossfade, or edge bounce.
 - File > Reload File (`F5`) bypasses the decoded-neighbor cache and reads the
   current path again. It resets in-memory view edits only when the action is safe,
-  retains the last good frame during decode, and exposes Retry on failure.
+  retains the last good frame during decode, and exposes Retry when a later try
+  can succeed.
 - File and the image right-click surface expose Open With.... The action uses a
   native user-mediated chooser for the exact accepted source and never
   constructs a shell command or stores an editor preference: Windows

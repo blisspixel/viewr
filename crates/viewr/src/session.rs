@@ -72,6 +72,10 @@ pub struct Session {
     pub presented_path: Option<PathBuf>,
     /// Error from the most recent load attempt.
     pub load_error: Option<String>,
+    /// Raw decoder or I/O line for Image Information. Absent for status text.
+    pub decoder_detail: Option<String>,
+    /// Whether Retry can help the current load error.
+    pub load_retry_allowed: bool,
     /// Whether the selected, not-yet-presented source was confirmed absent.
     pub selected_missing: bool,
     /// Generation counter used to invalidate stale asynchronous work.
@@ -86,6 +90,8 @@ impl Default for Session {
             selected_path: None,
             presented_path: None,
             load_error: None,
+            decoder_detail: None,
+            load_retry_allowed: true,
             selected_missing: false,
             generation: Arc::new(AtomicU64::new(0)),
             receiver: None,
@@ -98,13 +104,13 @@ impl Session {
     pub fn cancel_pending_load(&mut self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
         self.receiver = None;
-        self.load_error = None;
+        self.clear_load_error();
         self.selected_missing = false;
     }
 
     /// Clear the previous load error before scheduling a replacement.
     pub fn prepare_for_load(&mut self, preserve_missing_recovery: bool) {
-        self.load_error = None;
+        self.clear_load_error();
         self.selected_missing = preserve_missing_recovery;
     }
 
@@ -112,8 +118,42 @@ impl Session {
     pub fn set_presented(&mut self, path: PathBuf) {
         self.presented_path = Some(path);
         self.receiver = None;
-        self.load_error = None;
+        self.clear_load_error();
         self.selected_missing = false;
+    }
+
+    /// Drop the card error, its decoder line, and restore Retry for the next failure.
+    pub fn clear_load_error(&mut self) {
+        self.load_error = None;
+        self.decoder_detail = None;
+        self.load_retry_allowed = true;
+    }
+
+    /// Show a status sentence that is not a classified decode failure.
+    pub fn note_status(&mut self, status: impl Into<String>) {
+        self.load_error = Some(status.into());
+        self.decoder_detail = None;
+        self.load_retry_allowed = true;
+    }
+
+    /// Show a classified decode failure and keep the raw line for Image Information.
+    ///
+    /// An empty detail means Image Information has nothing further to show.
+    pub fn note_decode_failure(
+        &mut self,
+        sentence: impl Into<String>,
+        detail: impl Into<String>,
+        allow_retry: bool,
+    ) {
+        self.load_error = Some(sentence.into());
+        let detail = detail.into();
+        let detail = detail.trim();
+        self.decoder_detail = if detail.is_empty() {
+            None
+        } else {
+            Some(detail.to_owned())
+        };
+        self.load_retry_allowed = allow_retry;
     }
 
     /// Record a confirmed missing selection while retaining any presented frame.
@@ -121,7 +161,7 @@ impl Session {
     /// language, because this state is shown as-is on the empty-state card.
     pub fn set_selected_missing(&mut self, status: &str) {
         self.receiver = None;
-        self.load_error = Some(status.to_owned());
+        self.note_status(status);
         self.selected_missing = true;
     }
 
@@ -154,6 +194,8 @@ mod tests {
         let (_sender, receiver) = mpsc::channel();
         let mut session = Session {
             load_error: Some("old failure".into()),
+            decoder_detail: Some("format error".into()),
+            load_retry_allowed: false,
             receiver: Some(receiver),
             ..Session::default()
         };
@@ -163,6 +205,8 @@ mod tests {
         assert_eq!(session.generation.load(Ordering::Acquire), 1);
         assert!(!session.is_loading());
         assert!(session.load_error.is_none());
+        assert!(session.decoder_detail.is_none());
+        assert!(session.load_retry_allowed);
         assert!(!session.selected_missing);
     }
 
@@ -171,6 +215,8 @@ mod tests {
         let (_sender, receiver) = mpsc::channel();
         let mut session = Session {
             load_error: Some("old failure".into()),
+            decoder_detail: Some("format error".into()),
+            load_retry_allowed: false,
             receiver: Some(receiver),
             ..Session::default()
         };
@@ -180,6 +226,8 @@ mod tests {
         assert_eq!(session.presented_path, Some(PathBuf::from("selected.png")));
         assert!(!session.is_loading());
         assert!(session.load_error.is_none());
+        assert!(session.decoder_detail.is_none());
+        assert!(session.load_retry_allowed);
         assert!(!session.selected_missing);
     }
 
@@ -189,6 +237,8 @@ mod tests {
         let mut session = Session {
             selected_path: Some(PathBuf::from("selected.png")),
             load_error: Some("old failure".into()),
+            decoder_detail: Some("format error".into()),
+            load_retry_allowed: false,
             selected_missing: true,
             receiver: Some(receiver),
             ..Session::default()
@@ -199,6 +249,8 @@ mod tests {
         assert_eq!(session.selected_path, Some(PathBuf::from("selected.png")));
         assert!(session.is_loading());
         assert!(session.load_error.is_none());
+        assert!(session.decoder_detail.is_none());
+        assert!(session.load_retry_allowed);
         assert!(!session.selected_missing);
         assert_eq!(session.generation.load(Ordering::Acquire), 0);
     }
@@ -235,6 +287,8 @@ mod tests {
 
         assert!(session.selected_missing);
         assert_eq!(session.load_error.as_deref(), Some(MISSING_IMAGE_STATUS));
+        assert!(session.decoder_detail.is_none());
+        assert!(session.load_retry_allowed);
         assert_eq!(
             foreground_retry_plan(session.selected_missing),
             ForegroundRetryPlan::LoadAndScanFolder
@@ -246,6 +300,31 @@ mod tests {
             foreground_retry_plan(session.selected_missing),
             ForegroundRetryPlan::LoadAndScanFolder
         );
+
+        session.note_decode_failure("The file is damaged or incomplete.", "   ", false);
+        assert_eq!(
+            session.load_error.as_deref(),
+            Some("The file is damaged or incomplete.")
+        );
+        assert!(session.decoder_detail.is_none());
+        assert!(!session.load_retry_allowed);
+        session.note_decode_failure(
+            "viewr doesn't have permission to read this file.",
+            "Access is denied. (os error 5)",
+            true,
+        );
+        assert_eq!(
+            session.decoder_detail.as_deref(),
+            Some("Access is denied. (os error 5)")
+        );
+        assert!(session.load_retry_allowed);
+        session.note_status("The image decoder stopped unexpectedly");
+        assert_eq!(
+            session.load_error.as_deref(),
+            Some("The image decoder stopped unexpectedly")
+        );
+        assert!(session.decoder_detail.is_none());
+        assert!(session.load_retry_allowed);
 
         session.prepare_for_load(false);
         assert!(!session.selected_missing);

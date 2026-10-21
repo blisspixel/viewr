@@ -85,8 +85,9 @@ use crate::prefetch::{
 };
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-    decode_failure_toast, durable_presentation_error, external_edit_pending_after_frame_transition,
-    image_open_in_progress, navigation_image_plan, preview_job_matches, user_facing_decode_error,
+    decode_failure_toast, durable_presentation_error, explain_open_failure,
+    external_edit_pending_after_frame_transition, failure_notice, image_open_in_progress,
+    navigation_image_plan, preview_job_matches,
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
@@ -2366,11 +2367,8 @@ impl App {
             return;
         }
         self.preview_load_retry_blocked = true;
-        self.session.load_error = Some(
-            self.language
-                .text(crate::ui::PREVIEW_RECOVERY_STATUS)
-                .to_owned(),
-        );
+        self.session
+            .note_status(self.language.text(crate::ui::PREVIEW_RECOVERY_STATUS));
         self.show_toast(self.language.localize(crate::ui::PREVIEW_RECOVERY_STATUS));
     }
 
@@ -2389,7 +2387,7 @@ impl App {
             return;
         }
         if let Some(load_error) = durable_presentation_error(kind, message.as_str()) {
-            self.session.load_error = Some(load_error);
+            self.session.note_status(load_error);
         }
         self.show_toast(message);
     }
@@ -2569,7 +2567,7 @@ impl App {
         self.pages = None;
         self.image_details = None;
         self.auxiliary_job = None;
-        self.session.load_error = None;
+        self.session.clear_load_error();
         self.stop_coherence_watch();
         self.unsaved_crop = false;
         self.pending_gone_notice = false;
@@ -7069,7 +7067,7 @@ impl App {
                 tr!("Could not start image decode: {error}"),
                 &[("error", &error.to_string())],
             );
-            self.session.load_error = Some(message.as_str().to_owned());
+            self.session.note_status(message.as_str());
             self.show_toast(message);
         }
     }
@@ -7085,12 +7083,11 @@ impl App {
                 self.session.receiver = None;
                 let message = self
                     .language
-                    .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS)
-                    .to_owned();
-                self.session.load_error = Some(message.clone());
+                    .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS);
+                self.session.note_status(message);
                 log::error!("foreground image result channel disconnected");
                 if self.current_image.is_some() {
-                    self.show_toast(decode_failure_toast(self.language, &message, true));
+                    self.show_toast(failure_notice(self.language, message, true, true));
                 }
                 self.request_redraw();
                 return;
@@ -7121,10 +7118,14 @@ impl App {
                     ForegroundLoadFailureDisposition::Other(error) => {
                         self.session.selected_missing = false;
                         log::error!("decode failed");
-                        let message = user_facing_decode_error(self.language, error);
-                        self.session.load_error = Some(message.clone());
+                        let failure = explain_open_failure(self.language, &error);
+                        self.session.note_decode_failure(
+                            failure.sentence.clone(),
+                            failure.detail.clone(),
+                            failure.allows_retry(),
+                        );
                         if self.current_image.is_some() {
-                            self.show_toast(decode_failure_toast(self.language, &message, true));
+                            self.show_toast(decode_failure_toast(self.language, &error, true));
                         }
                         self.request_redraw();
                     }
@@ -8918,6 +8919,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let is_opening = image_open_in_progress(self.session.is_loading(), preview_kind);
                 let is_loading = self.session.is_loading() || preview_kind.is_some();
                 let load_error = self.session.load_error.clone();
+                let decoder_detail = self.session.decoder_detail.clone();
+                let load_retry_allowed = self.session.load_retry_allowed;
                 let save_busy = self.save_job.is_some();
                 let save_overwrite_pending = self.pending_save.is_some();
                 let save_recovery_unsettled = self.save_recovery_unsettled;
@@ -9141,6 +9144,8 @@ impl ApplicationHandler<UserEvent> for App {
                     is_loading,
                     is_opening,
                     load_error,
+                    decoder_detail,
+                    load_retry_allowed,
                     save_busy,
                     save_overwrite_pending,
                     save_recovery_unsettled,

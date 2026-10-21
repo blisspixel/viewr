@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Explain a failed open in one short sentence. A damaged, unsupported, or
+  oversized file does not offer Retry. Permission, a missing file, a missing
+  viewr-decode helper, and an unrecognized failure still do. Image Information
+  keeps the decoder's own line. `viewr benchmark` prints the same sentence for
+  a skipped file, and `--verbose` adds the decoder line.
 - On Windows, keep the opened image selected when a file dialog and the folder
   listing spell that path with different capitalization. A case-only difference
   is the same file: the catalog keeps its rating, and the session adopts the

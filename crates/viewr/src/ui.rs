@@ -7830,7 +7830,8 @@ mod tests {
                 node.role() == egui::accesskit::Role::Button && node.label() == Some("Copy")
             })
             .expect("accessible Copy action");
-        assert_eq!(copy.keyboard_shortcut(), Some("Ctrl+C"));
+        let shortcut = format!("{}+C", super::PRIMARY_MODIFIER);
+        assert_eq!(copy.keyboard_shortcut(), Some(shortcut.as_str()));
         assert_eq!(copy.description(), Some(COPY_IMAGE_HELP));
 
         frame.crop_busy = true;
@@ -7846,7 +7847,7 @@ mod tests {
             update.nodes.iter().any(|(_, node)| {
                 node.role() == egui::accesskit::Role::Button
                     && node.label() == Some("Copy")
-                    && node.keyboard_shortcut() == Some("Ctrl+C")
+                    && node.keyboard_shortcut() == Some(shortcut.as_str())
             }),
             "Copy stays in the right-click menu while a crop is applying"
         );

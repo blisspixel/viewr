@@ -139,6 +139,66 @@ fn pixel_offset(x: u32, y: u32, width: u32) -> Result<usize, Error> {
         .map_err(|_| Error::Encode("pixel offset exceeds this platform's limits".to_owned()))
 }
 
+/// Largest image, in pixels, accepted for one clipboard copy.
+///
+/// The check uses dimensions before the buffer is read, so an oversized image
+/// is refused without allocating a transformed copy.
+pub(crate) const MAX_CLIPBOARD_PIXELS: u64 = 32 * 1024 * 1024;
+
+/// Tightly packed RGBA8 pixels ready for the system clipboard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClipboardImage {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) rgba: Vec<u8>,
+}
+
+/// Why a clipboard copy did not produce pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClipboardCopyError {
+    /// Width times height exceeds [`MAX_CLIPBOARD_PIXELS`].
+    TooLarge,
+    /// The buffer is empty, zero-sized, or does not match its dimensions.
+    Pixels,
+}
+
+/// Prepare the on-screen image for the clipboard.
+///
+/// An identity transform clones the source bytes. Any other transform uses the
+/// same pixel order as the GPU preview.
+pub(crate) fn clipboard_image(
+    source: &DecodedImage,
+    transform: PixelTransform,
+) -> Result<ClipboardImage, ClipboardCopyError> {
+    if source.width == 0 || source.height == 0 {
+        return Err(ClipboardCopyError::Pixels);
+    }
+    let pixels = u64::from(source.width).saturating_mul(u64::from(source.height));
+    if pixels > MAX_CLIPBOARD_PIXELS {
+        return Err(ClipboardCopyError::TooLarge);
+    }
+    if transform.is_identity() {
+        let expected =
+            rgba_len(source.width, source.height).map_err(|_| ClipboardCopyError::Pixels)?;
+        if source.rgba.len() != expected {
+            return Err(ClipboardCopyError::Pixels);
+        }
+        return Ok(ClipboardImage {
+            width: source.width,
+            height: source.height,
+            rgba: source.rgba.clone(),
+        });
+    }
+    let transformed = transform
+        .apply(source)
+        .map_err(|_| ClipboardCopyError::Pixels)?;
+    Ok(ClipboardImage {
+        width: transformed.width,
+        height: transformed.height,
+        rgba: transformed.rgba,
+    })
+}
+
 impl Rect {
     /// Return this rectangle clipped so it lies entirely within a `bounds`
     /// (width, height) image. The origin is clamped first, then the extent, so
@@ -767,7 +827,8 @@ fn supports_alpha(format: ImageFormat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        MetadataDisposition, PixelTransform, Rect, SaveOptions, commit_temporary_with_hook, crop,
+        ClipboardCopyError, ClipboardImage, MAX_CLIPBOARD_PIXELS, MetadataDisposition,
+        PixelTransform, Rect, SaveOptions, clipboard_image, commit_temporary_with_hook, crop,
         crop_cancellable, crop_while, encode_pixels_only, path_supports_exif,
         prepare_save_destination, save, save_with_accepted_source, save_with_options,
     };
@@ -959,6 +1020,72 @@ mod tests {
             .apply(&source)
             .unwrap();
         assert_eq!(red_channels(&counterclockwise), vec![3, 6, 2, 5, 1, 4]);
+    }
+
+    #[test]
+    fn clipboard_image_clones_identity_and_matches_a_clockwise_preview() {
+        let source = indexed_3x2();
+        let copied = clipboard_image(&source, PixelTransform::default()).unwrap();
+        assert_eq!(
+            copied,
+            ClipboardImage {
+                width: source.width,
+                height: source.height,
+                rgba: source.rgba.clone(),
+            }
+        );
+
+        let rotated = clipboard_image(&source, PixelTransform::new(1, false, false)).unwrap();
+        assert_eq!((rotated.width, rotated.height), (2, 3));
+        assert_eq!(
+            red_channels(&DecodedImage {
+                rgba: rotated.rgba,
+                width: rotated.width,
+                height: rotated.height,
+                color_profile: source.color_profile,
+                working_color: source.working_color,
+            }),
+            vec![4, 1, 5, 2, 6, 3]
+        );
+    }
+
+    #[test]
+    fn clipboard_image_rejects_oversized_and_malformed_buffers_before_use() {
+        let oversized = DecodedImage {
+            width: u32::try_from(MAX_CLIPBOARD_PIXELS).unwrap() + 1,
+            height: 1,
+            rgba: Vec::new(),
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        };
+        assert_eq!(
+            clipboard_image(&oversized, PixelTransform::default()),
+            Err(ClipboardCopyError::TooLarge)
+        );
+
+        let malformed = DecodedImage {
+            width: 2,
+            height: 2,
+            rgba: vec![1, 2, 3],
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        };
+        assert_eq!(
+            clipboard_image(&malformed, PixelTransform::default()),
+            Err(ClipboardCopyError::Pixels)
+        );
+
+        let empty = DecodedImage {
+            width: 0,
+            height: 1,
+            rgba: Vec::new(),
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: WorkingColorEncoding::SRGB_RGBA8,
+        };
+        assert_eq!(
+            clipboard_image(&empty, PixelTransform::default()),
+            Err(ClipboardCopyError::Pixels)
+        );
     }
 
     #[test]

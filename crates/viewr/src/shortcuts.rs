@@ -206,6 +206,10 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
         heading: "Edit",
         items: &[
             ShortcutSpec {
+                keys: "{primary}+C",
+                action: "Copy image",
+            },
+            ShortcutSpec {
                 keys: "0-5",
                 action: "Clear or set rating",
             },
@@ -486,6 +490,7 @@ mod tests {
             "Up / Shift+G Full-image collage",
             "Esc Leave tool, collage, or fullscreen",
             "Ctrl+Shift+S Save As",
+            "Ctrl+C Copy image",
             "Delete Move to Trash",
             "U Undo Trash",
         ] {

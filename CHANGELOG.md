@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Copy the image on screen from the right-click menu, Edit > Copy, or
+  Ctrl/Cmd+C. The copy includes unsaved rotation, flips, applied crop, and
+  Spot Heal. An image larger than 33554432 pixels is refused before a
+  transformed copy is allocated, and the status explains why. A text field
+  keeps Ctrl/Cmd+C for its own selection.
 - Reject a same-length in-place rewrite when the filesystem leaves the change
   time unchanged. Accepted sources keep an in-memory SHA-256 witness on every
   platform, matching the existing Windows check, and fail closed before a rating

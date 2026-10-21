@@ -297,6 +297,10 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   filmstrip browsing cancels pending source verification before changing the
   selection, so a superseded native chooser cannot appear later. A session
   watcher also observes the current file and folder without writing history.
+- Right-click and Edit > Copy copy the on-screen image, including unsaved
+  rotation, flips, applied crop, and Spot Heal. Ctrl+C or Cmd+C does the same
+  when a text field does not own the keys. An image larger than 33554432
+  pixels stays uncopied and explains why.
 - A folder entry can disappear after enumeration but before its first
   presentation. viewr requires matching absence observations from the decode
   worker and event loop before removing that unpresented selection, then advances

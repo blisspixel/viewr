@@ -107,11 +107,12 @@ struct App {
     image_details: Option<ImageDetails>,
     heal: HealTool,
 
-    // Folder scan, auxiliary, Save As, crop, and display-preview work each has a
-    // one-result, event-loop-owned job.
+    // Folder scan, auxiliary, Save As, clipboard copy, crop, and display-preview
+    // work each has a one-result, event-loop-owned job.
     folder_scan_job: Option<OneShotJob<FolderScanContext, FolderScanResult>>,
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     save_job: Option<OneShotJob<(), SaveResult>>,
+    copy_job: Option<OneShotJob<(), Result<ColorImage, ClipboardCopyError>>>,
     close_after_save: bool,
     save_recovery_unsettled: bool,
     crop_job: Option<OneShotJob<CropJobContext, CropJobResult>>,

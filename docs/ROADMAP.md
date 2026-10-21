@@ -205,11 +205,12 @@ or accessibility evidence gates.
 | Reliable path entry | Shipped v0.7.4 | Keep the editable Image or folder path field on the empty card and File > Open Path while viewing. Enter opens without consuming viewer shortcuts. Native chooser cancellation or unavailability points to path entry, Paste Path, and drop. |
 | Linux desktop identity | Implemented, unreleased | Wayland app_id and X11 WM_CLASS use `io.github.blisspixel.viewr`, matching the desktop entry and icon. Optional source-install instructions add a per-user launcher without changing default handlers. The native X11 smoke check verifies both class names. |
 | Recovery notice readability | Implemented on main, unreleased | Top-bar notices use up to two lines within the existing height. Render tests use platform fonts, inspect painted text for clipping, and cover long filenames, page and rating controls, and translated recovery copy. Complete hover and accessible text remain available for longer messages. |
+| Copy the viewed image | Implemented, unreleased | Right-click, Edit > Copy, and Ctrl/Cmd+C copy the on-screen pixels, including unsaved rotation, flips, applied crop, and Spot Heal. Images larger than 33554432 pixels are refused with an explanation. Opening an image from clipboard pixels stays a candidate. |
 | Transparency inspection | Candidate | Evaluate a session-only checkerboard image background for transparent PNG/WebP assets. It must show alpha clearly at different zoom levels and leave exported pixels unchanged. |
 
-Clipboard image open/copy, touch gestures, and slideshow remain separately
-tracked candidates. The viewing-control changes add no preference, catalog, or
-activity history.
+Clipboard image open, touch gestures, and slideshow remain separately tracked
+candidates. Copying the on-screen image is implemented and unreleased. The
+viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points
 
@@ -261,7 +262,7 @@ but completed history does not override an open gate here.
 The first public pre-1.0 release may remain clearly labeled as unsigned. A broadly
 recommended 1.0 must close the human accessibility, native platform trust,
 representative-hardware, and tagged-SDR display-correctness gates. RAW, HDR,
-advanced Spot Heal controls, clipboard features, and touch gestures do not block
+advanced Spot Heal controls, clipboard image open, and touch gestures do not block
 that release unless evidence shows a core workflow depends on them.
 
 ## What keeps viewr from exceptional
@@ -603,8 +604,10 @@ makes the application feel unreliable even when the decoder technically succeede
 - [ ] Ship camera RAW only through the path-free bounded worker, with orientation,
   color metadata, representative camera fixtures, fuzz seeds, and the same memory
   and deadline contracts as AVIF/HEIC. This remains a post-1.0 candidate.
-- [ ] Decide clipboard open/copy and touch gestures from measured user workflows,
-  not from feature-count pressure. They remain behind the work above.
+- [ ] Decide clipboard image open and touch gestures from measured user workflows,
+  not from feature-count pressure. Copying the on-screen image is implemented.
+  Opening pixels from the clipboard and touch gestures remain behind the work
+  above.
 
 Definition of done: external edits appear predictably, every selected page/frame
 is identifiable and bounded, and the format table distinguishes container support

@@ -25,8 +25,8 @@ smoke test, and this matrix quote one covered catalog:
 
 - `crates/viewr/src/shortcuts.rs` owns empty-state copy and About shortcut groups.
 - About lists Open, Browse, View, Edit, and Mouse controls, including `[` / `]`, `F5`,
-  `T` `G` `I`, `Shift+G`, Space-to-fit, `F` / `F11`, Escape, Save As, and Undo
-  Trash.
+  `T` `G` `I`, `Shift+G`, Space-to-fit, `F` / `F11`, Escape, Copy image, Save As,
+  and Undo Trash.
 - The empty card heading distinguishes first-run, opening, and failure. First-run
   copy is:
 

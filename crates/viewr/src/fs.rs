@@ -2004,6 +2004,27 @@ fn actual_windows_file_name(parent: &Path, requested: &OsStr) -> io::Result<OsSt
     Ok(folded_match.unwrap_or_else(|| requested.to_owned()))
 }
 
+/// Whether two catalog paths name the same file for selection and reconciliation.
+///
+/// Exact path equality always matches. Windows also accepts a case difference in
+/// the full path, because a file dialog and `read_dir` can spell one file
+/// differently. This does not walk the directory or open the file. On a
+/// case-sensitive Windows directory, the first matching spelling wins.
+#[must_use]
+pub(crate) fn catalog_paths_match(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        windows_os_str_eq_ignore_case(left.as_os_str(), right.as_os_str())
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)] // one audited Win32 ordinal filename comparison
 fn windows_os_str_eq_ignore_case(left: &OsStr, right: &OsStr) -> bool {
@@ -2327,9 +2348,9 @@ mod tests {
     use super::scan_image_entries_sorted_with_hook;
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, FolderSort, canonical_file_path,
-        error_kind_is_definitely_missing, is_core_format, is_supported_image, is_worker_format,
-        natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while, scan_images,
-        scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
+        catalog_paths_match, error_kind_is_definitely_missing, is_core_format, is_supported_image,
+        is_worker_format, natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while,
+        scan_images, scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
@@ -2453,6 +2474,32 @@ mod tests {
             canonical.file_name().unwrap(),
             std::ffi::OsStr::new("MiXeDCase.JPG")
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn catalog_paths_match_ignores_windows_case_and_not_a_different_name() {
+        assert!(catalog_paths_match(
+            Path::new(r"C:\Photos\MiXeD.JPG"),
+            Path::new(r"c:\photos\mixed.jpg")
+        ));
+        assert!(!catalog_paths_match(
+            Path::new(r"C:\Photos\One.JPG"),
+            Path::new(r"C:\Photos\Two.JPG")
+        ));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn catalog_paths_match_stays_case_sensitive_off_windows() {
+        assert!(catalog_paths_match(
+            Path::new("a/b.png"),
+            Path::new("a/b.png")
+        ));
+        assert!(!catalog_paths_match(
+            Path::new("a/B.png"),
+            Path::new("a/b.png")
+        ));
     }
 
     #[test]

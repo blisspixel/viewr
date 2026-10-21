@@ -213,13 +213,38 @@ pub(crate) fn selected_file_index_by<T>(
 ) -> Option<usize> {
     files
         .iter()
-        .position(|entry| path(entry) == selected)
+        .position(|entry| crate::fs::catalog_paths_match(path(entry), selected))
         .or_else(|| {
             let selected_name = selected.file_name()?;
-            files
-                .iter()
-                .position(|entry| path(entry).file_name() == Some(selected_name))
+            files.iter().position(|entry| {
+                path(entry).file_name().is_some_and(|name| {
+                    crate::fs::catalog_paths_match(Path::new(name), Path::new(selected_name))
+                })
+            })
         })
+}
+
+/// How a selected path relates to the spelling stored in the catalog.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogSpelling {
+    /// The paths are equal, including case.
+    Same,
+    /// Windows accepts the case difference, so the session should store the catalog spelling.
+    Adopt,
+    /// The paths name different files.
+    Different,
+}
+
+/// Compare a session path with the path a folder listing stored.
+#[must_use]
+pub(crate) fn catalog_spelling(selected: &Path, catalog: &Path) -> CatalogSpelling {
+    if selected == catalog {
+        CatalogSpelling::Same
+    } else if crate::fs::catalog_paths_match(selected, catalog) {
+        CatalogSpelling::Adopt
+    } else {
+        CatalogSpelling::Different
+    }
 }
 
 #[must_use]
@@ -421,6 +446,36 @@ mod tests {
         assert_eq!(
             selected_file_index_by(&files, Path::new("elsewhere/img2.png"), PathBuf::as_path),
             Some(1)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn selected_file_index_matches_windows_path_casing() {
+        let files = [PathBuf::from(r"c:\album\photo.jpg")];
+        assert_eq!(
+            selected_file_index_by(&files, Path::new(r"C:\Album\Photo.JPG"), PathBuf::as_path),
+            Some(0)
+        );
+        assert_eq!(
+            catalog_spelling(
+                Path::new(r"C:\Album\Photo.JPG"),
+                Path::new(r"c:\album\photo.jpg")
+            ),
+            CatalogSpelling::Adopt
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn catalog_spelling_stays_case_sensitive_off_windows() {
+        assert_eq!(
+            catalog_spelling(Path::new("a/B.png"), Path::new("a/b.png")),
+            CatalogSpelling::Different
+        );
+        assert_eq!(
+            catalog_spelling(Path::new("a/b.png"), Path::new("a/b.png")),
+            CatalogSpelling::Same
         );
     }
 

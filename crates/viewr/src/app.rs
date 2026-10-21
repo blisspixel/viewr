@@ -57,10 +57,10 @@ use crate::edit_state::{
     CanvasTool, EditAction, canvas_tool, edit_transaction_failure_message, within_click_distance,
 };
 use crate::entry_state::{
-    FolderScanDisposition, FolderScanSuccess, PathEntry, committed_scan_path_is_admissible,
-    folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
-    folder_scan_user_message, path_entry, selected_file_index_by, selected_scan_is_current,
-    sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
+    CatalogSpelling, FolderScanDisposition, FolderScanSuccess, PathEntry, catalog_spelling,
+    committed_scan_path_is_admissible, folder_scan_blocks_interaction, folder_scan_disposition,
+    folder_scan_failure_class, folder_scan_user_message, path_entry, selected_file_index_by,
+    selected_scan_is_current, sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
 };
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -1824,10 +1824,55 @@ impl App {
                 .get(fallback_index.min(entries.len().saturating_sub(1)))
                 .map(|entry| entry.path().to_owned());
             self.replace_playlist_from_scan(entries, fallback_index);
-            let followed_rename = new_path
-                .as_deref()
-                .is_some_and(|path| self.session.selected_path.as_deref() != Some(path));
+            let followed_rename = new_path.as_deref().is_some_and(|path| {
+                match self.session.selected_path.as_deref() {
+                    Some(selected) => {
+                        catalog_spelling(selected, path) == CatalogSpelling::Different
+                    }
+                    None => true,
+                }
+            });
             (new_path, followed_rename)
+        }
+    }
+
+    /// Store the catalog's spelling when Windows only changed the path's case.
+    fn install_scanned_selection(&mut self, new_path: Option<PathBuf>, followed_rename: bool) {
+        let Some(new_path) = new_path else {
+            return;
+        };
+        if followed_rename {
+            self.cancel_rating_disclosure_for_source_change();
+            self.session.selected_path = Some(new_path.clone());
+            if self.session.presented_path.is_some() {
+                self.session.presented_path = Some(new_path);
+            }
+            self.start_coherence_watch();
+            return;
+        }
+        if self
+            .session
+            .selected_path
+            .as_deref()
+            .is_some_and(|selected| catalog_spelling(selected, &new_path) == CatalogSpelling::Adopt)
+        {
+            self.session.selected_path = Some(new_path.clone());
+            if self
+                .session
+                .presented_path
+                .as_deref()
+                .is_some_and(|presented| {
+                    catalog_spelling(presented, &new_path) == CatalogSpelling::Adopt
+                })
+            {
+                self.session.presented_path = Some(new_path);
+            }
+            self.start_coherence_watch();
+            return;
+        }
+        if self.session.selected_path.is_none() {
+            self.session.selected_path = Some(new_path.clone());
+            self.spawn_image_load(new_path);
         }
     }
 
@@ -2069,23 +2114,11 @@ impl App {
                     .unwrap_or_else(|| selected.clone());
                 let (new_path, followed_rename) =
                     self.adopt_folder_scan_entries(entries, &preferred, index);
-                if let Some(new_path) = new_path {
-                    if followed_rename {
-                        self.cancel_rating_disclosure_for_source_change();
-                        self.session.selected_path = Some(new_path.clone());
-                        if self.session.presented_path.is_some() {
-                            self.session.presented_path = Some(new_path);
-                        }
-                        self.start_coherence_watch();
-                    } else if self.session.selected_path.is_none() {
-                        self.session.selected_path = Some(new_path.clone());
-                        self.spawn_image_load(new_path);
-                    }
-                }
+                self.install_scanned_selection(new_path, followed_rename);
                 let found_same = self
                     .playlist
                     .as_ref()
-                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
+                    .is_some_and(|playlist| playlist.contains_catalog_path(&preferred));
                 self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session
@@ -2111,23 +2144,11 @@ impl App {
                     .unwrap_or_else(|| selected.clone());
                 let (new_path, followed_rename) =
                     self.adopt_folder_scan_entries(entries, &preferred, fallback_index);
-                if let Some(new_path) = new_path {
-                    if followed_rename {
-                        self.cancel_rating_disclosure_for_source_change();
-                        self.session.selected_path = Some(new_path.clone());
-                        if self.session.presented_path.is_some() {
-                            self.session.presented_path = Some(new_path);
-                        }
-                        self.start_coherence_watch();
-                    } else if self.session.selected_path.is_none() {
-                        self.session.selected_path = Some(new_path.clone());
-                        self.spawn_image_load(new_path);
-                    }
-                }
+                self.install_scanned_selection(new_path, followed_rename);
                 let found_same = self
                     .playlist
                     .as_ref()
-                    .is_some_and(|playlist| playlist.files.iter().any(|path| path == &preferred));
+                    .is_some_and(|playlist| playlist.contains_catalog_path(&preferred));
                 self.settle_pending_gone_notice(found_same, followed_rename);
                 let provenance_path = self
                     .session

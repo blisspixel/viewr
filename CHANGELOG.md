@@ -5,6 +5,10 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- On Windows, keep the opened image selected when a file dialog and the folder
+  listing spell that path with different capitalization. A case-only difference
+  is the same file: the catalog keeps its rating, and the session adopts the
+  listing's spelling. Other platforms stay case-sensitive.
 - Copy the image on screen from the right-click menu, Edit > Copy, or
   Ctrl/Cmd+C. The copy includes unsaved rotation, flips, applied crop, and
   Spot Heal. An image larger than 33554432 pixels is refused before a

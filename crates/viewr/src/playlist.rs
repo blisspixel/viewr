@@ -443,16 +443,13 @@ impl Playlist {
             }
         }
 
-        let inherited = files
-            .iter()
-            .zip(&provenance)
-            .map(|(path, scanned)| inherited_catalog_rating(path, *scanned, &by_path, &by_identity))
-            .collect::<Vec<_>>();
+        let inherited_catalog =
+            inherit_reconciled_rows(&files, &provenance, &self.files, &by_path, &by_identity);
 
         let mut rename_sources = HashSet::new();
         let mut rename_targets = HashSet::new();
-        let mut ratings = Vec::with_capacity(inherited.len());
-        for (path, (rating, renamed_from)) in files.iter().zip(inherited) {
+        let mut ratings = Vec::with_capacity(inherited_catalog.rows.len());
+        for (path, (rating, renamed_from)) in files.iter().zip(inherited_catalog.rows) {
             if let Some(old_path) = renamed_from {
                 rename_sources.insert(old_path);
                 rename_targets.insert(path.clone());
@@ -464,13 +461,19 @@ impl Playlist {
         let removed = self
             .files
             .iter()
-            .filter(|path| !new_paths.contains(path.as_path()) && !rename_sources.contains(*path))
+            .filter(|path| {
+                !new_paths.contains(path.as_path())
+                    && !rename_sources.contains(*path)
+                    && !inherited_catalog.spelled_from.contains(*path)
+            })
             .cloned()
             .collect::<Vec<_>>();
         let added = files
             .iter()
             .filter(|path| {
-                !previous_paths.contains(path.as_path()) && !rename_targets.contains(*path)
+                !previous_paths.contains(path.as_path())
+                    && !rename_targets.contains(*path)
+                    && !inherited_catalog.spelled_to.contains(*path)
             })
             .count();
 
@@ -511,7 +514,7 @@ impl Playlist {
         fallback_index: usize,
     ) -> usize {
         preferred
-            .and_then(|path| self.files.iter().position(|candidate| candidate == path))
+            .and_then(|path| self.index_of(path))
             .or_else(|| {
                 previous_selected_provenance.and_then(|old| {
                     self.provenance.iter().position(|candidate| {
@@ -519,10 +522,7 @@ impl Playlist {
                     })
                 })
             })
-            .or_else(|| {
-                previous_selected
-                    .and_then(|path| self.files.iter().position(|candidate| candidate == path))
-            })
+            .or_else(|| previous_selected.and_then(|path| self.index_of(path)))
             .or_else(|| {
                 preferred
                     .is_none()
@@ -530,6 +530,22 @@ impl Playlist {
                     .filter(|&index| index < self.files.len())
             })
             .unwrap_or_else(|| self.index.min(self.files.len().saturating_sub(1)))
+    }
+
+    /// Find a catalog entry, accepting a Windows case difference after an exact miss.
+    pub(crate) fn contains_catalog_path(&self, path: &Path) -> bool {
+        self.index_of(path).is_some()
+    }
+
+    fn index_of(&self, path: &Path) -> Option<usize> {
+        self.files
+            .iter()
+            .position(|candidate| candidate.as_path() == path)
+            .or_else(|| {
+                self.files
+                    .iter()
+                    .position(|candidate| crate::fs::catalog_paths_match(candidate, path))
+            })
     }
 
     /// Choose the surviving visible entry that will occupy `removed_index`.
@@ -622,13 +638,86 @@ impl Playlist {
     }
 }
 
+struct InheritedCatalog {
+    rows: Vec<(RatingState, Option<PathBuf>)>,
+    spelled_from: HashSet<PathBuf>,
+    spelled_to: HashSet<PathBuf>,
+}
+
+fn inherit_reconciled_rows<'a>(
+    files: &[PathBuf],
+    provenance: &[Option<ScanProvenance>],
+    old_files: &'a [PathBuf],
+    by_path: &HashMap<&Path, RatingState>,
+    by_identity: &HashMap<crate::fs::FileIdentity, (&'a Path, RatingState)>,
+) -> InheritedCatalog {
+    let mut case_budget = crate::fs::MAX_FOLDER_IMAGES;
+    let mut spelled_from = HashSet::new();
+    let mut spelled_to = HashSet::new();
+    let mut rows = Vec::with_capacity(files.len());
+    for (path, scanned) in files.iter().zip(provenance) {
+        let partner = if by_path.contains_key(path.as_path()) {
+            None
+        } else {
+            case_partner(path, old_files, &mut case_budget)
+        };
+        if let Some(old) = partner {
+            spelled_from.insert(old.to_path_buf());
+            spelled_to.insert(path.clone());
+        }
+        rows.push(inherited_catalog_rating(
+            path,
+            *scanned,
+            by_path,
+            by_identity,
+            partner,
+        ));
+    }
+    InheritedCatalog {
+        rows,
+        spelled_from,
+        spelled_to,
+    }
+}
+
+/// Find an older catalog path that differs only by Windows case.
+///
+/// Exact matches are handled before this search. The budget keeps a full-folder
+/// case rewrite from comparing every path with every other path.
+fn case_partner<'a>(path: &Path, old_files: &'a [PathBuf], budget: &mut usize) -> Option<&'a Path> {
+    #[cfg(not(windows))]
+    {
+        let _ = (path, old_files, budget);
+        None
+    }
+    #[cfg(windows)]
+    {
+        for old in old_files {
+            if *budget == 0 {
+                return None;
+            }
+            *budget -= 1;
+            if old.as_path() != path && crate::fs::catalog_paths_match(old, path) {
+                return Some(old.as_path());
+            }
+        }
+        None
+    }
+}
+
 fn inherited_catalog_rating(
     path: &Path,
     provenance: Option<ScanProvenance>,
     by_path: &HashMap<&Path, RatingState>,
     by_identity: &HashMap<crate::fs::FileIdentity, (&Path, RatingState)>,
+    case_partner: Option<&Path>,
 ) -> (RatingState, Option<PathBuf>) {
     if let Some(rating) = by_path.get(path) {
+        return (*rating, None);
+    }
+    if let Some(old) = case_partner
+        && let Some(rating) = by_path.get(old)
+    {
         return (*rating, None);
     }
     let Some(new_provenance) = provenance else {
@@ -968,6 +1057,25 @@ mod tests {
         assert_eq!(result.removed, vec![path(4)]);
         assert!(!result.followed_rename);
         assert_eq!(result.selected_path, Some(path(5)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn membership_reconcile_keeps_a_windows_file_when_only_the_case_changes() {
+        let opened = PathBuf::from(r"C:\Album\Photo.JPG");
+        let listed = PathBuf::from(r"c:\album\photo.jpg");
+        let mut playlist = Playlist::new(vec![opened.clone()], 0);
+        let rated = RatingState::Rated(Rating::new(4).unwrap());
+        assert!(playlist.set_rating(&opened, rated));
+        let result = playlist.reconcile(vec![listed.clone()], vec![None], Some(&opened), 0);
+        assert_eq!(playlist.index, 0);
+        assert_eq!(playlist.files, vec![listed.clone()]);
+        assert_eq!(playlist.rating_for_path(&listed), rated);
+        assert_eq!(result.selected_path, Some(listed));
+        assert!(result.removed.is_empty());
+        assert_eq!(result.added, 0);
+        assert!(!result.followed_rename);
+        assert!(playlist.contains_catalog_path(&opened));
     }
 
     #[test]

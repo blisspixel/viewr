@@ -4,6 +4,7 @@
 //! This module owns only whether a completed scan still applies and which
 //! visible playlist outcome follows from purpose plus scan facts.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::playlist::ScanPurpose;
@@ -205,6 +206,41 @@ pub(crate) fn committed_scan_path_is_admissible(
     true
 }
 
+/// Whether a later folder listing may still name this path.
+///
+/// A Windows capitalization difference is the same file. Exact equality is the
+/// fast path. The catalog is scanned only after an unrestored Trash path
+/// matches, so a full listing does not compare every file with every other file.
+#[must_use]
+pub(crate) fn committed_scan_entry_is_admissible(
+    path: &Path,
+    in_flight: &HashSet<PathBuf>,
+    unrestored: &HashSet<PathBuf>,
+    catalog: &HashSet<PathBuf>,
+) -> bool {
+    let in_flight_removal = catalog_path_set_contains(in_flight, path);
+    let unrestored_trash = catalog_path_set_contains(unrestored, path);
+    let still_in_catalog = unrestored_trash && catalog_path_set_contains(catalog, path);
+    committed_scan_path_is_admissible(in_flight_removal, unrestored_trash, still_in_catalog)
+}
+
+/// Exact hit, or the same Windows path with different capitalization.
+#[must_use]
+pub(crate) fn catalog_path_set_contains(paths: &HashSet<PathBuf>, path: &Path) -> bool {
+    paths.contains(path)
+        || paths
+            .iter()
+            .any(|stored| crate::fs::catalog_paths_match(stored, path))
+}
+
+/// Whether `path` is one of the paths just removed, including Windows case.
+#[must_use]
+pub(crate) fn removal_names_path(removed: &[PathBuf], path: &Path) -> bool {
+    removed
+        .iter()
+        .any(|candidate| crate::fs::catalog_paths_match(candidate, path))
+}
+
 #[must_use]
 pub(crate) fn selected_file_index_by<T>(
     files: &[T],
@@ -353,6 +389,7 @@ pub(crate) const fn folder_scan_user_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::path::PathBuf;
 
     #[test]
@@ -397,6 +434,41 @@ mod tests {
         assert!(!committed_scan_path_is_admissible(true, false, true));
         assert!(!committed_scan_path_is_admissible(false, true, false));
         assert!(committed_scan_path_is_admissible(false, true, true));
+    }
+
+    #[test]
+    fn a_case_variant_of_trash_does_not_rejoin_the_listing() {
+        let stored = PathBuf::from(r"C:\Album\Photo.JPG");
+        let listed = PathBuf::from(r"c:\album\photo.jpg");
+        let mut in_flight = HashSet::new();
+        in_flight.insert(stored.clone());
+        let empty = HashSet::new();
+        let during_trash = committed_scan_entry_is_admissible(&listed, &in_flight, &empty, &empty);
+        let mut unrestored = HashSet::new();
+        unrestored.insert(stored);
+        let after_trash = committed_scan_entry_is_admissible(&listed, &empty, &unrestored, &empty);
+        let mut catalog = HashSet::new();
+        catalog.insert(listed.clone());
+        let undone = committed_scan_entry_is_admissible(&listed, &empty, &unrestored, &catalog);
+        if cfg!(windows) {
+            assert!(!during_trash);
+            assert!(!after_trash);
+            assert!(undone);
+            assert!(removal_names_path(&[stored_photo()], &listed));
+        } else {
+            assert!(during_trash);
+            assert!(after_trash);
+            assert!(undone);
+            assert!(!removal_names_path(&[stored_photo()], &listed));
+        }
+        let other = PathBuf::from(r"C:\Album\other.png");
+        assert!(committed_scan_entry_is_admissible(
+            &other, &in_flight, &empty, &empty
+        ));
+    }
+
+    fn stored_photo() -> PathBuf {
+        PathBuf::from(r"C:\Album\Photo.JPG")
     }
 
     #[test]

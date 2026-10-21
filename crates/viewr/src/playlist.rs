@@ -84,9 +84,7 @@ impl Playlist {
     }
 
     pub(crate) fn scan_provenance(&self, path: &std::path::Path) -> Option<ScanProvenance> {
-        self.files
-            .iter()
-            .position(|candidate| candidate == path)
+        self.catalog_index_of(path)
             .and_then(|index| self.provenance.get(index))
             .copied()
             .flatten()
@@ -106,7 +104,7 @@ impl Playlist {
         path: &std::path::Path,
         provenance: Option<ScanProvenance>,
     ) -> bool {
-        let Some(index) = self.files.iter().position(|candidate| candidate == path) else {
+        let Some(index) = self.catalog_index_of(path) else {
             return false;
         };
         self.provenance[index] = provenance;
@@ -152,9 +150,7 @@ impl Playlist {
     }
 
     pub(crate) fn rating_for_known_path(&self, path: &std::path::Path) -> Option<RatingState> {
-        self.files
-            .iter()
-            .position(|candidate| candidate == path)
+        self.catalog_index_of(path)
             .and_then(|index| self.ratings.get(index))
             .copied()
     }
@@ -228,7 +224,7 @@ impl Playlist {
     }
 
     pub(crate) fn set_rating(&mut self, path: &std::path::Path, state: RatingState) -> bool {
-        let Some(index) = self.files.iter().position(|candidate| candidate == path) else {
+        let Some(index) = self.catalog_index_of(path) else {
             return false;
         };
         self.ratings[index] = state;
@@ -514,7 +510,7 @@ impl Playlist {
         fallback_index: usize,
     ) -> usize {
         preferred
-            .and_then(|path| self.index_of(path))
+            .and_then(|path| self.catalog_index_of(path))
             .or_else(|| {
                 previous_selected_provenance.and_then(|old| {
                     self.provenance.iter().position(|candidate| {
@@ -522,7 +518,7 @@ impl Playlist {
                     })
                 })
             })
-            .or_else(|| previous_selected.and_then(|path| self.index_of(path)))
+            .or_else(|| previous_selected.and_then(|path| self.catalog_index_of(path)))
             .or_else(|| {
                 preferred
                     .is_none()
@@ -534,10 +530,10 @@ impl Playlist {
 
     /// Find a catalog entry, accepting a Windows case difference after an exact miss.
     pub(crate) fn contains_catalog_path(&self, path: &Path) -> bool {
-        self.index_of(path).is_some()
+        self.catalog_index_of(path).is_some()
     }
 
-    fn index_of(&self, path: &Path) -> Option<usize> {
+    pub(crate) fn catalog_index_of(&self, path: &Path) -> Option<usize> {
         self.files
             .iter()
             .position(|candidate| candidate.as_path() == path)
@@ -586,7 +582,10 @@ impl Playlist {
             .zip(self.ratings.drain(..))
             .zip(self.provenance.drain(..))
         {
-            if !removed.contains(&path) {
+            if !removed
+                .iter()
+                .any(|gone| crate::fs::catalog_paths_match(gone, &path))
+            {
                 kept_files.push(path);
                 kept_ratings.push(rating);
                 kept_provenance.push(provenance);
@@ -1076,6 +1075,21 @@ mod tests {
         assert_eq!(result.added, 0);
         assert!(!result.followed_rename);
         assert!(playlist.contains_catalog_path(&opened));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_paths_drops_a_windows_case_variant() {
+        let opened = PathBuf::from(r"C:\Album\Photo.JPG");
+        let listed = PathBuf::from(r"c:\album\photo.jpg");
+        let other = PathBuf::from(r"c:\album\other.png");
+        let mut playlist = Playlist::new(vec![listed.clone(), other.clone()], 0);
+        let rated = RatingState::Rated(Rating::new(4).unwrap());
+        assert!(playlist.set_rating(&opened, rated));
+        assert_eq!(playlist.rating_for_path(&opened), rated);
+        assert_eq!(playlist.catalog_index_of(&opened), Some(0));
+        playlist.remove_paths(std::slice::from_ref(&opened), 0);
+        assert_eq!(playlist.files, vec![other]);
     }
 
     #[test]

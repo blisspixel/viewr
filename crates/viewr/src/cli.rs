@@ -7,11 +7,10 @@
 
 use std::collections::VecDeque;
 use std::ffi::OsStr;
-use std::io::{IsTerminal, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
-use std::{io, mem};
 
 use crate::startup::{DOCTOR_FAIL, DOCTOR_NOTE, DOCTOR_OK, DOCTOR_WARN};
 
@@ -539,7 +538,7 @@ fn console_columns() -> Option<usize> {
             if handle.is_null() || handle == INVALID_HANDLE_VALUE {
                 return None;
             }
-            let mut info = mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>();
+            let mut info = std::mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>();
             if GetConsoleScreenBufferInfo(handle, &raw mut info) == 0 {
                 return None;
             }

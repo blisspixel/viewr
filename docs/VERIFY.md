@@ -28,7 +28,10 @@ they do not replace source review or platform signing.
   and license text while ignoring presentation order, line endings, and repository
   link changes that do not alter the shipped license obligations. Host-sensitive
   license detection is resolved only through checksum-backed source-file
-  clarifications in `about.toml`.
+  clarifications in `about.toml`. A Dependabot lockfile update also has to refresh
+  `packaging/flatpak/cargo-sources.json`. `python -B scripts/refresh_dependency_records.py`
+  rewrites those two records, and `.github/workflows/dependabot-records.yml` runs
+  that command from the base branch for a same-repository Dependabot pull request.
 - A GitHub artifact attestation binds a published asset digest to the repository and
   workflow identity recorded by GitHub. It does not make an unsigned executable a
   platform-signed application.

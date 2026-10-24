@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.7.6 - 2026-10-24
 
 - `install.sh uninstall` and `install.ps1 -Uninstall` remove an installer-owned
   viewr directory, the command or PATH entry that points at it, and the Linux

@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): source builds, fixed v0.7.5
+- [Install and update](INSTALL.md): source builds, fixed v0.7.6
   one-command installers, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
@@ -19,7 +19,7 @@ Start with the document that matches the task.
 - [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
   failure-recovery, and visual-polish matrix plus the candidate-artifact and
   evidence-validation contract for v0.6. Representative hardware evidence is
-  still open; the v0.7.5 preview discloses this evidence gap.
+  still open; the v0.7.6 preview discloses this evidence gap.
 - [Performance](PERFORMANCE.md): measured budgets and current evidence.
 
 ## Understanding and contributing
@@ -37,11 +37,11 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.7.6 candidate notes](releases/v0.7.6.md): the prepared transparency,
-  local-decode-proof, and installer-uninstall patch, pending the complete
-  release gate.
-- [v0.7.5 release notes](releases/v0.7.5.md): the copy, open-failure, doctor,
-  and Windows path-spelling patch and its explicit evidence limits.
+- [v0.7.6 release notes](releases/v0.7.6.md): the transparency,
+  local-decode-proof, and installer-uninstall patch and its explicit evidence
+  limits.
+- [v0.7.5 release notes](releases/v0.7.5.md): the previous copy, open-failure,
+  doctor, and Windows path-spelling patch and its explicit evidence limits.
 - [v0.7.4 release notes](releases/v0.7.4.md): the previous Linux entry and
   window-loss patch and its explicit evidence limits.
 - [v0.7.3 release notes](releases/v0.7.3.md): the previous focused viewer-polish

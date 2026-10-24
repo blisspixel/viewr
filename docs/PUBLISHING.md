@@ -107,11 +107,12 @@ workflow results, and release assets remain the source of truth:
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.5. README and INSTALL use its fixed immutable URLs.
+   currently v0.7.5. README and INSTALL are tag-ready for the intended v0.7.6
+   fixed immutable URLs; publication has not happened yet.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.6`, preparing the transparency, local-decode-proof, and
-   installer-uninstall patch.
+   `0.7.6`, verified and tag-ready for the transparency, local-decode-proof,
+   and installer-uninstall patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -628,6 +629,32 @@ file was unchanged, and the Start menu shortcut and user PATH point to that
 installed viewer. This guarded local update does not claim the still-open v0.8
 multi-platform installer acceptance matrix. Representative-hardware and native
 screen-reader acceptance remain uncollected.
+
+For v0.7.6, [main CI run 40075881442](https://github.com/blisspixel/viewr/actions/runs/40075881442),
+[fuzz run 40075881439](https://github.com/blisspixel/viewr/actions/runs/40075881439),
+and [CodeQL run 40075881144](https://github.com/blisspixel/viewr/actions/runs/40075881144)
+passed on candidate commit `8a12def388f2a43399fa5bff9ede571ae907729f`.
+One non-publishing [candidate run 40076650027](https://github.com/blisspixel/viewr/actions/runs/40076650027)
+repeated the complete quality and fuzz gates and built all four archives.
+Publication stayed skipped. All four downloads passed their sidecars and the
+official 54-file manifest verifier. The complete fixture set also verified
+against manifest SHA-256
+`0ca94fd40b372c94fcdf45d7c530829cb2345b597725db7bbbfacc1b07fc12a2`.
+
+| Candidate target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `6e98e8b42442f48c0d8672dbe0ce5d40678ce38b4ae0951b0ce9c2b4ef1e738e` |
+| macOS Intel | `b0b9e3ff0e2bc40d5c39a6f760671d6922def11bf8381b64592533ac3fd9038a` |
+| macOS Apple Silicon | `d8f590c2bc92125371809ebed0832b3bd51d9ca5a2aa6783afcc05f30bebb306` |
+| Linux x64 | `1f7a2cd5d941b587880d918258ae1585d6bbbf28549e142508efd8dd8255d6ac` |
+
+The extracted Windows candidate reports `viewr 0.7.6`, and its doctor report
+passed every critical check without opening a window. It was not installed
+over the published v0.7.5 viewer. The tag-ready follow-up changes release
+status, immutable links, and version assertions only. Application source,
+dependencies, workflows, and packaging remain identical to the verified
+candidate. Native screen-reader and carried hardware acceptance rows remain
+uncollected.
 
 ## Required before a broadly recommended 1.0
 

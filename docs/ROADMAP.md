@@ -174,8 +174,12 @@ claim attached retroactively to the immutable v0.6.0 release.
    previous installer-owned directory. Unix installer tests now inject release
    and command activation failures and verify restoration or a retained backup;
    reinstallation also refuses unexpected files and links in an existing
-   release directory. Update, uninstall, association, and provenance paths
-   remain open.
+   release directory. Uninstall now removes only an installer-owned tree:
+   Unix tests and the Windows smoke check refuse an unexpected file, leave
+   associations untouched, and on Windows remove a disposable PATH entry and a
+   shortcut that opens that installation. macOS update, full file-association
+   acceptance, and provenance beyond the existing release-workflow check remain
+   open.
 3. Prepare the v0.8.0 version and release notes before building one exact-commit
    non-publishing candidate. Require green CI, coverage, privacy, and fuzzing;
    verify every archive and the published limits under
@@ -269,7 +273,7 @@ but completed history does not override an open gate here.
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
 | Integrated product quality | Shipped through v0.7.5; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
-| Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI updates published v0.7.4 to the candidate on Linux and Windows, including the Linux launcher identity. Clean install on macOS, uninstall, rollback, and file-association acceptance remain open. Keep uncollected manual acceptance rows visible as separate claims. |
+| Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI updates published v0.7.4 to the candidate on Linux and Windows, including the Linux launcher identity. Uninstall of an installer-owned tree is covered by the Unix installer tests and the Windows smoke check. Clean install on macOS, full file-association acceptance, and macOS update remain open. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
 
 The first public pre-1.0 release may remain clearly labeled as unsigned. A broadly
@@ -687,12 +691,13 @@ broad feature category. They prove and refine the accumulated viewer.
 - [ ] Repeat startup, animation, large-image, 50,000-file, mixed-DPI,
   multi-monitor, and profiled-display acceptance on representative hardware.
 - [ ] Prove clean install, same-version reinstall, update from each supported
-  pre-1.0 line, uninstall, file-association opt-in, and injected rollback on the
-  signed release candidates. CI installs published v0.7.4 and updates it to the
+  pre-1.0 line, file-association opt-in, and injected rollback on the signed
+  release candidates. CI installs published v0.7.4 and updates it to the
   candidate on Linux and Windows. That job checks the Linux launcher migration,
   preserved preferences, staging cleanup, an unchanged Linux image handler, and
-  an unchanged Windows `HKCU\Software\Classes` tree. The other lines here remain
-  open.
+  an unchanged Windows `HKCU\Software\Classes` tree. Uninstall of an
+  installer-owned tree is covered by the disposable Unix tests and Windows
+  smoke check. The signed-candidate lines here remain open.
 - [ ] Evaluate launcher-provided neighboring-file order without inventing a
   cross-platform promise. A future Windows packaged delivery may consume the
   documented neighboring-files query. macOS and Linux may preserve an explicit

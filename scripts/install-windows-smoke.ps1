@@ -113,6 +113,8 @@ function Invoke-WebRequest {
 }
 
 $previousLocalAppData = $env:LOCALAPPDATA
+$previousStartMenu = $env:VIEWR_START_MENU_DIR
+$previousUserPathFile = $env:VIEWR_USER_PATH_FILE
 try {
     [IO.Directory]::CreateDirectory($sourceBin) | Out-Null
     Copy-FixtureFile $mainBinary "bin\viewr.exe"
@@ -279,10 +281,66 @@ try {
     if ($leftovers.Count -ne 0) {
         throw "failed activation left staging or backup directories behind"
     }
+
+    $notes = Join-Path $installDir "user-notes.txt"
+    [IO.File]::WriteAllText($notes, "keep these notes", [Text.UTF8Encoding]::new($false))
+    $refused = $false
+    try {
+        & $installer -Uninstall -InstallDir $installDir -NoPath -NoShortcut
+    }
+    catch {
+        if ($_.Exception.Message -notlike "*unexpected path*") {
+            throw
+        }
+        $refused = $true
+    }
+    if (-not $refused) {
+        throw "uninstall removed an installation that contained an unexpected file"
+    }
+    if ((Get-Content -LiteralPath $notes -Raw) -cne "keep these notes") {
+        throw "uninstall changed an unexpected file"
+    }
+    Remove-Item -LiteralPath $notes -Force
+
+    $menu = Join-Path $testRoot "start-menu"
+    [IO.Directory]::CreateDirectory($menu) | Out-Null
+    $env:VIEWR_START_MENU_DIR = $menu
+    $shell = New-Object -ComObject WScript.Shell
+    $ownedShortcut = $shell.CreateShortcut((Join-Path $menu "viewr.lnk"))
+    $ownedShortcut.TargetPath = Join-Path $installDir "viewr.exe"
+    $ownedShortcut.Save()
+    $otherShortcut = $shell.CreateShortcut((Join-Path $menu "other.lnk"))
+    $otherShortcut.TargetPath = Join-Path $env:SystemRoot "notepad.exe"
+    $otherShortcut.Save()
+    $pathFile = Join-Path $testRoot "user-path.txt"
+    $env:VIEWR_USER_PATH_FILE = $pathFile
+    [IO.File]::WriteAllText(
+        $pathFile,
+        "C:\keep;$installDir\",
+        [Text.UTF8Encoding]::new($false)
+    )
+
+    & $installer -Uninstall -InstallDir $installDir
+    if (Test-Path -LiteralPath $installDir) {
+        throw "uninstall left the installer-owned directory"
+    }
+    $updatedPath = [IO.File]::ReadAllText($pathFile)
+    if ($updatedPath -cne "C:\keep") {
+        throw "uninstall changed an unrelated PATH entry: $updatedPath"
+    }
+    if (Test-Path -LiteralPath (Join-Path $menu "viewr.lnk")) {
+        throw "uninstall left the Start menu shortcut"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $menu "other.lnk") -PathType Leaf)) {
+        throw "uninstall removed an unrelated shortcut"
+    }
+    & $installer -Uninstall -InstallDir $installDir -NoPath -NoShortcut
     Write-Host "install-windows-smoke: PASS"
 }
 finally {
     $env:LOCALAPPDATA = $previousLocalAppData
+    $env:VIEWR_START_MENU_DIR = $previousStartMenu
+    $env:VIEWR_USER_PATH_FILE = $previousUserPathFile
     $global:ViewrInstallerSmokeArchive = $null
     $global:ViewrInstallerSmokeSidecar = $null
     $global:ViewrInstallerSmokeRelease = $null

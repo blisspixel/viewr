@@ -214,6 +214,7 @@ exec /bin/mv "$@"
         fail_move: str | None = None,
         check: bool = True,
         extra_env: dict[str, str] | None = None,
+        args: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update(
@@ -232,7 +233,7 @@ exec /bin/mv "$@"
         if extra_env:
             environment.update(extra_env)
         return subprocess.run(
-            ["sh", str(INSTALLER)],
+            ["sh", str(INSTALLER), *(args or [])],
             check=check,
             capture_output=True,
             env=environment,
@@ -546,6 +547,71 @@ exec /bin/mv "$@"
         )
         self.assertEqual(list(releases.glob(".installing-*")), [])
         self.assertEqual(list(self.bin_dir.glob(".viewr-link-*")), [])
+
+    def test_uninstall_removes_only_the_owned_release_and_launcher(self) -> None:
+        data = self.home / "custom-data"
+        applications = data / "applications"
+        icons = data / "icons" / "hicolor" / "scalable" / "apps"
+        for directory in (applications, icons):
+            directory.mkdir(parents=True)
+        unrelated = applications / "other.desktop"
+        unrelated.write_bytes(b"keep another application")
+        defaults = applications / "mimeapps.list"
+        defaults.write_bytes(
+            b"[Default Applications]\nimage/png=io.github.blisspixel.viewr.desktop\n"
+        )
+        self.run_installer()
+        curl = self.fake_bin / "curl"
+        curl.write_text(
+            "#!/bin/sh\necho curl-called >&2\nexit 1\n",
+            encoding="utf-8",
+        )
+        curl.chmod(0o755)
+
+        result = self.run_installer(args=["uninstall"])
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Removed viewr", result.stdout)
+        self.assertNotIn("curl-called", result.stderr)
+        self.assertFalse(self.install_root.exists())
+        self.assertFalse((self.bin_dir / "viewr").exists())
+        self.assertFalse((applications / "io.github.blisspixel.viewr.desktop").exists())
+        self.assertFalse((icons / "io.github.blisspixel.viewr.svg").exists())
+        self.assertEqual(unrelated.read_bytes(), b"keep another application")
+        self.assertEqual(
+            defaults.read_bytes(),
+            b"[Default Applications]\nimage/png=io.github.blisspixel.viewr.desktop\n",
+        )
+
+        again = self.run_installer(args=["uninstall"])
+        self.assertEqual(again.returncode, 0)
+        self.assertIn("viewr is not installed", again.stdout)
+
+    def test_uninstall_keeps_an_unexpected_file_and_the_command(self) -> None:
+        self.run_installer()
+        release = self.install_root / "releases" / "v1.2.3"
+        notes = release / "user-notes.txt"
+        notes.write_bytes(b"keep these notes")
+        command_target = os.readlink(self.bin_dir / "viewr")
+
+        result = self.run_installer(args=["uninstall"], check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected path", result.stderr)
+        self.assertEqual(notes.read_bytes(), b"keep these notes")
+        self.assertEqual(os.readlink(self.bin_dir / "viewr"), command_target)
+
+    def test_uninstall_refuses_a_command_outside_the_install_root(self) -> None:
+        outside = self.root / "outside-viewr"
+        outside.write_bytes(b"#!/bin/sh\nexit 0\n")
+        (self.bin_dir / "viewr").symlink_to(outside)
+
+        result = self.run_installer(args=["uninstall"], check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not owned by the viewr installer", result.stderr)
+        self.assertTrue((self.bin_dir / "viewr").is_symlink())
+        self.assertFalse(self.install_root.exists())
 
 
 if __name__ == "__main__":

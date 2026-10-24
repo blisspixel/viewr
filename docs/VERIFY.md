@@ -95,14 +95,20 @@ it does not replace human Linux desktop or portal acceptance.
 The Windows installer smoke test uses disposable files and mocked downloads. It
 checks a clean install, reinstall, and a forced activation failure after the old
 directory is moved aside. The failure must restore every prior file byte for byte
-and leave no staging or backup directory. It does not prove that Start menu,
-associations, or uninstallation work on every Windows configuration.
+and leave no staging or backup directory. It then refuses to uninstall a directory
+that contains an unexpected file, and uninstalls the owned directory, a disposable
+PATH entry, and a shortcut that opens that `viewr.exe` while leaving an unrelated
+shortcut. It does not prove associations or the real user Start Menu.
 The Unix installer integration tests use disposable files and mocked downloads.
 They check failed release and command activation against the previous installation,
 and require an explicit retained-backup path if a simulated filesystem failure
 also prevents restoration. These tests run on Linux and macOS CI hosts.
 They also reject extra visible or hidden files, linked entries, and modified
 ownership markers before replacing a release directory, preserving those bytes.
+`install.sh uninstall` removes an owned release, its command symlink, and the
+Linux launcher and icon when those are regular files. It leaves an unexpected
+file, a command outside the install root, and MIME defaults in place, and it
+does not contact the network.
 
 ## 3. Build the exact target
 

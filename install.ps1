@@ -6,6 +6,7 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\viewr",
     [switch]$NoPath,
     [switch]$NoShortcut,
+    [switch]$Uninstall,
     [string]$LocalRelease = ""
 )
 
@@ -82,6 +83,134 @@ $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $localPrograms = [IO.Path]::GetFullPath("$env:LOCALAPPDATA\Programs")
 if (-not $InstallDir.StartsWith($localPrograms + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     Stop-Install "InstallDir must be inside the current user's LocalAppData Programs directory"
+}
+
+function Test-OwnedViewrDirectory([string]$Directory) {
+    $item = Get-Item -LiteralPath $Directory
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Stop-Install "refusing to remove an installation that is not a regular directory"
+    }
+    $allowedNames = @(
+        ".viewr-install.json",
+        "viewr.exe",
+        "viewr-decode.exe",
+        "LICENSE",
+        "NOTICE",
+        "README.md",
+        "THIRD_PARTY_LICENSES.txt",
+        "release-manifest.json"
+    )
+    $marker = Join-Path $Directory ".viewr-install.json"
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+        $names = @(Get-ChildItem -LiteralPath $Directory -Force | ForEach-Object { $_.Name })
+        $unexpected = @($names | Where-Object { $_ -notin @("viewr.exe", "viewr-decode.exe") })
+        if ($unexpected.Count -ne 0 -or
+            -not (Test-Path -LiteralPath (Join-Path $Directory "viewr.exe") -PathType Leaf) -or
+            -not (Test-Path -LiteralPath (Join-Path $Directory "viewr-decode.exe") -PathType Leaf)) {
+            Stop-Install "refusing to remove an installation not owned by the viewr installer"
+        }
+        foreach ($legacyName in @("viewr.exe", "viewr-decode.exe")) {
+            if ((Get-Item -LiteralPath (Join-Path $Directory $legacyName)).Attributes -band
+                [IO.FileAttributes]::ReparsePoint) {
+                Stop-Install "legacy installation contains a linked executable"
+            }
+        }
+        $allowedNames = @("viewr.exe", "viewr-decode.exe")
+    }
+    else {
+        $markerItem = Get-Item -LiteralPath $marker
+        if ($markerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            Stop-Install "existing installer ownership marker is not a regular file"
+        }
+        try {
+            $ownership = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+        }
+        catch {
+            Stop-Install "existing installer ownership marker is invalid"
+        }
+        $repositoryProperty = $ownership.PSObject.Properties["repository"]
+        if ($null -eq $repositoryProperty -or [string]$repositoryProperty.Value -cne $repository) {
+            Stop-Install "refusing to remove an installation with a foreign ownership marker"
+        }
+    }
+    foreach ($child in @(Get-ChildItem -LiteralPath $Directory -Force)) {
+        if ($child.PSIsContainer -or
+            ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $child.Name -notin $allowedNames) {
+            Stop-Install "refusing to remove an installation with an unexpected path: $($child.Name)"
+        }
+    }
+}
+
+function Remove-ViewrInstallDirFromPath([string]$PathValue, [string]$Directory) {
+    $target = $Directory.TrimEnd('\')
+    $segments = @($PathValue -split ';' | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_) -and $_.TrimEnd('\') -ine $target
+        })
+    return ($segments -join ';')
+}
+
+if ($Uninstall) {
+    $removed = $false
+    if (Test-Path -LiteralPath $InstallDir) {
+        Test-OwnedViewrDirectory $InstallDir
+        [IO.Directory]::Delete($InstallDir, $true)
+        $removed = $true
+    }
+    if (-not $NoPath) {
+        $pathFile = $env:VIEWR_USER_PATH_FILE
+        if (-not [string]::IsNullOrWhiteSpace($pathFile)) {
+            $userPath = ""
+            if (Test-Path -LiteralPath $pathFile -PathType Leaf) {
+                $userPath = [IO.File]::ReadAllText($pathFile)
+            }
+            $updatedPath = Remove-ViewrInstallDirFromPath $userPath $InstallDir
+            if ($updatedPath -cne $userPath) {
+                $removed = $true
+            }
+            [IO.File]::WriteAllText(
+                $pathFile,
+                $updatedPath,
+                [Text.UTF8Encoding]::new($false)
+            )
+        }
+        else {
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $updatedPath = Remove-ViewrInstallDirFromPath $userPath $InstallDir
+            if ($updatedPath -cne $userPath) {
+                [Environment]::SetEnvironmentVariable("Path", $updatedPath, "User")
+                $env:Path = Remove-ViewrInstallDirFromPath $env:Path $InstallDir
+                $removed = $true
+            }
+        }
+    }
+    if (-not $NoShortcut) {
+        $programs = $env:VIEWR_START_MENU_DIR
+        if ([string]::IsNullOrWhiteSpace($programs)) {
+            $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+        }
+        $shortcutPath = Join-Path $programs "viewr.lnk"
+        if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
+            $shell = New-Object -ComObject WScript.Shell
+            $shortcut = $shell.CreateShortcut($shortcutPath)
+            $expected = [IO.Path]::GetFullPath((Join-Path $InstallDir "viewr.exe"))
+            $targetPath = ""
+            if (-not [string]::IsNullOrWhiteSpace($shortcut.TargetPath)) {
+                $targetPath = [IO.Path]::GetFullPath($shortcut.TargetPath)
+            }
+            if ($targetPath -ieq $expected) {
+                Remove-Item -LiteralPath $shortcutPath -Force
+                $removed = $true
+            }
+        }
+    }
+    if ($removed) {
+        Write-Host "Removed viewr from $InstallDir"
+    }
+    else {
+        Write-Host "viewr is not installed"
+    }
+    return
 }
 
 [Net.ServicePointManager]::SecurityProtocol =

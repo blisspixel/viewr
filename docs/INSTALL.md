@@ -331,7 +331,10 @@ be selected as a Finder default.
 
 ## Uninstall
 
-Close viewr and change any file-type defaults first.
+Close viewr and change any file-type defaults first. Uninstalling viewr never
+changes file associations or deletes photos.
+
+The published v0.7.5 installer has no uninstall command. Remove it by hand:
 
 On Windows, remove the installer-owned
 `%LOCALAPPDATA%\Programs\viewr` directory, remove that exact directory from the user
@@ -346,7 +349,16 @@ the `io.github.blisspixel.viewr.desktop` and `io.github.blisspixel.viewr.svg`
 files from their user data directories, plus the corresponding
 `com.github.blisspixel.viewr` files if an older installation remains.
 
-Uninstalling viewr never changes or deletes photos.
+The source installer performs those steps and stops when a release contains any
+other file:
+
+```sh
+sh install.sh uninstall
+```
+
+```powershell
+.\install.ps1 -Uninstall
+```
 
 ## Verify an installation
 

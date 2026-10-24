@@ -940,7 +940,7 @@ fn doctor_to(
     match decode_self_test() {
         Ok((w, h, ms)) => {
             report.row(&format!(
-                "{DOCTOR_OK}decode self-test: {w}x{h} PNG in {ms:.2} ms"
+                "{DOCTOR_OK}decode self-test: {w}x{h} PNG in {ms:.2} ms, in memory, no network"
             ))?;
         }
         Err(e) => {
@@ -1518,6 +1518,10 @@ mod tests {
         assert!(error.is_empty());
         assert!(output.contains("Binaries, decode, and privacy"));
         assert!(output.contains("decode self-test: 64x48 PNG"));
+        assert!(
+            output.contains(" ms, in memory, no network"),
+            "doctor self-test should name memory and no network: {output}"
+        );
         assert!(output.contains("Window presentation"));
         assert!(!output.contains("[FAIL]"));
         assert!(!output.contains("[WARN]"));

@@ -24,6 +24,7 @@ fn patterned_image(width: u32, height: u32) -> DecodedImage {
         height,
         color_profile: viewr::decode::ColorProfileStatus::AssumedSrgb,
         working_color: WorkingColorEncoding::SRGB_RGBA8,
+        decode_proof: None,
     }
 }
 

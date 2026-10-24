@@ -452,6 +452,7 @@ mod tests {
             height: 400,
             color_profile: ColorProfileStatus::TaggedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         })
     }
 

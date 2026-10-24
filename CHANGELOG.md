@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- Image Information ends with the measured local decode time for the opened
+  image, rounded to 0.1 ms, and whether the sandboxed worker or the in-process
+  decoder produced it. The line is static muted text and states that decoding
+  used no network.
+- `viewr doctor` names the in-memory decode self-test and that it used no
+  network.
+- The README hero names Windows, macOS, and Linux.
+
 ## 0.7.5 - 2026-10-21
 
 - Explain a failed open in one short sentence. A damaged, unsupported, or

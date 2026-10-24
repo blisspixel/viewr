@@ -239,6 +239,7 @@ fn run_internal(
         animation: None,
         pages: None,
         image_details: None,
+        opened_decode_proof: None,
         auxiliary_job: None,
         open_with_job: None,
         coherence_watch: None,
@@ -1143,6 +1144,8 @@ struct App {
     pages: Option<crate::pages::PageCursor>,
     /// Best-effort facts for the current Image Information panel.
     image_details: Option<crate::image_info::ImageDetails>,
+    /// Measured local decode for the opened image. Not a preference.
+    opened_decode_proof: Option<crate::decode::DecodeProof>,
     /// Replace-latest animation and metadata result for the current source.
     auxiliary_job: Option<OneShotJob<AuxiliaryLoadContext, AuxiliaryLoadResult>>,
     /// Generation-cancellable source verification before the native Open With chooser.
@@ -2424,6 +2427,9 @@ impl App {
         } else {
             true
         };
+        if kind == PresentationKind::Loaded {
+            self.opened_decode_proof = image.decode_proof;
+        }
         self.current_image = Some(image);
         self.current_preview = preview.cloned();
         self.current_source = source;
@@ -2559,6 +2565,7 @@ impl App {
         self.animation = None;
         self.pages = None;
         self.image_details = None;
+        self.opened_decode_proof = None;
         self.auxiliary_job = None;
         self.session.clear_load_error();
         self.stop_coherence_watch();
@@ -8996,6 +9003,7 @@ impl ApplicationHandler<UserEvent> for App {
                 });
                 let details = self.image_details.clone();
                 let color_profile = self.current_image.as_ref().map(|image| image.color_profile);
+                let decode_proof = self.opened_decode_proof;
                 let is_cropping = self.transform.is_cropping;
                 let crop_ratio = self.transform.crop_ratio;
                 let custom_crop_ratio = self.custom_crop_ratio;
@@ -9125,6 +9133,7 @@ impl ApplicationHandler<UserEvent> for App {
                     pages,
                     details,
                     color_profile,
+                    decode_proof,
                     display_output: crate::display_state::output_status(
                         self.display_monitor.as_ref(),
                         self.display_hints,
@@ -9869,6 +9878,7 @@ mod test {
                 height: 1,
                 color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
                 working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+                decode_proof: None,
             }),
             source: None,
             destination: crate::edit::prepare_save_destination(&destination_path).unwrap(),
@@ -10370,6 +10380,7 @@ mod test {
             height: 16,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         let job = crate::heal::SpotHealJob::prepare(
             &image,
@@ -10555,6 +10566,7 @@ mod test {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         });
         let transform = Transform {
             crop_start: Some((0.2, 0.3)),

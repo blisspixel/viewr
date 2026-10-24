@@ -120,6 +120,7 @@ impl PixelTransform {
             height: output_size.1,
             color_profile: source.color_profile,
             working_color: source.working_color,
+            decode_proof: source.decode_proof,
         })
     }
 }
@@ -477,6 +478,7 @@ fn crop_while(
         height: r.height,
         color_profile: src.color_profile,
         working_color: src.working_color,
+        decode_proof: src.decode_proof,
     }))
 }
 
@@ -858,6 +860,7 @@ mod tests {
             height: 4,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -872,6 +875,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -890,6 +894,7 @@ mod tests {
             height: h,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -993,6 +998,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert!(
             crop(
@@ -1044,6 +1050,7 @@ mod tests {
                 height: rotated.height,
                 color_profile: source.color_profile,
                 working_color: source.working_color,
+                decode_proof: None,
             }),
             vec![4, 1, 5, 2, 6, 3]
         );
@@ -1057,6 +1064,7 @@ mod tests {
             rgba: Vec::new(),
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert_eq!(
             clipboard_image(&oversized, PixelTransform::default()),
@@ -1069,6 +1077,7 @@ mod tests {
             rgba: vec![1, 2, 3],
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert_eq!(
             clipboard_image(&malformed, PixelTransform::default()),
@@ -1081,6 +1090,7 @@ mod tests {
             rgba: Vec::new(),
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert_eq!(
             clipboard_image(&empty, PixelTransform::default()),
@@ -1123,6 +1133,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert!(PixelTransform::default().apply(&malformed).is_err());
     }
@@ -1135,6 +1146,7 @@ mod tests {
             height: 4,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         let ws = TempWorkspace::new("edit_bad").unwrap();
         let path = ws.path().join("viewr_bad.png");
@@ -1162,6 +1174,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         let ws = TempWorkspace::new("edit_jpeg").unwrap();
         let path = ws.path().join("viewr_jpeg.jpg");

@@ -156,6 +156,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         })
     }
 
@@ -169,6 +170,7 @@ mod tests {
             height: source_image.height,
             color_profile: source_image.color_profile,
             working_color: source_image.working_color,
+            decode_proof: None,
         });
         let recovery = CropRecoveryIdentity {
             path: &path,

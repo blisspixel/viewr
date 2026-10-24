@@ -38,6 +38,7 @@ const COPY_THEME_DEFAULT: &str = "Theme Default";
 const COPY_BLACK: &str = "Black";
 const COPY_NEUTRAL_GRAY: &str = "Neutral Gray";
 const COPY_WHITE: &str = "White";
+const COPY_CHECKERBOARD: &str = "Checkerboard";
 const COPY_UNDO_TRASH: &str = "Undo Trash";
 const COPY_UNDO_TRASH_WITH_HELP: &str = "{label}. {help}";
 const COPY_RESTORE_UNSETTLED: &str = "Trash restore state is not settled. Follow the current status or recovery guidance before using Undo Trash.";
@@ -111,6 +112,7 @@ const CHROME_COPY: &[&str] = &[
     COPY_BLACK,
     COPY_NEUTRAL_GRAY,
     COPY_WHITE,
+    COPY_CHECKERBOARD,
     COPY_UNDO_TRASH,
     COPY_UNDO_TRASH_WITH_HELP,
     COPY_RESTORE_UNSETTLED,
@@ -612,10 +614,10 @@ pub(crate) struct RatingFilterChoiceView {
     pub accessibility_label: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BackgroundChoiceView {
     pub label: &'static str,
-    pub value: Option<[f64; 4]>,
+    pub value: crate::theme::ImageBackground,
     pub selected: bool,
 }
 
@@ -1186,30 +1188,23 @@ pub(crate) fn appearance_choices(
 
 pub(crate) fn background_choices(
     language: Language,
-    current: Option<[f64; 4]>,
-) -> [BackgroundChoiceView; 4] {
-    [
-        BackgroundChoiceView {
-            label: language.text(COPY_THEME_DEFAULT),
-            value: None,
-            selected: current.is_none(),
-        },
-        BackgroundChoiceView {
-            label: language.text(COPY_BLACK),
-            value: Some([0.0, 0.0, 0.0, 1.0]),
-            selected: current == Some([0.0, 0.0, 0.0, 1.0]),
-        },
-        BackgroundChoiceView {
-            label: language.text(COPY_NEUTRAL_GRAY),
-            value: Some([0.2, 0.2, 0.2, 1.0]),
-            selected: current == Some([0.2, 0.2, 0.2, 1.0]),
-        },
-        BackgroundChoiceView {
-            label: language.text(COPY_WHITE),
-            value: Some([1.0, 1.0, 1.0, 1.0]),
-            selected: current == Some([1.0, 1.0, 1.0, 1.0]),
-        },
-    ]
+    current: crate::theme::ImageBackground,
+) -> [BackgroundChoiceView; 5] {
+    crate::theme::ImageBackground::ALL.map(|value| BackgroundChoiceView {
+        label: language.text(background_label(value)),
+        value,
+        selected: current == value,
+    })
+}
+
+fn background_label(value: crate::theme::ImageBackground) -> &'static str {
+    match value {
+        crate::theme::ImageBackground::ThemeDefault => COPY_THEME_DEFAULT,
+        crate::theme::ImageBackground::Black => COPY_BLACK,
+        crate::theme::ImageBackground::NeutralGray => COPY_NEUTRAL_GRAY,
+        crate::theme::ImageBackground::White => COPY_WHITE,
+        crate::theme::ImageBackground::Checkerboard => COPY_CHECKERBOARD,
+    }
 }
 
 #[cfg(test)]
@@ -2055,15 +2050,30 @@ mod tests {
 
     #[test]
     fn background_and_appearance_choices_have_one_selected_radio() {
-        for value in [
-            None,
-            Some([0.0, 0.0, 0.0, 1.0]),
-            Some([0.2, 0.2, 0.2, 1.0]),
-            Some([1.0, 1.0, 1.0, 1.0]),
-        ] {
+        for value in crate::theme::ImageBackground::ALL {
             let choices = background_choices(EN, value);
+            assert_eq!(choices.len(), 5);
             assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
+            assert_eq!(
+                choices
+                    .iter()
+                    .find(|choice| choice.selected)
+                    .map(|choice| choice.value),
+                Some(value)
+            );
         }
+        let english = background_choices(EN, crate::theme::ImageBackground::Checkerboard);
+        assert_eq!(
+            english.map(|choice| choice.label),
+            [
+                "Theme Default",
+                "Black",
+                "Neutral Gray",
+                "White",
+                "Checkerboard",
+            ]
+        );
+        assert!(english[4].value.is_checkerboard());
         for preference in crate::theme::Preference::ALL {
             let choices = appearance_choices(EN, preference, crate::theme::Mode::Dark);
             assert_eq!(choices.len(), 4);

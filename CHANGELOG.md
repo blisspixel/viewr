@@ -18,6 +18,10 @@ and organized by user-visible concern.
   network.
 - The README hero names Windows, macOS, and Linux. Fast by design cites one
   measured `viewr benchmark` row and the command that produced it.
+- Composite transparent pixels over the image background. Opaque images keep
+  the sRGB texture path. A session-only Checkerboard draws under the image
+  rectangle only. Image Information shows `Transparency: yes` when the decoded
+  image has any alpha below 255. Saved pixels stay unchanged.
 
 ## 0.7.5 - 2026-10-21
 

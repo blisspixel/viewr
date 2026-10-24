@@ -342,6 +342,124 @@ pub fn palette_for(mode: Mode) -> Palette {
     }
 }
 
+/// Session-only image background. This is not a persisted preference.
+///
+/// Solid choices are explicit sRGB colors. Checkerboard is not a sentinel
+/// color: the letterbox keeps the theme clear color, and the pattern is drawn
+/// only under the image rectangle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageBackground {
+    /// Resolved appearance canvas.
+    #[default]
+    ThemeDefault,
+    /// Explicit black inspection background.
+    Black,
+    /// Explicit neutral-gray inspection background.
+    NeutralGray,
+    /// Explicit white inspection background.
+    White,
+    /// Screen-space checkerboard under the image only.
+    Checkerboard,
+}
+
+impl ImageBackground {
+    /// Menu order. Checkerboard follows White.
+    pub const ALL: [Self; 5] = [
+        Self::ThemeDefault,
+        Self::Black,
+        Self::NeutralGray,
+        Self::White,
+        Self::Checkerboard,
+    ];
+
+    /// Solid sRGB clear color, or `None` when the theme canvas stays in place.
+    #[must_use]
+    pub const fn solid_srgb(self) -> Option<[f64; 4]> {
+        match self {
+            Self::ThemeDefault | Self::Checkerboard => None,
+            Self::Black => Some([0.0, 0.0, 0.0, 1.0]),
+            Self::NeutralGray => Some([0.2, 0.2, 0.2, 1.0]),
+            Self::White => Some([1.0, 1.0, 1.0, 1.0]),
+        }
+    }
+
+    /// Whether the image rectangle should show the checkerboard.
+    #[must_use]
+    pub const fn is_checkerboard(self) -> bool {
+        matches!(self, Self::Checkerboard)
+    }
+}
+
+/// Logical pixels along one checkerboard cell. Image zoom does not scale it.
+pub const CHECKERBOARD_CELL_LOGICAL_PX: f64 = 8.0;
+
+/// One checkerboard pair. Channels are sRGB bytes, not the accent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Checkerboard {
+    /// Darker cell.
+    pub dark: [u8; 3],
+    /// Lighter cell.
+    pub light: [u8; 3],
+}
+
+impl Checkerboard {
+    /// Opaque sRGB channels in `0.0..=1.0` for the clear-color conversion.
+    #[must_use]
+    pub fn srgb(self) -> ([f64; 4], [f64; 4]) {
+        (srgb_byte_color(self.dark), srgb_byte_color(self.light))
+    }
+}
+
+/// Checker colors for a resolved appearance.
+///
+/// High contrast uses two neutrals close to its canvas. It does not use the
+/// accent yellow or blue.
+#[must_use]
+pub const fn checkerboard_for(mode: Mode) -> Checkerboard {
+    match mode {
+        Mode::Dark => Checkerboard {
+            dark: [0x1A, 0x1D, 0x24],
+            light: [0x23, 0x27, 0x31],
+        },
+        Mode::Light => Checkerboard {
+            dark: [0xE6, 0xE8, 0xEC],
+            light: [0xF4, 0xF5, 0xF7],
+        },
+        Mode::Console => Checkerboard {
+            dark: [0x05, 0x10, 0x0A],
+            light: [0x0B, 0x1A, 0x10],
+        },
+        Mode::HighContrastDark => Checkerboard {
+            dark: [0x0A, 0x0A, 0x0A],
+            light: [0x1C, 0x1C, 0x1C],
+        },
+        Mode::HighContrastLight => Checkerboard {
+            dark: [0xE6, 0xE6, 0xE6],
+            light: [0xF7, 0xF7, 0xF7],
+        },
+    }
+}
+
+/// Physical pixels per checker cell. `ui_scale_factor` is physical pixels per
+/// logical pixel. The result is at least one physical pixel.
+#[must_use]
+pub fn checkerboard_cell_px(ui_scale_factor: f64) -> f32 {
+    let pixels = (CHECKERBOARD_CELL_LOGICAL_PX * ui_scale_factor).max(1.0);
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        pixels as f32
+    }
+}
+
+const fn srgb_byte_color(rgb: [u8; 3]) -> [f64; 4] {
+    [
+        rgb[0] as f64 / 255.0,
+        rgb[1] as f64 / 255.0,
+        rgb[2] as f64 / 255.0,
+        1.0,
+    ]
+}
+
 /// Return the complete chrome palette for a resolved mode.
 #[must_use]
 pub const fn chrome_palette_for(mode: Mode) -> ChromePalette {
@@ -523,9 +641,10 @@ fn preference_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Mode, Preference, PreferenceLoad, PreferenceRecovery, PreferenceSaveError,
-        appearance_save_failure_message, chrome_palette_for, load_preference_from,
-        load_preference_from_path, palette_for, save_preference_to,
+        ImageBackground, Mode, Preference, PreferenceLoad, PreferenceRecovery, PreferenceSaveError,
+        appearance_save_failure_message, checkerboard_cell_px, checkerboard_for,
+        chrome_palette_for, load_preference_from, load_preference_from_path, palette_for,
+        save_preference_to,
     };
 
     #[test]
@@ -614,6 +733,109 @@ mod tests {
             chrome_palette_for(Mode::HighContrastLight).panel,
             [0xFF, 0xFF, 0xFF, 0xFF]
         );
+    }
+
+    #[test]
+    fn image_backgrounds_keep_checkerboard_out_of_the_solid_colors() {
+        assert_eq!(ImageBackground::default(), ImageBackground::ThemeDefault);
+        assert_eq!(
+            ImageBackground::ALL,
+            [
+                ImageBackground::ThemeDefault,
+                ImageBackground::Black,
+                ImageBackground::NeutralGray,
+                ImageBackground::White,
+                ImageBackground::Checkerboard,
+            ]
+        );
+        assert_eq!(ImageBackground::ThemeDefault.solid_srgb(), None);
+        assert_eq!(ImageBackground::Checkerboard.solid_srgb(), None);
+        assert!(ImageBackground::Checkerboard.is_checkerboard());
+        assert!(!ImageBackground::White.is_checkerboard());
+        assert_eq!(
+            ImageBackground::Black.solid_srgb(),
+            Some([0.0, 0.0, 0.0, 1.0])
+        );
+        assert_eq!(
+            ImageBackground::NeutralGray.solid_srgb(),
+            Some([0.2, 0.2, 0.2, 1.0])
+        );
+        assert_eq!(
+            ImageBackground::White.solid_srgb(),
+            Some([1.0, 1.0, 1.0, 1.0])
+        );
+    }
+
+    #[test]
+    fn checkerboard_colors_match_the_specified_pairs() {
+        assert_eq!(
+            checkerboard_for(Mode::Dark),
+            super::Checkerboard {
+                dark: [0x1A, 0x1D, 0x24],
+                light: [0x23, 0x27, 0x31],
+            }
+        );
+        assert_eq!(
+            checkerboard_for(Mode::Light),
+            super::Checkerboard {
+                dark: [0xE6, 0xE8, 0xEC],
+                light: [0xF4, 0xF5, 0xF7],
+            }
+        );
+        assert_eq!(
+            checkerboard_for(Mode::Console),
+            super::Checkerboard {
+                dark: [0x05, 0x10, 0x0A],
+                light: [0x0B, 0x1A, 0x10],
+            }
+        );
+        for mode in Mode::ALL {
+            let checker = checkerboard_for(mode);
+            assert_ne!(checker.dark, checker.light, "{mode:?}");
+            let (dark, light) = checker.srgb();
+            assert_eq!(dark[3].to_bits(), 1.0_f64.to_bits());
+            assert_eq!(light[3].to_bits(), 1.0_f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn high_contrast_checkerboard_stays_near_the_canvas_and_off_the_accent() {
+        for mode in [Mode::HighContrastDark, Mode::HighContrastLight] {
+            let checker = checkerboard_for(mode);
+            let accent = chrome_palette_for(mode).accent;
+            let canvas = palette_for(mode).background.map(|channel| {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                {
+                    (channel * 255.0).round() as u8
+                }
+            });
+            for color in [checker.dark, checker.light] {
+                assert_ne!(color, [accent[0], accent[1], accent[2]], "{mode:?}");
+                for (channel, canvas_channel) in color.into_iter().zip(canvas) {
+                    assert!(
+                        channel.abs_diff(canvas_channel) <= 48,
+                        "{mode:?} checker {color:?} is far from canvas {canvas:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            checkerboard_for(Mode::HighContrastDark).light,
+            [0x1C, 0x1C, 0x1C]
+        );
+        assert_eq!(
+            checkerboard_for(Mode::HighContrastLight).dark,
+            [0xE6, 0xE6, 0xE6]
+        );
+    }
+
+    #[test]
+    fn checkerboard_cell_is_eight_logical_pixels_and_ignores_image_zoom() {
+        assert_eq!(checkerboard_cell_px(1.0).to_bits(), 8.0_f32.to_bits());
+        assert_eq!(checkerboard_cell_px(2.0).to_bits(), 16.0_f32.to_bits());
+        assert_eq!(checkerboard_cell_px(1.5).to_bits(), 12.0_f32.to_bits());
+        assert_eq!(checkerboard_cell_px(0.0).to_bits(), 1.0_f32.to_bits());
+        assert_eq!(checkerboard_cell_px(-3.0).to_bits(), 1.0_f32.to_bits());
     }
 
     #[test]

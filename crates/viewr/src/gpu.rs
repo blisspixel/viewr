@@ -15,10 +15,13 @@ pub(crate) use crate::gpu_image::{
     ImagePreview, MAX_GPU_BASE_PIXELS, PERFORMANCE_PROBE_GPU_BASE_PIXELS, PreviewSpec,
     prepare_image_preview,
 };
-use crate::gpu_image::{mip_level_count, preview_spec, select_image_upload};
+use crate::gpu_image::{
+    PatchUploadBytes, encode_patch_for_texture, mip_level_count, prepare_texture_upload,
+    preview_spec, select_image_upload,
+};
 use crate::gpu_policy::{
-    PLACEMENT_BYTES, pack_placement, palette_to_color, select_srgb_surface_format,
-    srgb_clear_color, validate_patch_upload,
+    CHECKER_PARAMS_BYTES, PLACEMENT_BYTES, pack_checker_params, pack_placement, palette_to_color,
+    select_srgb_surface_format, srgb_clear_color, validate_patch_upload,
 };
 use crate::performance::GpuAdapterReport;
 use crate::theme::{self, Mode};
@@ -40,7 +43,14 @@ pub struct Renderer {
     bind_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     mipmap_blitter: wgpu::util::TextureBlitter,
+    linear_mipmap_blitter: wgpu::util::TextureBlitter,
     pipeline: wgpu::RenderPipeline,
+    premul_pipeline: wgpu::RenderPipeline,
+    checker_pipeline: wgpu::RenderPipeline,
+    checker_params: wgpu::Buffer,
+    checker_bind_group: wgpu::BindGroup,
+    draw_checkerboard: bool,
+    theme_mode: Mode,
     output_color_transform: OutputColorTransform,
     display_output: DisplayOutputNormalizer,
     image: Option<Image>,
@@ -69,6 +79,8 @@ struct Image {
     texture_size: (u32, u32),
     mip_level_count: u32,
     working_color: WorkingColorEncoding,
+    /// Display texture is premultiplied linear RGBA8 rather than straight sRGB.
+    premultiplied: bool,
 }
 
 /// One full-image mosaic draw using a GPU slot owned by the renderer.
@@ -89,8 +101,11 @@ fn build_image_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     })
 }
 
-fn build_mipmap_blitter(device: &wgpu::Device) -> wgpu::util::TextureBlitter {
-    wgpu::util::TextureBlitterBuilder::new(device, wgpu::TextureFormat::Rgba8UnormSrgb)
+fn build_mipmap_blitter(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> wgpu::util::TextureBlitter {
+    wgpu::util::TextureBlitterBuilder::new(device, format)
         .sample_type(wgpu::FilterMode::Linear)
         .build()
 }
@@ -169,9 +184,7 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        let (pipeline, bind_layout) = build_pipeline(&device, format);
-        let sampler = build_image_sampler(&device);
-        let mipmap_blitter = build_mipmap_blitter(&device);
+        let draw = build_draw_resources(&device, format);
         let egui_ctx = egui::Context::default();
         egui_ctx.set_fonts(crate::typography::font_definitions());
         let viewport_id = egui_ctx.viewport_id();
@@ -201,10 +214,17 @@ impl Renderer {
             adapter_report,
             max_dim,
             max_base_pixels: max_base_pixels.max(1),
-            bind_layout,
-            sampler,
-            mipmap_blitter,
-            pipeline,
+            bind_layout: draw.bind_layout,
+            sampler: draw.sampler,
+            mipmap_blitter: draw.mipmap_blitter,
+            linear_mipmap_blitter: draw.linear_mipmap_blitter,
+            pipeline: draw.pipeline,
+            premul_pipeline: draw.premul_pipeline,
+            checker_pipeline: draw.checker_pipeline,
+            checker_params: draw.checker_params,
+            checker_bind_group: draw.checker_bind_group,
+            draw_checkerboard: false,
+            theme_mode: mode,
             output_color_transform,
             display_output: DisplayOutputNormalizer::identity(),
             image: None,
@@ -457,8 +477,16 @@ impl Renderer {
             self.output_color_transform,
         )?;
         let display_pixels = self.display_output.apply(upload.rgba)?;
+        let prepared = prepare_texture_upload(display_pixels.as_ref())?;
         let (width, height) = upload.size;
         let mip_level_count = mip_level_count((width, height));
+        // Opaque bytes stay on the sRGB replace path. Any alpha below 255 is a
+        // display-only premultiplied linear upload and does not change stored pixels.
+        let format = if prepared.premultiplied {
+            wgpu::TextureFormat::Rgba8Unorm
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        };
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -470,7 +498,7 @@ impl Renderer {
             mip_level_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -478,7 +506,7 @@ impl Renderer {
         });
         self.queue.write_texture(
             texture.as_image_copy(),
-            display_pixels.as_ref(),
+            prepared.rgba.as_ref(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
@@ -527,6 +555,7 @@ impl Renderer {
                 texture_size: (width, height),
                 mip_level_count,
                 working_color: image.working_color,
+                premultiplied: prepared.premultiplied,
             },
             upload.full_resolution,
         ))
@@ -546,6 +575,7 @@ impl Renderer {
         if !self.output_color_transform.accepts(image.working_color) {
             return false;
         }
+        let premultiplied = image.premultiplied;
         let Some(upload) = validate_patch_upload(image.source_size, image.texture_size, patch)
         else {
             return false;
@@ -553,12 +583,18 @@ impl Renderer {
         let Ok(display_pixels) = self.display_output.apply(&patch.rgba) else {
             return false;
         };
+        // A new transparent pixel cannot be written into an opaque sRGB texture.
+        // The caller uploads the whole image, which selects the linear path.
+        let encoded = match encode_patch_for_texture(display_pixels.as_ref(), premultiplied) {
+            Ok(PatchUploadBytes::Inline(bytes)) => bytes,
+            Ok(PatchUploadBytes::NeedsFullUpload) | Err(_) => return false,
+        };
 
         let mut destination = image.texture.as_image_copy();
         destination.origin = upload.origin;
         self.queue.write_texture(
             destination,
-            display_pixels.as_ref(),
+            encoded.as_ref(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(upload.bytes_per_row),
@@ -571,13 +607,20 @@ impl Renderer {
         true
     }
 
-    /// Rebuild every derived level from the preceding sRGB texture level.
-    /// Sampling decodes sRGB and rendering re-encodes it, so minification is
-    /// averaged in linear light rather than directly averaging encoded bytes.
+    /// Rebuild every derived level from the preceding texture level.
+    ///
+    /// An sRGB texture decodes on sample, so those mips average linear light.
+    /// A premultiplied texture is already linear, so its blitter averages the
+    /// stored premultiplied values directly.
     fn regenerate_mipmaps(&self, texture: &wgpu::Texture, mip_level_count: u32) {
         if mip_level_count <= 1 {
             return;
         }
+        let blitter = if texture.format() == wgpu::TextureFormat::Rgba8Unorm {
+            &self.linear_mipmap_blitter
+        } else {
+            &self.mipmap_blitter
+        };
 
         let mut encoder = self
             .device
@@ -599,8 +642,7 @@ impl Renderer {
                 mip_level_count: Some(1),
                 ..Default::default()
             });
-            self.mipmap_blitter
-                .copy(&self.device, &mut encoder, &source, &target);
+            blitter.copy(&self.device, &mut encoder, &source, &target);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
     }
@@ -612,7 +654,30 @@ impl Renderer {
 
     /// Change the clear color to match `mode`.
     pub fn set_mode(&mut self, mode: Mode) {
+        self.theme_mode = mode;
         self.clear = palette_to_color(theme::palette_for(mode));
+    }
+
+    /// Apply the session image background. Checkerboard keeps the theme clear
+    /// color in the letterbox and is drawn only under image rectangles.
+    pub fn sync_image_background(&mut self, background: crate::theme::ImageBackground, mode: Mode) {
+        self.draw_checkerboard = background.is_checkerboard();
+        if let Some(color) = background.solid_srgb() {
+            self.theme_mode = mode;
+            self.set_clear_color(color);
+        } else {
+            self.set_mode(mode);
+        }
+    }
+
+    fn write_checker_params(&self) {
+        let (dark, light) = theme::checkerboard_for(self.theme_mode).srgb();
+        let packed = pack_checker_params(
+            dark,
+            light,
+            theme::checkerboard_cell_px(self.ui_scale_factor()),
+        );
+        self.queue.write_buffer(&self.checker_params, 0, &packed);
     }
 
     /// Scale the interface by the operating-system text size on top of the
@@ -681,6 +746,9 @@ impl Renderer {
                 self.queue
                     .write_buffer(&image.placement, 0, &pack_placement(&draw.placement));
             }
+        }
+        if self.draw_checkerboard {
+            self.write_checker_params();
         }
 
         let view = frame
@@ -763,7 +831,13 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            rpass.set_pipeline(&self.pipeline);
+            let quad = ImageQuad {
+                draw_checkerboard: self.draw_checkerboard,
+                checker_pipeline: &self.checker_pipeline,
+                checker_bind_group: &self.checker_bind_group,
+                replace_pipeline: &self.pipeline,
+                premul_pipeline: &self.premul_pipeline,
+            };
             if mosaic.is_empty() {
                 if let (Some(image), Some(viewport), Some(_)) = (
                     &self.image,
@@ -773,8 +847,7 @@ impl Renderer {
                     placement,
                 ) {
                     rpass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
-                    rpass.set_bind_group(0, &image.bind_group, &[]);
-                    rpass.draw(0..6, 0..1);
+                    draw_image_quad(&mut rpass, image, &quad);
                 }
             } else {
                 for draw in mosaic {
@@ -788,8 +861,7 @@ impl Renderer {
                         continue;
                     };
                     rpass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
-                    rpass.set_bind_group(0, &image.bind_group, &[]);
-                    rpass.draw(0..6, 0..1);
+                    draw_image_quad(&mut rpass, image, &quad);
                 }
             }
         }
@@ -865,29 +937,143 @@ pub enum FrameResult {
     NeedsReconfigure,
 }
 
-/// Build the textured-quad pipeline and its bind group layout.
-fn build_pipeline(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
+struct RenderTargets {
+    bind_layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::RenderPipeline,
+    premul_pipeline: wgpu::RenderPipeline,
+    checker_pipeline: wgpu::RenderPipeline,
+    checker_params: wgpu::Buffer,
+    checker_bind_group: wgpu::BindGroup,
+}
+
+struct ImageQuad<'a> {
+    draw_checkerboard: bool,
+    checker_pipeline: &'a wgpu::RenderPipeline,
+    checker_bind_group: &'a wgpu::BindGroup,
+    replace_pipeline: &'a wgpu::RenderPipeline,
+    premul_pipeline: &'a wgpu::RenderPipeline,
+}
+
+fn draw_image_quad<'a>(pass: &mut wgpu::RenderPass<'a>, image: &'a Image, quad: &ImageQuad<'a>) {
+    if quad.draw_checkerboard {
+        pass.set_pipeline(quad.checker_pipeline);
+        pass.set_bind_group(0, &image.bind_group, &[]);
+        pass.set_bind_group(1, quad.checker_bind_group, &[]);
+        pass.draw(0..6, 0..1);
+    }
+    pass.set_pipeline(if image.premultiplied {
+        quad.premul_pipeline
+    } else {
+        quad.replace_pipeline
+    });
+    pass.set_bind_group(0, &image.bind_group, &[]);
+    pass.draw(0..6, 0..1);
+}
+
+struct DrawResources {
+    bind_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    mipmap_blitter: wgpu::util::TextureBlitter,
+    linear_mipmap_blitter: wgpu::util::TextureBlitter,
+    pipeline: wgpu::RenderPipeline,
+    premul_pipeline: wgpu::RenderPipeline,
+    checker_pipeline: wgpu::RenderPipeline,
+    checker_params: wgpu::Buffer,
+    checker_bind_group: wgpu::BindGroup,
+}
+
+fn build_draw_resources(device: &wgpu::Device, format: wgpu::TextureFormat) -> DrawResources {
+    let pipelines = build_render_targets(device, format);
+    DrawResources {
+        bind_layout: pipelines.bind_layout,
+        sampler: build_image_sampler(device),
+        mipmap_blitter: build_mipmap_blitter(device, wgpu::TextureFormat::Rgba8UnormSrgb),
+        linear_mipmap_blitter: build_mipmap_blitter(device, wgpu::TextureFormat::Rgba8Unorm),
+        pipeline: pipelines.pipeline,
+        premul_pipeline: pipelines.premul_pipeline,
+        checker_pipeline: pipelines.checker_pipeline,
+        checker_params: pipelines.checker_params,
+        checker_bind_group: pipelines.checker_bind_group,
+    }
+}
+
+/// Build the image and checker pipelines that share one shader module.
+fn build_render_targets(device: &wgpu::Device, format: wgpu::TextureFormat) -> RenderTargets {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("viewr shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
     });
+    let bind_layout = image_bind_layout(device);
+    let image_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("viewr pipeline layout"),
+        bind_group_layouts: &[Some(&bind_layout)],
+        immediate_size: 0,
+    });
+    let pipeline = create_quad_pipeline(
+        device,
+        &shader,
+        &image_layout,
+        format,
+        wgpu::BlendState::REPLACE,
+        "viewr pipeline",
+        "fs_main",
+    );
+    let premul_pipeline = create_quad_pipeline(
+        device,
+        &shader,
+        &image_layout,
+        format,
+        wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+        "viewr premultiplied pipeline",
+        "fs_main",
+    );
+    let checker_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("viewr checkerboard layout"),
+        entries: &[uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+    });
+    let checker_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("viewr checkerboard pipeline layout"),
+        bind_group_layouts: &[Some(&bind_layout), Some(&checker_layout)],
+        immediate_size: 0,
+    });
+    let checker_pipeline = create_quad_pipeline(
+        device,
+        &shader,
+        &checker_pipeline_layout,
+        format,
+        wgpu::BlendState::REPLACE,
+        "viewr checkerboard pipeline",
+        "fs_checker",
+    );
+    let checker_params = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("viewr checkerboard uniform"),
+        size: CHECKER_PARAMS_BYTES,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let checker_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("viewr checkerboard bind group"),
+        layout: &checker_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: checker_params.as_entire_binding(),
+        }],
+    });
+    RenderTargets {
+        bind_layout,
+        pipeline,
+        premul_pipeline,
+        checker_pipeline,
+        checker_params,
+        checker_bind_group,
+    }
+}
 
-    let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+fn image_bind_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewr bind layout"),
         entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
+            uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
@@ -905,29 +1091,46 @@ fn build_pipeline(
                 count: None,
             },
         ],
-    });
+    })
+}
 
-    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("viewr pipeline layout"),
-        bind_group_layouts: &[Some(&bind_layout)],
-        immediate_size: 0,
-    });
+fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
 
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("viewr pipeline"),
-        layout: Some(&layout),
+fn create_quad_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    blend: wgpu::BlendState,
+    label: &'static str,
+    fragment_entry: &'static str,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
         vertex: wgpu::VertexState {
-            module: &shader,
+            module: shader,
             entry_point: Some("vs_main"),
             buffers: &[],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
         fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
+            module: shader,
+            entry_point: Some(fragment_entry),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -937,7 +1140,5 @@ fn build_pipeline(
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
-    });
-
-    (pipeline, bind_layout)
+    })
 }

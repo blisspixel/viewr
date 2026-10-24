@@ -292,16 +292,70 @@ fn resize_decoded(decoded: crate::decode::DecodedImage) -> ThumbnailResult {
     let factor = box_reduction_factor(decoded.width, decoded.height, width, height);
     let (reduced_width, reduced_height, reduced) =
         box_reduce(decoded.rgba, decoded.width, decoded.height, factor);
-    let img = image::RgbaImage::from_raw(reduced_width, reduced_height, reduced)
+    let rgba = if reduced_width == width && reduced_height == height {
+        reduced
+    } else if crate::image_info::rgba_has_transparency(&reduced) {
+        resize_premultiplied_straight(reduced, reduced_width, reduced_height, width, height)?
+    } else {
+        let img = image::RgbaImage::from_raw(reduced_width, reduced_height, reduced)
+            .ok_or(ThumbnailFailure::InvalidRgbaBuffer)?;
+        image::imageops::resize(&img, width, height, image::imageops::FilterType::Triangle)
+            .into_raw()
+    };
+    ThumbRgba::new(width, height, rgba, decoded.working_color)
+}
+
+/// Triangle-resize straight RGBA by filtering premultiplied encoded bytes.
+///
+/// `image::imageops::resize` averages channels independently and assumes alpha
+/// is already premultiplied. Opaque bytes are an identity under this round
+/// trip, so callers skip it when every alpha is 255 and keep those thumbnails
+/// identical to a direct resize. The returned buffer is straight again.
+fn resize_premultiplied_straight(
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    target_width: u32,
+    target_height: u32,
+) -> Result<Vec<u8>, ThumbnailFailure> {
+    let premul = premultiply_encoded_rgba(rgba);
+    let img = image::RgbaImage::from_raw(width, height, premul)
         .ok_or(ThumbnailFailure::InvalidRgbaBuffer)?;
-    let resized =
-        image::imageops::resize(&img, width, height, image::imageops::FilterType::Triangle);
-    ThumbRgba::new(
-        resized.width(),
-        resized.height(),
-        resized.into_raw(),
-        decoded.working_color,
-    )
+    let resized = image::imageops::resize(
+        &img,
+        target_width,
+        target_height,
+        image::imageops::FilterType::Triangle,
+    );
+    Ok(unpremultiply_encoded_rgba(resized.into_raw()))
+}
+
+fn premultiply_encoded_rgba(mut rgba: Vec<u8>) -> Vec<u8> {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        let alpha = u32::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            let value = (u32::from(*channel) * alpha + 127) / 255;
+            *channel = u8::try_from(value).unwrap_or(u8::MAX);
+        }
+    }
+    rgba
+}
+
+fn unpremultiply_encoded_rgba(mut rgba: Vec<u8>) -> Vec<u8> {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        let alpha = u32::from(pixel[3]);
+        if alpha == 0 {
+            pixel[0] = 0;
+            pixel[1] = 0;
+            pixel[2] = 0;
+            continue;
+        }
+        for channel in &mut pixel[..3] {
+            let value = (u32::from(*channel) * 255 + alpha / 2) / alpha;
+            *channel = u8::try_from(value).unwrap_or(u8::MAX);
+        }
+    }
+    rgba
 }
 
 /// Integer block size for the cheap first reduction of a thumbnail source.
@@ -316,41 +370,66 @@ fn box_reduction_factor(width: u32, height: u32, target_width: u32, target_heigh
     horizontal.min(vertical).max(1)
 }
 
-/// Average `factor` by `factor` blocks of straight RGBA. Rows and columns past
-/// the last whole block are dropped, at most `factor - 1` source pixels. A
-/// factor of one returns the pixels unchanged.
+/// Average `factor` by `factor` blocks into straight RGBA. RGB is weighted by
+/// alpha, so a fully transparent color does not tint the block. Rows and
+/// columns past the last whole block are dropped, at most `factor - 1` source
+/// pixels. A factor of one returns the pixels unchanged.
 fn box_reduce(rgba: Vec<u8>, width: u32, height: u32, factor: u32) -> (u32, u32, Vec<u8>) {
     if factor <= 1 {
+        return (width, height, rgba);
+    }
+    let Some(area) = u64::from(factor).checked_mul(u64::from(factor)) else {
+        return (width, height, rgba);
+    };
+    // Each pixel contributes at most 255 * 255 to a weighted channel sum.
+    if area > u64::MAX / (255 * 255) {
         return (width, height, rgba);
     }
     let out_width = width / factor;
     let out_height = height / factor;
     let stride = width as usize * 4;
     let block = factor as usize;
-    let area = factor * factor;
-    let mut sums = vec![0_u32; out_width as usize * 4];
-    let mut out = Vec::with_capacity(out_width as usize * out_height as usize * 4);
+    let columns = out_width as usize;
+    let mut weighted = vec![0_u64; columns * 3];
+    let mut alpha_sums = vec![0_u64; columns];
+    let mut out = Vec::with_capacity(columns * out_height as usize * 4);
     for out_row in 0..out_height as usize {
-        sums.fill(0);
+        weighted.fill(0);
+        alpha_sums.fill(0);
         for row in rgba.chunks_exact(stride).skip(out_row * block).take(block) {
-            for (sum, run) in sums
-                .as_chunks_mut::<4>()
+            for ((rgb, alpha_sum), run) in weighted
+                .as_chunks_mut::<3>()
                 .0
                 .iter_mut()
+                .zip(alpha_sums.iter_mut())
                 .zip(row.chunks_exact(block * 4))
             {
                 for pixel in run.as_chunks::<4>().0 {
-                    sum[0] += u32::from(pixel[0]);
-                    sum[1] += u32::from(pixel[1]);
-                    sum[2] += u32::from(pixel[2]);
-                    sum[3] += u32::from(pixel[3]);
+                    let alpha = u64::from(pixel[3]);
+                    rgb[0] += u64::from(pixel[0]) * alpha;
+                    rgb[1] += u64::from(pixel[1]) * alpha;
+                    rgb[2] += u64::from(pixel[2]) * alpha;
+                    *alpha_sum += alpha;
                 }
             }
         }
-        out.extend(
-            sums.iter()
-                .map(|total| u8::try_from((total + area / 2) / area).unwrap_or(u8::MAX)),
-        );
+        for (rgb, alpha_sum) in weighted
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(alpha_sums.iter().copied())
+        {
+            let alpha_byte = u8::try_from((alpha_sum + area / 2) / area).unwrap_or(u8::MAX);
+            if alpha_sum == 0 || alpha_byte == 0 {
+                out.extend_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+            let half = alpha_sum / 2;
+            out.push(u8::try_from((rgb[0] + half) / alpha_sum).unwrap_or(u8::MAX));
+            out.push(u8::try_from((rgb[1] + half) / alpha_sum).unwrap_or(u8::MAX));
+            out.push(u8::try_from((rgb[2] + half) / alpha_sum).unwrap_or(u8::MAX));
+            out.push(alpha_byte);
+        }
     }
     (out_width, out_height, out)
 }
@@ -823,5 +902,73 @@ mod tests {
             .max()
             .unwrap();
         assert!(worst <= 3, "reduced preview drifted by {worst}");
+    }
+
+    #[test]
+    fn transparent_color_does_not_tint_a_reduced_thumbnail() {
+        let fringe = vec![255, 0, 0, 0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 255, 255];
+        let (width, height, out) = box_reduce(fringe, 2, 2, 2);
+        assert_eq!((width, height), (1, 1));
+        assert_eq!(out, vec![0, 0, 255, 128]);
+
+        let kept = vec![255, 0, 0, 0];
+        let unchanged = resize_decoded(crate::decode::DecodedImage {
+            rgba: kept.clone(),
+            width: 1,
+            height: 1,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        })
+        .unwrap();
+        assert_eq!(
+            unchanged.rgba, kept,
+            "a same-size thumb keeps straight bytes"
+        );
+
+        let mut wide = Vec::new();
+        for _row in 0..2 {
+            for column in 0..144_u32 {
+                if column < 72 {
+                    wide.extend([255, 0, 0, 0]);
+                } else {
+                    wide.extend([0, 0, 255, 255]);
+                }
+            }
+        }
+        let (target_width, target_height) = fit_size(144, 2, THUMB_EDGE);
+        let straight_image = image::RgbaImage::from_raw(144, 2, wide.clone()).unwrap();
+        let straight = image::imageops::resize(
+            &straight_image,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Triangle,
+        );
+        let filtered = resize_decoded(crate::decode::DecodedImage {
+            rgba: wide,
+            width: 144,
+            height: 2,
+            color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
+            working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+        })
+        .unwrap();
+        assert_eq!(
+            (filtered.width, filtered.height),
+            (target_width, target_height)
+        );
+        assert!(
+            filtered.rgba.chunks_exact(4).all(|pixel| pixel[0] == 0),
+            "transparent red tinted the thumbnail: {:?}",
+            filtered.rgba
+        );
+        let right = usize::try_from(target_width / 2).unwrap();
+        let straight_right_red = straight.as_raw()[right * 4..]
+            .chunks_exact(4)
+            .map(|pixel| pixel[0])
+            .max()
+            .unwrap_or(0);
+        assert!(
+            straight_right_red > 0,
+            "straight resize did not place red on the opaque side"
+        );
     }
 }

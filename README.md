@@ -198,8 +198,9 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 - **Dark** uses low-glare charcoal chrome.
 - **Console** uses near-black chrome, phosphor-green text, and monospace type.
 
-Image Background independently offers Theme Default, Black, Neutral Gray, and
-White. Appearance changes interface chrome and canvas only, never image pixels.
+Image Background independently offers Theme Default, Black, Neutral Gray,
+White, and a session-only Checkerboard. Appearance changes interface chrome
+and canvas only, never image pixels.
 v0.7.3 corrects overly light canvas backgrounds in the previous
 v0.7.2 preview so they match the specified appearance colors.
 Windows Text size and GNOME text scaling enlarge the interface when the window

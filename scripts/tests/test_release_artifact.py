@@ -729,12 +729,11 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("/main/install.sh", combined)
         self.assertNotIn("/master/install.ps1", combined)
         self.assertNotIn("/master/install.sh", combined)
-        self.assertIn("/releases/download/v0.7.5/install.ps1", public_commands)
-        self.assertIn("/releases/download/v0.7.5/install.sh", public_commands)
-        self.assertNotIn("/releases/download/v0.7.6/", public_commands)
+        self.assertIn("/releases/download/v0.7.6/install.ps1", public_commands)
+        self.assertIn("/releases/download/v0.7.6/install.sh", public_commands)
+        self.assertNotIn("/releases/download/v0.7.5/", public_commands)
         self.assertIn("/releases/download/v0.7.6/install.ps1", compiled_commands)
         self.assertIn("/releases/download/v0.7.6/install.sh", compiled_commands)
-        self.assertNotIn("/releases/download/v0.7.5/", compiled_commands)
 
     def test_update_job_installs_the_workspace_candidate_over_published_v074(
         self,

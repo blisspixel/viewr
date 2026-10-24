@@ -1,20 +1,20 @@
 # Installing viewr
 
-viewr is pre-1.0. v0.7.5 is the preview described here, a copy, open-failure,
-doctor, and Windows path-spelling patch. Its portable archives are checksummed,
-manifest-verified, and attested, but the Windows artifacts are not
+viewr is pre-1.0. v0.7.6 is the preview described here, a transparency,
+local-decode-proof, and installer-uninstall patch. Its portable archives are
+checksummed, manifest-verified, and attested, but the Windows artifacts are not
 Authenticode-signed and the macOS artifacts are not Developer
 ID-signed or notarized. Normal operating-system trust warnings may appear. Installation is
 per user and never requires elevation. The representative-hardware
 product-quality matrix was not completed for this tag; the
-[v0.7.5 notes](releases/v0.7.5.md) record that gap exactly.
+[v0.7.6 notes](releases/v0.7.6.md) record that gap exactly.
 
 ## One-command install and update
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.5/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.ps1 | iex
 ```
 
 The installer:
@@ -34,7 +34,7 @@ background.
 To install a specific version from a reviewed local copy of the script:
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.5/install.ps1 `
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.ps1 `
   -OutFile $env:TEMP\viewr-install.ps1
 & $env:TEMP\viewr-install.ps1 -Version 0.6.2
 ```
@@ -46,7 +46,7 @@ shortcut. `-InstallDir` is accepted only inside the current user's
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.5/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.sh | sh
 ```
 
 The shell installer:
@@ -85,11 +85,11 @@ configuration. The installer reports this without editing profile files.
 ## Review before running
 
 Pipe-to-shell commands are convenient but execute installer code. The commands
-above are fixed to the immutable `v0.7.5` release rather than a moving branch.
+above are fixed to the immutable `v0.7.6` release rather than a moving branch.
 To review it first:
 
 ```sh
-curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.5/install.sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.sh
 less install.sh
 sh install.sh
 ```
@@ -126,7 +126,7 @@ Extract the archive and keep `bin/viewr` and `bin/viewr-decode` side by side. Th
 archive also contains the project license, notice, third-party license inventory,
 security policy, canonical documentation, and a per-file release manifest.
 
-GitHub checksums and attestations improve integrity and provenance. The v0.7.5
+GitHub checksums and attestations improve integrity and provenance. The v0.7.6
 portable archives are not Authenticode-signed or Apple-notarized, so
 operating-system trust dialogs may still apply. Do not disable platform security
 controls to force a launch.
@@ -273,7 +273,7 @@ not running. viewr uses the X server named by `DISPLAY` in that case rather than
 failing, and says so in the doctor report.
 
 The published v0.7.4 installer registers `com.github.blisspixel.viewr.desktop`.
-The v0.7.5 archive uses `io.github.blisspixel.viewr.desktop`. Neither
+The v0.7.6 archive uses `io.github.blisspixel.viewr.desktop`. Neither
 installation changes a default. File > Default
 Image Viewer offers commands matching its build. For current source builds,
 opt in explicitly:
@@ -334,7 +334,24 @@ be selected as a Finder default.
 Close viewr and change any file-type defaults first. Uninstalling viewr never
 changes file associations or deletes photos.
 
-The published v0.7.5 installer has no uninstall command. Remove it by hand:
+The v0.7.6 installer removes an installer-owned directory, the command or PATH
+entry that points at it, and the Linux launcher and icon or the Windows Start
+menu shortcut that opens it. A directory with any other file stays in place.
+Review the fixed-version script, then run:
+
+```sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.sh
+sh install.sh uninstall
+```
+
+```powershell
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.ps1 `
+  -OutFile $env:TEMP\viewr-install.ps1
+& $env:TEMP\viewr-install.ps1 -Uninstall
+```
+
+The already published v0.7.5 installer has no uninstall command. Remove that
+release by hand:
 
 On Windows, remove the installer-owned
 `%LOCALAPPDATA%\Programs\viewr` directory, remove that exact directory from the user

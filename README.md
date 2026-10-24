@@ -51,17 +51,17 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.5 is the preview described here. Its portable archives are checksummed and
+v0.7.6 is the preview described here. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
-[v0.7.5 notes](docs/releases/v0.7.5.md) record that gap exactly.
+[v0.7.6 notes](docs/releases/v0.7.6.md) record that gap exactly.
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.5/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -71,20 +71,20 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.5/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.6/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The command downloads the v0.7.5 installer, which installs the v0.7.5
+The command downloads the v0.7.6 installer, which installs the v0.7.6
 archive after verifying its SHA-256 sidecar and internal manifest, without
 giving the application network access.
 Run the same command again for an explicit update. For review-first installation,
 manual archive verification, uninstall steps, platform prerequisites, or a source
 build, see [Installing viewr](docs/INSTALL.md).
 
-The v0.7.5 archive uses the `io.github.blisspixel.viewr` desktop ID.
+The v0.7.6 archive uses the `io.github.blisspixel.viewr` desktop ID.
 Existing source installs should follow the launcher's
 [identity migration steps](docs/INSTALL.md#linux-identity-migration).
 
@@ -208,16 +208,16 @@ has room; image zoom does not change.
 
 ## Project status
 
-v0.7.5 adds copying the on-screen image, plain-language open failures, doctor
-output, and Windows path spelling to the focused viewer. The representative-hardware
+v0.7.6 adds transparent-pixel compositing, a local decode proof, and removal
+of an installer-owned tree to the focused viewer. The representative-hardware
 and screen-reader acceptance rows remain open; this patch does not complete the
 v0.8 release-readiness milestone.
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.4 remain
+v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.5 remain
 published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.8.0** release
 readiness through v0.9 publisher authentication, then v1.0.
-The [current release notes](docs/releases/v0.7.5.md) state the exact published
+The [current release notes](docs/releases/v0.7.6.md) state the exact published
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
 Unpublished candidates are identified by exact commit and workflow run. The

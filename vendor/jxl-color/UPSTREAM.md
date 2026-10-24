@@ -40,6 +40,9 @@ The local deviations from that archive are deliberately narrow:
   unsafe entry points cannot be selected by an ambiguous source-text check.
 - The crate manifest delegates workspace resolver selection to viewr's root
   manifest so workspace validation emits no ignored-resolver warning.
+- Constant-size `chunks_exact` loops use `as_chunks` so the current Clippy
+  warning stays fixed. Each loop still processes the same whole groups and
+  leaves the same tail for the scalar fallback.
 
 Apart from the documented CICP evidence added to synthesized PQ and HLG profiles,
 supported color transforms remain compatible with upstream. Unsupported enum

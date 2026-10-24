@@ -722,7 +722,7 @@ fn encode_pixels_only(
         let mut rgb = Vec::new();
         rgb.try_reserve_exact(rgb_len)
             .map_err(|error| Error::Encode(format!("could not allocate RGB export: {error}")))?;
-        for pixel in image.rgba.chunks_exact(4) {
+        for pixel in image.rgba.as_chunks::<4>().0 {
             rgb.extend_from_slice(&pixel[..3]);
         }
         image::write_buffer_with_format(
@@ -876,7 +876,13 @@ mod tests {
     }
 
     fn red_channels(image: &DecodedImage) -> Vec<u8> {
-        image.rgba.chunks_exact(4).map(|pixel| pixel[0]).collect()
+        image
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect()
     }
 
     fn solid_rgba(w: u32, h: u32) -> DecodedImage {
@@ -942,7 +948,7 @@ mod tests {
         assert_eq!(out.width, 2);
         assert_eq!(out.height, 2);
         assert_eq!(out.working_color, WorkingColorEncoding::SRGB_RGBA8);
-        let reds: Vec<u8> = out.rgba.chunks_exact(4).map(|p| p[0]).collect();
+        let reds: Vec<u8> = out.rgba.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         assert_eq!(reds, vec![5, 6, 9, 10]);
     }
 

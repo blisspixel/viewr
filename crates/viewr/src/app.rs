@@ -3997,7 +3997,7 @@ impl App {
         let corner_x = (ndc_x - p.offset[0]) / p.scale[0];
         let corner_y = (ndc_y - p.offset[1]) / p.scale[1];
 
-        let base_uv_x = (corner_x + 1.0) * 0.5;
+        let base_uv_x = f32::midpoint(corner_x, 1.0);
         let base_uv_y = (1.0 - corner_y) * 0.5;
 
         let cx = base_uv_x - 0.5;
@@ -6145,7 +6145,7 @@ impl App {
         let corner_y = 1.0 - base_v * 2.0;
         let ndc_x = corner_x * place.scale[0] + place.offset[0];
         let ndc_y = corner_y * place.scale[1] + place.offset[1];
-        let screen_x = (ndc_x + 1.0) * 0.5 * win_size.width as f32;
+        let screen_x = f32::midpoint(ndc_x, 1.0) * win_size.width as f32;
         let screen_y = (1.0 - ndc_y) * 0.5 * win_size.height as f32;
         Some((screen_x, screen_y))
     }

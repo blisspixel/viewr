@@ -130,11 +130,8 @@ mod tests {
         let bytes = pack_placement(&placement);
         assert_eq!(PLACEMENT_BYTES, bytes.len() as u64);
 
-        for (actual, expected) in bytes.chunks_exact(4).zip(expected) {
-            assert_eq!(
-                f32::from_ne_bytes(actual.try_into().unwrap()).to_bits(),
-                expected.to_bits()
-            );
+        for (actual, expected) in bytes.as_chunks::<4>().0.iter().zip(expected) {
+            assert_eq!(f32::from_ne_bytes(*actual).to_bits(), expected.to_bits());
         }
     }
 

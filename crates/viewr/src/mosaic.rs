@@ -679,7 +679,7 @@ mod tests {
                 );
             }
         }
-        assert!(
+        assert_eq!(
             dense_collage(
                 PhysicalViewport {
                     x: 0,
@@ -690,8 +690,8 @@ mod tests {
                 &[],
                 8
             )
-            .cells
-            .is_empty()
+            .cells,
+            [] as [PhysicalViewport; 0]
         );
     }
 

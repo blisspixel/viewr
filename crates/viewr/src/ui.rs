@@ -6701,7 +6701,7 @@ mod tests {
             Some("Photo 5 of 20 in the active folder view"),
             "selection is a state, not part of the name"
         );
-        assert!(selected.is_selected() == Some(true));
+        assert_eq!(selected.is_selected(), Some(true));
         assert_eq!(photo_nodes[1].1.is_selected(), Some(false));
         assert_eq!(
             update.focus, *selected_id,
@@ -6878,7 +6878,7 @@ mod tests {
             .iter()
             .filter_map(|(_, node)| (node.value() == Some(&expected_status)).then_some(node))
             .collect::<Vec<_>>();
-        assert!(!status_nodes.is_empty());
+        assert_ne!(status_nodes, [] as [&egui::accesskit::Node; 0]);
         for node in status_nodes {
             let bounds = node.bounds().expect("status bounds");
             assert!(bounds.x0 >= 0.0 && bounds.x1 <= 640.0);
@@ -10262,7 +10262,7 @@ mod tests {
             let output = context.run_ui(accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
-            assert!(!output.shapes.is_empty());
+            assert_ne!(output.shapes, [] as [egui::epaint::ClippedShape; 0]);
         }
     }
 

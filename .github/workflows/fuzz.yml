@@ -32,7 +32,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  FUZZ_TOOLCHAIN: nightly-2026-07-20
+  FUZZ_TOOLCHAIN: nightly-2026-08-15
   # Pull requests stay fast. The weekly sweep runs longest, and the runs whose
   # result is allowed to reach a user get more than a pull request: a tag,
   # which is the release rerun, and a push to `main`. A reusable workflow keeps

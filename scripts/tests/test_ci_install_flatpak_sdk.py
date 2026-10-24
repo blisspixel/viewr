@@ -81,15 +81,15 @@ class CiInstallFlatpakSdkTests(unittest.TestCase):
         match = CHANNEL.search(TOOLCHAIN.read_text(encoding="utf-8"))
         self.assertIsNotNone(match)
         channel = match.group(1)
-        self.assertEqual(channel, "1.96.0")
+        self.assertEqual(channel, "1.99.1")
         self.assertIn(f"RUST_VERSION={channel}", self.script)
-        self.assertIn("RUST_DIST_DATE=2026-05-28", self.script)
+        self.assertIn("RUST_DIST_DATE=2026-10-15", self.script)
         self.assertIn(
             'RUST_URL="https://static.rust-lang.org/dist/${RUST_DIST_DATE}/${RUST_TARBALL}"',
             self.script,
         )
         self.assertIn(
-            "c295047583a56238ea06b43f849f4b877fa12bfd4c7103f8d9a74c94c9c4e108",
+            "231fcae47ee950621374725b5fc3b5441d2fbda2955ac45dd7dc816d8876cfe7",
             self.script,
         )
         self.assertIn("curl --fail --location --proto =https --tlsv1.2", self.script)

@@ -107,25 +107,25 @@ mod tests {
                 assert!(
                     cursor
                         .rgba
-                        .chunks_exact(4)
-                        .any(|pixel| pixel == [255, 255, 255, 255])
+                        .as_chunks::<4>()
+                        .0
+                        .contains(&[255, 255, 255, 255])
                 );
+                assert!(cursor.rgba.as_chunks::<4>().0.contains(&[23, 26, 32, 255]));
                 assert!(
                     cursor
                         .rgba
-                        .chunks_exact(4)
-                        .any(|pixel| pixel == [23, 26, 32, 255])
-                );
-                assert!(
-                    cursor
-                        .rgba
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .any(|pixel| pixel[3] > 0 && pixel[3] < 255 && pixel[0] > pixel[3])
                 );
                 assert!(
                     cursor
                         .rgba
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .take(usize::from(size))
                         .all(|pixel| pixel[3] == 0)
                 );

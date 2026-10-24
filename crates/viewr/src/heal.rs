@@ -1885,7 +1885,7 @@ mod tests {
         let width = 15;
         let height = 7;
         let mut rgba = vec![100_u8; width * height * CHANNELS];
-        for pixel in rgba.chunks_exact_mut(CHANNELS) {
+        for pixel in rgba.as_chunks_mut::<CHANNELS>().0 {
             pixel[3] = 255;
         }
         let set_gray = |rgba: &mut [u8], x: usize, y: usize, value: u8| {

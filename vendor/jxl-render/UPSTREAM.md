@@ -20,6 +20,9 @@ The local deviations are deliberately narrow:
   one `RenderState` boundary, with an executable regression test proving that an
   error wakes a blocked caller. The crate manifest delegates workspace resolver
   selection to viewr's root manifest.
+- Constant-size lane groups in the architecture DCT paths use `as_chunks` so
+  the current Clippy warning stays fixed. The groups and their scalar tails are
+  unchanged.
 - `src/blend.rs` skips compositing a channel whose clipped frame region has zero
   area, while still appending the channel so the output keeps its shape. A
   malformed stream can clip a channel to nothing, and upstream 0.12.4 then

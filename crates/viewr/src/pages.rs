@@ -553,7 +553,7 @@ fn dynamic_cmyk8(width: u32, height: u32, buffer: &[u8]) -> Result<image::Dynami
     let mut rgb = Vec::new();
     rgb.try_reserve(pixel_count.saturating_mul(3))
         .map_err(|_| Error::Decode("TIFF CMYK page could not allocate an RGB buffer".into()))?;
-    for pixel in buffer.chunks_exact(4) {
+    for pixel in buffer.as_chunks::<4>().0 {
         rgb.extend_from_slice(&cmyk8_to_rgb([pixel[0], pixel[1], pixel[2], pixel[3]]));
     }
     dynamic_rgb8(width, height, rgb)
@@ -720,7 +720,7 @@ mod tests {
         let mut encoder = tiff::encoder::TiffEncoder::new(file).unwrap();
         for &(width, height, color) in pages {
             let mut data = vec![0_u8; usize::try_from(width * height * 3).unwrap()];
-            for pixel in data.chunks_exact_mut(3) {
+            for pixel in data.as_chunks_mut::<3>().0 {
                 pixel.copy_from_slice(&color);
             }
             encoder

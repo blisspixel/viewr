@@ -1071,7 +1071,7 @@ mod tests {
         assert_eq!(playlist.files, vec![listed.clone()]);
         assert_eq!(playlist.rating_for_path(&listed), rated);
         assert_eq!(result.selected_path, Some(listed));
-        assert!(result.removed.is_empty());
+        assert_eq!(result.removed, [] as [std::path::PathBuf; 0]);
         assert_eq!(result.added, 0);
         assert!(!result.followed_rename);
         assert!(playlist.contains_catalog_path(&opened));
@@ -1096,7 +1096,7 @@ mod tests {
     fn membership_reconcile_empty_catalog_reports_every_removed_path() {
         let mut playlist = Playlist::new((0..3).map(path).collect(), 1);
         let result = playlist.reconcile(Vec::new(), Vec::new(), Some(&path(1)), 0);
-        assert!(playlist.files.is_empty());
+        assert_eq!(playlist.files, [] as [std::path::PathBuf; 0]);
         assert_eq!(result.removed, vec![path(0), path(1), path(2)]);
         assert_eq!(result.added, 0);
         assert_eq!(result.selected_path, None);
@@ -1252,11 +1252,10 @@ mod tests {
         assert!(!playlist.dismiss_outside_filter());
         assert!(!playlist.select(0));
         assert!(!playlist.set_rating(PathBuf::from("missing.jpg").as_path(), RatingState::Unrated));
-        assert!(playlist.visible_catalog_range().is_empty());
-        assert!(
-            playlist
-                .visible_neighbor_paths(Heading::Forward, 4, 4)
-                .is_empty()
+        assert_eq!(playlist.visible_catalog_range(), [] as [usize; 0]);
+        assert_eq!(
+            playlist.visible_neighbor_paths(Heading::Forward, 4, 4),
+            [] as [std::path::PathBuf; 0]
         );
     }
 

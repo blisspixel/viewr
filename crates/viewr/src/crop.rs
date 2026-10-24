@@ -197,8 +197,8 @@ pub(crate) fn fit_crop_rect_to_ratio(
     } else {
         (available_width, available_width / aspect)
     };
-    let center_x = (left + right) * 0.5;
-    let center_y = (top + bottom) * 0.5;
+    let center_x = f32::midpoint(left, right);
+    let center_y = f32::midpoint(top, bottom);
     [
         center_x - width * 0.5,
         center_y - height * 0.5,
@@ -209,7 +209,7 @@ pub(crate) fn fit_crop_rect_to_ratio(
 
 pub(crate) fn crop_handle_from_uv(rect: [f32; 4], point: (f32, f32)) -> CropHandle {
     fn nearest_zone(value: f32, start: f32, end: f32) -> i8 {
-        let center = (start + end) * 0.5;
+        let center = f32::midpoint(start, end);
         let candidates = [
             ((value - start).abs(), -1),
             ((value - center).abs(), 0),
@@ -381,7 +381,7 @@ fn locked_horizontal_edge_crop(
     pointer_x: f32,
     aspect: f32,
 ) -> [f32; 4] {
-    let center_y = (top + bottom) * 0.5;
+    let center_y = f32::midpoint(top, bottom);
     let (anchor_x, direction) = if handle == CropHandle::Left {
         (right, -1.0)
     } else {
@@ -419,7 +419,7 @@ fn locked_vertical_edge_crop(
     pointer_y: f32,
     aspect: f32,
 ) -> [f32; 4] {
-    let center_x = (left + right) * 0.5;
+    let center_x = f32::midpoint(left, right);
     let (anchor_y, direction) = if handle == CropHandle::Top {
         (bottom, -1.0)
     } else {
@@ -488,8 +488,8 @@ pub(crate) fn adjust_crop_rect(
         next_height *= fit_scale;
     }
 
-    let center_x = (left + right) * 0.5;
-    let center_y = (top + bottom) * 0.5;
+    let center_x = f32::midpoint(left, right);
+    let center_y = f32::midpoint(top, bottom);
     let next_left = (center_x - next_width * 0.5).clamp(0.0, 1.0 - next_width);
     let next_top = (center_y - next_height * 0.5).clamp(0.0, 1.0 - next_height);
     [
@@ -598,8 +598,8 @@ pub fn crop_pixel_rect(
     let scale = nonnegative_floor_u32(desired_scale).clamp(1, maximum_scale);
     let crop_width = ratio_width.checked_mul(scale)?;
     let crop_height = ratio_height.checked_mul(scale)?;
-    let center_x = (left + right) * 0.5 * f64::from(width);
-    let center_y = (top + bottom) * 0.5 * f64::from(height);
+    let center_x = f64::midpoint(left, right) * f64::from(width);
+    let center_y = f64::midpoint(top, bottom) * f64::from(height);
     let x = centered_crop_origin(center_x, crop_width, width);
     let y = centered_crop_origin(center_y, crop_height, height);
     Some(crate::edit::Rect {

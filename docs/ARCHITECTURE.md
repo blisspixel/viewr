@@ -174,8 +174,10 @@ Shipped:
   recovery or promise that the same failing input will succeed after restart.
 - **`gpu`**: the wgpu pipeline. It clears to the image background and draws one
   textured quad, scissored to the physical-pixel viewport left after docked
-  chrome. Egui draws in a separate full-window pass. The current image is an sRGB
-  texture with a complete GPU-generated mip chain and trilinear sampling. A source
+  chrome. Egui draws in a separate full-window pass. An opaque image stays an
+  sRGB texture drawn with replace blending. Any alpha byte below 255 uses a
+  display-only premultiplied linear texture drawn over the background. Both
+  have a complete GPU-generated mip chain and trilinear sampling. A source
   larger than the adapter texture or pixel limit receives an aspect-preserving
   preview prepared by a dedicated replace-latest background worker. Its bounded,
   fallible area resampler works in linear light and premultiplied alpha; the winit
@@ -194,8 +196,10 @@ Shipped:
   failure. A damaged, unsupported, or oversized file does not. A typed output
   contract admits only matching RGBA8 sRGB working pixels and an sRGB
   presentation surface; unsupported surface formats fail explicitly instead of
-  changing the transfer function. A Spot Heal patch updates the base level and
-  regenerates dependent mips. No scene graph.
+  changing the transfer function. A Spot Heal patch updates the base level in
+  that same representation and regenerates dependent mips. A patch that adds
+  transparency to an opaque texture is uploaded again as a whole image. No
+  scene graph.
 - **`color`**: the narrow color contract shared by decode, edits, previews, and
   presentation. It names the working color space and pixel format separately from
   the renderer-owned output transform. The only shipping contract is RGBA8 sRGB
@@ -610,7 +614,8 @@ treatment.
    Current plus collage display pixels are admitted against a transient 640 MiB
    decoded-byte policy. Each background slot is bounded to at most 4 Mi pixels
    and its actual allowance is divided across the remaining slots. Mosaic
-   textures retain the normal output transform and mip chain; there is no
+   textures retain the normal output transform, the opaque or premultiplied
+   upload choice, and the mip chain; there is no
    thumbnail substitution. Image-cache memory does not grow
    with folder length; the lightweight playlist path index necessarily does.
 6. **Panning/zooming is pure GPU.** The decoded frame is a texture; pan and zoom
@@ -671,11 +676,13 @@ and close application. Recovery status copy lives beside the other recovery
 strings so chrome and Save As preflight share one fixed message.
 
 The covered `gpu_image` seam owns CPU-only texture sizing, mip planning,
-linear-light alpha-correct preview preparation, and upload selection. The covered
-`gpu_policy` seam owns first-supported sRGB surface selection, full-resolution
-patch geometry validation, exact placement-buffer packing, and clear-color
-mapping. Neither creates a device resource or owns event-loop state. `gpu.rs`
-keeps the device, queue, surface, texture, pipeline, sampler, mip generation, and
+linear-light alpha-correct preview preparation, straight-alpha upload selection,
+and display-only premultiplied linear encoding. The covered `gpu_policy` seam
+owns first-supported sRGB surface selection, full-resolution patch geometry
+validation, exact placement-buffer packing, clear-color mapping, and checkerboard
+uniform packing. Neither creates a device resource or owns event-loop state.
+`gpu.rs` keeps the device, queue, surface, texture, pipeline, sampler, mip
+generation, and
 frame lifecycle, consuming the validated decisions while preserving one renderer
 owner and the existing asynchronous preview contract.
 

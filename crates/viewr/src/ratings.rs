@@ -2926,7 +2926,7 @@ mod tests {
 
         assert!(matches!(result, Err(MetadataError::Unreadable)));
         assert_eq!(checks, 4);
-        assert!(!reader.is_empty());
+        assert_ne!(reader, []);
     }
 
     #[test]

@@ -164,8 +164,8 @@ pub(crate) enum UiAction {
     Trash,
     /// Undo the last trash operation.
     UndoTrash,
-    /// Set the background color.
-    SetBackground(Option<[f64; 4]>),
+    /// Set the session-only image background. Checkerboard is not persisted.
+    SetBackground(crate::theme::ImageBackground),
     /// Set the application appearance preference.
     SetTheme(crate::theme::Preference),
     /// Set the persisted user-interface language.
@@ -314,8 +314,10 @@ pub(crate) struct UiFrameOwned {
     pub(crate) dock: DockInput,
     /// Whether Save As will retain EXIF (default false = strip).
     pub retain_exif: bool,
-    /// Current image-background override; `None` follows the operating-system theme.
-    pub background_override: Option<[f64; 4]>,
+    /// Session-only image background. Theme default follows the resolved appearance.
+    pub background_override: crate::theme::ImageBackground,
+    /// Whether the decoded image has any alpha byte below 255.
+    pub has_transparency: bool,
     /// User-selected appearance preference.
     pub theme_preference: crate::theme::Preference,
     /// Resolved appearance after applying the system choice.
@@ -357,6 +359,8 @@ pub(crate) struct UiFrameOwned {
     pub details: Option<crate::image_info::ImageDetails>,
     /// How the displayed pixels were normalized for the sRGB render pipeline.
     pub color_profile: Option<crate::decode::ColorProfileStatus>,
+    /// Measured local decode for the opened image. Absent until a file decode is published.
+    pub decode_proof: Option<crate::decode::DecodeProof>,
     /// How the current sRGB swapchain relates to the display that owns the window.
     pub display_output: crate::display_state::DisplayOutputStatus,
     /// Crop tool active.
@@ -2646,7 +2650,7 @@ fn render_dock_side_choices(
 fn background_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
-    current: Option<[f64; 4]>,
+    current: crate::theme::ImageBackground,
     language: Language,
 ) {
     ui.set_min_width(172.0);
@@ -3858,6 +3862,7 @@ fn render_image_info_panel(
                     render_capture_info(ui, frame);
                     render_source_privacy(ui, frame);
                     render_export_privacy(ui, actions, frame);
+                    render_decode_proof(ui, frame);
                 });
         });
 }
@@ -3885,6 +3890,9 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     }
     if let Some(value) = frame.details.as_ref().and_then(format_and_size) {
         ui.label(RichText::new(value).color(colors.muted));
+    }
+    if frame.has_transparency {
+        ui.label(RichText::new(frame.text(tr!("Transparency: yes"))).color(colors.muted));
     }
     if let Some(color_profile) = frame.color_profile {
         ui.label(
@@ -4209,6 +4217,16 @@ fn source_privacy_categories(details: &crate::image_info::ImageDetails) -> Vec<&
     .into_iter()
     .filter_map(|(present, label)| present.then_some(label))
     .collect()
+}
+
+fn render_decode_proof(ui: &mut egui::Ui, frame: &UiFrameOwned) {
+    let Some(proof) = frame.decode_proof else {
+        return;
+    };
+    let colors = chrome_colors(ui);
+    let line = crate::image_info::local_decode_line(frame.language, proof);
+    ui.add_space(8.0);
+    ui.label(RichText::new(line).color(colors.muted));
 }
 
 fn render_export_privacy(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
@@ -5786,7 +5804,8 @@ mod tests {
                 immersive: false,
             },
             retain_exif: false,
-            background_override: None,
+            background_override: crate::theme::ImageBackground::ThemeDefault,
+            has_transparency: false,
             theme_preference: crate::theme::Preference::System,
             theme_mode: crate::theme::Mode::Dark,
             show_about: false,
@@ -5808,6 +5827,7 @@ mod tests {
             pages: None,
             details: None,
             color_profile: Some(crate::decode::ColorProfileStatus::AssumedSrgb),
+            decode_proof: None,
             display_output: crate::display_state::DisplayOutputStatus::SrgbFallback,
             is_cropping: false,
             crop_ratio: crate::crop::CropRatio::Free,
@@ -6701,7 +6721,7 @@ mod tests {
             Some("Photo 5 of 20 in the active folder view"),
             "selection is a state, not part of the name"
         );
-        assert!(selected.is_selected() == Some(true));
+        assert_eq!(selected.is_selected(), Some(true));
         assert_eq!(photo_nodes[1].1.is_selected(), Some(false));
         assert_eq!(
             update.focus, *selected_id,
@@ -6878,7 +6898,7 @@ mod tests {
             .iter()
             .filter_map(|(_, node)| (node.value() == Some(&expected_status)).then_some(node))
             .collect::<Vec<_>>();
-        assert!(!status_nodes.is_empty());
+        assert_ne!(status_nodes, [] as [&egui::accesskit::Node; 0]);
         for node in status_nodes {
             let bounds = node.bounds().expect("status bounds");
             assert!(bounds.x0 >= 0.0 && bounds.x1 <= 640.0);
@@ -7031,6 +7051,41 @@ mod tests {
     }
 
     #[test]
+    fn image_information_names_transparency_only_when_alpha_is_present() {
+        fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            output
+                .platform_output
+                .accesskit_update
+                .expect("transparency AccessKit update should be generated")
+                .nodes
+                .iter()
+                .flat_map(|(_, node)| [node.label(), node.value()])
+                .flatten()
+                .map(str::to_owned)
+                .collect()
+        }
+
+        let opaque = exposed_text(&accessibility_test_frame());
+        assert!(
+            opaque.iter().all(|text| !text.contains("Transparency")),
+            "an opaque image published a transparency line: {opaque:?}"
+        );
+
+        let mut frame = accessibility_test_frame();
+        frame.has_transparency = true;
+        let transparent = exposed_text(&frame);
+        assert!(
+            transparent.iter().any(|text| text == "Transparency: yes"),
+            "missing transparency line; exposed: {transparent:?}"
+        );
+    }
+
+    #[test]
     fn image_information_shows_the_decoder_line_only_for_a_decode_failure() {
         fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
             let context = egui::Context::default();
@@ -7079,6 +7134,182 @@ mod tests {
             truncated.iter().all(|text| !text.contains(&long)),
             "Image Information published the unbounded decoder line: {truncated:?}"
         );
+    }
+
+    fn accesskit_texts(frame: &UiFrameOwned) -> Vec<String> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, frame);
+        });
+        output
+            .platform_output
+            .accesskit_update
+            .expect("decode-proof AccessKit update should be generated")
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[derive(Debug)]
+    struct PlacedText {
+        text: String,
+        x0: f64,
+        x1: f64,
+        y0: f64,
+        y1: f64,
+        text_run: bool,
+    }
+
+    fn placed_texts(frame: &UiFrameOwned) -> Vec<PlacedText> {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("decode-proof AccessKit update should be generated");
+        let mut placed = Vec::new();
+        for (_, node) in &update.nodes {
+            let Some(bounds) = node.bounds() else {
+                continue;
+            };
+            let text_run = node.role() == egui::accesskit::Role::TextRun;
+            for text in [node.label(), node.value()].into_iter().flatten() {
+                placed.push(PlacedText {
+                    text: text.to_owned(),
+                    x0: bounds.x0,
+                    x1: bounds.x1,
+                    y0: bounds.y0,
+                    y1: bounds.y1,
+                    text_run,
+                });
+            }
+        }
+        placed
+    }
+
+    #[test]
+    fn image_information_ends_with_the_local_decode_proof() {
+        let quiet = accesskit_texts(&accessibility_test_frame());
+        assert!(
+            quiet.iter().all(|text| !text.contains("Decoded locally")),
+            "a frame without a file decode published a proof line: {quiet:?}"
+        );
+
+        let mut worker = accessibility_test_frame();
+        worker.decode_proof = Some(crate::decode::DecodeProof {
+            duration: std::time::Duration::from_micros(6_940),
+            route: crate::decode::DecodeRoute::SandboxedWorker,
+        });
+        let proof = "Decoded locally in 6.9 ms, in the sandboxed worker. No network.";
+        let placed = placed_texts(&worker);
+        let proof_row = placed
+            .iter()
+            .find(|row| !row.text_run && row.text == proof)
+            .unwrap_or_else(|| panic!("missing worker proof line: {placed:?}"));
+        let export_row = placed
+            .iter()
+            .find(|row| {
+                !row.text_run
+                    && row.text.contains("Off by default")
+                    && row.text.contains("this session")
+            })
+            .expect("export privacy fact");
+        assert!(
+            proof_row.y0 > export_row.y0,
+            "proof line is not below export privacy: proof {proof_row:?} export {export_row:?}"
+        );
+        let below: Vec<_> = placed
+            .iter()
+            .filter(|row| {
+                if row.text_run || row.text.is_empty() || row.text == proof {
+                    return false;
+                }
+                let center = f64::midpoint(row.x0, row.x1);
+                row.y0 > proof_row.y1 - 0.5
+                    && center >= proof_row.x0 - 24.0
+                    && center <= proof_row.x1 + 24.0
+            })
+            .collect();
+        assert!(
+            below.is_empty(),
+            "text follows the proof line in Image Information: {below:?}"
+        );
+
+        let mut in_process = worker;
+        in_process.decode_proof = Some(crate::decode::DecodeProof {
+            duration: std::time::Duration::from_micros(6_940),
+            route: crate::decode::DecodeRoute::InProcess,
+        });
+        let in_process_labels = accesskit_texts(&in_process);
+        assert!(
+            in_process_labels
+                .iter()
+                .any(|text| text == "Decoded locally in 6.9 ms, in this process. No network."),
+            "missing in-process proof line: {in_process_labels:?}"
+        );
+        assert!(
+            in_process_labels
+                .iter()
+                .all(|text| !text.contains("sandboxed")),
+            "in-process decode named the worker: {in_process_labels:?}"
+        );
+
+        for mode in crate::theme::Mode::ALL {
+            let mut framed = accessibility_test_frame();
+            framed.theme_mode = mode;
+            framed.decode_proof = Some(crate::decode::DecodeProof {
+                duration: std::time::Duration::from_micros(6_940),
+                route: crate::decode::DecodeRoute::SandboxedWorker,
+            });
+            let colors = chrome_colors_for(mode);
+            let context = egui::Context::default();
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, &framed);
+            });
+            let painted = painted_text_color(&output, proof)
+                .unwrap_or_else(|| panic!("{mode:?} did not paint the proof line"));
+            assert_eq!(painted, colors.muted, "{mode:?} proof line is not muted");
+            assert_ne!(painted, colors.accent, "{mode:?} proof line uses accent");
+        }
+    }
+
+    fn painted_text_color(output: &egui::FullOutput, needle: &str) -> Option<egui::Color32> {
+        fn walk(shape: &egui::epaint::Shape, needle: &str) -> Option<egui::Color32> {
+            match shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text.contains(needle) => {
+                    Some(glyph_color(text))
+                }
+                egui::epaint::Shape::Vec(children) => {
+                    children.iter().find_map(|child| walk(child, needle))
+                }
+                _ => None,
+            }
+        }
+        fn glyph_color(text: &egui::epaint::TextShape) -> egui::Color32 {
+            if let Some(color) = text.override_text_color {
+                return color;
+            }
+            text.galley
+                .job
+                .sections
+                .iter()
+                .find_map(|section| {
+                    (section.format.color != egui::Color32::PLACEHOLDER)
+                        .then_some(section.format.color)
+                })
+                .unwrap_or(text.fallback_color)
+        }
+        output
+            .shapes
+            .iter()
+            .find_map(|clipped| walk(&clipped.shape, needle))
     }
 
     #[test]
@@ -9224,6 +9455,10 @@ mod tests {
                     frame.dock.show_tools = true;
                     frame.dock.show_filmstrip = true;
                     frame.dock.show_image_info = true;
+                    frame.decode_proof = Some(crate::decode::DecodeProof {
+                        duration: std::time::Duration::from_micros(6_940),
+                        route: crate::decode::DecodeRoute::InProcess,
+                    });
                     let position = Language::Pseudo
                         .fill(
                             tr!("Page {index} of {count}"),
@@ -10262,7 +10497,7 @@ mod tests {
             let output = context.run_ui(accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
-            assert!(!output.shapes.is_empty());
+            assert_ne!(output.shapes, [] as [egui::epaint::ClippedShape; 0]);
         }
     }
 

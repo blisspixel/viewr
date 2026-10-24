@@ -82,6 +82,30 @@ pub(super) fn palette_to_color(palette: Palette) -> wgpu::Color {
     srgb_clear_color(palette.background)
 }
 
+/// Checkerboard uniform: two linear colors, then the cell size in physical pixels.
+pub(super) const CHECKER_PARAMS_BYTES: u64 = 48;
+
+/// Pack checker colors and the screen-space cell size for the checker shader.
+///
+/// Colors are converted with the same sRGB-to-linear clear-color mapping the
+/// surface uses, so the encoded framebuffer matches the specified bytes.
+pub(super) fn pack_checker_params(dark: [f64; 4], light: [f64; 4], cell_px: f32) -> [u8; 48] {
+    let mut bytes = [0_u8; 48];
+    write_linear_color(&mut bytes[0..16], srgb_clear_color(dark));
+    write_linear_color(&mut bytes[16..32], srgb_clear_color(light));
+    bytes[32..36].copy_from_slice(&cell_px.to_ne_bytes());
+    bytes
+}
+
+fn write_linear_color(dest: &mut [u8], color: wgpu::Color) {
+    for (slot, channel) in [color.r, color.g, color.b, color.a].into_iter().enumerate() {
+        let offset = slot * 4;
+        #[allow(clippy::cast_possible_truncation)]
+        let value = channel as f32;
+        dest[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+}
+
 /// Surface writes encode RGB to sRGB; alpha stays linear.
 pub(super) fn srgb_clear_color([r, g, b, a]: [f64; 4]) -> wgpu::Color {
     let linear = |channel: f64| f64::from(egui::ecolor::linear_from_gamma(channel as f32));
@@ -96,8 +120,8 @@ pub(super) fn srgb_clear_color([r, g, b, a]: [f64; 4]) -> wgpu::Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        PLACEMENT_BYTES, pack_placement, palette_to_color, select_srgb_surface_format,
-        srgb_clear_color, validate_patch_upload,
+        CHECKER_PARAMS_BYTES, PLACEMENT_BYTES, pack_checker_params, pack_placement,
+        palette_to_color, select_srgb_surface_format, srgb_clear_color, validate_patch_upload,
     };
     use crate::color::{OutputColorSpace, WorkingColorEncoding};
     use crate::edit::Rect;
@@ -130,11 +154,8 @@ mod tests {
         let bytes = pack_placement(&placement);
         assert_eq!(PLACEMENT_BYTES, bytes.len() as u64);
 
-        for (actual, expected) in bytes.chunks_exact(4).zip(expected) {
-            assert_eq!(
-                f32::from_ne_bytes(actual.try_into().unwrap()).to_bits(),
-                expected.to_bits()
-            );
+        for (actual, expected) in bytes.as_chunks::<4>().0.iter().zip(expected) {
+            assert_eq!(f32::from_ne_bytes(*actual).to_bits(), expected.to_bits());
         }
     }
 
@@ -292,5 +313,36 @@ mod tests {
                 a: 1.0
             }
         );
+    }
+
+    #[test]
+    fn checker_uniform_round_trips_the_theme_srgb_bytes() {
+        fn displayed_rgb(bytes: &[u8]) -> [u8; 3] {
+            let mut rgb = [0_u8; 3];
+            for (channel, dest) in bytes.as_chunks::<4>().0.iter().take(3).zip(rgb.iter_mut()) {
+                let linear = f32::from_ne_bytes(*channel);
+                *dest = egui::ecolor::gamma_u8_from_linear_f32(linear);
+            }
+            rgb
+        }
+
+        for mode in Mode::ALL {
+            let checker = theme::checkerboard_for(mode);
+            let (dark, light) = checker.srgb();
+            let packed = pack_checker_params(dark, light, 8.0);
+            assert_eq!(
+                CHECKER_PARAMS_BYTES,
+                u64::try_from(packed.len()).expect("checker uniform fits in u64")
+            );
+            assert_eq!(displayed_rgb(&packed[0..16]), checker.dark, "{mode:?}");
+            assert_eq!(displayed_rgb(&packed[16..32]), checker.light, "{mode:?}");
+            let alpha_a = f32::from_ne_bytes(packed[12..16].try_into().unwrap());
+            let alpha_b = f32::from_ne_bytes(packed[28..32].try_into().unwrap());
+            assert_eq!(alpha_a.to_bits(), 1.0_f32.to_bits());
+            assert_eq!(alpha_b.to_bits(), 1.0_f32.to_bits());
+            let cell = f32::from_ne_bytes(packed[32..36].try_into().unwrap());
+            assert_eq!(cell.to_bits(), 8.0_f32.to_bits());
+            assert_eq!(&packed[36..], &[0; 12]);
+        }
     }
 }

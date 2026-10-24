@@ -3,6 +3,9 @@
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use crate::decode::{DecodeProof, DecodeRoute};
+use crate::locale::{Language, tr};
+
 use crc32fast::Hasher;
 use flate2::read::ZlibDecoder;
 use little_exif::exif_tag::ExifTag;
@@ -64,6 +67,27 @@ pub struct ImageDetails {
     pub has_embedded_thumbnail: bool,
     /// Whether opaque maker-specific data is present.
     pub has_maker_specific_data: bool,
+}
+
+/// Static Image Information fact for one opened image.
+///
+/// The time is this image's measured decode, rounded to 0.1 ms. The route
+/// names the sandboxed worker or this process, matching the decoder that
+/// produced the pixels.
+#[must_use]
+pub(crate) fn local_decode_line(language: Language, proof: DecodeProof) -> String {
+    let template = match proof.route {
+        DecodeRoute::SandboxedWorker => {
+            tr!("Decoded locally in {time} ms, in the sandboxed worker. No network.")
+        }
+        DecodeRoute::InProcess => {
+            tr!("Decoded locally in {time} ms, in this process. No network.")
+        }
+    };
+    let time = crate::decode::format_decode_milliseconds(proof.duration);
+    language
+        .fill(template, &[("time", time.as_str())])
+        .into_string()
 }
 
 impl ImageDetails {
@@ -572,7 +596,7 @@ fn read_tiff_metadata(reader: &mut (impl Read + Seek)) -> Option<Vec<u8>> {
         let entries_end = 2_usize.checked_add(entry_count.checked_mul(12)?)?;
         let mut entries = Vec::new();
         entries.try_reserve_exact(entry_count).ok()?;
-        for raw in directory.get(2..entries_end)?.chunks_exact(12) {
+        for raw in directory.get(2..entries_end)?.as_chunks::<12>().0 {
             let tag = endian.read_u16(raw)?;
             if is_tiff_pixel_data_tag(tag) {
                 continue;
@@ -912,7 +936,7 @@ fn validate_tiff_directory(
     }
 
     let mut external = TiffExternalData::default();
-    for entry in payload[entries_start..entries_end].chunks_exact(12) {
+    for entry in payload[entries_start..entries_end].as_chunks::<12>().0 {
         if !validate_tiff_entry(payload, endian, entry, validation, &mut external) {
             return false;
         }
@@ -1077,7 +1101,7 @@ fn tiff_u32_values(
     let component_count = usize::try_from(components).ok()?;
     let mut values = Vec::new();
     values.try_reserve_exact(component_count).ok()?;
-    for bytes in data.chunks_exact(4) {
+    for bytes in data.as_chunks::<4>().0 {
         values.push(endian.read_u32(bytes)?);
     }
     (values.len() == component_count).then_some(values)
@@ -1121,6 +1145,15 @@ fn read_u32_le(reader: &mut impl Read) -> Option<u32> {
     let mut bytes = [0_u8; 4];
     reader.read_exact(&mut bytes).ok()?;
     Some(u32::from_le_bytes(bytes))
+}
+
+/// Whether any packed RGBA8 pixel stores an alpha byte below opaque.
+///
+/// Image Information uses this for the current decoded buffer. A trailing
+/// partial pixel is ignored; callers pass a length that matches the dimensions.
+#[must_use]
+pub(crate) fn rgba_has_transparency(rgba: &[u8]) -> bool {
+    rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255)
 }
 
 /// Format bytes using compact binary units.
@@ -1230,9 +1263,66 @@ const fn greatest_common_divisor(mut left: u32, mut right: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode::{DecodeProof, DecodeRoute};
     use crate::ephemeral::TempWorkspace;
+    use crate::locale::Language;
     use flate2::{Compression, write::ZlibEncoder};
     use std::io::{Cursor, Write};
+    use std::time::Duration;
+
+    #[test]
+    fn transparency_detection_requires_an_alpha_byte_below_opaque() {
+        assert!(!rgba_has_transparency(&[]));
+        assert!(!rgba_has_transparency(&[255, 255, 255, 255, 0, 0, 0, 255]));
+        assert!(rgba_has_transparency(&[255, 0, 0, 254]));
+        assert!(rgba_has_transparency(&[255, 0, 0, 0, 0, 0, 255, 255]));
+        assert!(!rgba_has_transparency(&[1, 2, 3]));
+        assert!(rgba_has_transparency(&[0, 0, 0, 0, 9]));
+    }
+
+    #[test]
+    fn local_decode_line_names_the_route_and_rounds_to_a_tenth() {
+        let in_process = DecodeProof {
+            duration: Duration::from_micros(6_940),
+            route: DecodeRoute::InProcess,
+        };
+        let worker = DecodeProof {
+            duration: Duration::from_micros(6_950),
+            route: DecodeRoute::SandboxedWorker,
+        };
+        assert_eq!(
+            super::local_decode_line(Language::English, in_process),
+            "Decoded locally in 6.9 ms, in this process. No network."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::English, worker),
+            "Decoded locally in 7.0 ms, in the sandboxed worker. No network."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::Spanish, in_process),
+            "Decodificado localmente en 6.9 ms, en este proceso. Sin red."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::Spanish, worker),
+            "Decodificado localmente en 7.0 ms, en el proceso aislado. Sin red."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::French, in_process),
+            "Décodé localement en 6.9 ms, dans ce processus. Aucun réseau."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::French, worker),
+            "Décodé localement en 7.0 ms, dans le processus isolé. Aucun réseau."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::German, in_process),
+            "Lokal in 6.9 ms dekodiert, in diesem Prozess. Kein Netzwerk."
+        );
+        assert_eq!(
+            super::local_decode_line(Language::German, worker),
+            "Lokal in 7.0 ms dekodiert, im isolierten Prozess. Kein Netzwerk."
+        );
+    }
 
     fn minimal_tiff(endian: TiffEndian) -> Vec<u8> {
         let mut bytes = match endian {

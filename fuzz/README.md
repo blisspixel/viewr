@@ -9,10 +9,10 @@ root workspace because sanitizer instrumentation requires nightly Rust.
 Run these commands from the repository root:
 
 ```bash
-rustup toolchain install nightly-2026-07-20 --profile minimal --component rustfmt --component clippy
+rustup toolchain install nightly-2026-08-15 --profile minimal --component rustfmt --component clippy
 cargo install cargo-fuzz --locked --version 0.13.2
-cargo +nightly-2026-07-20 fuzz build decode_memory
-cargo +nightly-2026-07-20 fuzz build protocol_frames
+cargo +nightly-2026-08-15 fuzz build decode_memory
+cargo +nightly-2026-08-15 fuzz build protocol_frames
 ```
 
 The exact nightly and cargo-fuzz version match `.github/workflows/fuzz.yml`.
@@ -47,8 +47,8 @@ and the affected fuzzer.
 ## Local runs
 
 ```bash
-cargo +nightly-2026-07-20 fuzz run decode_memory -- -max_len=1048576 -timeout=30
-cargo +nightly-2026-07-20 fuzz run protocol_frames -- -max_len=1048592 -timeout=30
+cargo +nightly-2026-08-15 fuzz run decode_memory -- -max_len=1048576 -timeout=30
+cargo +nightly-2026-08-15 fuzz run protocol_frames -- -max_len=1048592 -timeout=30
 ```
 
 Pull requests and pushes receive a short smoke run. The scheduled workflow runs

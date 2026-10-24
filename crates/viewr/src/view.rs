@@ -240,8 +240,8 @@ fn fit_to_viewport_with_limit(
     let s = (available_width / iw)
         .min(available_height / ih)
         .min(max_scale);
-    let center_x = (left + right) * 0.5;
-    let center_y = (top + bottom) * 0.5;
+    let center_x = f32::midpoint(left, right);
+    let center_y = f32::midpoint(top, bottom);
     Placement {
         scale: [(iw * s) / vw, (ih * s) / vh],
         offset: [center_x / vw * 2.0 - 1.0, 1.0 - center_y / vh * 2.0],

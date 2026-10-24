@@ -553,6 +553,7 @@ mod tests {
                 height: 1,
                 color_profile: ColorProfileStatus::AssumedSrgb,
                 working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+                decode_proof: None,
             }),
             delay: Duration::from_millis(delay_ms),
         }

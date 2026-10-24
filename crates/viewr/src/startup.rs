@@ -990,7 +990,7 @@ Install one of them, then run viewr again:\n",
                 names(DisplaySession::Wayland),
                 ["libxkbcommon.so.0", "libwayland-client.so.0"]
             );
-            assert!(required_libraries(DisplaySession::None).is_empty());
+            assert_eq!(required_libraries(DisplaySession::None), []);
 
             let runtimes: Vec<&str> = gpu_runtime_libraries()
                 .iter()

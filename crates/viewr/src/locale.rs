@@ -1778,6 +1778,18 @@ const MESSAGES: &[Message] = &[
         german: "Weiß",
     },
     Message {
+        english: "Checkerboard",
+        spanish: "Damero",
+        french: "Damier",
+        german: "Schachbrett",
+    },
+    Message {
+        english: "Transparency: yes",
+        spanish: "Transparencia: sí",
+        french: "Transparence : oui",
+        german: "Transparenz: ja",
+    },
+    Message {
         english: "{label}. {help}",
         spanish: "{label}. {help}",
         french: "{label}. {help}",
@@ -2274,6 +2286,18 @@ const MESSAGES: &[Message] = &[
         spanish: "Color · {profile}",
         french: "Couleur · {profile}",
         german: "Farbe · {profile}",
+    },
+    Message {
+        english: "Decoded locally in {time} ms, in the sandboxed worker. No network.",
+        spanish: "Decodificado localmente en {time} ms, en el proceso aislado. Sin red.",
+        french: "Décodé localement en {time} ms, dans le processus isolé. Aucun réseau.",
+        german: "Lokal in {time} ms dekodiert, im isolierten Prozess. Kein Netzwerk.",
+    },
+    Message {
+        english: "Decoded locally in {time} ms, in this process. No network.",
+        spanish: "Decodificado localmente en {time} ms, en este proceso. Sin red.",
+        french: "Décodé localement en {time} ms, dans ce processus. Aucun réseau.",
+        german: "Lokal in {time} ms dekodiert, in diesem Prozess. Kein Netzwerk.",
     },
     Message {
         english: "Display · {status}",
@@ -4221,10 +4245,10 @@ mod tests {
         assert_eq!(load_from(&path), Load::Recovered(Recovery::Oversized));
 
         for message in MESSAGES {
-            assert!(!message.english.is_empty());
-            assert!(!message.spanish.is_empty());
-            assert!(!message.french.is_empty());
-            assert!(!message.german.is_empty());
+            assert_ne!(message.english, "");
+            assert_ne!(message.spanish, "");
+            assert_ne!(message.french, "");
+            assert_ne!(message.german, "");
         }
     }
 
@@ -4273,7 +4297,7 @@ mod tests {
             Recovery::Unreadable,
             Recovery::ConfigurationUnavailable,
         ] {
-            assert!(!recovery.diagnostic_name().is_empty());
+            assert_ne!(recovery.diagnostic_name(), "");
             assert!(!recovery.notice().contains(['\\', '/']));
         }
         for error in [
@@ -4284,7 +4308,7 @@ mod tests {
             SaveError::SyncFailed,
             SaveError::ReplaceFailed,
         ] {
-            assert!(!error.diagnostic_name().is_empty());
+            assert_ne!(error.diagnostic_name(), "");
         }
         assert!(!save_failure_message().contains(['\\', '/']));
     }

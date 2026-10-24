@@ -28,7 +28,10 @@ they do not replace source review or platform signing.
   and license text while ignoring presentation order, line endings, and repository
   link changes that do not alter the shipped license obligations. Host-sensitive
   license detection is resolved only through checksum-backed source-file
-  clarifications in `about.toml`.
+  clarifications in `about.toml`. A Dependabot lockfile update also has to refresh
+  `packaging/flatpak/cargo-sources.json`. `python -B scripts/refresh_dependency_records.py`
+  rewrites those two records, and `.github/workflows/dependabot-records.yml` runs
+  that command from the base branch for a same-repository Dependabot pull request.
 - A GitHub artifact attestation binds a published asset digest to the repository and
   workflow identity recorded by GitHub. It does not make an unsigned executable a
   platform-signed application.
@@ -92,14 +95,20 @@ it does not replace human Linux desktop or portal acceptance.
 The Windows installer smoke test uses disposable files and mocked downloads. It
 checks a clean install, reinstall, and a forced activation failure after the old
 directory is moved aside. The failure must restore every prior file byte for byte
-and leave no staging or backup directory. It does not prove that Start menu,
-associations, or uninstallation work on every Windows configuration.
+and leave no staging or backup directory. It then refuses to uninstall a directory
+that contains an unexpected file, and uninstalls the owned directory, a disposable
+PATH entry, and a shortcut that opens that `viewr.exe` while leaving an unrelated
+shortcut. It does not prove associations or the real user Start Menu.
 The Unix installer integration tests use disposable files and mocked downloads.
 They check failed release and command activation against the previous installation,
 and require an explicit retained-backup path if a simulated filesystem failure
 also prevents restoration. These tests run on Linux and macOS CI hosts.
 They also reject extra visible or hidden files, linked entries, and modified
 ownership markers before replacing a release directory, preserving those bytes.
+`install.sh uninstall` removes an owned release, its command symlink, and the
+Linux launcher and icon when those are regular files. It leaves an unexpected
+file, a command outside the install root, and MIME defaults in place, and it
+does not contact the network.
 
 ## 3. Build the exact target
 

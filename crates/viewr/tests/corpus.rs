@@ -139,6 +139,7 @@ fn lossless_save_preserves_pixels_exactly() {
         height: 48,
         color_profile: viewr::decode::ColorProfileStatus::AssumedSrgb,
         working_color: viewr::color::WorkingColorEncoding::SRGB_RGBA8,
+        decode_proof: None,
     };
     let out = ws.path().join("roundtrip.png");
     edit::save(&original, &out).unwrap();

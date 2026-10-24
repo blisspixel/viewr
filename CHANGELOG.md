@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- `install.sh uninstall` and `install.ps1 -Uninstall` remove an installer-owned
+  viewr directory, the command or PATH entry that points at it, and the Linux
+  launcher and icon or the Windows Start menu shortcut that opens it. A directory
+  with any other file stays in place. File associations and photos are left
+  unchanged.
+- Image Information ends with the measured local decode time for the opened
+  image, rounded to 0.1 ms, and whether the sandboxed worker or the in-process
+  decoder produced it. The line is static muted text and states that decoding
+  used no network.
+- `viewr doctor` names the in-memory decode self-test and that it used no
+  network.
+- The README hero names Windows, macOS, and Linux. Fast by design cites one
+  measured `viewr benchmark` row and the command that produced it.
+- Composite transparent pixels over the image background. Opaque images keep
+  the sRGB texture path. A session-only Checkerboard draws under the image
+  rectangle only. Image Information shows `Transparency: yes` when the decoded
+  image has any alpha below 255. Saved pixels stay unchanged.
+
 ## 0.7.5 - 2026-10-21
 
 - Explain a failed open in one short sentence. A damaged, unsupported, or

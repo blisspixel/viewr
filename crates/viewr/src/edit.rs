@@ -120,6 +120,7 @@ impl PixelTransform {
             height: output_size.1,
             color_profile: source.color_profile,
             working_color: source.working_color,
+            decode_proof: source.decode_proof,
         })
     }
 }
@@ -477,6 +478,7 @@ fn crop_while(
         height: r.height,
         color_profile: src.color_profile,
         working_color: src.working_color,
+        decode_proof: src.decode_proof,
     }))
 }
 
@@ -722,7 +724,7 @@ fn encode_pixels_only(
         let mut rgb = Vec::new();
         rgb.try_reserve_exact(rgb_len)
             .map_err(|error| Error::Encode(format!("could not allocate RGB export: {error}")))?;
-        for pixel in image.rgba.chunks_exact(4) {
+        for pixel in image.rgba.as_chunks::<4>().0 {
             rgb.extend_from_slice(&pixel[..3]);
         }
         image::write_buffer_with_format(
@@ -858,6 +860,7 @@ mod tests {
             height: 4,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -872,11 +875,18 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
     fn red_channels(image: &DecodedImage) -> Vec<u8> {
-        image.rgba.chunks_exact(4).map(|pixel| pixel[0]).collect()
+        image
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect()
     }
 
     fn solid_rgba(w: u32, h: u32) -> DecodedImage {
@@ -890,6 +900,7 @@ mod tests {
             height: h,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -942,7 +953,7 @@ mod tests {
         assert_eq!(out.width, 2);
         assert_eq!(out.height, 2);
         assert_eq!(out.working_color, WorkingColorEncoding::SRGB_RGBA8);
-        let reds: Vec<u8> = out.rgba.chunks_exact(4).map(|p| p[0]).collect();
+        let reds: Vec<u8> = out.rgba.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
         assert_eq!(reds, vec![5, 6, 9, 10]);
     }
 
@@ -993,6 +1004,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert!(
             crop(
@@ -1044,6 +1056,7 @@ mod tests {
                 height: rotated.height,
                 color_profile: source.color_profile,
                 working_color: source.working_color,
+                decode_proof: None,
             }),
             vec![4, 1, 5, 2, 6, 3]
         );
@@ -1057,6 +1070,7 @@ mod tests {
             rgba: Vec::new(),
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert_eq!(
             clipboard_image(&oversized, PixelTransform::default()),
@@ -1069,6 +1083,7 @@ mod tests {
             rgba: vec![1, 2, 3],
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert_eq!(
             clipboard_image(&malformed, PixelTransform::default()),
@@ -1081,6 +1096,7 @@ mod tests {
             rgba: Vec::new(),
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert_eq!(
             clipboard_image(&empty, PixelTransform::default()),
@@ -1123,6 +1139,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert!(PixelTransform::default().apply(&malformed).is_err());
     }
@@ -1135,6 +1152,7 @@ mod tests {
             height: 4,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         let ws = TempWorkspace::new("edit_bad").unwrap();
         let path = ws.path().join("viewr_bad.png");
@@ -1162,6 +1180,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         let ws = TempWorkspace::new("edit_jpeg").unwrap();
         let path = ws.path().join("viewr_jpeg.jpg");

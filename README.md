@@ -1,6 +1,6 @@
 # viewr
 
-**Fast photos. No account. No tracking. No subscription.**
+**Fast photos on Windows, macOS and Linux. No account. No tracking. No subscription.**
 
 [![CI](https://github.com/blisspixel/viewr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/blisspixel/viewr/actions/workflows/ci.yml)
 
@@ -23,7 +23,9 @@ history, crash-report uploader, or automatic update check.
 
 - **Fast by design.** Decoding begins while the window initializes, neighboring
   images are prefetched within fixed memory limits, extra cores fill those slots,
-  and performance budgets run in CI.
+  and performance budgets run in CI. On 2026-10-23 a Windows development host
+  recorded a 1.28 ms median for the 640 by 480 `mem_b.png` row of
+  `viewr benchmark` with no folder argument, which measures the in-memory corpus.
 - **Private by construction.** The application dependency graph contains no HTTP
   or TLS client. Photos, paths, metadata, ratings, and diagnostics stay local.
   Local network shares (NAS, SMB, NFS) are accessed through standard operating-system
@@ -196,8 +198,9 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 - **Dark** uses low-glare charcoal chrome.
 - **Console** uses near-black chrome, phosphor-green text, and monospace type.
 
-Image Background independently offers Theme Default, Black, Neutral Gray, and
-White. Appearance changes interface chrome and canvas only, never image pixels.
+Image Background independently offers Theme Default, Black, Neutral Gray,
+White, and a session-only Checkerboard. Appearance changes interface chrome
+and canvas only, never image pixels.
 v0.7.3 corrects overly light canvas backgrounds in the previous
 v0.7.2 preview so they match the specified appearance colors.
 Windows Text size and GNOME text scaling enlarge the interface when the window

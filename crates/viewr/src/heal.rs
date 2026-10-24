@@ -1705,6 +1705,7 @@ mod tests {
             height,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -1721,6 +1722,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert!(matches!(
             SpotHealJob::prepare(&malformed, &[StrokePoint { x: 1.0, y: 1.0 }], 4),
@@ -1732,6 +1734,7 @@ mod tests {
             height: u32::MAX,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         assert!(matches!(
             SpotHealJob::prepare(
@@ -1784,6 +1787,7 @@ mod tests {
             height: 2_100,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
         let result = SpotHealJob::prepare(
             &image,
@@ -1885,7 +1889,7 @@ mod tests {
         let width = 15;
         let height = 7;
         let mut rgba = vec![100_u8; width * height * CHANNELS];
-        for pixel in rgba.chunks_exact_mut(CHANNELS) {
+        for pixel in rgba.as_chunks_mut::<CHANNELS>().0 {
             pixel[3] = 255;
         }
         let set_gray = |rgba: &mut [u8], x: usize, y: usize, value: u8| {

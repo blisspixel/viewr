@@ -940,7 +940,7 @@ fn doctor_to(
     match decode_self_test() {
         Ok((w, h, ms)) => {
             report.row(&format!(
-                "{DOCTOR_OK}decode self-test: {w}x{h} PNG in {ms:.2} ms"
+                "{DOCTOR_OK}decode self-test: {w}x{h} PNG in {ms:.2} ms, in memory, no network"
             ))?;
         }
         Err(e) => {
@@ -1473,19 +1473,19 @@ mod tests {
     fn static_commands_report_their_contract() {
         let (code, help, error) = invoke(Invocation::Help(HelpTopic::Overview));
         assert_eq!(code, ExitCode::SUCCESS);
-        assert!(error.is_empty());
+        assert_eq!(error, "");
         assert!(help.contains("Usage:"));
         assert!(help.contains("No network client"));
         assert!(help.contains("Add --help to any command"));
 
         let (code, version, error) = invoke(Invocation::Version);
         assert_eq!(code, ExitCode::SUCCESS);
-        assert!(error.is_empty());
+        assert_eq!(error, "");
         assert!(version.starts_with("viewr "));
 
         let (code, update, error) = invoke(Invocation::Update);
         assert_eq!(code, ExitCode::SUCCESS);
-        assert!(error.is_empty());
+        assert_eq!(error, "");
         assert!(update.contains("never checks for or downloads updates"));
         assert!(update.contains(OFFICIAL_RELEASES_URL));
         assert!(OFFICIAL_LATEST_RELEASE_URL.starts_with(OFFICIAL_RELEASES_URL));
@@ -1503,8 +1503,8 @@ mod tests {
 
         let (code, output, error) = invoke(Invocation::Gui { image: None });
         assert_eq!(code, ExitCode::FAILURE);
-        assert!(output.is_empty());
-        assert!(error.is_empty());
+        assert_eq!(output, "");
+        assert_eq!(error, "");
     }
 
     #[test]
@@ -1515,9 +1515,13 @@ mod tests {
 
         let readiness = window_readiness();
         let (code, output, error) = invoke(Invocation::Doctor);
-        assert!(error.is_empty());
+        assert_eq!(error, "");
         assert!(output.contains("Binaries, decode, and privacy"));
         assert!(output.contains("decode self-test: 64x48 PNG"));
+        assert!(
+            output.contains(" ms, in memory, no network"),
+            "doctor self-test should name memory and no network: {output}"
+        );
         assert!(output.contains("Window presentation"));
         assert!(!output.contains("[FAIL]"));
         assert!(!output.contains("[WARN]"));
@@ -1559,7 +1563,7 @@ mod tests {
             ReportStyle::plain(60),
         );
         assert_eq!(code, ExitCode::SUCCESS);
-        assert!(error.is_empty());
+        assert_eq!(error, "");
         assert!(!help.contains('\u{1b}'));
         for line in help.lines() {
             assert!(line.chars().count() <= 60, "{line}");
@@ -1576,7 +1580,7 @@ mod tests {
         );
 
         let (_code, doctor, doctor_error) = invoke_with(Invocation::Doctor, ReportStyle::plain(60));
-        assert!(doctor_error.is_empty());
+        assert_eq!(doctor_error, "");
         assert!(!doctor.contains('\u{1b}'));
         for line in doctor.lines() {
             assert!(line.chars().count() <= 60, "{line}");
@@ -1824,7 +1828,7 @@ mod tests {
         benchmark_to(None, &mut stdout, &mut stderr, false, false).unwrap();
 
         let output = String::from_utf8(stdout).unwrap();
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
         assert!(output.contains("in-memory corpus (no temp files written)"));
         assert!(output.contains("mem_a.png"));
         assert!(output.contains("mem_b.png"));

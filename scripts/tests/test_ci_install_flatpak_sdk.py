@@ -81,15 +81,15 @@ class CiInstallFlatpakSdkTests(unittest.TestCase):
         match = CHANNEL.search(TOOLCHAIN.read_text(encoding="utf-8"))
         self.assertIsNotNone(match)
         channel = match.group(1)
-        self.assertEqual(channel, "1.96.0")
+        self.assertEqual(channel, "1.99.1")
         self.assertIn(f"RUST_VERSION={channel}", self.script)
-        self.assertIn("RUST_DIST_DATE=2026-05-28", self.script)
+        self.assertIn("RUST_DIST_DATE=2026-10-15", self.script)
         self.assertIn(
             'RUST_URL="https://static.rust-lang.org/dist/${RUST_DIST_DATE}/${RUST_TARBALL}"',
             self.script,
         )
         self.assertIn(
-            "c295047583a56238ea06b43f849f4b877fa12bfd4c7103f8d9a74c94c9c4e108",
+            "231fcae47ee950621374725b5fc3b5441d2fbda2955ac45dd7dc816d8876cfe7",
             self.script,
         )
         self.assertIn("curl --fail --location --proto =https --tlsv1.2", self.script)
@@ -98,3 +98,21 @@ class CiInstallFlatpakSdkTests(unittest.TestCase):
         self.assertIn("--disable-download", self.script)
         self.assertIn("install_flathub_rust_stable", self.script)
         self.assertIn("install_pinned_rust_stable_extension", self.script)
+        self.assertIn(
+            "flatpak run --user --command=/usr/lib/sdk/rust-stable/bin/rustc \\",
+            self.script,
+        )
+        self.assertIn("org.freedesktop.Sdk//25.08 --version", self.script)
+        self.assertIn("sort -C -V", self.script)
+        self.assertIn("version_meets_pin", self.script)
+        self.assertIn(
+            "flatpak uninstall --user --assumeyes --noninteractive \\\n"
+            "    org.freedesktop.Sdk.Extension.rust-stable//25.08",
+            self.script,
+        )
+        self.assertNotIn(
+            'if retry_fn "Flathub rust-stable" install_flathub_rust_stable; then\n'
+            "  exit 0\n"
+            "fi\n",
+            self.script,
+        )

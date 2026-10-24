@@ -807,6 +807,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -817,6 +818,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 
@@ -829,8 +831,8 @@ mod tests {
         assert_eq!(neighbor_indices(4, 5, Forward, 3, 1), vec![3]);
         assert_eq!(neighbor_indices(1, 5, Backward, 3, 1), vec![0, 2]);
         assert_eq!(neighbor_indices(2, 5, Forward, 1, 1), vec![3, 1]);
-        assert!(neighbor_indices(0, 0, Forward, 3, 1).is_empty());
-        assert!(neighbor_indices(9, 5, Forward, 3, 1).is_empty());
+        assert_eq!(neighbor_indices(0, 0, Forward, 3, 1), [] as [usize; 0]);
+        assert_eq!(neighbor_indices(9, 5, Forward, 3, 1), [] as [usize; 0]);
         assert_eq!(super::Heading::between(3, 5), Some(Forward));
         assert_eq!(super::Heading::between(5, 3), Some(Backward));
         assert_eq!(super::Heading::between(4, 4), None);

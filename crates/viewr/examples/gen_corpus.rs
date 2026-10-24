@@ -24,7 +24,7 @@ fn synthesize(width: u32, height: u32) -> RgbImage {
         let v = y as f32 / fh;
         let r = (u * 255.0) as u8;
         let g = (v * 255.0) as u8;
-        let b = (((u + v) * 0.5 + 0.25 * (u * 12.0).sin()) * 255.0).clamp(0.0, 255.0) as u8;
+        let b = ((f32::midpoint(u, v) + 0.25 * (u * 12.0).sin()) * 255.0).clamp(0.0, 255.0) as u8;
         *pixel = Rgb([r, g, b]);
     }
     img

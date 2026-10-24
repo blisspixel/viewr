@@ -108,6 +108,9 @@ disappears. This spec is the converged result of two rounds of design critique
   export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
   risk-category presence without displaying raw sensitive values, and states that
   the limited scan cannot prove other metadata or hidden pixel data is absent.
+  Its last line states the opened image's measured local decode time, rounded
+  to 0.1 ms, names the sandboxed worker or this process, and says decoding
+  used no network, as static muted text.
   View > Panels or `I` toggles it, and
   View > Panel Position independently docks it on the left or right.
 - View > Panels renders `T`, `G`, and `I` as right-aligned accelerators on selected
@@ -206,14 +209,29 @@ disappears. This spec is the converged result of two rounds of design critique
 - The default image background follows the resolved appearance. Dark uses deep
   ink `#0B0E14`; light uses `#F4F5F7` rather than pure white so bright photos
   retain an edge; Console uses `#010502`. View also offers explicit black,
-  neutral-gray, and white inspection backgrounds independently of chrome.
-  Palette and inspection RGB values are decoded to linear values before the
-  sRGB surface encodes the clear color; alpha is kept unchanged.
+  neutral-gray, white, and a session-only checkerboard, independently of
+  chrome. Checkerboard is not saved. Solid choices replace the clear color.
+  Checkerboard keeps the theme clear color in the letterbox and paints an
+  8-logical-pixel screen-space pattern only under each image rectangle, so
+  zoom does not change the cell size. Dark uses `#1A1D24` and `#232731`,
+  Light `#E6E8EC` and `#F4F5F7`, Console `#05100A` and `#0B1A10`. High
+  contrast uses two neutrals near its canvas, not the accent. Palette,
+  inspection, and checker RGB values are decoded to linear values before the
+  sRGB surface encodes them; alpha is kept unchanged.
 - Dark mode retains accent amber `#F7A845`. Light uses a darker amber that remains
   legible on a bright panel. Console uses phosphor green. In every theme, the
   accent marks active or affirmative state only, never decoration.
-- Decoded image pixels use an sRGB GPU texture and mip chain. A bounded embedded
-  RGB ICC profile is converted to sRGB before upload; Image Information reports
+- Opaque images use an sRGB GPU texture, replace blending, and the existing
+  mip chain, so a fully opaque JPEG keeps today's display bytes. When any
+  source alpha byte is below 255, a display-only buffer is premultiplied in
+  linear light, uploaded to a linear RGBA8 texture, and drawn with
+  premultiplied blending over that background. Stored pixels and Save As stay
+  straight and unchanged. CPU tests prove the premultiply, a partial-edge
+  linear reference, and that fully transparent RGB does not tint the preview
+  or a folder thumbnail. A hardware screenshot of the blended frame was not
+  collected. Image Information adds `Transparency: yes` only when the decoded
+  image has an alpha byte below 255. A bounded embedded RGB ICC profile is
+  converted to sRGB before upload; Image Information reports
   conversion or fallback status. The window's display identity is tracked, and
   Image Information reports the sRGB swapchain as operating-system managed, as
   a display profile applied on an unmanaged path, or as a fallback. Unmanaged
@@ -542,9 +560,9 @@ and unsupported containers, remain visibly read-only.
   unavailable, full-texture presentation is attempted. If both fail, exact
   inverse pixels are restored and history remains unchanged. An internal inverse
   failure automatically reloads the selected source. Successful edits regenerate
-  the dependent mip chain. If the GPU cannot display the complete decoded image
-  in one texture, Spot Heal is
-  unavailable instead of risking an edit at the wrong source coordinate.
+  the dependent mip chain in the texture's representation. If the GPU cannot
+  display the complete decoded image in one texture, Spot Heal is unavailable
+  instead of risking an edit at the wrong source coordinate.
 - `Ctrl+Z` or `Command+Z` undoes an in-memory pixel patch, the shifted equivalent
   redoes it, and Esc leaves the tool. A submitted repair finishes and applies
   after the inspector closes; navigation clears edit history and any stale worker

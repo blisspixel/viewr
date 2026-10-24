@@ -20,7 +20,136 @@ need() {
     command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
 
+action=install
+if [ $# -gt 0 ]; then
+    case "$1" in
+        uninstall) action=uninstall ;;
+        *) fail "unsupported installer action: $1" ;;
+    esac
+    shift
+fi
+[ $# -eq 0 ] || fail "unsupported installer action: $1"
+
 [ -n "${HOME:-}" ] || fail "HOME is not set"
+case "$INSTALL_ROOT" in
+    /*) ;;
+    *) fail "VIEWR_INSTALL_ROOT must be an absolute path" ;;
+esac
+case "$BIN_DIR" in
+    /*) ;;
+    *) fail "VIEWR_BIN_DIR must be an absolute path" ;;
+esac
+[ "$INSTALL_ROOT" != "/" ] || fail "VIEWR_INSTALL_ROOT must not be the filesystem root"
+[ "$BIN_DIR" != "/" ] || fail "VIEWR_BIN_DIR must not be the filesystem root"
+
+release_is_owned() {
+    release_dir=$1
+    [ -d "$release_dir" ] && [ ! -L "$release_dir" ] || return 1
+    marker="$release_dir/.viewr-install"
+    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+    grep -Fqx "repository=$REPOSITORY" "$marker"
+}
+
+release_entries_are_owned() {
+    release_dir=$1
+    for entry in "$release_dir"/* "$release_dir"/.[!.]* "$release_dir"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        case "${entry##*/}" in
+            .viewr-install|viewr|viewr-decode|LICENSE|NOTICE|README.md|THIRD_PARTY_LICENSES.txt|release-manifest.json)
+                [ -f "$entry" ] && [ ! -L "$entry" ] || return 1
+                ;;
+            *) return 1 ;;
+        esac
+    done
+    return 0
+}
+
+remove_regular_file() {
+    target=$1
+    if [ -f "$target" ] && [ ! -L "$target" ]; then
+        rm -f -- "$target"
+        removed=1
+    fi
+}
+
+uninstall_viewr() {
+    need grep
+    need readlink
+    need rm
+    need uname
+    releases_dir="$INSTALL_ROOT/releases"
+    command_link="$BIN_DIR/viewr"
+    removed=0
+
+    if [ -e "$command_link" ] || [ -L "$command_link" ]; then
+        [ -L "$command_link" ] ||
+            fail "refusing to remove a non-symlink command: $command_link"
+        link_target=$(readlink "$command_link" || true)
+        case "$link_target" in
+            "$releases_dir/"*/viewr) ;;
+            *) fail "refusing to remove a symlink not owned by the viewr installer: $command_link" ;;
+        esac
+        link_release=${link_target%/viewr}
+        release_is_owned "$link_release" ||
+            fail "refusing to remove a symlink without a valid viewr ownership marker: $command_link"
+        release_entries_are_owned "$link_release" ||
+            fail "refusing to remove an installation with an unexpected path: $link_release"
+    fi
+
+    if [ -e "$releases_dir" ] || [ -L "$releases_dir" ]; then
+        [ -d "$releases_dir" ] && [ ! -L "$releases_dir" ] ||
+            fail "refusing to remove an installation that is not a regular directory: $releases_dir"
+        set +f
+        for child in "$releases_dir"/* "$releases_dir"/.[!.]* "$releases_dir"/..?*; do
+            [ -e "$child" ] || [ -L "$child" ] || continue
+            release_is_owned "$child" ||
+                fail "refusing to remove an installation with an unexpected path: $child"
+            release_entries_are_owned "$child" ||
+                fail "refusing to remove an installation with an unexpected path: $child"
+        done
+        set -f
+    fi
+
+    if [ -L "$command_link" ]; then
+        rm -f -- "$command_link"
+        removed=1
+    fi
+    if [ -d "$releases_dir" ] && [ ! -L "$releases_dir" ]; then
+        set +f
+        for child in "$releases_dir"/* "$releases_dir"/.[!.]* "$releases_dir"/..?*; do
+            [ -e "$child" ] || [ -L "$child" ] || continue
+            rm -rf -- "$child"
+            removed=1
+        done
+        set -f
+        rmdir "$releases_dir" 2>/dev/null || true
+    fi
+    if [ -d "$INSTALL_ROOT" ] && [ ! -L "$INSTALL_ROOT" ]; then
+        rmdir "$INSTALL_ROOT" 2>/dev/null || true
+    fi
+
+    os=$(uname -s)
+    if [ "$os" = "Linux" ]; then
+        applications_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+        icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+        for desktop_id in io.github.blisspixel.viewr com.github.blisspixel.viewr; do
+            remove_regular_file "$applications_dir/$desktop_id.desktop"
+            remove_regular_file "$icons_dir/$desktop_id.svg"
+        done
+    fi
+
+    if [ "$removed" -eq 1 ]; then
+        printf '%s\n' "Removed viewr from $INSTALL_ROOT"
+    else
+        printf '%s\n' "viewr is not installed"
+    fi
+}
+
+if [ "$action" = "uninstall" ]; then
+    uninstall_viewr
+    exit 0
+fi
+
 need curl
 need awk
 need cmp
@@ -37,17 +166,6 @@ need tr
 need uname
 need unzip
 need wc
-
-case "$INSTALL_ROOT" in
-    /*) ;;
-    *) fail "VIEWR_INSTALL_ROOT must be an absolute path" ;;
-esac
-case "$BIN_DIR" in
-    /*) ;;
-    *) fail "VIEWR_BIN_DIR must be an absolute path" ;;
-esac
-[ "$INSTALL_ROOT" != "/" ] || fail "VIEWR_INSTALL_ROOT must not be the filesystem root"
-[ "$BIN_DIR" != "/" ] || fail "VIEWR_BIN_DIR must not be the filesystem root"
 
 os=$(uname -s)
 arch=$(uname -m)

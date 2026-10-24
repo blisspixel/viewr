@@ -10,6 +10,7 @@ use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::color::WorkingColorEncoding;
 use crate::error::Error;
@@ -497,6 +498,7 @@ impl SourceImage {
             height: self.height,
             color_profile,
             working_color: WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         }
     }
 }
@@ -514,6 +516,48 @@ pub struct DecodedImage {
     pub color_profile: ColorProfileStatus,
     /// Complete color-space and storage interpretation for `rgba`.
     pub working_color: WorkingColorEncoding,
+    /// Local file-decode measurement. Absent for derived pixels and in-memory
+    /// diagnostics. Not persisted and not logged.
+    pub decode_proof: Option<DecodeProof>,
+}
+
+/// Where one file decode ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecodeRoute {
+    /// Pure-Rust decoder in this process.
+    InProcess,
+    /// Isolated `viewr-decode` worker.
+    SandboxedWorker,
+}
+
+/// Measured local file decode for one opened image.
+///
+/// The clock covers the decoder call after the source handle is open. It does
+/// not include a queue wait, and it is not stored as a preference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DecodeProof {
+    /// Time spent in the chosen decoder.
+    pub duration: Duration,
+    /// Whether the sandboxed worker or the in-process decoder produced the pixels.
+    pub route: DecodeRoute,
+}
+
+/// The same worker-or-process choice `load` uses for a path.
+#[must_use]
+pub(crate) fn decode_route(path: &Path) -> DecodeRoute {
+    if crate::fs::is_worker_format(path) {
+        DecodeRoute::SandboxedWorker
+    } else {
+        DecodeRoute::InProcess
+    }
+}
+
+/// Round a decode duration to 0.1 ms, half up.
+#[must_use]
+pub(crate) fn format_decode_milliseconds(duration: Duration) -> String {
+    const NANOS_PER_TENTH_MS: u128 = 100_000;
+    let tenths = duration.as_nanos().saturating_add(NANOS_PER_TENTH_MS / 2) / NANOS_PER_TENTH_MS;
+    format!("{}.{}", tenths / 10, tenths % 10)
 }
 
 /// Pixels plus live ownership of the exact source object used to decode them.
@@ -867,7 +911,9 @@ impl DecodedImage {
             .clone_for_decode()
             .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
 
-        let result = if crate::fs::is_worker_format(path) {
+        let started = Instant::now();
+        let route = decode_route(path);
+        let result = if matches!(route, DecodeRoute::SandboxedWorker) {
             crate::sandbox::load_via_worker(path, file, generation)
         } else if ext == "jxl" {
             Self::load_jxl(file, generation)
@@ -876,12 +922,14 @@ impl DecodedImage {
         } else {
             Self::load_core_image(path, file, generation)
         };
+        let duration = started.elapsed();
 
         before_publish();
         if !source.version_is_current_while(|| generation.is_current()) {
             return Ok(None);
         }
-        result.map(|image| {
+        result.map(|mut image| {
+            image.decode_proof = Some(DecodeProof { duration, route });
             Some(LoadedImage {
                 image: Arc::new(image),
                 source,
@@ -1651,13 +1699,13 @@ pub(crate) fn positive_f32_to_px(v: f32) -> u32 {
 mod tests {
     use super::{
         CloseLatestJobQueueOnLastExit, ColorNormalizer, ColorProfileStatus, DecodeGate,
-        DecodeGateState, DecodeGeneration, DecodePriority, DecodedImage, GenerationReader,
-        LatestJobQueue, MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION, MAX_ICC_PROFILE_BYTES,
-        MAX_SVG_ATTRIBUTE_BYTES, MAX_SVG_ATTRIBUTES, MAX_SVG_GEOMETRY_TOKENS,
-        MIN_CONCURRENT_FILE_DECODES, PNG_SIGNATURE, SourceImage, SourceOpen,
-        acquire_decode_permit_from, max_concurrent_file_decodes_for, positive_f32_to_px,
-        run_guarded_latest_queue, svg_geometry_tokens, try_schedule_background,
-        validate_dimensions,
+        DecodeGateState, DecodeGeneration, DecodePriority, DecodeRoute, DecodedImage,
+        GenerationReader, LatestJobQueue, MAX_CONCURRENT_FILE_DECODES, MAX_DECODE_DIMENSION,
+        MAX_ICC_PROFILE_BYTES, MAX_SVG_ATTRIBUTE_BYTES, MAX_SVG_ATTRIBUTES,
+        MAX_SVG_GEOMETRY_TOKENS, MIN_CONCURRENT_FILE_DECODES, PNG_SIGNATURE, SourceImage,
+        SourceOpen, acquire_decode_permit_from, decode_route, format_decode_milliseconds,
+        max_concurrent_file_decodes_for, positive_f32_to_px, run_guarded_latest_queue,
+        svg_geometry_tokens, try_schedule_background, validate_dimensions,
     };
     use crate::color::WorkingColorEncoding;
     use crate::ephemeral::TempWorkspace;
@@ -2003,6 +2051,59 @@ mod tests {
         assert_eq!(decoded.rgba.len(), 8 * 6 * 4);
         assert_eq!(decoded.color_profile, ColorProfileStatus::AssumedSrgb);
         assert_eq!(decoded.working_color, WorkingColorEncoding::SRGB_RGBA8);
+        let proof = decoded
+            .decode_proof
+            .expect("a file decode records its route");
+        assert_eq!(proof.route, DecodeRoute::InProcess);
+        assert!(proof.duration < Duration::from_secs(30));
+        let bytes = fs::read(&path).unwrap();
+        assert!(
+            DecodedImage::load_from_memory(&bytes)
+                .unwrap()
+                .decode_proof
+                .is_none(),
+            "an in-memory diagnostic decode is not an opened file"
+        );
+    }
+
+    #[test]
+    fn decode_route_follows_the_worker_extension_decision() {
+        assert_eq!(
+            decode_route(std::path::Path::new("photo.avif")),
+            DecodeRoute::SandboxedWorker
+        );
+        assert_eq!(
+            decode_route(std::path::Path::new("photo.HEIC")),
+            DecodeRoute::SandboxedWorker
+        );
+        assert_eq!(
+            decode_route(std::path::Path::new("photo.png")),
+            DecodeRoute::InProcess
+        );
+        assert_eq!(
+            decode_route(std::path::Path::new("photo.jxl")),
+            DecodeRoute::InProcess
+        );
+    }
+
+    #[test]
+    fn decode_time_rounds_to_a_tenth_of_a_millisecond() {
+        assert_eq!(
+            format_decode_milliseconds(Duration::from_micros(6_940)),
+            "6.9"
+        );
+        assert_eq!(
+            format_decode_milliseconds(Duration::from_micros(6_950)),
+            "7.0"
+        );
+        assert_eq!(format_decode_milliseconds(Duration::from_micros(40)), "0.0");
+        assert_eq!(format_decode_milliseconds(Duration::from_micros(50)), "0.1");
+        assert_eq!(
+            format_decode_milliseconds(Duration::from_millis(12)),
+            "12.0"
+        );
+        assert_eq!(format_decode_milliseconds(Duration::ZERO), "0.0");
+        assert_eq!(format_decode_milliseconds(Duration::from_secs(3)), "3000.0");
     }
 
     #[test]

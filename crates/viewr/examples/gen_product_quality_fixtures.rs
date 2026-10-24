@@ -238,7 +238,7 @@ fn write_tiff(path: &Path) -> anyhow::Result<()> {
         (WIDTH / 2, HEIGHT / 2, [30, 60, 210]),
     ] {
         let mut pixels = vec![0_u8; usize::try_from(width * height * 3)?];
-        for pixel in pixels.chunks_exact_mut(3) {
+        for pixel in pixels.as_chunks_mut::<3>().0 {
             pixel.copy_from_slice(&color);
         }
         encoder.write_image::<tiff::encoder::colortype::RGB8>(width, height, &pixels)?;

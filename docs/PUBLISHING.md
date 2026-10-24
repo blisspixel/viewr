@@ -110,8 +110,8 @@ Four version states must not be conflated:
    currently v0.7.5. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.5`, the published copy, open-failure, doctor, and Windows path-spelling
-   patch.
+   `0.7.6`, preparing the transparency, local-decode-proof, and
+   installer-uninstall patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -153,6 +153,15 @@ reviewed objc2 0.6.5 retain fix. It requires the complete automated gate and
 one exact candidate; it does not close hardware, native assistive-technology,
 or v0.8 acceptance work.
 
+The v0.7.6 preparation uses the same narrow exception for transparent-pixel
+compositing, the local decode proof, removal of an installer-owned tree, and
+the related doctor and README proof already reviewed on main. It includes the
+reviewed Rust 1.99.1 pin and the clipboard-win 5.4.3 replacement for the
+yanked 5.4.1 release. It requires the complete automated gate and one exact
+candidate. It does not close hardware, native assistive-technology, the
+repeated 50,000-file rating probe, macOS update, full file-association
+acceptance, or the rest of the v0.8 acceptance work.
+
 Application source, dependencies, workflows, packaging, or user-facing behavior
 instructions changed after a candidate run invalidate that candidate and all
 evidence affected by it. Evidence records, actual release dates, public
@@ -188,7 +197,7 @@ production environment.
    validator when the required platform records are available:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.5
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.6
    ```
 
 2. On a feature branch, make the single version transition described in

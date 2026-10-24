@@ -241,12 +241,23 @@ def _load_identity(repository_root: Path) -> tuple[str, str]:
     return version, channel
 
 
+# Notes published after the static floor. The update job still verifies the
+# published v0.7.4 archive, which does not contain later notes. A listed
+# archive version includes every notes file through its own version. Any
+# other version, including release-artifact test fixtures, appends only its
+# own notes file.
+_RELEASE_NOTES_THROUGH = {
+    "0.7.5": ("docs/releases/v0.7.5.md",),
+    "0.7.6": (
+        "docs/releases/v0.7.5.md",
+        "docs/releases/v0.7.6.md",
+    ),
+}
+
+
 def _archive_documentation_paths(version: str) -> tuple[str, ...]:
-    # The static list is also the contract for already published archives.
-    # Notes for a version that is not yet public stay out of that list and
-    # are appended only for the archive being built or checked.
-    current_release_notes = f"docs/releases/v{version}.md"
-    return tuple(dict.fromkeys((*ARCHIVE_DOCUMENTATION_PATHS, current_release_notes)))
+    extra = _RELEASE_NOTES_THROUGH.get(version, (f"docs/releases/v{version}.md",))
+    return tuple(dict.fromkeys((*ARCHIVE_DOCUMENTATION_PATHS, *extra)))
 
 
 def _canonical_text(path: Path, description: str) -> bytes:

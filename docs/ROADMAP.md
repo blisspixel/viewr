@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.5](https://github.com/blisspixel/viewr/releases/tag/v0.7.5), the copy, open-failure, doctor, and Windows path-spelling patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.5`, the published copy, open-failure, doctor, and Windows path-spelling patch |
+| Workspace version | `0.7.6`, preparing the transparency, local-decode-proof, and installer-uninstall patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.7.6** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -220,12 +220,16 @@ or accessibility evidence gates.
 | Plain-language failed opens | Shipped v0.7.5 | A failed open shows one catalog sentence. Retry appears only when a later try can succeed. Image Information keeps the decoder's own line. `viewr benchmark` prints that sentence, and `--verbose` adds the decoder line. |
 | Windows catalog spelling | Shipped v0.7.5 | On Windows, a file dialog and a folder listing that differ only in capitalization name the same file. The catalog keeps its rating, Trash and a folder refresh cannot bring that file back under the other spelling, and the session stores the listing's spelling. Other platforms stay case-sensitive. |
 | Same-length rewrite rejection | Shipped v0.7.5 | A same-length in-place rewrite is rejected when the filesystem leaves the change time unchanged. Accepted sources keep an in-memory SHA-256 witness on every platform and fail closed before a rating or metadata write. The digest is not stored or logged. |
-| Transparency inspection | Implemented | Checkerboard is the last View > Image Background choice and is session-only. Any alpha below 255 composites in premultiplied linear light over the background; opaque images stay on the sRGB replace path. Stored pixels and Save As are unchanged. Image Information shows `Transparency: yes` only for those images. Tests prove detection, premultiply, checker colors and cell size, menu order, and the information line. A hardware screenshot, collage upload capture, and animation frame were not collected. |
+| Transparency inspection | Implemented, unreleased | Checkerboard is the last View > Image Background choice and is session-only. Any alpha below 255 composites in premultiplied linear light over the background; opaque images stay on the sRGB replace path. Stored pixels and Save As are unchanged. Image Information shows `Transparency: yes` only for those images. Tests prove detection, premultiply, checker colors and cell size, menu order, and the information line. A hardware screenshot, collage upload capture, and animation frame were not collected. |
+| Local decode proof | Implemented, unreleased | Image Information ends with the measured local decode time for a successful file open, rounded to 0.1 ms, and whether the sandboxed worker or the in-process decoder produced it. The line states that decoding used no network. A crop does not clear it. In-memory diagnostics do not show it. |
+| Doctor decode self-test | Implemented, unreleased | `viewr doctor` names the in-memory PNG decode self-test and that it used no network. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
 failed opens, Windows catalog spelling, same-length rewrite rejection, the
-Linux window identity, and two-line top-bar notices shipped in v0.7.5. The
+Linux window identity, and two-line top-bar notices shipped in v0.7.5.
+Transparency inspection, the local decode proof, the doctor decode self-test,
+and removal of an installer-owned tree are implemented and unreleased. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points

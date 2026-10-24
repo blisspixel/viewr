@@ -1153,7 +1153,7 @@ fn read_u32_le(reader: &mut impl Read) -> Option<u32> {
 /// partial pixel is ignored; callers pass a length that matches the dimensions.
 #[must_use]
 pub(crate) fn rgba_has_transparency(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(4).any(|pixel| pixel[3] < 255)
+    rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255)
 }
 
 /// Format bytes using compact binary units.
@@ -1266,6 +1266,9 @@ mod tests {
     use crate::decode::{DecodeProof, DecodeRoute};
     use crate::ephemeral::TempWorkspace;
     use crate::locale::Language;
+    use flate2::{Compression, write::ZlibEncoder};
+    use std::io::{Cursor, Write};
+    use std::time::Duration;
 
     #[test]
     fn transparency_detection_requires_an_alpha_byte_below_opaque() {
@@ -1276,9 +1279,6 @@ mod tests {
         assert!(!rgba_has_transparency(&[1, 2, 3]));
         assert!(rgba_has_transparency(&[0, 0, 0, 0, 9]));
     }
-    use flate2::{Compression, write::ZlibEncoder};
-    use std::io::{Cursor, Write};
-    use std::time::Duration;
 
     #[test]
     fn local_decode_line_names_the_route_and_rounds_to_a_tenth() {

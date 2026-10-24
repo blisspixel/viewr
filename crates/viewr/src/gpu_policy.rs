@@ -319,8 +319,8 @@ mod tests {
     fn checker_uniform_round_trips_the_theme_srgb_bytes() {
         fn displayed_rgb(bytes: &[u8]) -> [u8; 3] {
             let mut rgb = [0_u8; 3];
-            for (channel, dest) in bytes.chunks_exact(4).take(3).zip(rgb.iter_mut()) {
-                let linear = f32::from_ne_bytes(channel.try_into().unwrap());
+            for (channel, dest) in bytes.as_chunks::<4>().0.iter().take(3).zip(rgb.iter_mut()) {
+                let linear = f32::from_ne_bytes(*channel);
                 *dest = egui::ecolor::gamma_u8_from_linear_f32(linear);
             }
             rgb

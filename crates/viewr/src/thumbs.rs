@@ -918,6 +918,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         })
         .unwrap();
         assert_eq!(
@@ -949,6 +950,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         })
         .unwrap();
         assert_eq!(
@@ -956,13 +958,20 @@ mod tests {
             (target_width, target_height)
         );
         assert!(
-            filtered.rgba.chunks_exact(4).all(|pixel| pixel[0] == 0),
+            filtered
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[0] == 0),
             "transparent red tinted the thumbnail: {:?}",
             filtered.rgba
         );
         let right = usize::try_from(target_width / 2).unwrap();
         let straight_right_red = straight.as_raw()[right * 4..]
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|pixel| pixel[0])
             .max()
             .unwrap_or(0);

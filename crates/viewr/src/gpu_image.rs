@@ -336,7 +336,12 @@ pub(crate) fn premultiply_linear_rgba8(straight_srgb: &[u8]) -> Result<Vec<u8>, 
         })?;
     out.resize(straight_srgb.len(), 0);
     let linear = srgb_decode_table();
-    for (src, dst) in straight_srgb.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
+    for (src, dst) in straight_srgb
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(out.as_chunks_mut::<4>().0)
+    {
         let alpha = f32::from(src[3]) / 255.0;
         dst[0] = unit_to_byte(linear[usize::from(src[0])] * alpha);
         dst[1] = unit_to_byte(linear[usize::from(src[1])] * alpha);

@@ -1778,6 +1778,18 @@ const MESSAGES: &[Message] = &[
         german: "Weiß",
     },
     Message {
+        english: "Checkerboard",
+        spanish: "Damero",
+        french: "Damier",
+        german: "Schachbrett",
+    },
+    Message {
+        english: "Transparency: yes",
+        spanish: "Transparencia: sí",
+        french: "Transparence : oui",
+        german: "Transparenz: ja",
+    },
+    Message {
         english: "{label}. {help}",
         spanish: "{label}. {help}",
         french: "{label}. {help}",

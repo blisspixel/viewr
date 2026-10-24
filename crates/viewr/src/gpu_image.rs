@@ -4,6 +4,8 @@
 //! native adapter in `gpu` consumes these validated decisions and remains the sole
 //! owner of GPU resources.
 
+use std::borrow::Cow;
+
 use crate::color::{OutputColorTransform, WorkingColorEncoding};
 use crate::decode::{ColorProfileStatus, DecodedImage};
 use crate::error::Error;
@@ -109,7 +111,10 @@ pub(crate) fn preview_spec(
 }
 
 /// Build a linear-light, alpha-correct area preview with bounded allocation.
-/// Returning `Ok(None)` means the generation was canceled between output rows.
+///
+/// The returned bytes stay straight sRGB RGBA. Fully transparent RGB does not
+/// contribute. Returning `Ok(None)` means the generation was canceled between
+/// output rows.
 pub(crate) fn prepare_image_preview(
     image: &DecodedImage,
     spec: PreviewSpec,
@@ -258,6 +263,88 @@ pub(crate) fn select_image_upload<'a>(
     }
 }
 
+/// Bytes ready for one image texture, without mutating the stored image.
+pub(crate) struct TextureUpload<'a> {
+    /// `true` when `rgba` is premultiplied linear RGBA8 for an `Rgba8Unorm` texture.
+    pub(crate) premultiplied: bool,
+    /// Straight sRGB when `premultiplied` is false. The borrow is the caller's buffer.
+    pub(crate) rgba: Cow<'a, [u8]>,
+}
+
+/// Patch bytes for a texture that already has a representation, or a request to
+/// upload the whole image because a straight sRGB texture cannot take new alpha.
+pub(crate) enum PatchUploadBytes<'a> {
+    /// Write these bytes into the existing texture.
+    Inline(Cow<'a, [u8]>),
+    /// The patch introduces transparency into an opaque sRGB texture.
+    NeedsFullUpload,
+}
+
+/// Choose the display texture for straight sRGB working pixels.
+///
+/// Opaque buffers are borrowed unchanged. Any alpha byte below 255 selects a
+/// new premultiplied linear buffer. The input is not modified.
+pub(crate) fn prepare_texture_upload(straight_srgb: &[u8]) -> Result<TextureUpload<'_>, Error> {
+    if !straight_srgb.len().is_multiple_of(4) {
+        return Err(Error::Gpu("display pixels are not packed RGBA".to_owned()));
+    }
+    if !crate::image_info::rgba_has_transparency(straight_srgb) {
+        return Ok(TextureUpload {
+            premultiplied: false,
+            rgba: Cow::Borrowed(straight_srgb),
+        });
+    }
+    Ok(TextureUpload {
+        premultiplied: true,
+        rgba: Cow::Owned(premultiply_linear_rgba8(straight_srgb)?),
+    })
+}
+
+/// Encode one Spot Heal patch for the texture representation already in use.
+pub(crate) fn encode_patch_for_texture(
+    straight_srgb: &[u8],
+    premultiplied_texture: bool,
+) -> Result<PatchUploadBytes<'_>, Error> {
+    if !straight_srgb.len().is_multiple_of(4) {
+        return Err(Error::Gpu("patch pixels are not packed RGBA".to_owned()));
+    }
+    if premultiplied_texture {
+        return Ok(PatchUploadBytes::Inline(Cow::Owned(
+            premultiply_linear_rgba8(straight_srgb)?,
+        )));
+    }
+    if crate::image_info::rgba_has_transparency(straight_srgb) {
+        return Ok(PatchUploadBytes::NeedsFullUpload);
+    }
+    Ok(PatchUploadBytes::Inline(Cow::Borrowed(straight_srgb)))
+}
+
+/// Premultiply straight sRGB RGBA8 into linear light.
+///
+/// RGB is decoded with the sRGB transfer, multiplied by alpha, and stored as
+/// 8-bit linear. Alpha is copied unchanged. A fully transparent pixel stores
+/// zero RGB, so its source color contributes nothing.
+pub(crate) fn premultiply_linear_rgba8(straight_srgb: &[u8]) -> Result<Vec<u8>, Error> {
+    if !straight_srgb.len().is_multiple_of(4) {
+        return Err(Error::Gpu("display pixels are not packed RGBA".to_owned()));
+    }
+    let mut out = Vec::new();
+    out.try_reserve_exact(straight_srgb.len())
+        .map_err(|error| {
+            Error::Gpu(format!("could not allocate premultiplied display: {error}"))
+        })?;
+    out.resize(straight_srgb.len(), 0);
+    let linear = srgb_decode_table();
+    for (src, dst) in straight_srgb.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
+        let alpha = f32::from(src[3]) / 255.0;
+        dst[0] = unit_to_byte(linear[usize::from(src[0])] * alpha);
+        dst[1] = unit_to_byte(linear[usize::from(src[1])] * alpha);
+        dst[2] = unit_to_byte(linear[usize::from(src[2])] * alpha);
+        dst[3] = src[3];
+    }
+    Ok(out)
+}
+
 fn srgb_decode_table() -> &'static [f32; 256] {
     static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
@@ -320,7 +407,8 @@ fn nonnegative_floor_to_u32(value: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImagePreview, MAX_GPU_BASE_PIXELS, PreviewSpec, mip_level_count, prepare_image_preview,
+        ImagePreview, MAX_GPU_BASE_PIXELS, PatchUploadBytes, PreviewSpec, encode_patch_for_texture,
+        mip_level_count, premultiply_linear_rgba8, prepare_image_preview, prepare_texture_upload,
         preview_spec, select_image_upload, texture_dimensions,
     };
     use crate::color::{OutputColorTransform, WorkingColorEncoding};
@@ -507,7 +595,150 @@ mod tests {
         let preview = prepare_image_preview(&alpha, spec, || false)
             .unwrap()
             .unwrap();
+        // Fully transparent red must not tint the opaque blue. A straight
+        // average of those bytes would be about [128, 0, 128, 128].
         assert_eq!(preview.rgba, [0, 0, 255, 128]);
+        assert_ne!(preview.rgba, [128, 0, 128, 128]);
+        assert_ne!(preview.rgba, [127, 0, 127, 128]);
+
+        let edge = decoded_image(
+            vec![255, 0, 0, 128, 0, 0, 255, 255],
+            2,
+            1,
+            WorkingColorEncoding::SRGB_RGBA8,
+        );
+        let edge_preview = prepare_image_preview(&edge, spec, || false)
+            .unwrap()
+            .unwrap();
+        let expected = linear_edge_reference();
+        for (actual, target) in edge_preview.rgba.iter().zip(expected) {
+            assert!(
+                actual.abs_diff(target) <= 1,
+                "partial edge {actual} drifted from linear reference {target}; got {:?}",
+                edge_preview.rgba
+            );
+        }
+        assert!(
+            edge_preview.rgba[0].abs_diff(127) > 20,
+            "partial edge collapsed to a straight RGB average: {:?}",
+            edge_preview.rgba
+        );
+    }
+
+    /// Independent IEC transfer for a half-covered red pixel beside opaque blue.
+    fn linear_edge_reference() -> [u8; 4] {
+        fn srgb_to_linear(byte: u8) -> f64 {
+            let encoded = f64::from(byte) / 255.0;
+            if encoded <= 0.040_45 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        fn linear_to_srgb(linear: f64) -> u8 {
+            let encoded = if linear <= 0.003_130_8 {
+                linear * 12.92
+            } else {
+                1.055 * linear.powf(1.0 / 2.4) - 0.055
+            };
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            {
+                (encoded.clamp(0.0, 1.0) * 255.0).round() as u8
+            }
+        }
+        let alpha0 = 128.0 / 255.0;
+        let alpha1 = 1.0;
+        let total_weight = 2.0;
+        let alpha_sum = alpha0 + alpha1;
+        let red = srgb_to_linear(255) * alpha0;
+        let blue = srgb_to_linear(255) * alpha1;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let alpha = ((alpha_sum / total_weight).clamp(0.0, 1.0) * 255.0).round() as u8;
+        [
+            linear_to_srgb(red / alpha_sum),
+            0,
+            linear_to_srgb(blue / alpha_sum),
+            alpha,
+        ]
+    }
+
+    #[test]
+    fn premultiply_matches_linear_light_and_leaves_opaque_bytes_unchanged() {
+        let transparent_red = [255_u8, 0, 0, 0];
+        let cleared = premultiply_linear_rgba8(&transparent_red).unwrap();
+        assert_eq!(cleared, [0, 0, 0, 0]);
+
+        let edge = [128_u8, 64, 200, 128];
+        let encoded = premultiply_linear_rgba8(&edge).unwrap();
+        assert_eq!(encoded[3], 128);
+        let alpha = 128.0 / 255.0;
+        let expect = |byte: u8| {
+            let encoded_channel = f64::from(byte) / 255.0;
+            let linear = if encoded_channel <= 0.040_45 {
+                encoded_channel / 12.92
+            } else {
+                ((encoded_channel + 0.055) / 1.055).powf(2.4)
+            };
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            {
+                (linear * alpha * 255.0).round() as u8
+            }
+        };
+        for (actual, source) in encoded[..3].iter().zip(edge[..3].iter().copied()) {
+            let target = expect(source);
+            assert!(
+                actual.abs_diff(target) <= 1,
+                "channel {source} stored {actual}, reference {target}"
+            );
+        }
+
+        let source = [255_u8, 0, 0, 0, 10, 20, 30, 255];
+        let original = source;
+        let combined = premultiply_linear_rgba8(&source).unwrap();
+        assert_eq!(source, original);
+        assert_eq!(&combined[..4], &[0, 0, 0, 0]);
+        assert_eq!(combined[7], 255);
+
+        let opaque = [128_u8, 128, 128, 255, 4, 5, 6, 255];
+        let upload = prepare_texture_upload(&opaque).unwrap();
+        assert!(!upload.premultiplied);
+        assert!(matches!(upload.rgba, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(&*upload.rgba, &opaque);
+
+        let mixed = [255_u8, 0, 0, 0, 0, 0, 255, 255];
+        let upload = prepare_texture_upload(&mixed).unwrap();
+        assert!(upload.premultiplied);
+        assert_eq!(&upload.rgba[..4], &[0, 0, 0, 0]);
+        assert_eq!(&upload.rgba[4..], &[0, 0, 255, 255]);
+        assert!(prepare_texture_upload(&[1, 2, 3]).is_err());
+        assert!(premultiply_linear_rgba8(&[1, 2, 3]).is_err());
+
+        let opaque_patch = [8_u8, 8, 8, 255];
+        match encode_patch_for_texture(&opaque_patch, false).unwrap() {
+            PatchUploadBytes::Inline(bytes) => assert_eq!(&*bytes, &opaque_patch),
+            PatchUploadBytes::NeedsFullUpload => panic!("opaque patch fits a straight texture"),
+        }
+        assert!(matches!(
+            encode_patch_for_texture(&transparent_red, false).unwrap(),
+            PatchUploadBytes::NeedsFullUpload
+        ));
+        match encode_patch_for_texture(&transparent_red, true).unwrap() {
+            PatchUploadBytes::Inline(bytes) => assert_eq!(&*bytes, &[0, 0, 0, 0]),
+            PatchUploadBytes::NeedsFullUpload => panic!("premultiplied texture accepts the patch"),
+        }
+        let gray = [128_u8, 128, 128, 255];
+        match encode_patch_for_texture(&gray, true).unwrap() {
+            PatchUploadBytes::Inline(bytes) => {
+                assert_eq!(bytes[3], 255);
+                assert_ne!(
+                    bytes[0], 128,
+                    "opaque gray in a linear texture stays sRGB-encoded"
+                );
+            }
+            PatchUploadBytes::NeedsFullUpload => {
+                panic!("premultiplied texture accepts opaque gray")
+            }
+        }
     }
 
     #[test]

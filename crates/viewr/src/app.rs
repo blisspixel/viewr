@@ -107,7 +107,9 @@ use crate::session::{
     ForegroundLoadFailure, ForegroundLoadFailureDisposition, ForegroundRetryPlan,
     foreground_retry_plan, resolve_foreground_load_failure,
 };
-use crate::theme::{Preference, PreferenceRecovery, appearance_save_failure_message};
+use crate::theme::{
+    ImageBackground, Preference, PreferenceRecovery, appearance_save_failure_message,
+};
 use crate::thumbs::{self, ThumbnailCompletion};
 use crate::ui::FilmstripItem;
 use crate::ui::{ToastAnnouncement, ToastView};
@@ -268,7 +270,8 @@ fn run_internal(
         image_info_side: crate::chrome::DockSide::Right,
         // Privacy default: Save As strips EXIF/GPS unless the user opts in.
         retain_exif: false,
-        bg_override: None,
+        bg_override: ImageBackground::default(),
+        presented_has_transparency: false,
         theme_preference: appearance.preference(),
         preference_recovery_notice: startup_preference_recovery_notice(
             appearance_recovery,
@@ -1196,7 +1199,10 @@ struct App {
     image_info_side: crate::chrome::DockSide,
     /// When true, Save As copies EXIF from the source. Default **false** (strip).
     retain_exif: bool,
-    bg_override: Option<[f64; 4]>,
+    /// Session-only image background. Not a persisted preference.
+    bg_override: ImageBackground,
+    /// True when the presented working buffer has any alpha byte below 255.
+    presented_has_transparency: bool,
     /// Persisted application-chrome and default-canvas appearance.
     theme_preference: Preference,
     /// Abnormal preference fallback to announce once the first window is ready.
@@ -2385,6 +2391,20 @@ impl App {
         self.show_toast(message);
     }
 
+    fn set_current_image(&mut self, image: Option<Arc<DecodedImage>>) {
+        self.presented_has_transparency = image
+            .as_ref()
+            .is_some_and(|image| crate::image_info::rgba_has_transparency(&image.rgba));
+        self.current_image = image;
+    }
+
+    fn refresh_presented_transparency(&mut self) {
+        self.presented_has_transparency = self
+            .current_image
+            .as_ref()
+            .is_some_and(|image| crate::image_info::rgba_has_transparency(&image.rgba));
+    }
+
     fn finish_image_presentation(
         &mut self,
         path: &Path,
@@ -2424,7 +2444,7 @@ impl App {
         } else {
             true
         };
-        self.current_image = Some(image);
+        self.set_current_image(Some(image));
         self.current_preview = preview.cloned();
         self.current_source = source;
         self.current_image_reuse = kind.image_reuse();
@@ -2566,7 +2586,7 @@ impl App {
         self.pending_gone_notice = false;
         self.source_gone = false;
         self.last_coherence_action = None;
-        self.current_image = None;
+        self.set_current_image(None);
         self.current_preview = None;
         self.current_source = None;
         self.current_rating_capability = RatingWriteCapability::UnsafeSource;
@@ -2808,7 +2828,7 @@ impl App {
             ));
             return;
         }
-        self.current_image = Some(image);
+        self.set_current_image(Some(image));
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
     }
 
@@ -2821,7 +2841,7 @@ impl App {
             return Ok(());
         }
         self.upload_realtime_image(image)?;
-        self.current_image = Some(Arc::clone(image));
+        self.set_current_image(Some(Arc::clone(image)));
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
         Ok(())
     }
@@ -2868,7 +2888,7 @@ impl App {
         }
         let size_changed = previous_size
             .is_some_and(|(width, height)| width != image.width || height != image.height);
-        self.current_image = Some(image);
+        self.set_current_image(Some(image));
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
         if size_changed {
             self.fit_to_view();
@@ -2892,7 +2912,7 @@ impl App {
             ));
             return;
         }
-        self.current_image = Some(image);
+        self.set_current_image(Some(image));
         self.current_image_reuse = ImageReuseEligibility::Ineligible;
     }
 
@@ -5951,6 +5971,7 @@ impl App {
                 match apply_result {
                     Ok(()) => {
                         self.current_image_reuse = ImageReuseEligibility::Ineligible;
+                        self.refresh_presented_transparency();
                         self.show_toast(heal_success_message(
                             self.language,
                             replacing_latest,
@@ -6001,6 +6022,7 @@ impl App {
         match result {
             Ok(true) => {
                 self.current_image_reuse = ImageReuseEligibility::Ineligible;
+                self.refresh_presented_transparency();
                 self.heal.refresh = None;
                 self.show_toast(self.language.localize(tr!("Undid spot heal")));
             }
@@ -6037,6 +6059,7 @@ impl App {
         match result {
             Ok(true) => {
                 self.current_image_reuse = ImageReuseEligibility::Ineligible;
+                self.refresh_presented_transparency();
                 self.heal.refresh = None;
                 self.show_toast(self.language.localize(tr!("Redid spot heal")));
             }
@@ -9062,11 +9085,7 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 };
 
-                if let Some(bg) = bg_override {
-                    renderer.set_clear_color(bg);
-                } else {
-                    renderer.set_mode(theme_mode);
-                }
+                renderer.sync_image_background(bg_override, theme_mode);
 
                 let placement = if mosaic_ui.is_none()
                     && let Some(size) = renderer.image_size()
@@ -9106,6 +9125,7 @@ impl ApplicationHandler<UserEvent> for App {
                     dock,
                     retain_exif,
                     background_override: bg_override,
+                    has_transparency: self.presented_has_transparency,
                     theme_preference,
                     theme_mode,
                     show_about,

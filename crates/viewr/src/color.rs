@@ -1,7 +1,9 @@
 //! Explicit contracts between decoded source pixels, working pixels, and display output.
 //!
 //! The current shipping path is deliberately narrow: RGBA8 pixels encoded in
-//! sRGB are sampled through an sRGB GPU texture and presented to an sRGB surface.
+//! sRGB are presented to an sRGB surface. Opaque images are sampled through an
+//! sRGB GPU texture. Any alpha below 255 is sampled from a display-only
+//! premultiplied linear texture. Stored working pixels stay straight RGBA8.
 //! Keeping that contract typed prevents a future wide-gamut or higher-precision
 //! decoder from being accepted by the RGBA8 path and clipped implicitly.
 

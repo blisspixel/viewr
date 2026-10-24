@@ -110,9 +110,11 @@ every redraw. This is the difference between "flips through a folder instantly" 
 quality and color management right rather than accepting a framework's defaults.
 See `ARCHITECTURE.md` for the texture-cache strategy.
 
-The shipped SDR path uses an sRGB image texture, generates every mip level on the
-GPU after upload or a pixel patch, and samples trilinearly. Sources larger than the
-adapter texture or pixel limit receive a bounded preview prepared on a cancellable
+The shipped SDR path keeps an opaque image on an sRGB texture. Any alpha byte
+below 255 uses a display-only premultiplied linear texture. Both generate every
+mip level on the GPU after upload or a pixel patch and sample trilinearly.
+Sources larger than the adapter texture or pixel limit receive a bounded preview
+prepared on a cancellable
 replace-latest background worker. The preview uses a linear-light, alpha-correct
 area filter and fallible output allocation, while full decoded pixels remain
 available to export. Embedded RGB ICC profiles are normalized into sRGB before

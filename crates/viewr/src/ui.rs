@@ -164,8 +164,8 @@ pub(crate) enum UiAction {
     Trash,
     /// Undo the last trash operation.
     UndoTrash,
-    /// Set the background color.
-    SetBackground(Option<[f64; 4]>),
+    /// Set the session-only image background. Checkerboard is not persisted.
+    SetBackground(crate::theme::ImageBackground),
     /// Set the application appearance preference.
     SetTheme(crate::theme::Preference),
     /// Set the persisted user-interface language.
@@ -314,8 +314,10 @@ pub(crate) struct UiFrameOwned {
     pub(crate) dock: DockInput,
     /// Whether Save As will retain EXIF (default false = strip).
     pub retain_exif: bool,
-    /// Current image-background override; `None` follows the operating-system theme.
-    pub background_override: Option<[f64; 4]>,
+    /// Session-only image background. Theme default follows the resolved appearance.
+    pub background_override: crate::theme::ImageBackground,
+    /// Whether the decoded image has any alpha byte below 255.
+    pub has_transparency: bool,
     /// User-selected appearance preference.
     pub theme_preference: crate::theme::Preference,
     /// Resolved appearance after applying the system choice.
@@ -2646,7 +2648,7 @@ fn render_dock_side_choices(
 fn background_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
-    current: Option<[f64; 4]>,
+    current: crate::theme::ImageBackground,
     language: Language,
 ) {
     ui.set_min_width(172.0);
@@ -3885,6 +3887,9 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     }
     if let Some(value) = frame.details.as_ref().and_then(format_and_size) {
         ui.label(RichText::new(value).color(colors.muted));
+    }
+    if frame.has_transparency {
+        ui.label(RichText::new(frame.text(tr!("Transparency: yes"))).color(colors.muted));
     }
     if let Some(color_profile) = frame.color_profile {
         ui.label(
@@ -5786,7 +5791,8 @@ mod tests {
                 immersive: false,
             },
             retain_exif: false,
-            background_override: None,
+            background_override: crate::theme::ImageBackground::ThemeDefault,
+            has_transparency: false,
             theme_preference: crate::theme::Preference::System,
             theme_mode: crate::theme::Mode::Dark,
             show_about: false,
@@ -7027,6 +7033,41 @@ mod tests {
                 .iter()
                 .any(|text| text.contains("Display · sRGB, display profile applied")),
             "missing applied display-profile status; exposed: {applied:?}"
+        );
+    }
+
+    #[test]
+    fn image_information_names_transparency_only_when_alpha_is_present() {
+        fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let output = context.run_ui(accessibility_input(), |ui| {
+                let _ = render(ui, frame);
+            });
+            output
+                .platform_output
+                .accesskit_update
+                .expect("transparency AccessKit update should be generated")
+                .nodes
+                .iter()
+                .flat_map(|(_, node)| [node.label(), node.value()])
+                .flatten()
+                .map(str::to_owned)
+                .collect()
+        }
+
+        let opaque = exposed_text(&accessibility_test_frame());
+        assert!(
+            opaque.iter().all(|text| !text.contains("Transparency")),
+            "an opaque image published a transparency line: {opaque:?}"
+        );
+
+        let mut frame = accessibility_test_frame();
+        frame.has_transparency = true;
+        let transparent = exposed_text(&frame);
+        assert!(
+            transparent.iter().any(|text| text == "Transparency: yes"),
+            "missing transparency line; exposed: {transparent:?}"
         );
     }
 

@@ -1123,6 +1123,15 @@ fn read_u32_le(reader: &mut impl Read) -> Option<u32> {
     Some(u32::from_le_bytes(bytes))
 }
 
+/// Whether any packed RGBA8 pixel stores an alpha byte below opaque.
+///
+/// Image Information uses this for the current decoded buffer. A trailing
+/// partial pixel is ignored; callers pass a length that matches the dimensions.
+#[must_use]
+pub(crate) fn rgba_has_transparency(rgba: &[u8]) -> bool {
+    rgba.chunks_exact(4).any(|pixel| pixel[3] < 255)
+}
+
 /// Format bytes using compact binary units.
 #[must_use]
 pub fn format_file_size(bytes: u64) -> String {
@@ -1231,6 +1240,16 @@ const fn greatest_common_divisor(mut left: u32, mut right: u32) -> u32 {
 mod tests {
     use super::*;
     use crate::ephemeral::TempWorkspace;
+
+    #[test]
+    fn transparency_detection_requires_an_alpha_byte_below_opaque() {
+        assert!(!rgba_has_transparency(&[]));
+        assert!(!rgba_has_transparency(&[255, 255, 255, 255, 0, 0, 0, 255]));
+        assert!(rgba_has_transparency(&[255, 0, 0, 254]));
+        assert!(rgba_has_transparency(&[255, 0, 0, 0, 0, 0, 255, 255]));
+        assert!(!rgba_has_transparency(&[1, 2, 3]));
+        assert!(rgba_has_transparency(&[0, 0, 0, 0, 9]));
+    }
     use flate2::{Compression, write::ZlibEncoder};
     use std::io::{Cursor, Write};
 

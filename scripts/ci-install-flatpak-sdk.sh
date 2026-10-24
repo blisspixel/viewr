@@ -5,11 +5,12 @@
 # only the compiler that builds viewr inside that SDK. Flathub republishes
 # rust-stable on every Rust release and can 404 the ostree ref for hours, which
 # is not a defect in this repository but fails the Ubuntu quality job exactly
-# like a missing runtime. Retry the Flathub extension first. If it stays
-# missing, install the same /usr/lib/sdk/rust-stable layout from the official
-# standalone tarball pinned to rust-toolchain.toml. The product manifest is
-# unchanged. A hung pull is a failed attempt: each Flathub try is bounded so
-# the fallback can start, and the workflow step timeout remains the outer bound.
+# like a missing runtime. Retry the Flathub extension first. A Flathub compiler
+# older than rust-toolchain.toml cannot build this workspace, so that case uses
+# the same fallback as a missing ref: the official standalone tarball, installed
+# at /usr/lib/sdk/rust-stable. The product manifest is unchanged. A hung pull is
+# a failed attempt: each Flathub try is bounded so the fallback can start, and
+# the workflow step timeout remains the outer bound.
 set -euo pipefail
 
 attempts=3
@@ -70,7 +71,7 @@ install_pinned_rust_stable_extension() {
   # shellcheck disable=SC2064
   trap "rm -rf '$work'" EXIT
 
-  echo "Flathub rust-stable 25.08 unavailable; installing pinned ${RUST_VERSION} as the SDK extension" >&2
+  echo "Installing pinned ${RUST_VERSION} as the SDK extension" >&2
 
   curl --fail --location --proto =https --tlsv1.2 \
     --retry 3 --retry-delay 5 \
@@ -106,8 +107,35 @@ EOF
   flatpak info --user org.freedesktop.Sdk.Extension.rust-stable//25.08 >/dev/null
 }
 
+# rustc is mounted at the same path flatpak-builder uses. The probe runs the
+# SDK, not a host binary. An empty result means the compiler could not be read.
+flathub_rustc_version() {
+  local line
+  line="$(
+    flatpak run --user --command=/usr/lib/sdk/rust-stable/bin/rustc \
+      org.freedesktop.Sdk//25.08 --version 2>/dev/null || true
+  )"
+  printf '%s\n' "$line" | awk 'NR==1 && $1 == "rustc" { print $2 }'
+}
+
+# True when installed is present and not strictly older than required.
+# sort -C reads every line, so pipefail does not see a SIGPIPE.
+version_meets_pin() {
+  local installed=$1
+  local required=$2
+  [ -n "$installed" ] || return 1
+  printf '%s\n%s\n' "$required" "$installed" | sort -C -V
+}
+
 retry_fn "Freedesktop 25.08 runtime" install_runtimes
 if retry_fn "Flathub rust-stable" install_flathub_rust_stable; then
-  exit 0
+  installed="$(flathub_rustc_version)"
+  if version_meets_pin "$installed" "$RUST_VERSION"; then
+    echo "Flathub rust-stable ${installed} meets pinned ${RUST_VERSION}" >&2
+    exit 0
+  fi
+  echo "Flathub rust-stable ${installed:-unknown} is older than pinned ${RUST_VERSION}; replacing it" >&2
+  flatpak uninstall --user --assumeyes --noninteractive \
+    org.freedesktop.Sdk.Extension.rust-stable//25.08
 fi
 install_pinned_rust_stable_extension

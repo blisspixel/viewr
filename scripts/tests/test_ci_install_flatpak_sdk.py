@@ -98,3 +98,21 @@ class CiInstallFlatpakSdkTests(unittest.TestCase):
         self.assertIn("--disable-download", self.script)
         self.assertIn("install_flathub_rust_stable", self.script)
         self.assertIn("install_pinned_rust_stable_extension", self.script)
+        self.assertIn(
+            "flatpak run --user --command=/usr/lib/sdk/rust-stable/bin/rustc \\",
+            self.script,
+        )
+        self.assertIn("org.freedesktop.Sdk//25.08 --version", self.script)
+        self.assertIn("sort -C -V", self.script)
+        self.assertIn("version_meets_pin", self.script)
+        self.assertIn(
+            "flatpak uninstall --user --assumeyes --noninteractive \\\n"
+            "    org.freedesktop.Sdk.Extension.rust-stable//25.08",
+            self.script,
+        )
+        self.assertNotIn(
+            'if retry_fn "Flathub rust-stable" install_flathub_rust_stable; then\n'
+            "  exit 0\n"
+            "fi\n",
+            self.script,
+        )

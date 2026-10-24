@@ -108,6 +108,9 @@ disappears. This spec is the converged result of two rounds of design critique
   export-privacy checkbox. Its Source Privacy section reports bounded EXIF tag and
   risk-category presence without displaying raw sensitive values, and states that
   the limited scan cannot prove other metadata or hidden pixel data is absent.
+  Its last line states the opened image's measured local decode time, rounded
+  to 0.1 ms, names the sandboxed worker or the in-process decoder, and says
+  decoding used no network, as static muted text.
   View > Panels or `I` toggles it, and
   View > Panel Position independently docks it on the left or right.
 - View > Panels renders `T`, `G`, and `I` as right-aligned accelerators on selected

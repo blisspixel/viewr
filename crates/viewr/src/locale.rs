@@ -2276,6 +2276,18 @@ const MESSAGES: &[Message] = &[
         german: "Farbe · {profile}",
     },
     Message {
+        english: "Decoded locally in {time} ms, in the sandboxed worker. No network.",
+        spanish: "Decodificado localmente en {time} ms, en el proceso aislado. Sin red.",
+        french: "Décodé localement en {time} ms, dans le processus isolé. Aucun réseau.",
+        german: "Lokal in {time} ms dekodiert, im isolierten Prozess. Kein Netzwerk.",
+    },
+    Message {
+        english: "Decoded locally in {time} ms. No network.",
+        spanish: "Decodificado localmente en {time} ms. Sin red.",
+        french: "Décodé localement en {time} ms. Aucun réseau.",
+        german: "Lokal in {time} ms dekodiert. Kein Netzwerk.",
+    },
+    Message {
         english: "Display · {status}",
         spanish: "Pantalla · {status}",
         french: "Affichage · {status}",

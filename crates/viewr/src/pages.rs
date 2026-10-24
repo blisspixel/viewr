@@ -872,6 +872,7 @@ mod tests {
                         height: 1,
                         color_profile: ColorProfileStatus::AssumedSrgb,
                         working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+                        decode_proof: None,
                     }),
                 },
                 PageFrame {
@@ -881,6 +882,7 @@ mod tests {
                         height: 1,
                         color_profile: ColorProfileStatus::AssumedSrgb,
                         working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+                        decode_proof: None,
                     }),
                 },
             ],

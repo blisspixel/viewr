@@ -10,6 +10,13 @@ and organized by user-visible concern.
   launcher and icon or the Windows Start menu shortcut that opens it. A directory
   with any other file stays in place. File associations and photos are left
   unchanged.
+- Image Information ends with the measured local decode time for the opened
+  image, rounded to 0.1 ms, and whether the sandboxed worker or the in-process
+  decoder produced it. The line is static muted text and states that decoding
+  used no network.
+- `viewr doctor` names the in-memory decode self-test and that it used no
+  network.
+- The README hero names Windows, macOS, and Linux.
 
 ## 0.7.5 - 2026-10-21
 

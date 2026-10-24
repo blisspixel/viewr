@@ -44,6 +44,7 @@ impl ImagePreview {
             height: self.spec.height,
             color_profile,
             working_color: self.working_color,
+            decode_proof: None,
         }
     }
 }
@@ -338,6 +339,7 @@ mod tests {
             height,
             color_profile: ColorProfileStatus::AssumedSrgb,
             working_color,
+            decode_proof: None,
         }
     }
 

@@ -441,6 +441,7 @@ mod tests {
             height: 2,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::DISPLAY_P3_RGBA8,
+            decode_proof: None,
         };
 
         assert_eq!(
@@ -457,6 +458,7 @@ mod tests {
             height: 1,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         };
 
         assert_eq!(resize_decoded(decoded), Err(ThumbnailFailure::EmptyImage));
@@ -803,6 +805,7 @@ mod tests {
             height,
             color_profile: crate::decode::ColorProfileStatus::AssumedSrgb,
             working_color: crate::color::WorkingColorEncoding::SRGB_RGBA8,
+            decode_proof: None,
         })
         .unwrap();
         assert_eq!(

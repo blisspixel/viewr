@@ -388,6 +388,19 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn('multiple-versions = "deny"', deny_policy)
         self.assertNotIn('multiple-versions = "warn"', deny_policy)
 
+    def test_agents_md_starts_and_stops_tidy(self) -> None:
+        agents = (REPOSITORY_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("### Start tidy, stop tidy", agents)
+        self.assertIn("git fetch --prune", agents)
+        self.assertIn("check PR state, not only", agents)
+        self.assertIn("When committing and pushing are in scope", agents)
+        self.assertIn("Never use", agents)
+        self.assertIn("`--force` to remove one", agents)
+        self.assertLess(
+            agents.index("## Autonomy"),
+            agents.index("### Start tidy, stop tidy"),
+        )
+
     def test_claude_md_imports_canonical_agents_md(self) -> None:
         claude = (REPOSITORY_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("@AGENTS.md", claude)

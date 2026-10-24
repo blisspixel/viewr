@@ -1,0 +1,95 @@
+name: Dependabot dependency records
+
+# Runs from the base branch with a write token. It overlays only the known
+# lockfiles and manifests from a same-repository Dependabot pull request,
+# regenerates records with the base scripts, and pushes those two files.
+# It does not execute the pull request's scripts.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "fuzz/Cargo.lock"
+      - "fuzz/Cargo.toml"
+      - "crates/*/Cargo.toml"
+      - "vendor/*/Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-records-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: Refresh generated dependency records
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          path: trusted
+
+      - name: Overlay known lockfiles and manifests
+        working-directory: trusted
+        run: |
+          git fetch --no-tags origin ${{ github.event.pull_request.head.sha }}
+          for path in \
+            Cargo.lock \
+            Cargo.toml \
+            fuzz/Cargo.lock \
+            fuzz/Cargo.toml \
+            crates/viewr/Cargo.toml \
+            crates/viewr-decode/Cargo.toml \
+            crates/viewr-protocol/Cargo.toml \
+            crates/viewr-seccomp/Cargo.toml \
+            vendor/jxl-color/Cargo.toml \
+            vendor/jxl-render/Cargo.toml
+          do
+            git cat-file -e "FETCH_HEAD:$path"
+            git checkout FETCH_HEAD -- "$path"
+          done
+
+      - name: Set up Rust
+        working-directory: trusted
+        run: rustup show
+
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
+        with:
+          tool: cargo-about@0.9.1
+
+      - name: Regenerate records with the trusted scripts
+        working-directory: trusted
+        run: python3 -B scripts/refresh_dependency_records.py
+
+      - name: Checkout the pull request branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          path: head
+
+      - name: Commit the generated records
+        working-directory: head
+        run: |
+          cp ../trusted/packaging/flatpak/cargo-sources.json packaging/flatpak/cargo-sources.json
+          cp ../trusted/THIRD_PARTY_LICENSES.txt THIRD_PARTY_LICENSES.txt
+          git add -- packaging/flatpak/cargo-sources.json THIRD_PARTY_LICENSES.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh generated dependency records"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"

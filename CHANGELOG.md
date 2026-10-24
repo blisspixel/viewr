@@ -11,7 +11,8 @@ and organized by user-visible concern.
   used no network.
 - `viewr doctor` names the in-memory decode self-test and that it used no
   network.
-- The README hero names Windows, macOS, and Linux.
+- The README hero names Windows, macOS, and Linux. Fast by design cites one
+  measured `viewr benchmark` row and the command that produced it.
 
 ## 0.7.5 - 2026-10-21
 

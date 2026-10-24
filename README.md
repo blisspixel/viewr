@@ -25,7 +25,7 @@ history, crash-report uploader, or automatic update check.
   images are prefetched within fixed memory limits, extra cores fill those slots,
   and performance budgets run in CI. On 2026-10-23 a Windows development host
   recorded a 1.28 ms median for the 640 by 480 `mem_b.png` row of
-  `cargo run --release --locked --bin viewr -- benchmark`.
+  `viewr benchmark` with no folder argument, which measures the in-memory corpus.
 - **Private by construction.** The application dependency graph contains no HTTP
   or TLS client. Photos, paths, metadata, ratings, and diagnostics stay local.
   Local network shares (NAS, SMB, NFS) are accessed through standard operating-system

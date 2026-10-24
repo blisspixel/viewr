@@ -2282,10 +2282,10 @@ const MESSAGES: &[Message] = &[
         german: "Lokal in {time} ms dekodiert, im isolierten Prozess. Kein Netzwerk.",
     },
     Message {
-        english: "Decoded locally in {time} ms. No network.",
-        spanish: "Decodificado localmente en {time} ms. Sin red.",
-        french: "Décodé localement en {time} ms. Aucun réseau.",
-        german: "Lokal in {time} ms dekodiert. Kein Netzwerk.",
+        english: "Decoded locally in {time} ms, in this process. No network.",
+        spanish: "Decodificado localmente en {time} ms, en este proceso. Sin red.",
+        french: "Décodé localement en {time} ms, dans ce processus. Aucun réseau.",
+        german: "Lokal in {time} ms dekodiert, in diesem Prozess. Kein Netzwerk.",
     },
     Message {
         english: "Display · {status}",

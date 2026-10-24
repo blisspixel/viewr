@@ -72,14 +72,17 @@ pub struct ImageDetails {
 /// Static Image Information fact for one opened image.
 ///
 /// The time is this image's measured decode, rounded to 0.1 ms. The route
-/// names the sandboxed worker only when that worker produced the pixels.
+/// names the sandboxed worker or this process, matching the decoder that
+/// produced the pixels.
 #[must_use]
 pub(crate) fn local_decode_line(language: Language, proof: DecodeProof) -> String {
     let template = match proof.route {
         DecodeRoute::SandboxedWorker => {
             tr!("Decoded locally in {time} ms, in the sandboxed worker. No network.")
         }
-        DecodeRoute::InProcess => tr!("Decoded locally in {time} ms. No network."),
+        DecodeRoute::InProcess => {
+            tr!("Decoded locally in {time} ms, in this process. No network.")
+        }
     };
     let time = crate::decode::format_decode_milliseconds(proof.duration);
     language
@@ -1270,7 +1273,7 @@ mod tests {
         };
         assert_eq!(
             super::local_decode_line(Language::English, in_process),
-            "Decoded locally in 6.9 ms. No network."
+            "Decoded locally in 6.9 ms, in this process. No network."
         );
         assert_eq!(
             super::local_decode_line(Language::English, worker),
@@ -1278,7 +1281,7 @@ mod tests {
         );
         assert_eq!(
             super::local_decode_line(Language::Spanish, in_process),
-            "Decodificado localmente en 6.9 ms. Sin red."
+            "Decodificado localmente en 6.9 ms, en este proceso. Sin red."
         );
         assert_eq!(
             super::local_decode_line(Language::Spanish, worker),
@@ -1286,7 +1289,7 @@ mod tests {
         );
         assert_eq!(
             super::local_decode_line(Language::French, in_process),
-            "Décodé localement en 6.9 ms. Aucun réseau."
+            "Décodé localement en 6.9 ms, dans ce processus. Aucun réseau."
         );
         assert_eq!(
             super::local_decode_line(Language::French, worker),
@@ -1294,7 +1297,7 @@ mod tests {
         );
         assert_eq!(
             super::local_decode_line(Language::German, in_process),
-            "Lokal in 6.9 ms dekodiert. Kein Netzwerk."
+            "Lokal in 6.9 ms dekodiert, in diesem Prozess. Kein Netzwerk."
         );
         assert_eq!(
             super::local_decode_line(Language::German, worker),

@@ -77,7 +77,7 @@ mod tests {
             assert_eq!(reported, expected);
             assert!(!reported.contains('\n'), "{reported}");
             // Debug output names the variant for opt-in diagnostics.
-            assert!(!format!("{error:?}").is_empty());
+            assert_ne!(format!("{error:?}"), "");
         }
     }
 }

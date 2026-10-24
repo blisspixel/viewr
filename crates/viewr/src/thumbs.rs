@@ -333,8 +333,13 @@ fn box_reduce(rgba: Vec<u8>, width: u32, height: u32, factor: u32) -> (u32, u32,
     for out_row in 0..out_height as usize {
         sums.fill(0);
         for row in rgba.chunks_exact(stride).skip(out_row * block).take(block) {
-            for (sum, run) in sums.chunks_exact_mut(4).zip(row.chunks_exact(block * 4)) {
-                for pixel in run.chunks_exact(4) {
+            for (sum, run) in sums
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(row.chunks_exact(block * 4))
+            {
+                for pixel in run.as_chunks::<4>().0 {
                     sum[0] += u32::from(pixel[0]);
                     sum[1] += u32::from(pixel[1]);
                     sum[2] += u32::from(pixel[2]);
@@ -744,8 +749,10 @@ mod tests {
         let (_, _, reduced) = box_reduce(uniform, 12, 9, 3);
         assert!(
             reduced
-                .chunks_exact(4)
-                .all(|pixel| pixel == [7, 70, 170, 200])
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [7, 70, 170, 200])
         );
     }
 
@@ -805,8 +812,10 @@ mod tests {
         // Smooth gradients: the two paths agree closely on red and green.
         let worst = reduced
             .rgba
-            .chunks_exact(4)
-            .zip(direct.as_raw().chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(direct.as_raw().as_chunks::<4>().0)
             .flat_map(|(a, b)| (0..2).map(move |channel| a[channel].abs_diff(b[channel])))
             .max()
             .unwrap();

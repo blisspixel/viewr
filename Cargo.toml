@@ -25,7 +25,7 @@ jxl-render = { path = "vendor/jxl-render" }
 [workspace.package]
 version = "0.7.5"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.99"
 license = "Apache-2.0"
 authors = ["viewr contributors"]
 repository = "https://github.com/blisspixel/viewr"

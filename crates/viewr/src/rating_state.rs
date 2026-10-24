@@ -385,7 +385,7 @@ mod tests {
     fn rating_write_failure_copy_is_exhaustive_and_path_free() {
         for error in WRITE_ERRORS {
             let message = rating_write_failure_message(EN, error);
-            assert!(!message.is_empty());
+            assert_ne!(message, "");
             assert!(!message.contains('\\'));
             assert!(!message.contains('/'));
             assert!(!message.contains('\n'));

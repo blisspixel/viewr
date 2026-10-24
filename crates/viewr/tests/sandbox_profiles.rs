@@ -80,7 +80,7 @@ fn true_entitlements(source: &str) -> BTreeSet<String> {
     );
 
     let mut entitlements = BTreeSet::new();
-    for pair in elements.chunks_exact(2) {
+    for pair in elements.as_chunks::<2>().0 {
         assert!(pair[0].has_tag_name("key"), "expected entitlement key");
         assert!(
             pair[1].has_tag_name("true"),

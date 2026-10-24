@@ -3170,7 +3170,10 @@ mod tests {
         symlink(&target, &link).unwrap();
 
         assert!(canonical_file_path(&link).unwrap().ends_with("linked.png"));
-        assert!(scan_images(workspace.path()).unwrap().is_empty());
+        assert_eq!(
+            scan_images(workspace.path()).unwrap(),
+            [] as [std::path::PathBuf; 0]
+        );
     }
 
     #[test]

@@ -572,7 +572,7 @@ fn read_tiff_metadata(reader: &mut (impl Read + Seek)) -> Option<Vec<u8>> {
         let entries_end = 2_usize.checked_add(entry_count.checked_mul(12)?)?;
         let mut entries = Vec::new();
         entries.try_reserve_exact(entry_count).ok()?;
-        for raw in directory.get(2..entries_end)?.chunks_exact(12) {
+        for raw in directory.get(2..entries_end)?.as_chunks::<12>().0 {
             let tag = endian.read_u16(raw)?;
             if is_tiff_pixel_data_tag(tag) {
                 continue;
@@ -912,7 +912,7 @@ fn validate_tiff_directory(
     }
 
     let mut external = TiffExternalData::default();
-    for entry in payload[entries_start..entries_end].chunks_exact(12) {
+    for entry in payload[entries_start..entries_end].as_chunks::<12>().0 {
         if !validate_tiff_entry(payload, endian, entry, validation, &mut external) {
             return false;
         }
@@ -1077,7 +1077,7 @@ fn tiff_u32_values(
     let component_count = usize::try_from(components).ok()?;
     let mut values = Vec::new();
     values.try_reserve_exact(component_count).ok()?;
-    for bytes in data.chunks_exact(4) {
+    for bytes in data.as_chunks::<4>().0 {
         values.push(endian.read_u32(bytes)?);
     }
     (values.len() == component_count).then_some(values)

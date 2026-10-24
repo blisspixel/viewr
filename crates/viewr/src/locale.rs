@@ -4221,10 +4221,10 @@ mod tests {
         assert_eq!(load_from(&path), Load::Recovered(Recovery::Oversized));
 
         for message in MESSAGES {
-            assert!(!message.english.is_empty());
-            assert!(!message.spanish.is_empty());
-            assert!(!message.french.is_empty());
-            assert!(!message.german.is_empty());
+            assert_ne!(message.english, "");
+            assert_ne!(message.spanish, "");
+            assert_ne!(message.french, "");
+            assert_ne!(message.german, "");
         }
     }
 
@@ -4273,7 +4273,7 @@ mod tests {
             Recovery::Unreadable,
             Recovery::ConfigurationUnavailable,
         ] {
-            assert!(!recovery.diagnostic_name().is_empty());
+            assert_ne!(recovery.diagnostic_name(), "");
             assert!(!recovery.notice().contains(['\\', '/']));
         }
         for error in [
@@ -4284,7 +4284,7 @@ mod tests {
             SaveError::SyncFailed,
             SaveError::ReplaceFailed,
         ] {
-            assert!(!error.diagnostic_name().is_empty());
+            assert_ne!(error.diagnostic_name(), "");
         }
         assert!(!save_failure_message().contains(['\\', '/']));
     }

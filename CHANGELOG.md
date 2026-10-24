@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- `install.sh uninstall` and `install.ps1 -Uninstall` remove an installer-owned
+  viewr directory, the command or PATH entry that points at it, and the Linux
+  launcher and icon or the Windows Start menu shortcut that opens it. A directory
+  with any other file stays in place. File associations and photos are left
+  unchanged.
+
 ## 0.7.5 - 2026-10-21
 
 - Explain a failed open in one short sentence. A damaged, unsupported, or

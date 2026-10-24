@@ -7210,7 +7210,7 @@ mod tests {
         assert!(
             in_process_labels
                 .iter()
-                .any(|text| text == "Decoded locally in 6.9 ms. No network."),
+                .any(|text| text == "Decoded locally in 6.9 ms, in this process. No network."),
             "missing in-process proof line: {in_process_labels:?}"
         );
         assert!(

@@ -731,8 +731,10 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn("/master/install.sh", combined)
         self.assertIn("/releases/download/v0.7.5/install.ps1", public_commands)
         self.assertIn("/releases/download/v0.7.5/install.sh", public_commands)
-        self.assertIn("/releases/download/v0.7.5/install.ps1", compiled_commands)
-        self.assertIn("/releases/download/v0.7.5/install.sh", compiled_commands)
+        self.assertNotIn("/releases/download/v0.7.6/", public_commands)
+        self.assertIn("/releases/download/v0.7.6/install.ps1", compiled_commands)
+        self.assertIn("/releases/download/v0.7.6/install.sh", compiled_commands)
+        self.assertNotIn("/releases/download/v0.7.5/", compiled_commands)
 
     def test_update_job_installs_the_workspace_candidate_over_published_v074(
         self,
@@ -746,18 +748,19 @@ class ReleaseArtifactTests(unittest.TestCase):
         windows = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.ps1").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(workflow.count("--expected-tag v0.7.5"), 2)
+        self.assertEqual(workflow.count("--expected-tag v0.7.6"), 2)
         self.assertNotIn("--expected-tag v0.7.4", workflow)
+        self.assertNotIn("--expected-tag v0.7.5", workflow)
         self.assertEqual(workflow.count("Update from published v0.7.4"), 2)
 
         self.assertEqual(linux.count("gh release download v0.7.4"), 1)
         self.assertEqual(linux.count("viewr-0.7.4-x86_64-unknown-linux-gnu.zip"), 3)
-        self.assertEqual(linux.count("viewr-0.7.5-x86_64-unknown-linux-gnu.zip"), 1)
-        self.assertEqual(linux.count("VIEWR_VERSION=0.7.5"), 1)
+        self.assertEqual(linux.count("viewr-0.7.6-x86_64-unknown-linux-gnu.zip"), 1)
+        self.assertEqual(linux.count("VIEWR_VERSION=0.7.6"), 1)
         self.assertNotIn("VIEWR_VERSION=0.7.4", linux)
-        self.assertEqual(linux.count("releases/v0.7.5/viewr"), 2)
+        self.assertEqual(linux.count("releases/v0.7.6/viewr"), 2)
         self.assertNotIn("releases/v0.7.4/viewr", linux)
-        self.assertIn('"viewr 0.7.5"', linux)
+        self.assertIn('"viewr 0.7.6"', linux)
         self.assertEqual(linux.count("--source-ref refs/tags/v0.7.4"), 2)
 
         self.assertEqual(windows.count("gh release download v0.7.4"), 1)
@@ -766,12 +769,12 @@ class ReleaseArtifactTests(unittest.TestCase):
             3,
         )
         self.assertEqual(
-            windows.count("viewr-0.7.5-x86_64-pc-windows-msvc.zip"),
+            windows.count("viewr-0.7.6-x86_64-pc-windows-msvc.zip"),
             1,
         )
         self.assertEqual(windows.count("-Version 0.7.4"), 1)
-        self.assertEqual(windows.count("-Version 0.7.5"), 1)
-        self.assertIn('"viewr 0.7.5"', windows)
+        self.assertEqual(windows.count("-Version 0.7.6"), 1)
+        self.assertIn('"viewr 0.7.6"', windows)
         self.assertNotIn('"viewr 0.7.4"', windows)
         self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
 
@@ -790,11 +793,17 @@ class ReleaseArtifactTests(unittest.TestCase):
 
     def test_unpublished_notes_are_not_required_in_a_published_archive(self) -> None:
         published = release_artifact._archive_documentation_paths("0.7.4")
-        candidate = release_artifact._archive_documentation_paths("0.7.5")
+        previous = release_artifact._archive_documentation_paths("0.7.5")
+        candidate = release_artifact._archive_documentation_paths("0.7.6")
         self.assertIn("docs/releases/v0.7.4.md", published)
         self.assertNotIn("docs/releases/v0.7.5.md", published)
+        self.assertNotIn("docs/releases/v0.7.6.md", published)
+        self.assertIn("docs/releases/v0.7.5.md", previous)
+        self.assertNotIn("docs/releases/v0.7.6.md", previous)
         self.assertIn("docs/releases/v0.7.5.md", candidate)
+        self.assertIn("docs/releases/v0.7.6.md", candidate)
         self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.5.md").is_file())
+        self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.6.md").is_file())
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

@@ -7,7 +7,7 @@ repo=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$repo"
 
 candidate_dir="$repo/target/release-artifacts"
-candidate_archive="$candidate_dir/viewr-0.7.5-x86_64-unknown-linux-gnu.zip"
+candidate_archive="$candidate_dir/viewr-0.7.6-x86_64-unknown-linux-gnu.zip"
 candidate_binary="$repo/target/release/viewr"
 [ -f "$candidate_archive" ] || {
   echo "missing candidate archive: $candidate_archive" >&2
@@ -97,17 +97,17 @@ new_icon="$XDG_DATA_HOME/icons/hicolor/scalable/apps/io.github.blisspixel.viewr.
 [ ! -e "$new_desktop" ] || { echo "published install wrote $new_desktop" >&2; exit 1; }
 [ ! -e "$new_icon" ] || { echo "published install wrote $new_icon" >&2; exit 1; }
 
-VIEWR_VERSION=0.7.5 VIEWR_LOCAL_RELEASE="$candidate_dir" sh "$repo/install.sh"
+VIEWR_VERSION=0.7.6 VIEWR_LOCAL_RELEASE="$candidate_dir" sh "$repo/install.sh"
 
 [ -f "$new_desktop" ] || { echo "candidate install did not write $new_desktop" >&2; exit 1; }
 [ -f "$new_icon" ] || { echo "candidate install did not write $new_icon" >&2; exit 1; }
 [ ! -e "$old_desktop" ] || { echo "candidate install left $old_desktop" >&2; exit 1; }
 [ ! -e "$old_icon" ] || { echo "candidate install left $old_icon" >&2; exit 1; }
 
-installed_version=$("$VIEWR_INSTALL_ROOT/releases/v0.7.5/viewr" --version)
-[ "$installed_version" = "viewr 0.7.5" ]
+installed_version=$("$VIEWR_INSTALL_ROOT/releases/v0.7.6/viewr" --version)
+[ "$installed_version" = "viewr 0.7.6" ]
 
-installed_hash=$(sha256sum "$VIEWR_INSTALL_ROOT/releases/v0.7.5/viewr" | awk '{print $1}')
+installed_hash=$(sha256sum "$VIEWR_INSTALL_ROOT/releases/v0.7.6/viewr" | awk '{print $1}')
 candidate_hash=$(sha256sum "$candidate_binary" | awk '{print $1}')
 if [ "$installed_hash" != "$candidate_hash" ]; then
   printf 'installed binary %s does not match candidate %s\n' "$installed_hash" "$candidate_hash" >&2

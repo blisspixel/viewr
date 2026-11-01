@@ -2585,7 +2585,7 @@ used_by:
   anstyle-wincon 3.0.11
   anstyle 1.0.14
   colorchoice 1.0.5
-  crc32fast 1.5.2
+  crc32fast 1.5.3
   env_filter 2.0.0
   env_logger 0.11.11
   foreign-types-macros 0.2.3
@@ -4130,7 +4130,7 @@ used_by:
   regex-syntax 0.8.11
   regex 1.13.1
   renderdoc-sys 1.1.0
-  roxmltree 0.21.1
+  roxmltree 0.21.2
   rustc-hash 1.1.0
   rustix 0.38.44
   rustix 1.1.4

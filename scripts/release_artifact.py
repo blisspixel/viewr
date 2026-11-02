@@ -257,6 +257,12 @@ _RELEASE_NOTES_THROUGH = {
         "docs/releases/v0.7.6.md",
         "docs/releases/v0.7.7.md",
     ),
+    "0.7.8": (
+        "docs/releases/v0.7.5.md",
+        "docs/releases/v0.7.6.md",
+        "docs/releases/v0.7.7.md",
+        "docs/releases/v0.7.8.md",
+    ),
 }
 
 

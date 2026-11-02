@@ -14,9 +14,9 @@ and organized by user-visible concern.
 - `viewr benchmark` reports a missing directory and a file as different
   errors, includes the path as typed, and prints no table header until the
   path is a directory.
-- The install command downloads the immutable v0.7.7 installer script. That
-  script installs the newest stable release unless a version is set. README,
-  the installation guide, and `viewr update` say so.
+- The install command downloads one immutable installer script. That script
+  installs the newest stable release unless a version is set. README, the
+  installation guide, and `viewr update` say so.
 
 ## 0.7.7 - 2026-11-01
 

@@ -37,6 +37,9 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
+- [v0.7.8 candidate notes](releases/v0.7.8.md): the prepared missing-format,
+  damaged WebP and TIFF, version-command, benchmark, and installer-script
+  patch, pending the complete release gate.
 - [v0.7.7 release notes](releases/v0.7.7.md): the damaged JPEG, ICO, Image
   Information, CLI help, and Save Path patch and its explicit evidence limits.
 - [v0.7.6 release notes](releases/v0.7.6.md): the previous transparency,

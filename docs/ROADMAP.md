@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.7](https://github.com/blisspixel/viewr/releases/tag/v0.7.7), the damaged JPEG, ICO, Image Information, CLI help, and Save Path patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.7`, the published damaged JPEG, ICO, Image Information, CLI help, and Save Path patch |
+| Workspace version | `0.7.8`, preparing the missing-format, damaged WebP and TIFF, command, and installer-script patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.7.8** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -123,6 +123,9 @@ v0.7.4  Linux entry and window-loss patch [released, acceptance rows open]
 v0.7.5  Copy and recovery patch           [released, acceptance rows open]
 v0.7.6  Transparency patch                [released, acceptance rows open]
 v0.7.7  Damaged-file and Save Path patch  [released, acceptance rows open]
+   |
+   v
+v0.7.8  Format and command patch          [candidate]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -230,6 +233,11 @@ or accessibility evidence gates.
 | Localized Image Information values | Shipped v0.7.7 | File size, aperture, focal length, and exposure use the active language's decimal separator. English keeps a period. Spanish, French, and German use a comma. Counts below 1 KiB stay whole numbers. |
 | CLI help columns | Shipped v0.7.7 | `viewr help` keeps the command and description columns aligned. A narrower terminal wraps the description under that column. |
 | Typed Save Path | Shipped v0.7.7 | File > Save Path types a destination when the native chooser returns no path. The field starts with the suggested JPEG name beside the open file. An existing destination still asks before replacement, and an invalid path reports Save failed. The path is not persisted. |
+| Named missing formats | Implemented, unreleased | A failed open names AVIF, HEIC, and camera RAW and does not offer Retry. The worker error carries a stable format token. Camera RAW stays deferred. |
+| Damaged WebP and TIFF | Implemented, unreleased | Truncated WebP and TIFF files report that the file is damaged or incomplete, the same sentence truncated JPEG, PNG, and GIF use. |
+| Version command contract | Implemented, unreleased | `viewr version --help` and `viewr help version` print help. An extra argument exits 2. `--version` and `-V` still print the version. |
+| Benchmark path errors | Implemented, unreleased | A missing directory and a file are different errors, the path is included as typed, and no table header is printed until the path is a directory. |
+| Installer script scope | Implemented, unreleased | The install command downloads one immutable installer script. The script installs the newest stable release unless a version is set. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
@@ -238,7 +246,9 @@ Linux window identity, and two-line top-bar notices shipped in v0.7.5.
 Transparency inspection, the local decode proof, the doctor decode self-test,
 and removal of an installer-owned tree shipped in v0.7.6. Damaged JPEG opens,
 RGB PNG icon entries, localized Image Information values, aligned CLI help,
-and typed Save Path shipped in v0.7.7. The
+and typed Save Path shipped in v0.7.7. Named missing-format opens, damaged
+WebP and TIFF files, the version command, benchmark path errors, and the
+installer-script explanation are implemented and unreleased. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points

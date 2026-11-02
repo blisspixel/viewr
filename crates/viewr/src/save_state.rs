@@ -4,6 +4,8 @@
 //! This module owns only deterministic start blockers, terminal dispositions, and
 //! close coordination derived from immutable facts.
 
+use std::path::{Path, PathBuf};
+
 use crate::chrome::SAVE_RECOVERY_STATUS;
 use crate::locale::Language;
 use crate::playlist::ScanPurpose;
@@ -16,6 +18,21 @@ const WAIT_SPOT_HEAL: &str = "Wait for spot heal to finish before saving";
 const WAIT_CROP: &str = "Wait for the crop to finish before saving";
 const WAIT_CROP_SELECTION: &str = "Apply or cancel the crop before saving a copy";
 const SAVE_ALREADY: &str = "A copy is already being saved";
+
+/// Default Save As name beside the open file.
+///
+/// The native chooser and File > Save Path start from this JPEG name. A typed
+/// destination may replace it before any file is written.
+#[must_use]
+pub(crate) fn suggested_save_path(source: &Path) -> Option<PathBuf> {
+    let file_name = source.file_name()?;
+    let suggested = Path::new(file_name).with_extension("jpg");
+    let name = suggested.file_name()?;
+    Some(match source.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(name),
+        _ => PathBuf::from(name),
+    })
+}
 
 #[cfg(test)]
 const ALL_COPY: &[&str] = &[
@@ -378,5 +395,22 @@ mod tests {
         assert!(folder_scan_blocks_save(Some(&ScanPurpose::OpenFolder)));
         assert!(!folder_scan_blocks_save(Some(&selected)));
         assert!(!folder_scan_blocks_save(None));
+    }
+
+    #[test]
+    fn suggested_save_path_uses_a_jpeg_name_beside_the_source() {
+        assert_eq!(
+            suggested_save_path(Path::new("photos/cat.png")).as_deref(),
+            Some(Path::new("photos/cat.jpg"))
+        );
+        assert_eq!(
+            suggested_save_path(Path::new("photos/cat.jpg")).as_deref(),
+            Some(Path::new("photos/cat.jpg"))
+        );
+        assert_eq!(
+            suggested_save_path(Path::new("cat.png")).as_deref(),
+            Some(Path::new("cat.jpg"))
+        );
+        assert_eq!(suggested_save_path(Path::new("")), None);
     }
 }

@@ -150,6 +150,10 @@ pub(crate) enum UiAction {
     SetOpenPathText(String),
     /// Open the typed path through the same file/folder entry policy.
     OpenEnteredPath,
+    /// Change the session-only Save As destination, without writing it.
+    SetSavePathText(String),
+    /// Save the current image to the typed destination.
+    SaveEnteredPath,
     /// Decode the current file from disk again, bypassing the neighbor cache.
     Reload,
     /// Open a save as dialog.
@@ -349,6 +353,10 @@ pub(crate) struct UiFrameOwned {
     pub open_path_text: String,
     /// Inline feedback for the last typed-path attempt.
     pub open_path_error: Option<String>,
+    /// Session-only Save As destination. Never stored as a preference.
+    pub save_path_text: String,
+    /// Inline feedback for the last typed Save As destination.
+    pub save_path_error: Option<String>,
     /// Pixel dimensions of the current image, if any.
     pub img_size: Option<(u32, u32)>,
     /// Playback state for an animated image.
@@ -1893,6 +1901,7 @@ fn file_menu(
                 actions.push(UiAction::SaveAs);
                 ui.close();
             }
+            save_path_menu_item(ui, actions, frame, chrome);
             ui.separator();
             if ui.button(frame.text(tr!("Preferences..."))).clicked() {
                 actions.push(UiAction::ShowPreferences);
@@ -1915,6 +1924,24 @@ fn file_menu(
         },
     )
     .response
+}
+
+fn save_path_menu_item(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
+    ui.add_enabled_ui(chrome.is_enabled(ChromeControl::SaveAs), |ui| {
+        ui.menu_button(frame.text(tr!("Save Path...")), |ui| {
+            ui.set_width(330.0);
+            render_save_path_entry(ui, actions, frame);
+        })
+        .response
+        .on_hover_text(frame.text(tr!(
+            "Type a destination when no file chooser is available. The original stays unchanged."
+        )));
+    });
 }
 
 fn exit_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, language: Language) {
@@ -3782,11 +3809,67 @@ fn render_path_entry(
     });
 }
 
+fn render_save_path_entry(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let mut text = frame.save_path_text.clone();
+    let (field, save_clicked) = ui
+        .vertical(|ui| {
+            ui.label(frame.text(tr!("Destination path")));
+            ui.horizontal(|ui| {
+                let width = (ui.available_width() - 80.0 - ui.spacing().item_spacing.x).max(80.0);
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(egui::Id::new("menu_save_path_input"))
+                        .desired_width(width)
+                        .min_size(Vec2::new(0.0, 32.0))
+                        .margin(egui::Margin::symmetric(6, 8))
+                        .char_limit(32_768),
+                );
+                let save_clicked = ui
+                    .add_enabled(
+                        !text.trim().is_empty(),
+                        egui::Button::new(frame.text(tr!("Save"))).min_size(Vec2::new(72.0, 32.0)),
+                    )
+                    .clicked();
+                (field, save_clicked)
+            })
+            .inner
+        })
+        .inner;
+    field.widget_info(|| {
+        WidgetInfo::text_edit(
+            ui.is_enabled(),
+            &frame.save_path_text,
+            &text,
+            frame.text(tr!("Destination path")),
+        )
+    });
+    field.ctx.accesskit_node_builder(field.id, |node| {
+        node.set_label(frame.text(tr!("Destination path")));
+    });
+    let submit = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if field.changed() {
+        actions.push(UiAction::SetSavePathText(text.clone()));
+    }
+    if save_clicked || submit {
+        actions.push(UiAction::SaveEnteredPath);
+    }
+    if let Some(error) = &frame.save_path_error {
+        ScrollArea::vertical().max_height(72.0).show(ui, |ui| {
+            let response = ui.add(egui::Label::new(error).wrap());
+            mark_as_polite_status(&response);
+        });
+    }
+}
+
 pub(crate) fn path_input_has_focus(ctx: &egui::Context) -> bool {
     ctx.memory(|memory| {
-        ["menu_path_input", "empty_path_input"]
-            .into_iter()
-            .any(|id| memory.focused() == Some(egui::Id::new(id)))
+        [
+            "menu_path_input",
+            "empty_path_input",
+            "menu_save_path_input",
+        ]
+        .into_iter()
+        .any(|id| memory.focused() == Some(egui::Id::new(id)))
     })
 }
 
@@ -5747,7 +5830,7 @@ mod tests {
         rating_menu, render, retry_open_label, top_toast_max_width, undo_trash_menu_item,
     };
     use super::{TOP_PAGE_NEXT_GLYPH, TOP_PAGE_PREVIOUS_GLYPH, ToastAnnouncement, ToastView};
-    use super::{path_input_has_focus, render_path_entry};
+    use super::{path_input_has_focus, render_path_entry, render_save_path_entry};
     use crate::locale::tr;
 
     fn visual_toast(text: &str) -> ToastView {
@@ -5799,21 +5882,25 @@ mod tests {
         }
     }
 
+    fn accessibility_test_dock() -> DockInput {
+        DockInput {
+            has_image: true,
+            has_multiple_images: true,
+            show_tools: true,
+            tools_expanded: true,
+            tools_side: DockSide::Left,
+            show_filmstrip: true,
+            filmstrip_expanded: true,
+            show_image_info: true,
+            image_info_side: DockSide::Right,
+            heal_active: false,
+            immersive: false,
+        }
+    }
+
     fn accessibility_test_frame() -> UiFrameOwned {
         UiFrameOwned {
-            dock: DockInput {
-                has_image: true,
-                has_multiple_images: true,
-                show_tools: true,
-                tools_expanded: true,
-                tools_side: DockSide::Left,
-                show_filmstrip: true,
-                filmstrip_expanded: true,
-                show_image_info: true,
-                image_info_side: DockSide::Right,
-                heal_active: false,
-                immersive: false,
-            },
+            dock: accessibility_test_dock(),
             retain_exif: false,
             background_override: crate::theme::ImageBackground::ThemeDefault,
             has_transparency: false,
@@ -5833,6 +5920,8 @@ mod tests {
             selected_file_name: Some("current.png".to_owned()),
             open_path_text: String::new(),
             open_path_error: None,
+            save_path_text: String::new(),
+            save_path_error: None,
             img_size: Some((1920, 1080)),
             animation: None,
             pages: None,
@@ -7518,6 +7607,72 @@ mod tests {
         );
         context.memory_mut(|memory| memory.request_focus(egui::Id::new("zoom_button")));
         assert!(!path_input_has_focus(&context));
+    }
+
+    #[test]
+    fn typed_save_path_owns_typing_and_submit_and_exposes_wrapped_errors() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.save_path_text = "photos/edited.jpg".to_owned();
+        frame.save_path_error =
+            Some("Save failed: could not verify the Save As destination parent".repeat(4));
+        let mut actions = Vec::new();
+        let output = context.run_ui(accessibility_input(), |ui| {
+            ui.set_width(330.0);
+            render_save_path_entry(ui, &mut actions, &frame);
+        });
+        let update = output.platform_output.accesskit_update.unwrap();
+        let input = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.role() == egui::accesskit::Role::TextInput)
+            .expect("named save path input");
+        assert_eq!(input.label(), Some("Destination path"));
+        assert_eq!(input.value(), Some("photos/edited.jpg"));
+        let error = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.value() == frame.save_path_error.as_deref())
+            .expect("complete inline save error");
+        assert_eq!(error.live(), Some(egui::accesskit::Live::Polite));
+        assert!(error.bounds().unwrap().width() <= 330.0);
+
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("menu_save_path_input")));
+        assert!(path_input_has_focus(&context));
+        let mut input = accessibility_input();
+        input.events = vec![egui::Event::Text("2".to_owned())];
+        let _ = context.run_ui(input, |ui| {
+            render_save_path_entry(ui, &mut actions, &frame);
+        });
+        let edited = actions
+            .iter()
+            .find_map(|action| match action {
+                UiAction::SetSavePathText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .expect("typing must update the save field");
+        assert!(edited.contains('2'));
+        frame.save_path_text = edited;
+        actions.clear();
+        let mut input = accessibility_input();
+        input.events = vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        let _ = context.run_ui(input, |ui| {
+            render_save_path_entry(ui, &mut actions, &frame);
+        });
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::SaveEnteredPath))
+        );
     }
 
     #[test]

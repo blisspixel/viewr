@@ -101,7 +101,7 @@ use crate::rating_state::{
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, WindowLossResult,
     close_disposition, folder_scan_blocks_save, save_close_disposition, save_start_blocker,
-    save_start_blocker_message,
+    save_start_blocker_message, suggested_save_path,
 };
 use crate::session::{
     ForegroundLoadFailure, ForegroundLoadFailureDisposition, ForegroundRetryPlan,
@@ -285,6 +285,9 @@ fn run_internal(
         show_file_associations: false,
         open_path_text: String::new(),
         open_path_error: None,
+        save_path_text: String::new(),
+        save_path_edited_for: None,
+        save_path_error: None,
         external_edit_pending: false,
         source_gone: false,
         modifiers: ModifiersState::default(),
@@ -662,6 +665,13 @@ type AuxiliaryLoadResult = (
 );
 
 type SaveResult = Result<crate::edit::MetadataDisposition, String>;
+
+struct SaveRequest {
+    source_path: PathBuf,
+    source_image: Arc<DecodedImage>,
+    source: Option<Arc<crate::fs::ImageSource>>,
+    pixel_transform: crate::edit::PixelTransform,
+}
 
 struct PendingSave {
     source_path: PathBuf,
@@ -1221,6 +1231,11 @@ struct App {
     /// Session-only path entry and recovery feedback, never persisted.
     open_path_text: String,
     open_path_error: Option<Localized>,
+    /// Session-only Save As destination. Never stored as a preference.
+    save_path_text: String,
+    /// Source the typed destination belongs to. Another image uses the suggestion.
+    save_path_edited_for: Option<PathBuf>,
+    save_path_error: Option<Localized>,
     window_loss_result: WindowLossResult,
     /// Whether another app may have changed the source since the last accepted decode.
     external_edit_pending: bool,
@@ -7190,8 +7205,80 @@ impl App {
     }
 
     fn save_as(&mut self) {
-        if self.block_action_while_curating(BlockedAction::SaveCopy) {
+        let Some(request) = self.begin_save_request() else {
             return;
+        };
+        let Some(save_path) = suggested_save_path(&request.source_path) else {
+            return;
+        };
+        let Some(file_name) = save_path.file_name() else {
+            return;
+        };
+        let Some(save_path) = rfd::FileDialog::new()
+            .set_file_name(file_name.to_string_lossy())
+            .add_filter("JPEG", &["jpg", "jpeg"])
+            .add_filter("PNG", &["png"])
+            .add_filter("WebP", &["webp"])
+            .add_filter("BMP", &["bmp"])
+            .save_file()
+        else {
+            self.show_save_picker_fallback();
+            return;
+        };
+        self.commit_save_request(request, &save_path, false);
+    }
+
+    fn save_entered_path(&mut self) {
+        let Some(request) = self.begin_save_request() else {
+            return;
+        };
+        let (text, _) = self.save_path_entry();
+        let crate::entry_state::ClipboardPathResult::Path(path) =
+            crate::entry_state::parse_clipboard_path(&text)
+        else {
+            return;
+        };
+        self.commit_save_request(request, &path, true);
+    }
+
+    fn show_save_picker_fallback(&mut self) {
+        // The native API uses None for both cancellation and a chooser that
+        // could not start. The note points at the typed destination either way.
+        self.show_status_toast(self.language.localize(tr!(
+            "No path selected. Use Save Path in the File menu to type a destination."
+        )));
+    }
+
+    fn save_path_entry(&self) -> (String, Option<String>) {
+        let current = self.current_loaded_path();
+        if self.save_path_edited_for.as_deref() == current {
+            (
+                self.save_path_text.clone(),
+                self.save_path_error.clone().map(Localized::into_string),
+            )
+        } else {
+            let text = current
+                .and_then(suggested_save_path)
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+            (text, None)
+        }
+    }
+
+    fn remember_save_path(
+        &mut self,
+        source: PathBuf,
+        destination: &Path,
+        error: Option<Localized>,
+    ) {
+        self.save_path_text = destination.display().to_string();
+        self.save_path_edited_for = Some(source);
+        self.save_path_error = error;
+    }
+
+    fn begin_save_request(&mut self) -> Option<SaveRequest> {
+        if self.block_action_while_curating(BlockedAction::SaveCopy) {
+            return None;
         }
         if let Some(blocker) = save_start_blocker([
             self.save_recovery_unsettled
@@ -7220,54 +7307,51 @@ impl App {
                 self.language,
                 blocker,
             )));
-            return;
+            return None;
         }
-        let Some(path) = self.current_loaded_path().map(Path::to_owned) else {
-            return;
-        };
-        let Some(image) = self.current_image.as_ref().map(Arc::clone) else {
-            return;
-        };
-        let pixel_transform = crate::edit::PixelTransform::new(
-            self.transform.rotation_steps,
-            self.transform.flip_h,
-            self.transform.flip_v,
-        );
-        let default_name = path.with_extension("jpg");
-        let Some(file_name) = default_name.file_name() else {
-            return;
-        };
-        let Some(save_path) = rfd::FileDialog::new()
-            .set_file_name(file_name.to_string_lossy())
-            .add_filter("JPEG", &["jpg", "jpeg"])
-            .add_filter("PNG", &["png"])
-            .add_filter("WebP", &["webp"])
-            .add_filter("BMP", &["bmp"])
-            .save_file()
-        else {
-            return;
-        };
-        let destination = match crate::edit::prepare_save_destination(&save_path) {
+        let path = self.current_loaded_path().map(Path::to_owned)?;
+        let image = self.current_image.as_ref().map(Arc::clone)?;
+        Some(SaveRequest {
+            source_path: path,
+            source_image: image,
+            source: self.current_source.as_ref().map(Arc::clone),
+            pixel_transform: crate::edit::PixelTransform::new(
+                self.transform.rotation_steps,
+                self.transform.flip_h,
+                self.transform.flip_v,
+            ),
+        })
+    }
+
+    fn commit_save_request(&mut self, request: SaveRequest, save_path: &Path, typed: bool) {
+        let destination = match crate::edit::prepare_save_destination(save_path) {
             Ok(destination) => destination,
             Err(error) => {
-                self.show_toast(self.language.fill(
+                let message = self.language.fill(
                     tr!("Save failed: {error}"),
                     &[("error", &error.to_string())],
-                ));
+                );
+                if typed {
+                    self.remember_save_path(request.source_path, save_path, Some(message.clone()));
+                }
+                self.show_toast(message);
                 return;
             }
         };
+        if typed {
+            self.remember_save_path(request.source_path.clone(), save_path, None);
+        }
         let options = if self.retain_exif {
             crate::edit::SaveOptions::retain_exif()
         } else {
             crate::edit::SaveOptions::strip()
         };
         let pending = PendingSave {
-            source_path: path,
-            source_image: image,
-            source: self.current_source.as_ref().map(Arc::clone),
+            source_path: request.source_path,
+            source_image: request.source_image,
+            source: request.source,
             destination,
-            pixel_transform,
+            pixel_transform: request.pixel_transform,
             options,
         };
         if pending.destination.requires_overwrite_confirmation() {
@@ -7275,6 +7359,9 @@ impl App {
             self.request_redraw();
         } else {
             self.start_save(pending);
+        }
+        if typed && let Some(renderer) = &self.renderer {
+            egui::Popup::close_all(&renderer.egui_ctx);
         }
     }
 
@@ -9088,6 +9175,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.sync_mosaic_gpu();
                 }
                 let (mosaic_draws, mosaic_ui) = self.mosaic_frame_geometry(scale_factor);
+                let (save_path_text, save_path_error) = self.save_path_entry();
 
                 let Some(renderer) = self.renderer.as_mut() else {
                     return;
@@ -9130,6 +9218,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let frame = crate::ui::UiFrameOwned {
                     open_path_text: self.open_path_text.clone(),
                     open_path_error: self.open_path_error.clone().map(Localized::into_string),
+                    save_path_text,
+                    save_path_error,
                     dock,
                     retain_exif,
                     background_override: bg_override,
@@ -9291,6 +9381,13 @@ impl ApplicationHandler<UserEvent> for App {
                             self.open_path_error = None;
                         }
                         crate::ui::UiAction::OpenEnteredPath => self.open_entered_path(),
+                        crate::ui::UiAction::SetSavePathText(text) => {
+                            self.save_path_text = text;
+                            self.save_path_edited_for =
+                                self.current_loaded_path().map(Path::to_owned);
+                            self.save_path_error = None;
+                        }
+                        crate::ui::UiAction::SaveEnteredPath => self.save_entered_path(),
                         crate::ui::UiAction::Open => {
                             self.open_image_dialog();
                         }

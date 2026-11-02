@@ -2,6 +2,12 @@ name: CI
 
 on:
   workflow_call:
+    inputs:
+      checkout-ref:
+        description: Full commit SHA to test. Empty uses github.sha.
+        required: false
+        type: string
+        default: ""
   push:
     branches: [main]
   pull_request:
@@ -13,7 +19,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A records run passes the commit it just pushed. Other events keep the ref
+  # group, so that called run does not cancel CI for the default branch.
+  # Bracket access keeps the hyphenated input from being read as subtraction.
+  group: ci-${{ inputs['checkout-ref'] || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -31,6 +40,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Install Linux GUI build dependencies
         timeout-minutes: 15
@@ -158,6 +169,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Install virtual-display and software-GPU dependencies
         timeout-minutes: 15
@@ -197,6 +210,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Install native decoder build and runtime dependencies
         timeout-minutes: 15
@@ -235,6 +250,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Install Linux GUI build dependencies
         timeout-minutes: 15
@@ -273,6 +290,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
       - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-deny,cargo-audit
@@ -326,6 +345,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Install Linux runtime packages
         timeout-minutes: 15
@@ -365,6 +386,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Set up Rust
         run: rustup show

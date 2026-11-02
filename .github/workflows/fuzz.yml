@@ -2,6 +2,12 @@ name: Fuzz
 
 on:
   workflow_call:
+    inputs:
+      checkout-ref:
+        description: Full commit SHA to test. Empty uses github.sha.
+        required: false
+        type: string
+        default: ""
   push:
     branches: [main]
     paths:
@@ -27,7 +33,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: fuzz-${{ github.event_name }}-${{ github.ref }}
+  # An empty checkout SHA keeps the event and ref group used by every other run.
+  group: fuzz-${{ inputs['checkout-ref'] || github.event_name }}-${{ inputs['checkout-ref'] || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -59,6 +66,8 @@ jobs:
             max_len: 1048592
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs['checkout-ref'] || github.sha }}
 
       - name: Install Linux GUI build dependencies
         timeout-minutes: 15

@@ -32,6 +32,25 @@ they do not replace source review or platform signing.
   `packaging/flatpak/cargo-sources.json`. `python -B scripts/refresh_dependency_records.py`
   rewrites those two records, and `.github/workflows/dependabot-records.yml` runs
   that command from the base branch for a same-repository Dependabot pull request.
+  The workflow pushes the two generated files with the job token. GitHub holds the
+  new pull request runs for approval, and those runs are not what satisfies the
+  required checks. The same records run checks out the new commit by its full SHA
+  and calls the base CI and fuzz workflows on it. The CI caller grants only the
+  permissions those jobs already request: contents read, attestation read, and the
+  update jobs' identity token. It passes no secrets, it does not grant contents
+  write, and its cache access is read-only. The records run then creates these
+  required checks on the new commit from the CI job results:
+  `fmt / clippy / test (ubuntu-latest)`,
+  `fmt / clippy / test (macos-latest)`,
+  `fmt / clippy / test (windows-latest)`,
+  `coverage (>= 85% on logic)`,
+  `C decoders under default-deny seccomp`, `GUI performance budgets`, and
+  `deny + audit (privacy invariant)`. A missing, skipped, or unsuccessful job is
+  reported as failure. An approval banner for the duplicate runs can remain. The
+  next Dependabot lockfile pull request is the proof that the new commit's required
+  checks are reported without a manual approval. This records workflow uses
+  `pull_request_target`. Public repositories must allow that event in an Actions
+  event policy before GitHub enforces the default block on December 2, 2026.
 - A GitHub artifact attestation binds a published asset digest to the repository and
   workflow identity recorded by GitHub. It does not make an unsigned executable a
   platform-signed application.

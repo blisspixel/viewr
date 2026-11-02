@@ -191,37 +191,36 @@ pub(crate) fn decode_ico_frames(
             return Ok(None);
         }
         let image_bytes = read_ico_image_bytes(&mut reader, entry)?;
-        let (mut image, color_normalizer, orientation) =
-            if image_bytes.starts_with(PNG_SIGNATURE) {
-                let mut decoder = image::codecs::png::PngDecoder::new(Cursor::new(&image_bytes))
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                decoder
-                    .set_limits(image_limits())
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                validate_page_canvas(decoder.dimensions())?;
-                let color_normalizer = ColorNormalizer::from_decoder(&mut decoder);
-                let orientation = decoder
-                    .orientation()
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                let img = image::DynamicImage::from_decoder(decoder)
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                (img, color_normalizer, orientation)
-            } else {
-                let synthetic = synthetic_single_entry_ico(entry, &image_bytes)?;
-                let mut decoder = image::codecs::ico::IcoDecoder::new(Cursor::new(synthetic))
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                decoder
-                    .set_limits(image_limits())
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                validate_page_canvas(decoder.dimensions())?;
-                let color_normalizer = ColorNormalizer::from_decoder(&mut decoder);
-                let orientation = decoder
-                    .orientation()
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                let img = image::DynamicImage::from_decoder(decoder)
-                    .map_err(|error| page_decode_error(&error.to_string()))?;
-                (img, color_normalizer, orientation)
-            };
+        let (mut image, color_normalizer, orientation) = if image_bytes.starts_with(PNG_SIGNATURE) {
+            let mut decoder = image::codecs::png::PngDecoder::new(Cursor::new(&image_bytes))
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            decoder
+                .set_limits(image_limits())
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            validate_page_canvas(decoder.dimensions())?;
+            let color_normalizer = ColorNormalizer::from_decoder(&mut decoder);
+            let orientation = decoder
+                .orientation()
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            let img = image::DynamicImage::from_decoder(decoder)
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            (img, color_normalizer, orientation)
+        } else {
+            let synthetic = synthetic_single_entry_ico(entry, &image_bytes)?;
+            let mut decoder = image::codecs::ico::IcoDecoder::new(Cursor::new(synthetic))
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            decoder
+                .set_limits(image_limits())
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            validate_page_canvas(decoder.dimensions())?;
+            let color_normalizer = ColorNormalizer::from_decoder(&mut decoder);
+            let orientation = decoder
+                .orientation()
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            let img = image::DynamicImage::from_decoder(decoder)
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            (img, color_normalizer, orientation)
+        };
         image.apply_orientation(orientation);
         let Some(image) = normalize_dynamic_image(image, &color_normalizer, is_current)? else {
             return Ok(None);
@@ -235,7 +234,6 @@ pub(crate) fn decode_ico_frames(
 }
 
 impl DecodedPages {
-
     #[must_use]
     pub(crate) const fn kind(&self) -> PageKind {
         self.kind

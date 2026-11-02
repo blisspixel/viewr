@@ -29,7 +29,13 @@ fn worker_accepts_protocol_probe_then_framed_encoded_input() {
         panic!("expected worker error response");
     };
     #[cfg(not(feature = "avif"))]
-    assert!(message.starts_with("AVIF support requires"));
+    {
+        assert_eq!(
+            viewr_protocol::FormatRefusal::parse(&message),
+            Some(viewr_protocol::FormatRefusal::Avif)
+        );
+        assert!(message.contains("AVIF support requires"));
+    }
     #[cfg(feature = "avif")]
     assert_ne!(message, "");
     assert!(message.len() < 512);

@@ -138,6 +138,12 @@ pub(crate) enum OpenFailureCause {
     Damaged,
     /// The extension or container is outside the decoders viewr ships.
     Unsupported,
+    /// This build has no AVIF decoder.
+    AvifUnavailable,
+    /// This build has no HEIC or HEIF decoder.
+    HeicUnavailable,
+    /// Camera RAW viewing is deferred.
+    RawDeferred,
     /// AVIF or HEIC needs the optional `viewr-decode` helper.
     WorkerAbsent,
     /// The operating system refused to read the file.
@@ -166,6 +172,9 @@ impl OpenFailureCause {
         let english = match self {
             Self::Damaged => tr!("The file is damaged or incomplete."),
             Self::Unsupported => tr!("viewr can't read this kind of file."),
+            Self::AvifUnavailable => tr!("This build can't open AVIF photos."),
+            Self::HeicUnavailable => tr!("This build can't open HEIC photos."),
+            Self::RawDeferred => tr!("viewr does not open camera RAW files yet."),
             Self::WorkerAbsent => {
                 tr!("This format needs the viewr-decode helper. Run viewr doctor.")
             }
@@ -218,6 +227,23 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
     if text.is_empty() {
         return OpenFailureCause::Other;
     }
+    if let Some(refusal) = viewr_protocol::FormatRefusal::parse(&text) {
+        return match refusal {
+            viewr_protocol::FormatRefusal::Avif => OpenFailureCause::AvifUnavailable,
+            viewr_protocol::FormatRefusal::Heic => OpenFailureCause::HeicUnavailable,
+            viewr_protocol::FormatRefusal::Raw => OpenFailureCause::RawDeferred,
+        };
+    }
+    // Workers from v0.7.7 and earlier sent the same facts without a token.
+    if text.contains("avif support requires building viewr-decode") {
+        return OpenFailureCause::AvifUnavailable;
+    }
+    if text.contains("heic/heif support requires building viewr-decode") {
+        return OpenFailureCause::HeicUnavailable;
+    }
+    if text.contains("camera raw is deferred") {
+        return OpenFailureCause::RawDeferred;
+    }
     if text.contains("viewr-decode worker executable not found")
         || text.contains("configured viewr-decode worker executable is unavailable")
     {
@@ -263,6 +289,8 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
         || text.contains("dimensions must be non-zero")
         || text.contains("do not match their dimensions")
         || text.contains("unexpected end")
+        || text.contains("unexpected eof")
+        || text.contains("failed to fill whole buffer")
         || text.contains("failed to decode")
         || text.contains("failed to parse")
     {
@@ -648,6 +676,42 @@ mod tests {
                 OpenFailureCause::Other,
                 "The image could not be decoded.",
                 true,
+            ),
+            (
+                "failed to fill whole buffer",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "unexpected eof",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "worker error: viewr-format avif AVIF support requires building viewr-decode with --features avif (and libavif)",
+                OpenFailureCause::AvifUnavailable,
+                "This build can't open AVIF photos.",
+                false,
+            ),
+            (
+                "worker error: viewr-format heic HEIC/HEIF support requires building viewr-decode with --features heic (and libheif)",
+                OpenFailureCause::HeicUnavailable,
+                "This build can't open HEIC photos.",
+                false,
+            ),
+            (
+                "worker error: viewr-format raw camera RAW is deferred from 1.0; see docs/FORMATS.md",
+                OpenFailureCause::RawDeferred,
+                "viewr does not open camera RAW files yet.",
+                false,
+            ),
+            (
+                "camera RAW is deferred from 1.0 (feature raw reserved; see docs/FORMATS.md)",
+                OpenFailureCause::RawDeferred,
+                "viewr does not open camera RAW files yet.",
+                false,
             ),
         ];
         for (error, cause, sentence, retry) in cases {

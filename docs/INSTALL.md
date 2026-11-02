@@ -17,6 +17,9 @@ product-quality matrix was not completed for this tag; the
 irm https://github.com/blisspixel/viewr/releases/download/v0.7.7/install.ps1 | iex
 ```
 
+The URL is the immutable v0.7.7 installer script, not a moving branch. The
+script installs the newest stable release unless `-Version` is set.
+
 The installer:
 
 - resolves the latest stable release through the GitHub Releases API;
@@ -48,6 +51,9 @@ shortcut. `-InstallDir` is accepted only inside the current user's
 ```sh
 curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.7/install.sh | sh
 ```
+
+The URL is the immutable v0.7.7 installer script, not a moving branch. The
+script installs the newest stable release unless `VIEWR_VERSION` is set.
 
 The shell installer:
 
@@ -85,7 +91,9 @@ configuration. The installer reports this without editing profile files.
 ## Review before running
 
 Pipe-to-shell commands are convenient but execute installer code. The commands
-above are fixed to the immutable `v0.7.7` release rather than a moving branch.
+above download the immutable `v0.7.7` installer script rather than a moving
+branch. The script installs the newest stable release unless `VIEWR_VERSION`
+or `-Version` selects one.
 To review it first:
 
 ```sh

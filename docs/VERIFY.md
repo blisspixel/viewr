@@ -32,7 +32,9 @@ they do not replace source review or platform signing.
   `packaging/flatpak/cargo-sources.json`. `python -B scripts/refresh_dependency_records.py`
   rewrites those two records, and `.github/workflows/dependabot-records.yml` runs
   that command from the base branch for a same-repository Dependabot pull request.
-  The workflow pushes the two generated files with the job token. GitHub holds the
+  The workflow pushes the two generated files with the job token. The records
+  commit is authored as the maintainer, so the Actions app is not a commit
+  author on that branch. GitHub holds the
   new pull request runs for approval, and those runs are not what satisfies the
   required checks. The same records run passes the new commit to call-only CI and
   fuzz workflows as an input named pin. The pin must be 40 lowercase hex characters.

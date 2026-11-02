@@ -116,6 +116,12 @@ class DependabotRecordTests(unittest.TestCase):
             self.workflow,
         )
         self.assertNotIn("secrets: inherit", self.workflow)
+        self.assertNotIn("github-actions[bot]", self.workflow)
+        self.assertIn('git config user.name "Nick Seal"', self.workflow)
+        self.assertIn(
+            'git config user.email "32712898+blisspixel@users.noreply.github.com"',
+            self.workflow,
+        )
         self.assertEqual(self.workflow.count("contents: write"), 1)
         self.assertEqual(self.workflow.count("checks: write"), 1)
         self.assertEqual(self.workflow.count("id-token: write"), 0)

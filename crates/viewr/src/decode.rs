@@ -3188,4 +3188,36 @@ mod tests {
         let minus_three = &full[..full.len() - 3];
         assert!(DecodedImage::load_from_memory(minus_three).is_ok());
     }
+
+    #[test]
+    fn truncated_webp_and_tiff_are_damaged() {
+        let image = image::RgbImage::from_pixel(32, 24, image::Rgb([12, 34, 56]));
+        for format in [image::ImageFormat::WebP, image::ImageFormat::Tiff] {
+            let mut full = Vec::new();
+            image
+                .write_to(&mut Cursor::new(&mut full), format)
+                .unwrap_or_else(|error| panic!("encode {format:?}: {error}"));
+            assert!(
+                DecodedImage::load_from_memory(&full).is_ok(),
+                "{format:?} fixture"
+            );
+            let half = &full[..full.len() / 2];
+            match DecodedImage::load_from_memory(half) {
+                Err(error) => {
+                    let failure = crate::presentation::explain_open_failure(
+                        crate::locale::Language::English,
+                        &error,
+                    );
+                    assert_eq!(
+                        failure.cause,
+                        crate::presentation::OpenFailureCause::Damaged,
+                        "{format:?}: {error}"
+                    );
+                    assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+                    assert!(!failure.allows_retry(), "{format:?}");
+                }
+                Ok(_) => panic!("truncated {format:?} at 50% unexpectedly decoded"),
+            }
+        }
+    }
 }

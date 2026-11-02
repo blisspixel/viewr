@@ -98,8 +98,8 @@ jobs:
             echo "head_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "Nick Seal"
+          git config user.email "32712898+blisspixel@users.noreply.github.com"
           git commit -m "Refresh generated dependency records"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
           sha="$(git rev-parse HEAD)"

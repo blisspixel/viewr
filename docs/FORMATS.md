@@ -166,9 +166,9 @@ is and exits, because there is no protocol frame on a terminal to answer.
 
 | Format | Extensions | Default worker build | Full decode |
 |--------|------------|----------------------|-------------|
-| AVIF | `.avif` | Error explaining missing feature | `--features avif` (+ system libavif) |
-| HEIC / HEIF | `.heic`, `.heif` | Error explaining missing feature | `--features heic` (+ system libheif) |
-| Camera RAW | `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`, `.orf`, `.raf` | **Deferred from 1.0** honest error | Feature `raw` reserved; no decode, orientation, or color implementation ships in 1.0 |
+| AVIF | `.avif` | This build can't open AVIF photos. | `--features avif` (+ system libavif) |
+| HEIC / HEIF | `.heic`, `.heif` | This build can't open HEIC photos. | `--features heic` (+ system libheif) |
+| Camera RAW | `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`, `.orf`, `.raf` | viewr does not open camera RAW files yet. Deferred from 1.0. | Feature `raw` reserved; no decode, orientation, or color implementation ships in 1.0 |
 
 ### Building the worker with C backends
 

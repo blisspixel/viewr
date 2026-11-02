@@ -4,8 +4,8 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): source builds, fixed v0.7.7
-  one-command installers, manual downloads, default-app setup, platform
+- [Install and update](INSTALL.md): source builds, immutable v0.7.7
+  installer scripts, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
   Trash and Undo, and other interaction rules.

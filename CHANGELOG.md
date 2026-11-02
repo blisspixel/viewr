@@ -5,11 +5,23 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- A JPEG that ends before its end-of-image marker, and whose decoded image
+  finishes in the grey fill used for a missing scan, fails to open. The open
+  reports that the file is damaged or incomplete. `viewr benchmark` skips that
+  file with the same sentence. A complete JPEG is unchanged.
+- ICO entries stored as PNG decode through the PNG decoder, including 24-bit
+  RGB PNG entries. BMP icon entries stay on the ICO decoder.
+- Image Information formats file size, aperture, focal length, and exposure
+  with the active language's decimal separator. English uses a period.
+  Spanish, French, and German use a comma. Sizes below 1 KiB stay whole byte
+  counts.
+- `viewr help` keeps each command and its description in aligned columns. On
+  a narrower terminal the description wraps under that column.
 - File > Save Path types a Save As destination when the native file chooser
   returns nothing. The field starts with the suggested JPEG name beside the
   open file. An existing destination still asks before replacement, and an
   invalid path reports Save failed. Cancelling a chooser shows that note and
-  does not write a file.
+  does not write a file. The typed destination stays in memory for the session.
 
 ## 0.7.6 - 2026-10-24
 

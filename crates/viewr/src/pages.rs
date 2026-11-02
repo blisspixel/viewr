@@ -909,12 +909,9 @@ mod tests {
 
     #[test]
     fn ico_with_rgb_png_entries_opens_and_decodes_frames() {
-        let workspace = TempWorkspace::new("pages_rgb_ico").unwrap();
-        let path = workspace.path().join("rgb.ico");
         let ico_bytes = encode_rgb_png_ico(&[(16, 16, [250, 160, 30]), (32, 32, [250, 160, 30])]);
-        std::fs::write(&path, ico_bytes).unwrap();
 
-        let decoded = DecodedImage::load(&path).unwrap();
+        let decoded = DecodedImage::load_from_memory(&ico_bytes).unwrap();
         assert_eq!(decoded.width, 32);
         assert_eq!(decoded.height, 32);
         assert_eq!(decoded.rgba[0], 250);
@@ -922,7 +919,7 @@ mod tests {
         assert_eq!(decoded.rgba[2], 30);
         assert_eq!(decoded.rgba[3], 255);
 
-        let pages = DecodedPages::load_with_cancellation(&path, &|| true)
+        let pages = DecodedPages::decode_ico(Cursor::new(&ico_bytes), &|| true)
             .unwrap()
             .unwrap();
         assert_eq!(pages.kind(), PageKind::Ico);

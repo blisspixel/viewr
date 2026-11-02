@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.7.7 - 2026-11-01
 
 - A JPEG that ends before its end-of-image marker, and whose decoded image
   finishes in the grey fill used for a missing scan, fails to open. The open

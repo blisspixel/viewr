@@ -1241,9 +1241,9 @@ pub fn ensure_console() {
 mod tests {
     use super::{
         HelpTopic, Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL, ReportStyle,
-        UNIX_INSTALL_COMMAND, WINDOWS_INSTALL_COMMAND, benchmark_to, console_columns,
-        count_tag_rows, decode_self_test, doctor_closing, doctor_to, help_text, median,
-        no_color_disables, paint_tag, parse_args, parse_args_with, run_with_io, style_for,
+        UNIX_INSTALL_COMMAND, WINDOWS_INSTALL_COMMAND, bench_one_bytes, benchmark_to,
+        console_columns, count_tag_rows, decode_self_test, doctor_closing, doctor_to, help_text,
+        median, no_color_disables, paint_tag, parse_args, parse_args_with, run_with_io, style_for,
         window_readiness, wrap_logical_line, wrap_text,
     };
     use crate::ephemeral::TempWorkspace;
@@ -2045,8 +2045,7 @@ mod tests {
     }
 
     #[test]
-    fn directory_benchmark_skips_truncated_jpeg() {
-        let workspace = TempWorkspace::new("cli_benchmark_truncated_jpeg").unwrap();
+    fn benchmark_skips_truncated_jpeg() {
         let width = 64u32;
         let height = 64u32;
         let mut raw_pixels = Vec::with_capacity((width * height * 3) as usize);
@@ -2070,18 +2069,9 @@ mod tests {
         .unwrap();
 
         let half = &full[..full.len() / 2];
-        fs::write(workspace.path().join("half.jpg"), half).unwrap();
-
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        benchmark_to(
-            Some(workspace.path()),
-            &mut stdout,
-            &mut stderr,
-            false,
-            false,
-        )
-        .unwrap();
+        bench_one_bytes("half.jpg", half, 1, &mut stdout, &mut stderr, false, false).unwrap();
 
         let error = String::from_utf8(stderr).unwrap();
         assert_eq!(

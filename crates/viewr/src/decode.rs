@@ -6,7 +6,7 @@
 //! normalization boundary before becoming a [`DecodedImage`] in the renderer's
 //! typed working encoding.
 
-use std::io::{self, BufRead, BufReader, Read, Seek};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -1047,6 +1047,19 @@ impl DecodedImage {
     where
         R: BufRead + Seek,
     {
+        let is_jpeg = reader.format() == Some(image::ImageFormat::Jpeg);
+        let has_eoi = if is_jpeg {
+            let mut inner = reader.into_inner();
+            let has_eoi = jpeg_stream_has_eoi(&mut inner)?;
+            inner
+                .rewind()
+                .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+            reader = image::ImageReader::with_format(inner, image::ImageFormat::Jpeg);
+            has_eoi
+        } else {
+            true
+        };
+
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(MAX_DECODE_DIMENSION);
         limits.max_image_height = Some(MAX_DECODE_DIMENSION);
@@ -1062,6 +1075,9 @@ impl DecodedImage {
             .map_err(|e| Error::Decode(format!("could not read image orientation: {e}")))?;
         let mut dynamic_image = image::DynamicImage::from_decoder(decoder)
             .map_err(|e| Error::Decode(format!("decode failed: {e}")))?;
+        if is_jpeg && !has_eoi && dynamic_image_ends_with_truncated_grey_fill(&dynamic_image) {
+            return Err(Error::Decode("the file is damaged or incomplete".into()));
+        }
         dynamic_image.apply_orientation(orientation);
         color_normalizer
             .normalize_if_current(SourceImage::from_dynamic_image(dynamic_image)?, generation)
@@ -1715,6 +1731,43 @@ fn validate_decoder_allocation(decoder: &impl image::ImageDecoder) -> Result<(),
         ));
     }
     Ok(())
+}
+
+fn jpeg_stream_has_eoi<R: BufRead + Seek>(reader: &mut R) -> Result<bool, Error> {
+    let stream_len = reader
+        .seek(SeekFrom::End(0))
+        .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+    if stream_len < 2 {
+        return Ok(false);
+    }
+    let inspect_len = stream_len.min(4096);
+    let offset = i64::try_from(inspect_len)
+        .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+    reader
+        .seek(SeekFrom::End(-offset))
+        .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+    let mut tail = vec![0u8; inspect_len as usize];
+    reader
+        .read_exact(&mut tail)
+        .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+    Ok(tail.windows(2).any(|pair| pair == [0xFF, 0xD9]))
+}
+
+fn dynamic_image_ends_with_truncated_grey_fill(image: &image::DynamicImage) -> bool {
+    // zune-jpeg fills all unwritten pixels with 128 (0x80) when the bitstream terminates early.
+    // An aborted scan leaves at least one MCU block (or row) filled with 128.
+    const MIN_GREY_RUN: usize = 32;
+
+    let bytes = image.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    if bytes.len() < MIN_GREY_RUN {
+        return bytes.iter().all(|&b| b == 128);
+    }
+    bytes[bytes.len() - MIN_GREY_RUN..]
+        .iter()
+        .all(|&b| b == 128)
 }
 
 /// Convert a non-negative CSS/SVG length to a whole pixel count of at least 1.
@@ -3072,5 +3125,67 @@ mod tests {
         drop(second_background);
         foreground.join().unwrap();
         background.join().unwrap();
+    }
+
+    #[test]
+    fn truncated_jpeg_detection() {
+        let width = 128u32;
+        let height = 128u32;
+        let mut raw_pixels = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let r = ((x * 255) / width) as u8;
+                let g = ((y * 255) / height) as u8;
+                let b = 42u8;
+                raw_pixels.extend_from_slice(&[r, g, b]);
+            }
+        }
+        let mut full = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut full),
+            &raw_pixels,
+            width,
+            height,
+            image::ColorType::Rgb8,
+            image::ImageFormat::Jpeg,
+        )
+        .expect("encode JPEG");
+
+        assert!(DecodedImage::load_from_memory(&full).is_ok());
+
+        let half = &full[..full.len() / 2];
+        match DecodedImage::load_from_memory(half) {
+            Err(err) => {
+                let failure = crate::presentation::explain_open_failure(
+                    crate::locale::Language::English,
+                    &err,
+                );
+                assert_eq!(
+                    failure.cause,
+                    crate::presentation::OpenFailureCause::Damaged
+                );
+                assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+            }
+            Ok(_) => panic!("truncated JPEG at 50% unexpectedly decoded successfully"),
+        }
+
+        let ninety = &full[..(full.len() * 9) / 10];
+        match DecodedImage::load_from_memory(ninety) {
+            Err(err) => {
+                let failure = crate::presentation::explain_open_failure(
+                    crate::locale::Language::English,
+                    &err,
+                );
+                assert_eq!(
+                    failure.cause,
+                    crate::presentation::OpenFailureCause::Damaged
+                );
+                assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+            }
+            Ok(_) => panic!("truncated JPEG at 90% unexpectedly decoded successfully"),
+        }
+
+        let minus_three = &full[..full.len() - 3];
+        assert!(DecodedImage::load_from_memory(minus_three).is_ok());
     }
 }

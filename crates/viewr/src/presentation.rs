@@ -253,6 +253,8 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
     if text.contains("format error")
         || text.contains("truncated")
         || text.contains("corrupt")
+        || text.contains("damaged")
+        || text.contains("incomplete")
         || text.contains("illegal")
         || text.contains("malformed")
         || text.contains("invalid signature")
@@ -566,6 +568,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn open_failures_use_one_sentence_and_retry_only_when_a_later_try_can_help() {
         let cases = [
             (
@@ -624,6 +627,12 @@ mod tests {
             ),
             (
                 "source pixels do not match their dimensions",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "the file is damaged or incomplete",
                 OpenFailureCause::Damaged,
                 "The file is damaged or incomplete.",
                 false,

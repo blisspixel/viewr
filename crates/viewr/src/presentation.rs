@@ -247,7 +247,7 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
     {
         return OpenFailureCause::TooLarge;
     }
-    if text.contains("unsupported") {
+    if text.contains("unsupported") || text.contains("not in rgba format") {
         return OpenFailureCause::Unsupported;
     }
     if text.contains("format error")
@@ -517,6 +517,15 @@ mod tests {
         );
         assert_eq!(unsupported.cause, OpenFailureCause::Unsupported);
         assert!(!unsupported.allows_retry());
+        let rgba_format_error = explain_open_failure(
+            Language::English,
+            "Format error decoding ico: The PNG is not in RGBA format",
+        );
+        assert_eq!(rgba_format_error.cause, OpenFailureCause::Unsupported);
+        assert_eq!(
+            rgba_format_error.sentence,
+            "viewr can't read this kind of file."
+        );
         assert_eq!(
             decode_failure_toast(
                 Language::English,

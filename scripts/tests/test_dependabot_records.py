@@ -83,6 +83,8 @@ class DependabotRecordTests(unittest.TestCase):
         caller = self.workflow.split("  required-checks:", 1)[1].split("  fuzz:", 1)[0]
         self.assertIn("needs.refresh.outputs.head_sha", caller)
         self.assertIn("uses: ./.github/workflows/ci.yml", caller)
+        self.assertIn("pin: ${{ needs.refresh.outputs.head_sha }}", caller)
+        self.assertNotIn("checkout-ref", caller)
         self.assertIn("cache-mode: read", caller)
         self.assertIn("contents: read", caller)
         self.assertNotIn("contents: write", caller)
@@ -91,6 +93,8 @@ class DependabotRecordTests(unittest.TestCase):
 
         fuzz = self.workflow.split("  fuzz:", 1)[1].split("  report:", 1)[0]
         self.assertIn("uses: ./.github/workflows/fuzz.yml", fuzz)
+        self.assertIn("pin: ${{ needs.refresh.outputs.head_sha }}", fuzz)
+        self.assertNotIn("checkout-ref", fuzz)
         self.assertIn("cache-mode: read", fuzz)
         self.assertIn("permissions:\n      contents: read\n", fuzz)
         self.assertNotIn("id-token:", fuzz)
@@ -112,16 +116,35 @@ class DependabotRecordTests(unittest.TestCase):
         self.assertNotIn("checkout-ref", release)
 
     def test_called_workflows_checkout_the_requested_commit(self) -> None:
+        # Code scanning classifies a checkout ref expression that contains
+        # ref, head, sha, commit, or branch as an untrusted pull-request
+        # checkout. These workflows also run on schedule and workflow_dispatch.
+        forbidden = re.compile(r"head|branch|ref|sha|commit", re.IGNORECASE)
         for name in ("ci.yml", "fuzz.yml"):
-            text = (REPOSITORY_ROOT / ".github" / "workflows" / name).read_text(
-                encoding="utf-8"
+            text = (
+                (REPOSITORY_ROOT / ".github" / "workflows" / name)
+                .read_text(encoding="utf-8")
+                .replace("\r\n", "\n")
             )
-            checkouts = text.count("uses: actions/checkout@")
-            refs = text.count("ref: ${{ inputs['checkout-ref'] || github.sha }}")
-            self.assertGreater(checkouts, 0, name)
-            self.assertEqual(checkouts, refs, name)
-            self.assertIn("checkout-ref:", text)
-            self.assertIn("inputs['checkout-ref']", text)
+            self.assertIn("\n      pin:\n", text)
+            self.assertNotIn("checkout-ref", text)
+            self.assertNotIn("inputs[", text)
+            pin_refs = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip().startswith("ref:")
+            ]
+            self.assertTrue(pin_refs, name)
+            for line in pin_refs:
+                self.assertEqual(line, "ref: ${{ inputs.pin }}")
+                self.assertIsNone(forbidden.search(line.split("ref:", 1)[1]), line)
+            self.assertEqual(text.count("uses: actions/checkout@"), len(pin_refs) * 2)
+            self.assertEqual(text.count("if: ${{ !inputs.pin }}"), len(pin_refs))
+            self.assertEqual(text.count("if: ${{ inputs.pin }}"), len(pin_refs) * 2)
+            self.assertEqual(
+                text.count('if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then'),
+                len(pin_refs),
+            )
 
         verify = (REPOSITORY_ROOT / "docs" / "VERIFY.md").read_text(encoding="utf-8")
         for name in REQUIRED_CHECKS:

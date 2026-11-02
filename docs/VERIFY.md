@@ -34,8 +34,10 @@ they do not replace source review or platform signing.
   that command from the base branch for a same-repository Dependabot pull request.
   The workflow pushes the two generated files with the job token. GitHub holds the
   new pull request runs for approval, and those runs are not what satisfies the
-  required checks. The same records run checks out the new commit by its full SHA
-  and calls the base CI and fuzz workflows on it. The CI caller grants only the
+  required checks. The same records run passes the new commit to the base CI and
+  fuzz workflows as an input named pin. The pin must be 40 lowercase hex characters.
+  Push, pull request, schedule, and workflow dispatch runs do not receive a pin, and
+  they check out the commit that triggered them. The CI caller grants only the
   permissions those jobs already request: contents read, attestation read, and the
   update jobs' identity token. It passes no secrets, it does not grant contents
   write, and its cache access is read-only. The records run then creates these

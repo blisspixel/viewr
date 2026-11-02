@@ -123,7 +123,7 @@ jobs:
       id-token: write
     uses: ./.github/workflows/ci.yml
     with:
-      checkout-ref: ${{ needs.refresh.outputs.head_sha }}
+      pin: ${{ needs.refresh.outputs.head_sha }}
 
   fuzz:
     needs: refresh
@@ -133,7 +133,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/fuzz.yml
     with:
-      checkout-ref: ${{ needs.refresh.outputs.head_sha }}
+      pin: ${{ needs.refresh.outputs.head_sha }}
 
   report:
     needs: [refresh, required-checks]

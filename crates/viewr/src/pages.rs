@@ -738,7 +738,7 @@ fn stepped_index(index: usize, delta: isize, count: usize) -> Option<usize> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use crate::decode::ColorProfileStatus;
     use crate::ephemeral::TempWorkspace;
@@ -778,7 +778,7 @@ pub(crate) mod tests {
             .unwrap();
     }
 
-    pub(crate) fn write_rgb_png_ico(path: &Path, frames: &[(u8, u8, [u8; 3])]) {
+    fn encode_rgb_png_ico(frames: &[(u8, u8, [u8; 3])]) -> Vec<u8> {
         let mut encoded_pngs = Vec::new();
         for &(width, height, color) in frames {
             let mut png_bytes = Vec::new();
@@ -810,7 +810,7 @@ pub(crate) mod tests {
             ico.extend_from_slice(&png);
         }
 
-        std::fs::write(path, ico).unwrap();
+        ico
     }
 
     #[test]
@@ -911,7 +911,8 @@ pub(crate) mod tests {
     fn ico_with_rgb_png_entries_opens_and_decodes_frames() {
         let workspace = TempWorkspace::new("pages_rgb_ico").unwrap();
         let path = workspace.path().join("rgb.ico");
-        write_rgb_png_ico(&path, &[(16, 16, [250, 160, 30]), (32, 32, [250, 160, 30])]);
+        let ico_bytes = encode_rgb_png_ico(&[(16, 16, [250, 160, 30]), (32, 32, [250, 160, 30])]);
+        std::fs::write(&path, ico_bytes).unwrap();
 
         let decoded = DecodedImage::load(&path).unwrap();
         assert_eq!(decoded.width, 32);

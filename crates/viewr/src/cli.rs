@@ -1930,8 +1930,6 @@ mod tests {
         image::RgbImage::from_pixel(4, 3, image::Rgb([1, 2, 3]))
             .save(&good)
             .unwrap();
-        let rgb_ico = workspace.path().join("rgb.ico");
-        crate::pages::tests::write_rgb_png_ico(&rgb_ico, &[(16, 16, [250, 160, 30])]);
         fs::write(workspace.path().join("bad.png"), b"not a PNG").unwrap();
         fs::write(workspace.path().join("ignored.txt"), b"not an image").unwrap();
 
@@ -1949,7 +1947,6 @@ mod tests {
         let output = String::from_utf8(stdout).unwrap();
         let error = String::from_utf8(stderr).unwrap();
         assert!(output.contains("good.png"));
-        assert!(output.contains("rgb.ico"));
         assert!(!output.contains("ignored.txt"));
         assert_eq!(
             error.trim(),

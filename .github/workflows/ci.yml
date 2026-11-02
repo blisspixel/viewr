@@ -2,18 +2,6 @@ name: CI
 
 on:
   workflow_call:
-    inputs:
-      # The id stays `pin`. Code scanning treats a checkout ref expression
-      # that contains ref, head, sha, commit, or branch as an untrusted
-      # pull-request checkout. This workflow also runs on schedule and
-      # workflow_dispatch, which can write the default-branch cache, so the
-      # ref expression must not contain those words. An empty pin checks out
-      # the triggering commit.
-      pin:
-        description: Forty lowercase hex characters. Empty uses the triggering commit.
-        required: false
-        type: string
-        default: ""
   push:
     branches: [main]
   pull_request:
@@ -25,9 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  # A records run passes the commit it just pushed. Other events keep the ref
-  # group, so that called run does not cancel CI for the default branch.
-  group: ci-${{ inputs.pin || github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -44,23 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
 
       - name: Install Linux GUI build dependencies
         timeout-minutes: 15
@@ -187,23 +157,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
 
       - name: Install virtual-display and software-GPU dependencies
         timeout-minutes: 15
@@ -242,23 +196,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
 
       - name: Install native decoder build and runtime dependencies
         timeout-minutes: 15
@@ -296,23 +234,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
 
       - name: Install Linux GUI build dependencies
         timeout-minutes: 15
@@ -350,23 +272,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
       - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-deny,cargo-audit
@@ -419,23 +325,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
 
       - name: Install Linux runtime packages
         timeout-minutes: 15
@@ -474,23 +364,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Require a full commit pin
-        if: ${{ inputs.pin }}
-        shell: bash
-        env:
-          PIN: ${{ inputs.pin }}
-        run: |
-          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "pin must be a full commit SHA" >&2
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.pin }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ inputs.pin }}
-        with:
-          ref: ${{ inputs.pin }}
-          persist-credentials: false
 
       - name: Set up Rust
         run: rustup show

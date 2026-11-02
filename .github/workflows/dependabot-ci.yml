@@ -1,0 +1,382 @@
+name: Dependabot required CI
+
+# Called only after the records workflow pushes a commit. This file has no
+# schedule or workflow_dispatch trigger. Those events can write the
+# default-branch cache, so they stay on ci.yml, which checks out the
+# triggering commit. The caller keeps cache access read-only.
+
+on:
+  workflow_call:
+    inputs:
+      pin:
+        description: Forty lowercase hex characters.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: dependabot-required-${{ inputs.pin }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: fmt / clippy / test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Require a full commit pin
+        shell: bash
+        env:
+          PIN: ${{ inputs.pin }}
+        run: |
+          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pin must be a full commit SHA" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pin }}
+          persist-credentials: false
+
+      - name: Install Linux GUI build dependencies
+        timeout-minutes: 15
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/ci-install-packages.sh flatpak-builder libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      # Installs the exact toolchain and components pinned in rust-toolchain.toml.
+      - name: Set up Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install pinned Python quality tools
+        if: runner.os == 'Linux'
+        run: python -m pip install --require-hashes -r scripts/requirements-quality.txt
+
+      - name: Lint Python tooling
+        if: runner.os == 'Linux'
+        run: |
+          ruff check scripts
+          ruff format --check scripts
+
+      - name: Validate Unix installer syntax
+        if: runner.os != 'Windows'
+        run: |
+          sh -n install.sh
+          bash -n scripts/ci-update-from-v0.7.4.sh
+
+      - name: Validate Windows installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($file in @("install.ps1", "scripts/install-windows-smoke.ps1", "scripts/ci-update-from-v0.7.4.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error $_ }
+              exit 1
+            }
+          }
+
+      - name: Test release artifact contract
+        if: runner.os != 'Linux'
+        run: python -B -m unittest discover -s scripts/tests -v
+
+      - name: Measure release tooling coverage
+        if: runner.os == 'Linux'
+        env:
+          COVERAGE_FILE: target/release-tooling-coverage
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          coverage run \
+            --source=scripts.release_artifact,scripts.performance_gate,scripts.product_quality_evidence,scripts.software_gl_probe \
+            -m unittest discover -s scripts/tests
+          coverage report --precision=2 --show-missing --fail-under=85
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      # Pedantic clippy with warnings as errors. Do not pass --all-features on the
+      # whole workspace: viewr-decode's avif/heic/raw features need system C
+      # libraries and are opt-in for local builds (see docs/FORMATS.md).
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Documentation tests
+        run: cargo test --workspace --doc --locked
+
+      - name: Build workspace binaries
+        run: cargo build --workspace --all-targets --locked
+
+      - name: Exercise Windows installer contract
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: scripts/install-windows-smoke.ps1 -BinaryDirectory target/debug
+
+      - name: Exercise native Windows accessibility bridge
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/accessibility-smoke.ps1 -Binary target/debug/viewr.exe
+
+      - name: Verify generated Flatpak Cargo sources
+        if: runner.os == 'Linux'
+        run: |
+          python3 scripts/generate-flatpak-cargo-sources.py
+          git diff --exit-code -- packaging/flatpak/cargo-sources.json
+
+      - name: Install pinned Flatpak SDK
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        run: bash scripts/ci-install-flatpak-sdk.sh
+
+      - name: Build and probe Flatpak sandbox
+        if: runner.os == 'Linux'
+        run: |
+          flatpak-builder --force-clean --disable-rofiles-fuse \
+            target/profile-check/flatpak \
+            packaging/flatpak/io.github.blisspixel.viewr.yml
+          flatpak-builder --run \
+            target/profile-check/flatpak \
+            packaging/flatpak/io.github.blisspixel.viewr.yml \
+            viewr doctor
+
+      - name: Build and validate macOS App Sandbox bundle
+        if: runner.os == 'macOS'
+        run: bash scripts/build-macos-sandboxed-app.sh target/debug
+
+      - name: Build and validate Windows AppContainer package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/build-windows-appcontainer.ps1 -BinaryDirectory target/debug
+
+  performance:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: GUI performance budgets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Require a full commit pin
+        shell: bash
+        env:
+          PIN: ${{ inputs.pin }}
+        run: |
+          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pin must be a full commit SHA" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pin }}
+          persist-credentials: false
+
+      - name: Install virtual-display and software-GPU dependencies
+        timeout-minutes: 15
+        run: |
+          bash scripts/ci-install-packages.sh --no-install-recommends libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev mesa-vulkan-drivers xauth xvfb xdotool
+      - name: Set up pinned Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: gui-performance
+
+      - name: Build release probe target
+        run: cargo build --release --workspace --locked
+
+      - name: Enforce startup, first-pixel, navigation, idle, and memory budgets
+        run: python -B scripts/performance_gate.py --binary target/release/viewr
+
+      - name: Close X11 windows safely with an unconfirmed rating
+        run: bash scripts/linux-gui-smoke.sh target/release/viewr
+
+      # A host with no Vulkan driver must still present through OpenGL. wgpu
+      # reaches Mesa's GL through EGL, and it can only do so when the display
+      # connection reaches the instance, so this proves that wiring end to end.
+      - name: Present through the OpenGL backend on a software X session
+        env:
+          WGPU_BACKEND: gl
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get install -y --no-install-recommends libegl1 libegl-mesa0
+          python -B -m scripts.software_gl_probe --binary target/release/viewr
+
+  c-decoder-policy:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: C decoders under default-deny seccomp
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Require a full commit pin
+        shell: bash
+        env:
+          PIN: ${{ inputs.pin }}
+        run: |
+          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pin must be a full commit SHA" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pin }}
+          persist-credentials: false
+
+      - name: Install native decoder build and runtime dependencies
+        timeout-minutes: 15
+        run: |
+          bash scripts/ci-install-packages.sh --no-install-recommends build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev libde265-dev libx265-dev libnuma-dev libheif-dev libheif-plugin-libde265 libheif-plugin-x265
+      - name: Set up pinned Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: c-decoder-policy
+
+      - name: Lint feature-gated Linux policies and decoders
+        run: |
+          cargo clippy -p viewr-seccomp --all-targets --locked -- -D warnings
+          cargo clippy -p viewr-decode --features avif,heic --all-targets --locked -- -D warnings
+
+      - name: Prove default-deny policy and production decoder compatibility
+        run: |
+          cargo test -p viewr-seccomp --locked
+          cargo test --release -p viewr-decode \
+            --features avif,heic --locked \
+            -- --test-threads=1
+
+      - name: Prove libheif 1.23 profile and HEVC VUI behavior
+        run: |
+          pkg-config --atleast-version=1.0.7 libde265
+          cargo test --release -p viewr-decode \
+            --features heic-latest-ci --locked \
+            -- --test-threads=1
+
+  coverage:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: coverage (>= 85% on logic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require a full commit pin
+        shell: bash
+        env:
+          PIN: ${{ inputs.pin }}
+        run: |
+          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pin must be a full commit SHA" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pin }}
+          persist-credentials: false
+
+      - name: Install Linux GUI build dependencies
+        timeout-minutes: 15
+        run: |
+          bash scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      - name: Set up Rust
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
+        with:
+          tool: cargo-llvm-cov
+
+      # Coverage includes the egui/AccessKit UI adapter and the error types.
+      # Locally patched vendor crates run behavioral tests on every platform above
+      # but stay outside the owned-logic percentage, as they did before becoming
+      # workspace test members. Every remaining exact-path exclusion is native
+      # integration that cannot run honestly here: the winit event loop and its
+      # platform callbacks (`app`), the wgpu device and surface (`gpu`), the
+      # sandbox and worker process launchers (`sandbox`, `worker_limit`), and the
+      # two binary entry points (`main`). Their decisions live in the covered
+      # seams beside them.
+      - name: Coverage
+        run: >
+          cargo llvm-cov --workspace
+          --locked
+          --exclude jxl-color
+          --exclude jxl-render
+          --ignore-filename-regex '(^|[/\\])crates[/\\](viewr[/\\]src[/\\](app|gpu|sandbox|worker_limit|main)|viewr-decode[/\\]src[/\\]main)\.rs$'
+          --fail-under-lines 85
+          --lcov --output-path target/lcov.info
+
+  supply-chain:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: deny + audit (privacy invariant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require a full commit pin
+        shell: bash
+        env:
+          PIN: ${{ inputs.pin }}
+        run: |
+          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pin must be a full commit SHA" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pin }}
+          persist-credentials: false
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
+        with:
+          tool: cargo-deny,cargo-audit
+
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
+        with:
+          tool: cargo-about@0.9.1
+
+      - name: Verify committed lockfiles
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 > /dev/null
+          cargo metadata --manifest-path fuzz/Cargo.toml --locked --no-deps --format-version 1 > /dev/null
+
+      # cargo-deny bans remote-service clients and confines generic Linux D-Bus
+      # code to AccessKit, in addition to enforcing licenses, advisories, and an
+      # exact duplicate-version baseline. NCSA occurs only in the separate fuzz
+      # graph; the fuzz run denies every warning and proves that allowance is used.
+      - name: cargo-deny
+        run: cargo deny --locked check --hide-inclusion-graph -D warnings -A license-not-encountered -A unmatched-skip -A unnecessary-skip
+
+      - name: cargo-deny (fuzz workspace)
+        run: cargo deny --manifest-path fuzz/Cargo.toml --locked check --hide-inclusion-graph -D warnings
+
+      - name: cargo-audit
+        run: cargo audit -D warnings
+
+      - name: cargo-audit (fuzz workspace)
+        run: cargo audit --file fuzz/Cargo.lock -D warnings
+
+      - name: Verify third-party license inventory
+        run: |
+          cargo fetch --locked
+          mkdir -p target
+          cargo about generate about.hbs \
+            --workspace --locked --offline --fail \
+            --output-file target/THIRD_PARTY_LICENSES.txt
+          python -B scripts/verify_license_inventory.py \
+            THIRD_PARTY_LICENSES.txt target/THIRD_PARTY_LICENSES.txt
+
+      - name: privacy-check (packaging + tree)
+        run: bash scripts/privacy-check.sh

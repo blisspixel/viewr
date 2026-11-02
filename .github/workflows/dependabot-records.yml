@@ -4,9 +4,10 @@ name: Dependabot dependency records
 # overlays only the known lockfiles and manifests, regenerates records with the
 # base scripts, and pushes those two files. The refresh job does not execute
 # pull request scripts. A push with the job token leaves the new pull request
-# runs waiting for approval, so this run then calls the trusted CI and fuzz
-# workflows on that commit and reports the seven required checks from the CI
+# runs waiting for approval, so this run then calls the records CI and fuzz
+# workflows on that commit and reports the seven required checks from those
 # jobs. A missing, skipped, or unsuccessful required job is reported as failure.
+# Schedule and workflow dispatch stay on the normal CI and fuzz workflows.
 
 on:
   pull_request_target:
@@ -111,17 +112,15 @@ jobs:
   required-checks:
     needs: refresh
     if: needs.refresh.outputs.head_sha != ''
-    # The update jobs verify published attestations. A reusable caller cannot
-    # grant less than those nested jobs request, or the run fails before it
-    # starts. This job does not grant contents write and passes no secrets.
+    # These jobs run the seven required checks on the records commit. They do
+    # not run the update jobs, so this caller grants no identity token.
     # Read-only cache access keeps this pull_request_target call from saving
     # over the default branch cache.
     cache-mode: read
     permissions:
-      attestations: read
+      actions: read
       contents: read
-      id-token: write
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/dependabot-ci.yml
     with:
       pin: ${{ needs.refresh.outputs.head_sha }}
 
@@ -130,8 +129,9 @@ jobs:
     if: needs.refresh.outputs.head_sha != ''
     cache-mode: read
     permissions:
+      actions: read
       contents: read
-    uses: ./.github/workflows/fuzz.yml
+    uses: ./.github/workflows/dependabot-fuzz.yml
     with:
       pin: ${{ needs.refresh.outputs.head_sha }}
 

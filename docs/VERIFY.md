@@ -34,13 +34,13 @@ they do not replace source review or platform signing.
   that command from the base branch for a same-repository Dependabot pull request.
   The workflow pushes the two generated files with the job token. GitHub holds the
   new pull request runs for approval, and those runs are not what satisfies the
-  required checks. The same records run passes the new commit to the base CI and
+  required checks. The same records run passes the new commit to call-only CI and
   fuzz workflows as an input named pin. The pin must be 40 lowercase hex characters.
-  Push, pull request, schedule, and workflow dispatch runs do not receive a pin, and
-  they check out the commit that triggered them. The CI caller grants only the
-  permissions those jobs already request: contents read, attestation read, and the
-  update jobs' identity token. It passes no secrets, it does not grant contents
-  write, and its cache access is read-only. The records run then creates these
+  Those workflows have no schedule or workflow dispatch trigger. The normal CI and
+  fuzz workflows keep those triggers and check out the commit that triggered them.
+  The records caller does not run the update jobs and does not grant an identity
+  token. It grants contents read and actions read, passes no secrets, does not grant
+  contents write, and keeps cache access read-only. The records run then creates these
   required checks on the new commit from the CI job results:
   `fmt / clippy / test (ubuntu-latest)`,
   `fmt / clippy / test (macos-latest)`,

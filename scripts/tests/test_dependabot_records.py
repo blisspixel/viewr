@@ -25,6 +25,63 @@ REPORT = REPOSITORY_ROOT / "scripts" / "report_dependabot_required_checks.py"
 SHA = re.compile(r"@[0-9a-f]{40}\b")
 HEAD_SHA = "a" * 40
 REPOSITORY = "blisspixel/viewr"
+REQUIRED_JOBS = (
+    "quality",
+    "performance",
+    "c-decoder-policy",
+    "coverage",
+    "supply-chain",
+)
+
+
+def _workflow(name: str) -> str:
+    path = REPOSITORY_ROOT / ".github" / "workflows" / name
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def _jobs(text: str) -> dict[str, str]:
+    body = text.split("\njobs:\n", 1)[1]
+    parts = re.split(r"\n(?=  [a-z0-9-]+:\n)", "\n" + body)
+    jobs: dict[str, str] = {}
+    for part in parts:
+        part = part.strip("\n")
+        if not part.strip():
+            continue
+        name = part.split(":", 1)[0].strip()
+        jobs[name] = part
+    return jobs
+
+
+def _run_blocks(job: str) -> list[str]:
+    lines = job.splitlines()
+    blocks: list[str] = []
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].lstrip()
+        indent = len(lines[index]) - len(stripped)
+        if not stripped.startswith("run:"):
+            index += 1
+            continue
+        block = [stripped]
+        index += 1
+        while index < len(lines):
+            current = lines[index]
+            if current.strip() == "":
+                following = index + 1
+                if (
+                    following < len(lines)
+                    and lines[following].strip()
+                    and len(lines[following]) - len(lines[following].lstrip()) > indent
+                ):
+                    index += 1
+                    continue
+                break
+            if len(current) - len(current.lstrip()) <= indent:
+                break
+            block.append(current.strip())
+            index += 1
+        blocks.append("\n".join(block))
+    return blocks
 
 
 class DependabotRecordTests(unittest.TestCase):
@@ -61,7 +118,7 @@ class DependabotRecordTests(unittest.TestCase):
         self.assertNotIn("secrets: inherit", self.workflow)
         self.assertEqual(self.workflow.count("contents: write"), 1)
         self.assertEqual(self.workflow.count("checks: write"), 1)
-        self.assertEqual(self.workflow.count("id-token: write"), 1)
+        self.assertEqual(self.workflow.count("id-token: write"), 0)
         self.assertNotIn("conclusion: success", self.workflow)
         for line in self.workflow.splitlines():
             stripped = line.strip()
@@ -82,21 +139,27 @@ class DependabotRecordTests(unittest.TestCase):
     def test_records_run_calls_trusted_ci_and_reports_on_the_new_commit(self) -> None:
         caller = self.workflow.split("  required-checks:", 1)[1].split("  fuzz:", 1)[0]
         self.assertIn("needs.refresh.outputs.head_sha", caller)
-        self.assertIn("uses: ./.github/workflows/ci.yml", caller)
+        self.assertIn("uses: ./.github/workflows/dependabot-ci.yml", caller)
+        self.assertNotIn("uses: ./.github/workflows/ci.yml", caller)
         self.assertIn("pin: ${{ needs.refresh.outputs.head_sha }}", caller)
         self.assertNotIn("checkout-ref", caller)
         self.assertIn("cache-mode: read", caller)
+        self.assertIn("actions: read", caller)
         self.assertIn("contents: read", caller)
         self.assertNotIn("contents: write", caller)
         self.assertNotIn("checks: write", caller)
+        self.assertNotIn("id-token:", caller)
+        self.assertNotIn("attestations:", caller)
         self.assertNotIn("secrets:", caller)
 
         fuzz = self.workflow.split("  fuzz:", 1)[1].split("  report:", 1)[0]
-        self.assertIn("uses: ./.github/workflows/fuzz.yml", fuzz)
+        self.assertIn("uses: ./.github/workflows/dependabot-fuzz.yml", fuzz)
+        self.assertNotIn("uses: ./.github/workflows/fuzz.yml", fuzz)
         self.assertIn("pin: ${{ needs.refresh.outputs.head_sha }}", fuzz)
         self.assertNotIn("checkout-ref", fuzz)
         self.assertIn("cache-mode: read", fuzz)
-        self.assertIn("permissions:\n      contents: read\n", fuzz)
+        self.assertIn("actions: read", fuzz)
+        self.assertIn("contents: read", fuzz)
         self.assertNotIn("id-token:", fuzz)
         self.assertNotIn("secrets:", fuzz)
 
@@ -114,37 +177,60 @@ class DependabotRecordTests(unittest.TestCase):
         )
         self.assertIn("uses: ./.github/workflows/ci.yml", release)
         self.assertNotIn("checkout-ref", release)
+        self.assertNotIn("dependabot-ci.yml", release)
+        self.assertNotIn("inputs.pin", release)
 
     def test_called_workflows_checkout_the_requested_commit(self) -> None:
-        # Code scanning classifies a checkout ref expression that contains
-        # ref, head, sha, commit, or branch as an untrusted pull-request
-        # checkout. These workflows also run on schedule and workflow_dispatch.
-        forbidden = re.compile(r"head|branch|ref|sha|commit", re.IGNORECASE)
         for name in ("ci.yml", "fuzz.yml"):
-            text = (
-                (REPOSITORY_ROOT / ".github" / "workflows" / name)
-                .read_text(encoding="utf-8")
-                .replace("\r\n", "\n")
-            )
-            self.assertIn("\n      pin:\n", text)
-            self.assertNotIn("checkout-ref", text)
-            self.assertNotIn("inputs[", text)
-            pin_refs = [
+            text = _workflow(name)
+            triggers = text.split("\npermissions:", 1)[0]
+            self.assertIn("\n  schedule:\n", triggers)
+            self.assertIn("\n  workflow_dispatch:\n", triggers)
+            self.assertNotIn("inputs.pin", text)
+
+        guard = (
+            "github.actor == 'dependabot[bot]' && "
+            "github.event.pull_request.head.repo.full_name == github.repository"
+        )
+        pairs = (
+            ("ci.yml", "dependabot-ci.yml", REQUIRED_JOBS),
+            ("fuzz.yml", "dependabot-fuzz.yml", ("fuzz",)),
+        )
+        for source_name, called_name, job_ids in pairs:
+            called = _workflow(called_name)
+            triggers = called.split("\non:", 1)[1].split("\npermissions:", 1)[0]
+            self.assertIn("workflow_call:", triggers)
+            self.assertNotIn("schedule:", triggers)
+            self.assertNotIn("workflow_dispatch:", triggers)
+            self.assertNotIn("pull_request:", triggers)
+            self.assertNotIn("id-token:", called)
+            self.assertIn("actions: read", called)
+            self.assertIn("\n      pin:\n", called)
+            for line in called.splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("uses:"):
+                    continue
+                self.assertIsNotNone(
+                    SHA.search(stripped),
+                    f"action is not pinned to a full commit: {stripped}",
+                )
+            refs = [
                 line.strip()
-                for line in text.splitlines()
+                for line in called.splitlines()
                 if line.strip().startswith("ref:")
             ]
-            self.assertTrue(pin_refs, name)
-            for line in pin_refs:
-                self.assertEqual(line, "ref: ${{ inputs.pin }}")
-                self.assertIsNone(forbidden.search(line.split("ref:", 1)[1]), line)
-            self.assertEqual(text.count("uses: actions/checkout@"), len(pin_refs) * 2)
-            self.assertEqual(text.count("if: ${{ !inputs.pin }}"), len(pin_refs))
-            self.assertEqual(text.count("if: ${{ inputs.pin }}"), len(pin_refs) * 2)
-            self.assertEqual(
-                text.count('if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then'),
-                len(pin_refs),
-            )
+            self.assertTrue(refs, called_name)
+            self.assertTrue(all(line == "ref: ${{ inputs.pin }}" for line in refs))
+            source_jobs = _jobs(_workflow(source_name))
+            called_jobs = _jobs(called)
+            self.assertEqual(tuple(called_jobs), job_ids)
+            for job_id in job_ids:
+                self.assertIn(guard, called_jobs[job_id])
+                source_runs = _run_blocks(source_jobs[job_id])
+                called_runs = _run_blocks(called_jobs[job_id])
+                self.assertTrue(called_runs[0].startswith("run: |"))
+                self.assertIn('"$PIN" =~ ^[0-9a-f]{40}$', called_runs[0])
+                self.assertEqual(called_runs[1:], source_runs, job_id)
 
         verify = (REPOSITORY_ROOT / "docs" / "VERIFY.md").read_text(encoding="utf-8")
         for name in REQUIRED_CHECKS:

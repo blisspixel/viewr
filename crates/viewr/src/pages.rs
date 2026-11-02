@@ -21,6 +21,7 @@ const MAX_PAGES: usize = 1_000;
 const ICO_HEADER_LEN: u64 = 6;
 const ICO_ENTRY_LEN: u64 = 16;
 const ICO_TYPE_ICON: u16 = 1;
+const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 /// Container that exposes identifiable still pages instead of timed frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,8 +40,8 @@ impl PageKind {
     }
 }
 
-struct PageFrame {
-    image: Arc<DecodedImage>,
+pub(crate) struct PageFrame {
+    pub(crate) image: Arc<DecodedImage>,
 }
 
 /// A bounded, fully decoded multi-page document ready for UI-thread stepping.
@@ -170,15 +171,41 @@ impl DecodedPages {
         file: impl Read + Seek,
         is_current: &impl Fn() -> bool,
     ) -> Result<Option<Self>, Error> {
-        let mut reader = BufReader::new(file);
-        let entries = read_ico_entries(&mut reader)?;
-        let mut frames = Vec::with_capacity(entries.len());
-        let mut decoded_bytes = 0usize;
-        for entry in entries {
-            if !is_current() {
-                return Ok(None);
-            }
-            let image_bytes = read_ico_image_bytes(&mut reader, entry)?;
+        let Some(frames) = decode_ico_frames(file, is_current)? else {
+            return Ok(None);
+        };
+        Ok(finish_pages(frames, PageKind::Ico))
+    }
+}
+
+pub(crate) fn decode_ico_frames(
+    file: impl Read + Seek,
+    is_current: &impl Fn() -> bool,
+) -> Result<Option<Vec<PageFrame>>, Error> {
+    let mut reader = BufReader::new(file);
+    let entries = read_ico_entries(&mut reader)?;
+    let mut frames = Vec::with_capacity(entries.len());
+    let mut decoded_bytes = 0usize;
+    for entry in entries {
+        if !is_current() {
+            return Ok(None);
+        }
+        let image_bytes = read_ico_image_bytes(&mut reader, entry)?;
+        let (mut image, color_normalizer, orientation) = if image_bytes.starts_with(PNG_SIGNATURE) {
+            let mut decoder = image::codecs::png::PngDecoder::new(Cursor::new(&image_bytes))
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            decoder
+                .set_limits(image_limits())
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            validate_page_canvas(decoder.dimensions())?;
+            let color_normalizer = ColorNormalizer::from_decoder(&mut decoder);
+            let orientation = decoder
+                .orientation()
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            let img = image::DynamicImage::from_decoder(decoder)
+                .map_err(|error| page_decode_error(&error.to_string()))?;
+            (img, color_normalizer, orientation)
+        } else {
             let synthetic = synthetic_single_entry_ico(entry, &image_bytes)?;
             let mut decoder = image::codecs::ico::IcoDecoder::new(Cursor::new(synthetic))
                 .map_err(|error| page_decode_error(&error.to_string()))?;
@@ -190,20 +217,23 @@ impl DecodedPages {
             let orientation = decoder
                 .orientation()
                 .map_err(|error| page_decode_error(&error.to_string()))?;
-            let mut image = image::DynamicImage::from_decoder(decoder)
+            let img = image::DynamicImage::from_decoder(decoder)
                 .map_err(|error| page_decode_error(&error.to_string()))?;
-            image.apply_orientation(orientation);
-            let Some(image) = normalize_dynamic_image(image, &color_normalizer, is_current)? else {
-                return Ok(None);
-            };
-            decoded_bytes = add_decoded_bytes(decoded_bytes, &image)?;
-            frames.push(PageFrame {
-                image: Arc::new(image),
-            });
-        }
-        Ok(finish_pages(frames, PageKind::Ico))
+            (img, color_normalizer, orientation)
+        };
+        image.apply_orientation(orientation);
+        let Some(image) = normalize_dynamic_image(image, &color_normalizer, is_current)? else {
+            return Ok(None);
+        };
+        decoded_bytes = add_decoded_bytes(decoded_bytes, &image)?;
+        frames.push(PageFrame {
+            image: Arc::new(image),
+        });
     }
+    Ok(Some(frames))
+}
 
+impl DecodedPages {
     #[must_use]
     pub(crate) const fn kind(&self) -> PageKind {
         self.kind
@@ -748,6 +778,41 @@ mod tests {
             .unwrap();
     }
 
+    fn encode_rgb_png_ico(frames: &[(u8, u8, [u8; 3])]) -> Vec<u8> {
+        let mut encoded_pngs = Vec::new();
+        for &(width, height, color) in frames {
+            let mut png_bytes = Vec::new();
+            image::RgbImage::from_pixel(u32::from(width), u32::from(height), image::Rgb(color))
+                .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+                .unwrap();
+            encoded_pngs.push((width, height, png_bytes));
+        }
+
+        let mut ico = Vec::new();
+        ico.extend_from_slice(&0_u16.to_le_bytes());
+        ico.extend_from_slice(&1_u16.to_le_bytes());
+        ico.extend_from_slice(&u16::try_from(encoded_pngs.len()).unwrap().to_le_bytes());
+
+        let mut offset = 6 + u32::try_from(encoded_pngs.len() * 16).unwrap();
+        for (w, h, png) in &encoded_pngs {
+            ico.push(*w);
+            ico.push(*h);
+            ico.push(0);
+            ico.push(0);
+            ico.extend_from_slice(&1_u16.to_le_bytes());
+            ico.extend_from_slice(&24_u16.to_le_bytes());
+            ico.extend_from_slice(&u32::try_from(png.len()).unwrap().to_le_bytes());
+            ico.extend_from_slice(&offset.to_le_bytes());
+            offset += u32::try_from(png.len()).unwrap();
+        }
+
+        for (_, _, png) in encoded_pngs {
+            ico.extend_from_slice(&png);
+        }
+
+        ico
+    }
+
     #[test]
     fn two_page_tiff_is_identifiable_and_never_plays() {
         let workspace = TempWorkspace::new("pages_tiff").unwrap();
@@ -839,6 +904,25 @@ mod tests {
         let pages = DecodedPages::load_with_cancellation(&renamed, &|| true)
             .unwrap()
             .unwrap();
+        assert_eq!(pages.len(), 2);
+    }
+
+    #[test]
+    fn ico_with_rgb_png_entries_opens_and_decodes_frames() {
+        let ico_bytes = encode_rgb_png_ico(&[(16, 16, [250, 160, 30]), (32, 32, [250, 160, 30])]);
+
+        let decoded = DecodedImage::load_from_memory(&ico_bytes).unwrap();
+        assert_eq!(decoded.width, 32);
+        assert_eq!(decoded.height, 32);
+        assert_eq!(decoded.rgba[0], 250);
+        assert_eq!(decoded.rgba[1], 160);
+        assert_eq!(decoded.rgba[2], 30);
+        assert_eq!(decoded.rgba[3], 255);
+
+        let pages = DecodedPages::decode_ico(Cursor::new(&ico_bytes), &|| true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(pages.kind(), PageKind::Ico);
         assert_eq!(pages.len(), 2);
     }
 

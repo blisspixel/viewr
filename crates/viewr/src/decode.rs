@@ -919,6 +919,8 @@ impl DecodedImage {
             Self::load_jxl(file, generation)
         } else if ext == "svg" {
             Self::load_svg(file, generation)
+        } else if ext == "ico" {
+            Self::load_ico(file, generation)
         } else {
             Self::load_core_image(path, file, generation)
         };
@@ -955,6 +957,9 @@ impl DecodedImage {
         let reader = reader
             .with_guessed_format()
             .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
+        if reader.format() == Some(image::ImageFormat::Ico) {
+            return Self::decode_ico(reader.into_inner(), generation);
+        }
         Self::decode_image_reader(reader, generation)
     }
 
@@ -991,6 +996,9 @@ impl DecodedImage {
         let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
             .map_err(|e| Error::Decode(format!("decode failed: {e}")))?;
+        if reader.format() == Some(image::ImageFormat::Ico) {
+            return Self::decode_ico(reader.into_inner(), DecodeGeneration::unconditional());
+        }
         Self::decode_image_reader(reader, DecodeGeneration::unconditional())
     }
 
@@ -1018,6 +1026,10 @@ impl DecodedImage {
                 DecodeGeneration::unconditional(),
             ),
             "svg" => Self::load_svg_bytes(bytes),
+            "ico" => Self::decode_ico(
+                std::io::Cursor::new(bytes),
+                DecodeGeneration::unconditional(),
+            ),
             _ => {
                 enforce_embedded_metadata_limits(std::io::Cursor::new(bytes))?;
                 let format = image::ImageFormat::from_extension(&extension)
@@ -1146,6 +1158,31 @@ impl DecodedImage {
             ));
         }
         ColorNormalizer::assumed_srgb().normalize(SourceImage::new(rgba, width, height)?)
+    }
+
+    fn load_ico(file: impl Read + Seek, generation: DecodeGeneration<'_>) -> Result<Self, Error> {
+        Self::decode_ico(
+            GenerationReader::new(BufReader::new(file), generation),
+            generation,
+        )
+    }
+
+    fn decode_ico(
+        reader: impl Read + Seek,
+        generation: DecodeGeneration<'_>,
+    ) -> Result<Self, Error> {
+        let mut frames = crate::pages::decode_ico_frames(reader, &|| generation.is_current())?
+            .ok_or_else(|| Error::Decode("ICO decode was cancelled".into()))?;
+        if frames.is_empty() {
+            return Err(Error::Decode("ICO file contains no frames".into()));
+        }
+        let largest_index = frames
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, frame)| u64::from(frame.image.width) * u64::from(frame.image.height))
+            .map_or(0, |(index, _)| index);
+        let frame = frames.swap_remove(largest_index);
+        Ok(Arc::into_inner(frame.image).expect("frame arc is uniquely owned"))
     }
 }
 

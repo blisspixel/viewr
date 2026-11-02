@@ -104,17 +104,20 @@ workflow results, and release assets remain the source of truth:
 - [x] Publish and verify annotated tag `v0.7.6`, the transparency,
   local-decode-proof, and installer-uninstall patch. The immutable [v0.7.6 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.6)
   discloses the same open acceptance rows and unsigned status.
+- [x] Publish and verify annotated tag `v0.7.7`, the damaged JPEG, ICO,
+  Image Information, CLI help, and Save Path patch. The immutable [v0.7.7 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.7)
+  discloses the same open acceptance rows and unsigned status.
 
 ## Version state policy
 
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.6. README and INSTALL use its fixed immutable URLs.
+   currently v0.7.7. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.7`, verified candidate and tag-ready damaged JPEG, ICO, Image
-   Information, CLI help, and Save Path patch.
+   `0.7.7`, the published damaged JPEG, ICO, Image Information, CLI help,
+   and Save Path patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -718,6 +721,33 @@ dependencies, workflows, and packaging remain identical to the verified
 candidate. Native screen-reader and carried hardware acceptance rows remain
 uncollected.
 
+[Tag-ready main CI run 41387878171](https://github.com/blisspixel/viewr/actions/runs/41387878171),
+[fuzz run 41387892656](https://github.com/blisspixel/viewr/actions/runs/41387892656),
+and [CodeQL run 41387877717](https://github.com/blisspixel/viewr/actions/runs/41387877717)
+passed on tag commit `b2aca9940b1c61a8399f254d85c848491f01c1ce`.
+The fuzz workflow was dispatched for that commit because a docs-only push does
+not start it.
+[Tag release run 41389245578](https://github.com/blisspixel/viewr/actions/runs/41389245578)
+repeated the complete gates, rebuilt all four archives, and published the
+immutable twelve-asset [v0.7.7 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.7)
+on 2026-11-01. All twelve public assets passed checksum and exact-tag provenance
+verification. All four archives passed the official 55-file manifest verifier.
+The published archives were rebuilt from the tag commit, so their digests differ
+from the candidate table above.
+
+| Published target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `7adec9a1db524f57201a148875acb74a7614e26c17fdbdca2152a1dadbb97803` |
+| macOS Intel | `dc62650dd423415e36b1955c40ce437c6f410d6b2e86acf5faf1498c925bc942` |
+| macOS Apple Silicon | `c48360a61dddd8effe8ac63517dcdb87c1563ba7729f4a65947436c10ebe40a8` |
+| Linux x64 | `eb086fe6b3c7ee3e77ccfec1f066da5e43c22d846d25d33a515a7a7ed9fd11d1` |
+
+The extracted published Windows archive reports `viewr 0.7.7`, and its doctor
+report passed every critical check without opening a window. It was not
+installed over the published v0.7.6 viewer, and this check did not change the
+user PATH or Start menu. Representative-hardware and native screen-reader
+acceptance remain uncollected.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)
@@ -742,9 +772,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.7.6 is public, immutable, checksummed, and attested, and v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.7.7 is public, immutable, checksummed, and attested, and v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
+  known-issues note. v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
   acceptance evidence, which their release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.

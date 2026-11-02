@@ -30,6 +30,12 @@ disappears. This spec is the converged result of two rounds of design critique
 - A chooser returning no path shows neutral recovery guidance. Cancellation
   and an unavailable Linux portal share that native API outcome, so viewr does
   not invent a failure diagnosis. Native choosers are parented to the viewer.
+- File > Save Path types a destination while an image is open. The field starts
+  with a JPEG name beside the open file, the same name the native chooser
+  suggests. Enter saves through the existing destination checks, including
+  overwrite confirmation. A chooser that returns no path shows a neutral note
+  and points to Save Path without writing a file. The typed destination stays
+  in memory for this session and is never persisted.
 
 - The image is scaled to fit the window (aspect preserved) and centered. The
   letterbox area is the solid theme background. Windowed Fit shrinks a large

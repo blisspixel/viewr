@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- File > Save Path types a Save As destination when the native file chooser
+  returns nothing. The field starts with the suggested JPEG name beside the
+  open file. An existing destination still asks before replacement, and an
+  invalid path reports Save failed. Cancelling a chooser shows that note and
+  does not write a file.
+
 ## 0.7.6 - 2026-10-24
 
 - `install.sh uninstall` and `install.ps1 -Uninstall` remove an installer-owned

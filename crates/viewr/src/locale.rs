@@ -806,6 +806,36 @@ const MESSAGES: &[Message] = &[
         german: "Kein Pfad ausgewählt. Verwenden Sie Pfad öffnen im Menü Datei, Pfad einfügen oder ziehen Sie ein Bild oder einen Ordner hierher.",
     },
     Message {
+        english: "Save Path...",
+        spanish: "Guardar ruta...",
+        french: "Enregistrer un chemin...",
+        german: "Pfad speichern...",
+    },
+    Message {
+        english: "Destination path",
+        spanish: "Ruta de destino",
+        french: "Chemin de destination",
+        german: "Zielpfad",
+    },
+    Message {
+        english: "Save",
+        spanish: "Guardar",
+        french: "Enregistrer",
+        german: "Speichern",
+    },
+    Message {
+        english: "No path selected. Use Save Path in the File menu to type a destination.",
+        spanish: "No se seleccionó una ruta. Usa Guardar ruta en el menú Archivo para escribir un destino.",
+        french: "Aucun chemin sélectionné. Utilisez Enregistrer un chemin dans le menu Fichier pour saisir une destination.",
+        german: "Kein Pfad ausgewählt. Verwenden Sie Pfad speichern im Menü Datei, um ein Ziel einzugeben.",
+    },
+    Message {
+        english: "Type a destination when no file chooser is available. The original stays unchanged.",
+        spanish: "Escribe un destino cuando no hay un selector de archivos. El original no cambia.",
+        french: "Saisissez une destination lorsqu'aucun sélecteur de fichiers n'est disponible. L'original reste inchangé.",
+        german: "Geben Sie ein Ziel ein, wenn kein Dateiauswahldialog verfügbar ist. Die Originaldatei bleibt unverändert.",
+    },
+    Message {
         english: "Retry",
         spanish: "Reintentar",
         french: "Réessayer",

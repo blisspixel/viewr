@@ -146,6 +146,10 @@ with a complete inline explanation. A native chooser that returns no selection
 points to these alternatives. Path input stays in memory for this session.
 If a native chooser does not appear on your desktop, use the path field or
 File > Open Path to keep opening images and folders.
+File > Save Path types a destination for a copy. The field starts with the
+suggested JPEG name beside the open file, and Enter uses the same overwrite
+check as the chooser. A chooser that returns no destination shows where to type
+one and does not write a file. That destination stays in memory for this session.
 
 v0.7.3 includes File > Exit (Quit viewr on macOS), with Ctrl+Q
 or Cmd+Q, and installed platform interface fonts with bundled fallbacks.

@@ -1,0 +1,138 @@
+name: Dependabot fuzz
+
+# Called only after the records workflow pushes a commit. This file has no
+# schedule or workflow_dispatch trigger. Those events can write the
+# default-branch cache, so they stay on fuzz.yml, which checks out the
+# triggering commit. The caller keeps cache access read-only.
+
+on:
+  workflow_call:
+    inputs:
+      pin:
+        description: Forty lowercase hex characters.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: dependabot-fuzz-${{ inputs.pin }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_TOOLCHAIN: nightly-2026-08-15
+  # Pull requests stay fast. The weekly sweep runs longest, and the runs whose
+  # result is allowed to reach a user get more than a pull request: a tag,
+  # which is the release rerun, and a push to `main`. A reusable workflow keeps
+  # the caller's `event_name`, so the release rerun is identified by its tag
+  # ref rather than by `workflow_call`, which never appears here.
+  FUZZ_SECONDS: >-
+    ${{ github.event_name == 'schedule' && '600'
+    || github.ref_type == 'tag' && '300'
+    || github.event_name == 'push' && '180'
+    || '60' }}
+
+jobs:
+  fuzz:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: decode_memory
+            max_len: 1048576
+          - target: protocol_frames
+            max_len: 1048592
+    steps:
+      - name: Require a full commit pin
+        shell: bash
+        env:
+          PIN: ${{ inputs.pin }}
+        run: |
+          if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pin must be a full commit SHA" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.pin }}
+          persist-credentials: false
+
+      - name: Install Linux GUI build dependencies
+        timeout-minutes: 15
+        run: |
+          bash scripts/ci-install-packages.sh libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      - name: Install pinned fuzz toolchain
+        run: |
+          rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+          cargo install cargo-fuzz --locked --version 0.13.2
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: fuzz -> target
+
+      - name: Verify committed fuzz lockfile
+        run: cargo metadata --manifest-path fuzz/Cargo.toml --locked --no-deps --format-version 1 > /dev/null
+
+      - name: Format fuzz workspace
+        run: cargo +$FUZZ_TOOLCHAIN fmt --manifest-path fuzz/Cargo.toml --all -- --check
+
+      - name: Lint fuzz workspace
+        run: cargo +$FUZZ_TOOLCHAIN clippy --manifest-path fuzz/Cargo.toml --bins -- -D warnings
+
+      # libFuzzer writes every newly interesting input into the corpus
+      # directory, and without this that coverage is discarded when the job
+      # ends: each run restarts from the committed seeds alone. Carrying the
+      # corpus forward lets exploration compound across runs instead of
+      # re-deriving the same reachable states every time. The key rotates per
+      # run so each run publishes what it learned, and the prefix restores the
+      # most recent corpus for this target. Restored entries carry libFuzzer's
+      # content-hash names, so they never collide with the committed seeds and
+      # both sets are present for the run.
+      - name: Restore accumulated corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Build fuzz target
+        run: cargo +$FUZZ_TOOLCHAIN fuzz build "${{ matrix.target }}"
+
+      # A corpus that only grows would eventually spend the run's budget
+      # loading inputs instead of exploring. The weekly sweep reduces it in
+      # place to the smallest set reaching the same coverage, and that
+      # minimized corpus is what later runs restore. Committed seeds removed as
+      # redundant here return with the next checkout.
+      - name: Minimize accumulated corpus
+        if: github.event_name == 'schedule'
+        run: >
+          cargo +$FUZZ_TOOLCHAIN fuzz cmin "${{ matrix.target }}"
+          "fuzz/corpus/${{ matrix.target }}"
+          -- -max_len=${{ matrix.max_len }}
+
+      - name: Fuzz
+        run: >
+          cargo +$FUZZ_TOOLCHAIN fuzz run "${{ matrix.target }}"
+          "fuzz/corpus/${{ matrix.target }}" --
+          -max_total_time=$FUZZ_SECONDS
+          -timeout=30
+          -rss_limit_mb=2048
+          -max_len=${{ matrix.max_len }}
+          -print_final_stats=1
+
+      - name: Retain crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,9 +1,13 @@
 name: Dependabot dependency records
 
-# Runs from the base branch with a write token. It overlays only the known
-# lockfiles and manifests from a same-repository Dependabot pull request,
-# regenerates records with the base scripts, and pushes those two files.
-# It does not execute the pull request's scripts.
+# Runs from the base branch. For a same-repository Dependabot pull request it
+# overlays only the known lockfiles and manifests, regenerates records with the
+# base scripts, and pushes those two files. The refresh job does not execute
+# pull request scripts. A push with the job token leaves the new pull request
+# runs waiting for approval, so this run then calls the records CI and fuzz
+# workflows on that commit and reports the seven required checks from those
+# jobs. A missing, skipped, or unsuccessful required job is reported as failure.
+# Schedule and workflow dispatch stay on the normal CI and fuzz workflows.
 
 on:
   pull_request_target:
@@ -31,6 +35,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+    outputs:
+      head_sha: ${{ steps.records.outputs.head_sha }}
     steps:
       - name: Checkout the trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,15 +87,80 @@ jobs:
           path: head
 
       - name: Commit the generated records
+        id: records
         working-directory: head
         run: |
+          set -euo pipefail
           cp ../trusted/packaging/flatpak/cargo-sources.json packaging/flatpak/cargo-sources.json
           cp ../trusted/THIRD_PARTY_LICENSES.txt THIRD_PARTY_LICENSES.txt
           git add -- packaging/flatpak/cargo-sources.json THIRD_PARTY_LICENSES.txt
           if git diff --cached --quiet; then
+            echo "head_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Refresh generated dependency records"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          sha="$(git rev-parse HEAD)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "records commit is not a full SHA" >&2
+            exit 1
+          fi
+          echo "head_sha=$sha" >> "$GITHUB_OUTPUT"
+
+  required-checks:
+    needs: refresh
+    if: needs.refresh.outputs.head_sha != ''
+    # These jobs run the seven required checks on the records commit. They do
+    # not run the update jobs, so this caller grants no identity token.
+    # Read-only cache access keeps this pull_request_target call from saving
+    # over the default branch cache.
+    cache-mode: read
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/dependabot-ci.yml
+    with:
+      pin: ${{ needs.refresh.outputs.head_sha }}
+
+  fuzz:
+    needs: refresh
+    if: needs.refresh.outputs.head_sha != ''
+    cache-mode: read
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/dependabot-fuzz.yml
+    with:
+      pin: ${{ needs.refresh.outputs.head_sha }}
+
+  report:
+    needs: [refresh, required-checks]
+    if: always() && needs.refresh.outputs.head_sha != ''
+    name: Report required checks on the records commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+    steps:
+      - name: Checkout the workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Report required checks from the CI jobs
+        env:
+          HEAD_SHA: ${{ needs.refresh.outputs.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -B scripts/report_dependabot_required_checks.py \
+            --head-sha "$HEAD_SHA" \
+            --repository "$REPOSITORY" \
+            --run-id "$RUN_ID" \
+            --publish

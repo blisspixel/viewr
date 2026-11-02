@@ -180,7 +180,8 @@ acceptance work.
 The v0.7.8 preparation uses the same narrow exception for missing-format
 opens, truncated WebP and TIFF files, the version command, benchmark path
 errors, and the installer-script explanation already reviewed on main. It
-requires the complete automated gate and one exact candidate. It does not
+includes the reviewed async-executor 1.14.1 replacement for the yanked 1.14.0
+release. It requires the complete automated gate and one exact candidate. It does not
 close hardware, native assistive-technology, the repeated 50,000-file rating
 probe, macOS update, full file-association acceptance, or the rest of the v0.8
 acceptance work.

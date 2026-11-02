@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import subprocess
 import unittest
 from urllib.parse import unquote
 
@@ -546,6 +547,123 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertIn("product-quality-fixtures", product_quality)
         self.assertIn("gen_product_quality_fixtures", product_quality)
+
+    def test_macos_baseline_stays_separate_from_evidence(self) -> None:
+        """Intent, declared floors, and missing hardware receipts stay distinct."""
+        install = (REPOSITORY_ROOT / "docs/INSTALL.md").read_text(encoding="utf-8")
+        architecture = (REPOSITORY_ROOT / "docs/ARCHITECTURE.md").read_text(
+            encoding="utf-8"
+        )
+        product_quality = (REPOSITORY_ROOT / "docs/PRODUCT-QUALITY.md").read_text(
+            encoding="utf-8"
+        )
+        plist = (REPOSITORY_ROOT / "packaging/macos/Info.plist").read_text(
+            encoding="utf-8"
+        )
+        toolchain = (REPOSITORY_ROOT / "rust-toolchain.toml").read_text(
+            encoding="utf-8"
+        )
+        lock = (REPOSITORY_ROOT / "Cargo.lock").read_text(encoding="utf-8")
+        ci = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        called = (REPOSITORY_ROOT / ".github/workflows/dependabot-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        release = (REPOSITORY_ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        channel = re.search(r'channel = "([^"]+)"', toolchain)
+        self.assertIsNotNone(channel, "missing toolchain channel")
+        assert channel is not None
+        self.assertIn(f"pinned Rust toolchain, {channel.group(1)},", install)
+
+        for package, documented in (("winit", "0.30.13"), ("wgpu-hal", "29.0.4")):
+            version = self.package_version(lock, package)
+            self.assertEqual(version, documented)
+            self.assertIn(f"{package} {version}", install)
+
+        for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+            deployment = self.apple_deployment_target(target)
+            self.assertIn(f"`{target}` at deployment target {deployment}", install)
+            self.assertIn(f"- os: macos-latest\n            target: {target}", release)
+
+        self.assertIn(
+            "<key>LSMinimumSystemVersion</key>\n  <string>12.0</string>", plist
+        )
+        self.assertIn("strictest declared floor is macOS 12.0", install)
+        self.assertIn("declared floor is the 11.0 link target", install)
+        self.assertIn("not a runtime qualification", install)
+        self.assertIn("original M1", install)
+        self.assertIn(
+            "viewr-<version>-aarch64-apple-darwin.zip",
+            install,
+        )
+        self.assertIn("viewr-<version>-x86_64-apple-darwin.zip", install)
+        self.assertIn("Existing Intel releases remain", install)
+
+        self.assertIn("fmt / clippy / test (macos-latest)", architecture)
+        self.assertIn("arm64 macOS 26", architecture)
+        self.assertIn("not an original M1", architecture)
+        self.assertIn("[install guide](INSTALL.md)", architecture)
+        self.assertIn("os: [ubuntu-latest, macos-latest, windows-latest]", ci)
+        self.assertIn("os: [ubuntu-latest, macos-latest, windows-latest]", called)
+        self.assertIn("name: fmt / clippy / test (${{ matrix.os }})", ci)
+
+        self.assertIn(
+            "| macOS | Apple Silicon Retina laptop plus an external display, including a live move between them | Not yet recorded |",
+            product_quality,
+        )
+        self.assertIn("Original M1 runtime qualification", product_quality)
+        self.assertIn("do not fill either gap", product_quality)
+        for claim in (
+            "tested on an original M1",
+            "qualified on original M1",
+            "M1 acceptance passed",
+        ):
+            for document in (install, architecture, product_quality):
+                with self.subTest(claim=claim):
+                    self.assertNotIn(claim, document)
+
+        assignment = "MACOSX_DEPLOYMENT_TARGET="
+        for relative in (".github", "scripts", "packaging", "crates"):
+            root = REPOSITORY_ROOT / relative
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix.lower() not in {
+                    ".yml",
+                    ".yaml",
+                    ".py",
+                    ".sh",
+                    ".ps1",
+                    ".rs",
+                    ".toml",
+                    ".plist",
+                }:
+                    continue
+                if path.name == "test_documentation.py":
+                    continue
+                text = path.read_text(encoding="utf-8")
+                with self.subTest(path=path.relative_to(REPOSITORY_ROOT)):
+                    self.assertNotIn(assignment, text)
+
+    @staticmethod
+    def package_version(lock_text: str, name: str) -> str:
+        marker = f'name = "{name}"\nversion = "'
+        start = lock_text.index(marker) + len(marker)
+        return lock_text[start : lock_text.index('"', start)]
+
+    @staticmethod
+    def apple_deployment_target(target: str) -> str:
+        completed = subprocess.run(
+            ["rustc", "--print", "deployment-target", "--target", target],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        prefix = "MACOSX_DEPLOYMENT_TARGET="
+        line = completed.stdout.strip()
+        if not line.startswith(prefix):
+            raise AssertionError(f"unexpected deployment target output: {line}")
+        return line.removeprefix(prefix)
 
 
 if __name__ == "__main__":

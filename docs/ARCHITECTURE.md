@@ -797,6 +797,24 @@ Index preservation, trash-not-unlink, and undo are the three details that separa
 a viewer that "feels broken" from one that feels trustworthy. They are core, not
 polish.
 
+## macOS lane
+
+The native quality job uses the `macos-latest` label and keeps the required
+check name `fmt / clippy / test (macos-latest)`. GitHub's runner image table
+maps that label to arm64 macOS 26, as read on 2026-11-02. The job builds and
+tests that Apple Silicon lane, including the ad-hoc App Sandbox bundle. The
+runner image does not name the chip, so the lane is not an original M1
+receipt, and it does not boot the declared minimum operating system.
+
+Release packaging builds both `aarch64-apple-darwin` and
+`x86_64-apple-darwin` on `macos-latest`. The Intel target is added with
+`rustup target add` and compiled on the arm64 image. That archive stays
+published. It is not Intel hardware acceptance.
+
+Declared floors and the original M1 baseline are in the
+[install guide](INSTALL.md). This lane does not change the plist, the Rust
+deployment target, the runner label, or the required check name.
+
 ## Security boundaries
 
 ```

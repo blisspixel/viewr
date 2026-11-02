@@ -312,6 +312,31 @@ match the new ID in current builds; the X11 instance name stays `viewr`.
 
 ### macOS
 
+The intended hardware baseline is Apple Silicon ARM64, including the original M1.
+Intel qualification is not required for new baseline work. This is intent.
+It is not a record of a machine that has run viewr.
+
+`packaging/macos/Info.plist` sets `LSMinimumSystemVersion` to 12.0. That key
+applies to the sandbox bundle. The pinned Rust toolchain, 1.99.1, links
+`aarch64-apple-darwin` at deployment target 11.0.
+It also links `x86_64-apple-darwin` at deployment target 10.12.
+The repository does not set `MACOSX_DEPLOYMENT_TARGET`.
+winit 0.30.13 documents macOS 10.11.
+wgpu-hal 29.0.4 documents a Metal minimum of macOS 10.13.
+For the bundle, the strictest declared floor is macOS 12.0.
+For the portable Apple Silicon archive, the declared floor is the 11.0 link target.
+These figures are declarations, not a runtime qualification.
+A build host's operating system is not the application floor.
+
+Original M1 hardware and those declared floors have no install, startup, or
+image-opening receipt. A newer Apple Silicon computer, the hosted arm64 lane,
+and a cross-compiled Intel archive are not those receipts. The product-quality
+macOS row stays open until those runs exist.
+
+Published archives stay `viewr-<version>-aarch64-apple-darwin.zip` and
+`viewr-<version>-x86_64-apple-darwin.zip`. Existing Intel releases remain
+valid history.
+
 The portable command launches the GUI but is not a notarized application bundle.
 Developers can build the local ad-hoc-signed sandbox bundle with:
 

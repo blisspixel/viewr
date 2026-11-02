@@ -121,6 +121,12 @@ native hosted build, tests, archive verification, checksums, and final release
 attestation, but Intel hardware acceptance is deferred to the v0.8 complete
 artifact matrix. Do not imply that the v0.6 record tested Intel hardware.
 
+The install guide's intended baseline includes the original M1 and records
+the declared macOS floors. That statement does not complete this row.
+Original M1 runtime qualification and a run on the declared minimum
+operating system are still absent. The hosted `macos-latest` arm64 lane
+and the cross-compiled Intel archive do not fill either gap.
+
 ## Candidate fixture artifact
 
 The manual run produces `product-quality-fixtures` from the candidate source and

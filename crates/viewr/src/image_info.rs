@@ -91,6 +91,30 @@ pub(crate) fn local_decode_line(language: Language, proof: DecodeProof) -> Strin
 }
 
 impl ImageDetails {
+    /// Exposure formatted for the given language.
+    #[must_use]
+    pub(crate) fn localized_exposure(&self, language: Language) -> Option<String> {
+        self.exposure
+            .as_deref()
+            .map(|s| language.localize_decimal_string(s))
+    }
+
+    /// Aperture formatted for the given language.
+    #[must_use]
+    pub(crate) fn localized_aperture(&self, language: Language) -> Option<String> {
+        self.aperture
+            .as_deref()
+            .map(|s| language.localize_decimal_string(s))
+    }
+
+    /// Focal length formatted for the given language.
+    #[must_use]
+    pub(crate) fn localized_focal_length(&self, language: Language) -> Option<String> {
+        self.focal_length
+            .as_deref()
+            .map(|s| language.localize_decimal_string(s))
+    }
+
     /// Read file-system and supported EXIF facts without failing the open path.
     #[must_use]
     pub fn load(path: &Path) -> Self {
@@ -159,13 +183,15 @@ fn inspect_metadata(details: &mut ImageDetails, metadata: &Metadata) {
                 details.captured_at = clean_text(value).map(normalize_exif_date);
             }
             ExifTag::ExposureTime(values) => {
-                details.exposure = values.first().and_then(format_exposure);
+                details.exposure = values
+                    .first()
+                    .and_then(|v| format_exposure(v, Language::English));
             }
             ExifTag::FNumber(values) => {
                 details.aperture = values
                     .first()
                     .and_then(rational_value)
-                    .map(|value| format!("f/{value:.1}"));
+                    .map(|value| format_aperture(value, Language::English));
             }
             ExifTag::ISO(values) => {
                 details.iso = values.first().map(|value| format!("ISO {value}"));
@@ -174,7 +200,7 @@ fn inspect_metadata(details: &mut ImageDetails, metadata: &Metadata) {
                 details.focal_length = values
                     .first()
                     .and_then(rational_value)
-                    .map(|value| format!("{value:.1} mm"));
+                    .map(|value| format_focal_length(value, Language::English));
             }
             ExifTag::OwnerName(value) | ExifTag::Artist(value) | ExifTag::Copyright(value) => {
                 details.has_owner_or_author |= clean_text(value).is_some();
@@ -1156,18 +1182,27 @@ pub(crate) fn rgba_has_transparency(rgba: &[u8]) -> bool {
     rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255)
 }
 
-/// Format bytes using compact binary units.
+/// Format bytes using compact binary units and the active language's decimal separator.
 #[must_use]
-pub fn format_file_size(bytes: u64) -> String {
+pub(crate) fn format_file_size(bytes: u64, language: Language) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * 1024;
     const GIB: u64 = MIB * 1024;
     if bytes >= GIB {
-        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+        format!(
+            "{} GiB",
+            language.format_decimal(bytes as f64 / GIB as f64, 2)
+        )
     } else if bytes >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+        format!(
+            "{} MiB",
+            language.format_decimal(bytes as f64 / MIB as f64, 1)
+        )
     } else if bytes >= KIB {
-        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+        format!(
+            "{} KiB",
+            language.format_decimal(bytes as f64 / KIB as f64, 1)
+        )
     } else {
         format!("{bytes} B")
     }
@@ -1239,7 +1274,21 @@ fn rational_value(value: &uR64) -> Option<f64> {
     (value.denominator != 0).then(|| f64::from(value.clone()))
 }
 
-fn format_exposure(value: &uR64) -> Option<String> {
+/// Format aperture value, such as `f/2.8` or `f/2,8`.
+#[must_use]
+pub(crate) fn format_aperture(value: f64, language: Language) -> String {
+    format!("f/{}", language.format_decimal(value, 1))
+}
+
+/// Format focal length value, such as `50.0 mm` or `50,0 mm`.
+#[must_use]
+pub(crate) fn format_focal_length(value: f64, language: Language) -> String {
+    format!("{} mm", language.format_decimal(value, 1))
+}
+
+/// Format shutter speed / exposure time.
+#[must_use]
+pub(crate) fn format_exposure(value: &uR64, language: Language) -> Option<String> {
     let seconds = rational_value(value)?;
     if seconds <= 0.0 {
         return None;
@@ -1247,7 +1296,7 @@ fn format_exposure(value: &uR64) -> Option<String> {
     if seconds < 1.0 {
         Some(format!("1/{:.0} s", 1.0 / seconds))
     } else {
-        Some(format!("{seconds:.1} s"))
+        Some(format!("{} s", language.format_decimal(seconds, 1)))
     }
 }
 
@@ -1426,13 +1475,73 @@ mod tests {
 
     #[test]
     fn file_size_and_aspect_labels_cover_boundaries() {
-        assert_eq!(format_file_size(999), "999 B");
-        assert_eq!(format_file_size(1024), "1.0 KiB");
-        assert_eq!(format_file_size(1024 * 1024), "1.0 MiB");
-        assert_eq!(format_file_size(1024 * 1024 * 1024), "1.00 GiB");
+        assert_eq!(format_file_size(999, Language::English), "999 B");
+        assert_eq!(format_file_size(1024, Language::English), "1.0 KiB");
+        assert_eq!(format_file_size(1024 * 1024, Language::English), "1.0 MiB");
+        assert_eq!(
+            format_file_size(1024 * 1024 * 1024, Language::English),
+            "1.00 GiB"
+        );
         assert_eq!(aspect_ratio(6000, 4000).as_deref(), Some("3:2"));
         assert_eq!(aspect_ratio(1920, 1080).as_deref(), Some("16:9"));
         assert_eq!(aspect_ratio(0, 1080), None);
+    }
+
+    #[test]
+    fn value_formatting_localizes_decimal_separators_across_languages() {
+        for (language, sep) in [
+            (Language::English, '.'),
+            (Language::Spanish, ','),
+            (Language::French, ','),
+            (Language::German, ','),
+        ] {
+            assert_eq!(language.decimal_separator(), sep);
+
+            assert_eq!(format_file_size(999, language), "999 B");
+            assert_eq!(format_file_size(1024, language), format!("1{sep}0 KiB"));
+            assert_eq!(
+                format_file_size(1536 * 1024, language),
+                format!("1{sep}5 MiB")
+            );
+            assert_eq!(
+                format_file_size(1024 * 1024 * 1024, language),
+                format!("1{sep}00 GiB")
+            );
+
+            assert_eq!(format_aperture(2.8, language), format!("f/2{sep}8"));
+            assert_eq!(format_focal_length(50.0, language), format!("50{sep}0 mm"));
+
+            let fast = uR64 {
+                nominator: 1,
+                denominator: 125,
+            };
+            assert_eq!(format_exposure(&fast, language).as_deref(), Some("1/125 s"));
+
+            let slow = uR64 {
+                nominator: 3,
+                denominator: 2,
+            };
+            assert_eq!(format_exposure(&slow, language), Some(format!("1{sep}5 s")));
+
+            let details = ImageDetails {
+                aperture: Some("f/2.8".into()),
+                exposure: Some("1.5 s".into()),
+                focal_length: Some("50.0 mm".into()),
+                ..ImageDetails::default()
+            };
+            assert_eq!(
+                details.localized_aperture(language),
+                Some(format!("f/2{sep}8"))
+            );
+            assert_eq!(
+                details.localized_exposure(language),
+                Some(format!("1{sep}5 s"))
+            );
+            assert_eq!(
+                details.localized_focal_length(language),
+                Some(format!("50{sep}0 mm"))
+            );
+        }
     }
 
     #[test]
@@ -1612,10 +1721,13 @@ mod tests {
             Some("A B")
         );
         assert_eq!(
-            format_exposure(&uR64 {
-                nominator: 1,
-                denominator: 0
-            }),
+            format_exposure(
+                &uR64 {
+                    nominator: 1,
+                    denominator: 0
+                },
+                Language::English
+            ),
             None
         );
         assert_eq!(clean_text(&"x".repeat(MAX_TEXT_BYTES + 1)), None);
@@ -1639,18 +1751,24 @@ mod tests {
             "2026-07-25 12:34:56"
         );
         assert_eq!(
-            format_exposure(&uR64 {
-                nominator: 2,
-                denominator: 1,
-            })
+            format_exposure(
+                &uR64 {
+                    nominator: 2,
+                    denominator: 1,
+                },
+                Language::English
+            )
             .as_deref(),
             Some("2.0 s")
         );
         assert_eq!(
-            format_exposure(&uR64 {
-                nominator: 0,
-                denominator: 1,
-            }),
+            format_exposure(
+                &uR64 {
+                    nominator: 0,
+                    denominator: 1,
+                },
+                Language::English
+            ),
             None
         );
     }

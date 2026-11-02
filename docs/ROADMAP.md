@@ -51,8 +51,7 @@ images through one bounded serialized Trash queue, and bundles English, Spanish,
 French, and German interface catalogs covering first-run, About, Trash, wait
 copy, rating failures, every top-chrome toast and navigation notice, and every
 dialog, panel, and control including accessible names, enforced by a
-pseudo-language render test. Image Information value formats remain English.
-Appearance, default folder sort,
+pseudo-language render test. Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
 

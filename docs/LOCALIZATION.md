@@ -30,8 +30,7 @@ recovery, reload wait reasons, edit-presentation failures, Image Information,
 folder sort, top-chrome busy status, Update, Save As overwrite confirmation,
 every top-chrome toast and navigation notice, every dialog, panel, and crop
 and collage control with their accessible names, and the appearance chooser.
-Image Information value formats, such as decimal separators and the `MP`
-unit, are not yet localized. Technical detail that an operating system or decoder supplies, such
+Technical detail that an operating system or decoder supplies, such
 as the text after "Save failed:", is inserted untranslated into a translated
 sentence. The roadmap keeps complete catalog coverage and native
 assistive-technology review as open work before localization can be called

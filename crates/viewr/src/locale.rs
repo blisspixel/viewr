@@ -40,6 +40,41 @@ impl Language {
             Self::Pseudo => pseudo_text(message.english),
         }
     }
+
+    /// Decimal separator for numeric values in this language.
+    #[must_use]
+    pub(crate) const fn decimal_separator(self) -> char {
+        match self {
+            Self::English => '.',
+            Self::Spanish | Self::French | Self::German => ',',
+            #[cfg(test)]
+            Self::Pseudo => '.',
+        }
+    }
+
+    /// Format a floating-point number with fixed decimal places using this language's separator.
+    #[must_use]
+    pub(crate) fn format_decimal(self, value: f64, precision: usize) -> String {
+        let raw = format!("{value:.precision$}");
+        let separator = self.decimal_separator();
+        if separator == '.' {
+            raw
+        } else {
+            raw.replace('.', &separator.to_string())
+        }
+    }
+
+    /// Localize a decimal string (such as an aperture or focal length formatted with a period)
+    /// to this language's decimal separator.
+    #[must_use]
+    pub(crate) fn localize_decimal_string(self, text: &str) -> String {
+        let separator = self.decimal_separator();
+        if separator == '.' {
+            text.to_owned()
+        } else {
+            text.replace('.', &separator.to_string())
+        }
+    }
 }
 
 /// Opening and closing marks of the test-only pseudo language.

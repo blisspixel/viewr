@@ -3885,10 +3885,15 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
         ui.label(RichText::new(format!("{width} × {height}")).color(colors.muted));
         let megapixels = f64::from(width) * f64::from(height) / 1_000_000.0;
         if let Some(aspect) = crate::image_info::aspect_ratio(width, height) {
-            ui.label(RichText::new(format!("{megapixels:.1} MP · {aspect}")).color(colors.muted));
+            let mp_str = frame.language.format_decimal(megapixels, 1);
+            ui.label(RichText::new(format!("{mp_str} MP · {aspect}")).color(colors.muted));
         }
     }
-    if let Some(value) = frame.details.as_ref().and_then(format_and_size) {
+    if let Some(value) = frame
+        .details
+        .as_ref()
+        .and_then(|details| format_and_size(details, frame.language))
+    {
         ui.label(RichText::new(value).color(colors.muted));
     }
     if frame.has_transparency {
@@ -4077,14 +4082,17 @@ fn sequence_menu_items(frame: &UiFrameOwned) -> Option<(&'static str, &'static s
     })
 }
 
-fn format_and_size(details: &crate::image_info::ImageDetails) -> Option<String> {
+fn format_and_size(
+    details: &crate::image_info::ImageDetails,
+    language: crate::locale::Language,
+) -> Option<String> {
     match (&details.format, details.file_bytes) {
         (Some(format), Some(bytes)) => Some(format!(
             "{format} · {}",
-            crate::image_info::format_file_size(bytes)
+            crate::image_info::format_file_size(bytes, language)
         )),
         (Some(format), None) => Some(format.clone()),
-        (None, Some(bytes)) => Some(crate::image_info::format_file_size(bytes)),
+        (None, Some(bytes)) => Some(crate::image_info::format_file_size(bytes, language)),
         (None, None) => None,
     }
 }
@@ -4114,11 +4122,14 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         frame.text(tr!("Captured")),
         details.captured_at.as_deref(),
     );
+    let localized_exposure = details.localized_exposure(frame.language);
+    let localized_aperture = details.localized_aperture(frame.language);
+    let localized_focal_length = details.localized_focal_length(frame.language);
     let settings = [
-        details.exposure.as_deref(),
-        details.aperture.as_deref(),
+        localized_exposure.as_deref(),
+        localized_aperture.as_deref(),
         details.iso.as_deref(),
-        details.focal_length.as_deref(),
+        localized_focal_length.as_deref(),
     ]
     .into_iter()
     .flatten()

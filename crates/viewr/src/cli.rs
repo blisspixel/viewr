@@ -598,7 +598,7 @@ fn console_columns() -> Option<usize> {
     }
 }
 
-fn split_prefix(line: &str) -> (&str, &str, String) {
+fn split_prefix(line: &str, width: usize) -> (&str, &str, String) {
     for tag in [DOCTOR_OK, DOCTOR_WARN, DOCTOR_FAIL, DOCTOR_NOTE] {
         if let Some(body) = line.strip_prefix(tag) {
             return (tag, body, " ".repeat(tag.chars().count()));
@@ -610,7 +610,34 @@ fn split_prefix(line: &str) -> (&str, &str, String) {
         .nth(indent_chars)
         .map_or(line.len(), |(index, _)| index);
     let indent = &line[..indent_bytes];
-    (indent, &line[indent_bytes..], indent.to_owned())
+    let rest = &line[indent_bytes..];
+
+    // Usage row with a command column and an aligned description column:
+    // e.g. "  viewr doctor                 Local diagnostics (no network)"
+    if indent_chars >= 2
+        && let Some(gap_rel) = rest.find("  ")
+    {
+        let after_gap = &rest[gap_rel..];
+        let space_count = after_gap.chars().take_while(|ch| *ch == ' ').count();
+        let desc_rel = gap_rel
+            + after_gap
+                .char_indices()
+                .nth(space_count)
+                .map_or(after_gap.len(), |(i, _)| i);
+        if desc_rel < rest.len() {
+            let desc_col = indent_chars + rest[..desc_rel].chars().count();
+            if width.saturating_sub(desc_col) >= 10 {
+                let prefix_bytes = indent_bytes + desc_rel;
+                return (
+                    &line[..prefix_bytes],
+                    &line[prefix_bytes..],
+                    " ".repeat(desc_col),
+                );
+            }
+        }
+    }
+
+    (indent, rest, indent.to_owned())
 }
 
 /// Break one token so each piece fits `budget`, preferring a path separator.
@@ -659,7 +686,10 @@ fn wrap_logical_line(line: &str, width: usize) -> Vec<String> {
     if line.is_empty() {
         return vec![String::new()];
     }
-    let (prefix, body, continuation) = split_prefix(line);
+    if line.chars().count() <= width {
+        return vec![line.to_owned()];
+    }
+    let (prefix, body, continuation) = split_prefix(line, width);
     let mut pending: VecDeque<String> = body.split_whitespace().map(str::to_owned).collect();
     if pending.is_empty() {
         return vec![prefix.trim_end().to_owned()];
@@ -1587,6 +1617,64 @@ mod tests {
         }
         assert!(doctor.contains("GPU surface") || doctor.contains("not by doctor"));
         assert!(flattened(&doctor).contains("not by doctor"));
+    }
+
+    #[test]
+    fn help_usage_rows_preserve_column_alignment_and_hanging_indent() {
+        let source = help_text(HelpTopic::Overview, "photos/IMG_001.jpg");
+        let (code, help_80, error) = invoke_with(
+            Invocation::Help(HelpTopic::Overview),
+            ReportStyle::plain(80),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(error, "");
+
+        // At 80 columns, usage rows preserve their exact source column positions.
+        let source_usage: Vec<&str> = source
+            .lines()
+            .take_while(|line| !line.starts_with("Privacy:"))
+            .filter(|line| line.starts_with("  viewr "))
+            .collect();
+        let wrapped_80_usage: Vec<&str> = help_80
+            .lines()
+            .take_while(|line| !line.starts_with("Privacy:"))
+            .filter(|line| line.starts_with("  viewr "))
+            .collect();
+        assert_eq!(source_usage, wrapped_80_usage);
+
+        // At 60 columns, no line exceeds 60 columns, and wrapped continuation lines
+        // are indented to the description column (31 spaces).
+        let (code, help_60, error) = invoke_with(
+            Invocation::Help(HelpTopic::Overview),
+            ReportStyle::plain(60),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(error, "");
+        for line in help_60.lines() {
+            assert!(line.chars().count() <= 60, "line exceeds 60 cols: {line}");
+        }
+        let continuation_indent = " ".repeat(31);
+        assert!(
+            help_60
+                .lines()
+                .any(|line| line.starts_with(&continuation_indent))
+        );
+
+        // viewr benchmark --help also preserves its column positions.
+        let bench_source = help_text(HelpTopic::Benchmark, "photos/IMG_001.jpg");
+        let (_, bench_80, _) = invoke_with(
+            Invocation::Help(HelpTopic::Benchmark),
+            ReportStyle::plain(80),
+        );
+        let bench_source_usage: Vec<&str> = bench_source
+            .lines()
+            .filter(|line| line.starts_with("  viewr benchmark"))
+            .collect();
+        let bench_80_usage: Vec<&str> = bench_80
+            .lines()
+            .filter(|line| line.starts_with("  viewr benchmark"))
+            .collect();
+        assert_eq!(bench_source_usage, bench_80_usage);
     }
 
     #[test]

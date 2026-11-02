@@ -77,10 +77,13 @@ curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.7/install.
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The command downloads the v0.7.7 installer, which installs the v0.7.7
-archive after verifying its SHA-256 sidecar and internal manifest, without
-giving the application network access.
-Run the same command again for an explicit update. For review-first installation,
+The command downloads the immutable v0.7.7 installer script. That script
+installs the newest stable release unless you set a version, and it verifies
+the archive SHA-256 sidecar and internal manifest before installation. It does
+not give the application network access. Run the same command again to install
+the newest stable release. To install v0.7.7 itself, set `VIEWR_VERSION=0.7.7`
+before `sh` on macOS or Linux, or save the PowerShell script and run it with
+`-Version 0.7.7`. For review-first installation,
 manual archive verification, uninstall steps, platform prerequisites, or a source
 build, see [Installing viewr](docs/INSTALL.md).
 
@@ -151,15 +154,15 @@ suggested JPEG name beside the open file, and Enter uses the same overwrite
 check as the chooser. A chooser that returns no destination shows where to type
 one and does not write a file. That destination stays in memory for this session.
 
-v0.7.3 includes File > Exit (Quit viewr on macOS), with Ctrl+Q
-or Cmd+Q, and installed platform interface fonts with bundled fallbacks.
-Console uses softer phosphor-green text and selection outlines.
+File > Exit (Quit viewr on macOS) uses Ctrl+Q or Cmd+Q. Interface type uses
+installed platform fonts, with bundled fallbacks. Console uses softer
+phosphor-green text and selection outlines.
 
-v0.7.3 uses a compact open-hand cursor and direct drag-to-pan in
-image view, with a closed hand while dragging. The zoom percentage opens Fit,
-Actual Size, and zoom controls. Pan limits keep part of the photo reachable.
-Fullscreen starts at Fit and enlarges small images to the available screen area;
-Actual Size remains available for exact pixel inspection.
+Image view uses a compact open-hand cursor and direct drag-to-pan, with a
+closed hand while dragging. The zoom percentage opens Fit, Actual Size, and
+zoom controls. Pan limits keep part of the photo reachable. Fullscreen starts
+at Fit and enlarges small images to the available screen area; Actual Size
+remains available for exact pixel inspection.
 
 | Action | Control |
 | --- | --- |
@@ -204,9 +207,8 @@ and the write-safety contract are in [Ratings](docs/RATINGS.md).
 
 Image Background independently offers Theme Default, Black, Neutral Gray,
 White, and a session-only Checkerboard. Appearance changes interface chrome
-and canvas only, never image pixels.
-v0.7.3 corrects overly light canvas backgrounds in the previous
-v0.7.2 preview so they match the specified appearance colors.
+and canvas only, never image pixels. Canvas colors match the specified
+appearance palette.
 Windows Text size and GNOME text scaling enlarge the interface when the window
 has room; image zoom does not change.
 

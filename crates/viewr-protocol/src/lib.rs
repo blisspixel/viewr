@@ -98,6 +98,53 @@ pub enum ShapeError {
     AllocationLimit,
 }
 
+/// Why the worker refuses a format before it decodes bytes.
+///
+/// The token in the error line is the contract. Rewording the detail that
+/// follows it must not turn the failure into a generic retryable decode error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormatRefusal {
+    /// This build has no AVIF decoder.
+    Avif,
+    /// This build has no HEIC or HEIF decoder.
+    Heic,
+    /// Camera RAW viewing is deferred.
+    Raw,
+}
+
+const FORMAT_REFUSAL_PREFIX: &str = "viewr-format ";
+
+impl FormatRefusal {
+    /// Token written immediately after the refusal prefix.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Avif => "avif",
+            Self::Heic => "heic",
+            Self::Raw => "raw",
+        }
+    }
+
+    /// One worker error line: the prefix, the token, then the human detail.
+    #[must_use]
+    pub fn message(self, detail: &str) -> String {
+        format!("{FORMAT_REFUSAL_PREFIX}{} {detail}", self.token())
+    }
+
+    /// Find a refusal token in a worker or open-failure line.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let lower = text.to_ascii_lowercase();
+        let rest = lower.split(FORMAT_REFUSAL_PREFIX).nth(1)?;
+        match rest.split_whitespace().next()? {
+            "avif" => Some(Self::Avif),
+            "heic" => Some(Self::Heic),
+            "raw" => Some(Self::Raw),
+            _ => None,
+        }
+    }
+}
+
 /// One complete response from the isolated decode worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkerResponse {
@@ -803,5 +850,23 @@ mod tests {
         ] {
             assert!(read_worker_response(&mut Cursor::new(frame)).is_err());
         }
+    }
+
+    #[test]
+    fn format_refusal_token_survives_a_reworded_detail() {
+        let message = super::FormatRefusal::Heic.message("HEIC photos need another build");
+        assert_eq!(
+            super::FormatRefusal::parse(&message),
+            Some(super::FormatRefusal::Heic)
+        );
+        assert_eq!(
+            super::FormatRefusal::parse("worker error: viewr-format raw still deferred"),
+            Some(super::FormatRefusal::Raw)
+        );
+        assert_eq!(
+            super::FormatRefusal::parse("viewr-format avif"),
+            Some(super::FormatRefusal::Avif)
+        );
+        assert_eq!(super::FormatRefusal::parse("a plain decode error"), None);
     }
 }

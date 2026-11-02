@@ -39,6 +39,8 @@ pub enum HelpTopic {
     Benchmark,
     /// `viewr update`.
     Update,
+    /// `viewr version`.
+    Version,
     /// `viewr performance-probe`.
     PerformanceProbe,
 }
@@ -52,6 +54,7 @@ impl HelpTopic {
             "doctor" => Some(Self::Doctor),
             "benchmark" | "bench" => Some(Self::Benchmark),
             "update" => Some(Self::Update),
+            "version" => Some(Self::Version),
             "performance-probe" => Some(Self::PerformanceProbe),
             _ => None,
         }
@@ -187,7 +190,19 @@ where
                 format!("`viewr help` has no topic '{topic}'. Try `viewr help` for the command list.")
             }),
         },
-        "version" | "--version" | "-V" => Ok(Invocation::Version),
+        "version" | "--version" | "-V" => {
+            // `viewr version` answers help and rejects extras. `--version` and
+            // `-V` keep printing the version.
+            if first == "version" {
+                if asked_for_help {
+                    return Ok(Invocation::Help(HelpTopic::Version));
+                }
+                if let Some(extra) = rest.first() {
+                    return Err(unexpected_argument(extra, "viewr version"));
+                }
+            }
+            Ok(Invocation::Version)
+        }
         "doctor" | "update" => {
             if asked_for_help {
                 let topic = if first == "doctor" {
@@ -413,7 +428,9 @@ per second. A skipped file prints one short reason. `--verbose` adds the
 decoder's own line on the next row, dimmed on a color terminal. Files in <dir>
 are only read. Nothing is written, cached on disk, or sent anywhere.
 
-Exit status is 1 when <dir> is not a directory or contains no supported image.
+Exit status is 1 when <dir> is missing, is not a directory, or contains no
+supported image. A missing path is `no such directory`. A file is `not a
+directory`. Both name the path as typed, and neither prints the table header.
 "
         .to_owned(),
         HelpTopic::Update => "\
@@ -425,6 +442,16 @@ Usage:
 Prints the official release page and the installer command for this platform,
 plus the source rebuild. viewr never checks for, downloads, or installs an
 update by itself, and there is no `viewr update --download`.
+"
+        .to_owned(),
+        HelpTopic::Version => "\
+viewr version - show the version
+
+Usage:
+  viewr version
+
+Prints `viewr` and the version on one line. An extra argument is rejected.
+`--version` and `-V` print the same line.
 "
         .to_owned(),
         HelpTopic::PerformanceProbe => format!(
@@ -467,8 +494,13 @@ macOS or Linux:
   {UNIX_INSTALL_COMMAND}
 
 The installer contacts only the official GitHub repository after you run it and
-verifies the release checksum and manifest. The viewr application remains
-network-free and creates no background updater.
+verifies the release checksum and manifest. Those commands download the
+immutable v0.7.7 installer script, not a moving branch. The script installs the
+newest stable release unless you choose one. On macOS or Linux, put
+VIEWR_VERSION=0.7.7 before sh. On Windows, save the script and run it with
+-Version 0.7.7. Run the command again, without a version, to install the
+newest stable release.
+The viewr application remains network-free and creates no background updater.
 
 For a source checkout, close viewr and rebuild the updated checkout with:
 
@@ -1039,6 +1071,21 @@ fn benchmark_to(
 ) -> Result<(), String> {
     const ITERATIONS: u32 = 5;
 
+    if let Some(root) = dir {
+        // Classify the path before any table text, so a script that captures
+        // stdout does not see a header for a directory that was never read.
+        match std::fs::metadata(root) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return Err(format!("not a directory: {}", root.display()));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(format!("no such directory: {}", root.display()));
+            }
+            Err(error) => return Err(format!("{}: {error}", root.display())),
+        }
+    }
+
     writeln!(
         stdout,
         "{:<28} {:>10} {:>12} {:>12}",
@@ -1048,9 +1095,6 @@ fn benchmark_to(
     writeln!(stdout, "{}", "-".repeat(64)).map_err(|e| e.to_string())?;
 
     if let Some(root) = dir {
-        if !root.is_dir() {
-            return Err("not a directory".into());
-        }
         let mut entries: Vec<_> = std::fs::read_dir(root)
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
@@ -1316,6 +1360,11 @@ mod tests {
             parse_args(["viewr", "version"]).unwrap(),
             Invocation::Version
         );
+        assert_eq!(
+            parse_args(["viewr", "--version", "extra"]).unwrap(),
+            Invocation::Version
+        );
+        assert_eq!(parse_args(["viewr", "-V"]).unwrap(), Invocation::Version);
     }
 
     #[test]
@@ -1331,7 +1380,10 @@ mod tests {
                 ["viewr", "performance-probe", "--help"],
                 HelpTopic::PerformanceProbe,
             ),
+            (["viewr", "version", "--help"], HelpTopic::Version),
+            (["viewr", "version", "-h"], HelpTopic::Version),
             (["viewr", "help", "doctor"], HelpTopic::Doctor),
+            (["viewr", "help", "version"], HelpTopic::Version),
             (["viewr", "help", "open"], HelpTopic::Open),
         ] {
             assert_eq!(
@@ -1359,6 +1411,14 @@ mod tests {
             (
                 ["viewr", "doctor", "corpus"],
                 "`viewr doctor` takes no argument 'corpus'",
+            ),
+            (
+                ["viewr", "version", "extra"],
+                "`viewr version` takes no argument 'extra'",
+            ),
+            (
+                ["viewr", "version", "--verbose"],
+                "unknown option '--verbose' for `viewr version`",
             ),
             (
                 ["viewr", "benchmark", "--fast"],
@@ -1528,6 +1588,10 @@ mod tests {
         assert!(update.contains("verifies the release checksum and manifest"));
         assert!(update.contains("cargo build --release --workspace --locked"));
         assert!(update.contains("creates no background updater"));
+        assert!(update.contains("immutable v0.7.7 installer script"));
+        assert!(update.contains("newest stable release"));
+        assert!(update.contains("VIEWR_VERSION=0.7.7"));
+        assert!(update.contains("-Version 0.7.7"));
         assert!(!update.contains("git pull"));
         assert!(!update.contains("latest version"));
 
@@ -1883,7 +1947,9 @@ mod tests {
             (HelpTopic::Open, "viewr open <file or folder>"),
             (HelpTopic::Doctor, "viewr doctor - local diagnostics"),
             (HelpTopic::Benchmark, "viewr benchmark <dir>"),
+            (HelpTopic::Benchmark, "no such directory"),
             (HelpTopic::Update, "there is no `viewr update --download`"),
+            (HelpTopic::Version, "viewr version - show the version"),
             (
                 HelpTopic::PerformanceProbe,
                 "viewr performance-probe <path>",
@@ -2005,17 +2071,27 @@ mod tests {
     fn directory_benchmark_rejects_missing_or_empty_directories() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
+        let missing = Path::new("definitely_missing_viewr_benchmark_dir");
+        let mut missing_out = Vec::new();
         assert_eq!(
-            benchmark_to(
-                Some(Path::new("definitely_missing_viewr_benchmark_dir")),
-                &mut stdout,
-                &mut stderr,
-                false,
-                false,
-            )
-            .unwrap_err(),
-            "not a directory"
+            benchmark_to(Some(missing), &mut missing_out, &mut stderr, false, false).unwrap_err(),
+            format!("no such directory: {}", missing.display())
         );
+        assert!(
+            missing_out.is_empty(),
+            "a missing directory printed a table: {}",
+            String::from_utf8_lossy(&missing_out)
+        );
+
+        let file_workspace = TempWorkspace::new("cli_benchmark_file").unwrap();
+        let file = file_workspace.path().join("photo.jpg");
+        std::fs::write(&file, b"not an image").unwrap();
+        let mut file_out = Vec::new();
+        assert_eq!(
+            benchmark_to(Some(&file), &mut file_out, &mut stderr, false, false).unwrap_err(),
+            format!("not a directory: {}", file.display())
+        );
+        assert!(file_out.is_empty(), "a file printed a table");
 
         let workspace = TempWorkspace::new("cli_benchmark_empty").unwrap();
         assert_eq!(
@@ -2035,8 +2111,19 @@ mod tests {
             verbose: false,
         });
         assert_eq!(code, ExitCode::from(1));
-        assert!(output.contains("median ms"));
-        assert!(error.contains("benchmark failed: not a directory"));
+        assert_eq!(output, "");
+        assert!(error.contains(
+            "benchmark failed: no such directory: definitely_missing_viewr_benchmark_dir"
+        ));
+
+        let (code, output, error) = invoke(Invocation::Benchmark {
+            dir: Some(file),
+            verbose: false,
+        });
+        assert_eq!(code, ExitCode::from(1));
+        assert_eq!(output, "");
+        assert!(error.contains("benchmark failed: not a directory:"));
+        assert!(error.contains("photo.jpg"));
     }
 
     #[test]

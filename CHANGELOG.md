@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- A failed open names HEIC, AVIF, and camera RAW instead of offering Retry.
+  Truncated WebP and TIFF files report that the file is damaged or incomplete,
+  the same sentence truncated JPEG, PNG, and GIF already use.
+- `viewr version --help` and `viewr help version` print help for that command.
+  `viewr version` with an extra argument exits 2. `--version` and `-V` still
+  print the version.
+- `viewr benchmark` reports a missing directory and a file as different
+  errors, includes the path as typed, and prints no table header until the
+  path is a directory.
+- The install command downloads the immutable v0.7.7 installer script. That
+  script installs the newest stable release unless a version is set. README,
+  the installation guide, and `viewr update` say so.
+
 ## 0.7.7 - 2026-11-01
 
 - A JPEG that ends before its end-of-image marker, and whose decoded image

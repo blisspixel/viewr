@@ -243,7 +243,8 @@ fn decode_avif(encoded: &[u8]) -> Result<DecodedOutput, String> {
 
 #[cfg(not(feature = "avif"))]
 fn decode_avif(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err("AVIF support requires building viewr-decode with --features avif (and libavif)".into())
+    Err(viewr_protocol::FormatRefusal::Avif
+        .message("AVIF support requires building viewr-decode with --features avif (and libavif)"))
 }
 
 #[cfg(feature = "heic")]
@@ -253,10 +254,9 @@ fn decode_heic(encoded: &[u8]) -> Result<DecodedOutput, String> {
 
 #[cfg(not(feature = "heic"))]
 fn decode_heic(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err(
-        "HEIC/HEIF support requires building viewr-decode with --features heic (and libheif)"
-            .into(),
-    )
+    Err(viewr_protocol::FormatRefusal::Heic.message(
+        "HEIC/HEIF support requires building viewr-decode with --features heic (and libheif)",
+    ))
 }
 
 /// Camera RAW is deferred from 1.0. `libraw-rs` is still pre-1.0, and the
@@ -264,19 +264,21 @@ fn decode_heic(_encoded: &[u8]) -> Result<DecodedOutput, String> {
 /// `docs/STACK.md` Decision 9 and `docs/FORMATS.md`.
 #[cfg(feature = "raw")]
 fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err("camera RAW is deferred from 1.0 (feature raw reserved; see docs/FORMATS.md)".into())
+    Err(viewr_protocol::FormatRefusal::Raw
+        .message("camera RAW is deferred from 1.0 (feature raw reserved; see docs/FORMATS.md)"))
 }
 
 #[cfg(not(feature = "raw"))]
 fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err("camera RAW is deferred from 1.0; see docs/FORMATS.md".into())
+    Err(viewr_protocol::FormatRefusal::Raw
+        .message("camera RAW is deferred from 1.0; see docs/FORMATS.md"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        DecodedOutput, copy_strided_rgba, hand_run_exit, hand_run_notice, validate_decoded,
-        worker_error,
+        DecodedOutput, copy_strided_rgba, decode_input, hand_run_exit, hand_run_notice,
+        validate_decoded, worker_error,
     };
     use viewr_protocol::{MAX_DECODE_DIMENSION, MAX_DECODE_PIXELS};
     use viewr_protocol::{WorkerColorProfile, WorkerResponse};
@@ -341,5 +343,39 @@ mod tests {
         };
         assert!(!message.contains('\n'));
         assert!(message.len() <= viewr_protocol::MAX_WORKER_ERROR_BYTES);
+    }
+
+    #[test]
+    fn unavailable_formats_name_a_stable_refusal() {
+        #[cfg(not(feature = "avif"))]
+        {
+            let Err(message) = decode_input("avif", b"not an image") else {
+                panic!("AVIF refusal decoded bytes");
+            };
+            assert_eq!(
+                viewr_protocol::FormatRefusal::parse(&message),
+                Some(viewr_protocol::FormatRefusal::Avif)
+            );
+        }
+        #[cfg(not(feature = "heic"))]
+        {
+            let Err(message) = decode_input("heic", b"not an image") else {
+                panic!("HEIC refusal decoded bytes");
+            };
+            assert_eq!(
+                viewr_protocol::FormatRefusal::parse(&message),
+                Some(viewr_protocol::FormatRefusal::Heic)
+            );
+        }
+        for format in ["cr2", "nef", "arw", "dng", "rw2", "orf", "raf"] {
+            let Err(message) = decode_input(format, b"not an image") else {
+                panic!("{format} refusal decoded bytes");
+            };
+            assert_eq!(
+                viewr_protocol::FormatRefusal::parse(&message),
+                Some(viewr_protocol::FormatRefusal::Raw),
+                "{format}"
+            );
+        }
     }
 }

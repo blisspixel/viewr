@@ -3439,6 +3439,24 @@ const MESSAGES: &[Message] = &[
         german: "viewr kann diese Art von Datei nicht lesen.",
     },
     Message {
+        english: "This build can't open AVIF photos.",
+        spanish: "Esta versión no puede abrir fotos AVIF.",
+        french: "Cette version ne peut pas ouvrir les photos AVIF.",
+        german: "Diese Version kann keine AVIF-Fotos öffnen.",
+    },
+    Message {
+        english: "This build can't open HEIC photos.",
+        spanish: "Esta versión no puede abrir fotos HEIC.",
+        french: "Cette version ne peut pas ouvrir les photos HEIC.",
+        german: "Diese Version kann keine HEIC-Fotos öffnen.",
+    },
+    Message {
+        english: "viewr does not open camera RAW files yet.",
+        spanish: "viewr todavía no abre archivos RAW de cámara.",
+        french: "viewr n’ouvre pas encore les fichiers RAW d’appareil photo.",
+        german: "viewr öffnet Kamera-RAW-Dateien noch nicht.",
+    },
+    Message {
         english: "This format needs the viewr-decode helper. Run viewr doctor.",
         spanish: "Este formato necesita el auxiliar viewr-decode. Ejecute viewr doctor.",
         french: "Ce format nécessite l’assistant viewr-decode. Exécutez viewr doctor.",

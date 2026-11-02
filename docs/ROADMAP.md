@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.6](https://github.com/blisspixel/viewr/releases/tag/v0.7.6), the transparency, local-decode-proof, and installer-uninstall patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.7`, preparing the damaged JPEG, ICO, Image Information, CLI help, and Save Path patch |
+| Workspace version | `0.7.7`, verified candidate and tag-ready damaged JPEG, ICO, Image Information, CLI help, and Save Path patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.7** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.7.7** after green exact-commit tag-ready CI and fuzz; its complete candidate gate passed; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -248,6 +248,7 @@ viewing-control changes add no preference, catalog, or activity history.
 | Linux entry patch released | `0.7.4` | Candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a`, [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754), and tag commit `e9c12c336da0a8a6cb4284ae94c2739ddcf7cafc` | [Release run 37152808216](https://github.com/blisspixel/viewr/actions/runs/37152808216) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Copy and recovery patch released | `0.7.5` | Candidate commit `933e6aa44d961e961b53292306f54c54518d3530`, [candidate run 39552315440](https://github.com/blisspixel/viewr/actions/runs/39552315440), and tag commit `653b0a7f5606b1cafb02cf37ad93f1939a946688` | [Release run 39557759631](https://github.com/blisspixel/viewr/actions/runs/39557759631) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Transparency patch released | `0.7.6` | Candidate commit `8a12def388f2a43399fa5bff9ede571ae907729f`, [candidate run 40076650027](https://github.com/blisspixel/viewr/actions/runs/40076650027), and tag commit `349440a1ffab1a6ff0c98d8206277b7798e0fa5c` | [Release run 40080077413](https://github.com/blisspixel/viewr/actions/runs/40080077413) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
+| Patch tag-ready | `0.7.7` | Candidate commit `809bc555515488de62eb970a77f941873090f316` and [candidate run 41383540069](https://github.com/blisspixel/viewr/actions/runs/41383540069) | Complete automated gate, all four archives, and fixture verified; public target remains v0.7.6 until publication |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 

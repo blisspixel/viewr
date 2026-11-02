@@ -113,8 +113,8 @@ Four version states must not be conflated:
    currently v0.7.6. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.7`, preparing the damaged JPEG, ICO, Image Information, CLI help,
-   and Save Path patch.
+   `0.7.7`, verified candidate and tag-ready damaged JPEG, ICO, Image
+   Information, CLI help, and Save Path patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -691,6 +691,32 @@ report passed every critical check without opening a window. It was not
 installed over the published v0.7.5 viewer, and this check did not change the
 user PATH or Start menu. Representative-hardware and native screen-reader
 acceptance remain uncollected.
+
+For v0.7.7, [main CI run 41381621272](https://github.com/blisspixel/viewr/actions/runs/41381621272),
+[fuzz run 41381621154](https://github.com/blisspixel/viewr/actions/runs/41381621154),
+and [CodeQL run 41381620085](https://github.com/blisspixel/viewr/actions/runs/41381620085)
+passed on candidate commit `809bc555515488de62eb970a77f941873090f316`.
+One non-publishing [candidate run 41383540069](https://github.com/blisspixel/viewr/actions/runs/41383540069)
+repeated the complete quality and fuzz gates and built all four archives.
+Publication stayed skipped. All four downloads passed their sidecars and the
+official 55-file manifest verifier. The complete fixture set also verified
+against manifest SHA-256
+`0ca94fd40b372c94fcdf45d7c530829cb2345b597725db7bbbfacc1b07fc12a2`.
+
+| Candidate target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `f940f42e67c4a1bd21298b21fbcf7958865e05f5cec572def3d8145e522498ff` |
+| macOS Intel | `4e841089ea7f85bd1dd925a5d2f44f3132b53b00ff1be0b5c8d4f2865ec67c7a` |
+| macOS Apple Silicon | `cdf2f4685702ce6294f3ffea64c881c2c98ca0e3a876d63c12459ebe696f6873` |
+| Linux x64 | `d0ccbc6a49c20d26a5b875454284ccbe751706ac0835820fce0d67b0b4b7f7e2` |
+
+The extracted Windows candidate reports `viewr 0.7.7`, and its doctor report
+passed every critical check without opening a window. It was not installed
+over the published v0.7.6 viewer. The tag-ready follow-up changes release
+status, immutable links, and version assertions only. Application source,
+dependencies, workflows, and packaging remain identical to the verified
+candidate. Native screen-reader and carried hardware acceptance rows remain
+uncollected.
 
 ## Required before a broadly recommended 1.0
 

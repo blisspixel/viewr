@@ -2043,4 +2043,51 @@ mod tests {
     fn median_selects_the_middle_ordered_sample() {
         assert!((median(vec![9.0, 1.0, 5.0, 3.0, 7.0]) - 5.0).abs() < f64::EPSILON);
     }
+
+    #[test]
+    fn directory_benchmark_skips_truncated_jpeg() {
+        let workspace = TempWorkspace::new("cli_benchmark_truncated_jpeg").unwrap();
+        let width = 64u32;
+        let height = 64u32;
+        let mut raw_pixels = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let r = ((x * 255) / width) as u8;
+                let g = ((y * 255) / height) as u8;
+                let b = 100u8;
+                raw_pixels.extend_from_slice(&[r, g, b]);
+            }
+        }
+        let mut full = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut full),
+            &raw_pixels,
+            width,
+            height,
+            image::ColorType::Rgb8,
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+
+        let half = &full[..full.len() / 2];
+        fs::write(workspace.path().join("half.jpg"), half).unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        benchmark_to(
+            Some(workspace.path()),
+            &mut stdout,
+            &mut stderr,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let error = String::from_utf8(stderr).unwrap();
+        assert_eq!(
+            error.trim(),
+            "skip half.jpg: the file is damaged or incomplete",
+            "{error}"
+        );
+    }
 }

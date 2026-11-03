@@ -15,8 +15,8 @@ and organized by user-visible concern.
 - Linux accessibility and D-Bus use async-executor 1.14.1. Version 1.14.0 was
   yanked because a waker could use memory after the executor was dropped.
 - A failed open names HEIC, AVIF, and camera RAW instead of offering Retry.
-  Truncated WebP and TIFF files report that the file is damaged or incomplete,
-  the same sentence truncated JPEG, PNG, and GIF already use.
+  Truncated WebP, TIFF, and ICO files report that the file is damaged or
+  incomplete, the same sentence truncated JPEG, PNG, and GIF already use.
 - `viewr version --help` and `viewr help version` print help for that command.
   `viewr version` with an extra argument exits 2. `--version` and `-V` still
   print the version.

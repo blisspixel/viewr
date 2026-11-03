@@ -3220,4 +3220,34 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn truncated_ico_is_damaged_and_does_not_offer_retry() {
+        let image = image::RgbImage::from_pixel(16, 16, image::Rgb([9, 8, 7]));
+        let mut full = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut full), image::ImageFormat::Ico)
+            .expect("encode ICO");
+        assert!(
+            DecodedImage::load_from_memory_with_extension(&full, "ico").is_ok(),
+            "complete ICO fixture"
+        );
+        let half = &full[..full.len() / 2];
+        match DecodedImage::load_from_memory_with_extension(half, "ico") {
+            Err(error) => {
+                let failure = crate::presentation::explain_open_failure(
+                    crate::locale::Language::English,
+                    &error,
+                );
+                assert_eq!(
+                    failure.cause,
+                    crate::presentation::OpenFailureCause::Damaged,
+                    "{error}"
+                );
+                assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+                assert!(!failure.allows_retry(), "{error}");
+            }
+            Ok(_) => panic!("truncated ICO unexpectedly decoded"),
+        }
+    }
 }

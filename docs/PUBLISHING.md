@@ -116,7 +116,7 @@ Four version states must not be conflated:
    currently v0.7.7. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.8`, preparing the missing-format, damaged WebP and TIFF, command,
+   `0.7.8`, preparing the missing-format, damaged WebP, TIFF, and ICO, command,
    stable folder order, AppleDouble, and installer-script patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
@@ -178,7 +178,7 @@ probe, macOS update, full file-association acceptance, or the rest of the v0.8
 acceptance work.
 
 The v0.7.8 preparation uses the same narrow exception for missing-format
-opens, truncated WebP and TIFF files, the version command, benchmark path
+opens, truncated WebP, TIFF, and ICO files, the version command, benchmark path
 errors, stable folder order, AppleDouble sidecars, and the installer-script
 explanation already reviewed on main. It
 includes the reviewed async-executor 1.14.1 replacement for the yanked 1.14.0

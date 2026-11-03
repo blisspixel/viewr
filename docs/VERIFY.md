@@ -53,8 +53,12 @@ they do not replace source review or platform signing.
   reported as failure. An approval banner for the duplicate runs can remain. The
   next Dependabot lockfile pull request is the proof that the new commit's required
   checks are reported without a manual approval. This records workflow uses
-  `pull_request_target`. Public repositories must allow that event in an Actions
-  event policy before GitHub enforces the default block on December 2, 2026.
+  `pull_request_target`. GitHub blocks that event by default on public
+  repositories on December 2, 2026, with brownouts on November 9 and November 16.
+  The repository policy "Allow Dependabot records pull_request_target" allows
+  the event only for `.github/workflows/dependabot-records.yml`. It is not a
+  repository-wide event allowlist, and the other workflows keep their existing
+  triggers.
 - A GitHub artifact attestation binds a published asset digest to the repository and
   workflow identity recorded by GitHub. It does not make an unsigned executable a
   platform-signed application.

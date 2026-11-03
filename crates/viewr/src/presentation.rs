@@ -270,6 +270,9 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
         || text.contains("memory limit exceeded")
         || text.contains("image dimensions exceed")
         || text.contains("allocation exceeds")
+        || text.contains("addressable memory")
+        || text.contains("could not allocate a decode buffer")
+        || text.contains("could not allocate an rgb buffer")
     {
         return OpenFailureCause::TooLarge;
     }
@@ -293,6 +296,10 @@ fn open_failure_cause(detail: &str) -> OpenFailureCause {
         || text.contains("failed to fill whole buffer")
         || text.contains("failed to decode")
         || text.contains("failed to parse")
+        || text.contains("outside the file")
+        || text.contains("contains no image")
+        || text.contains("offset overflowed")
+        || text.contains("returned an invalid")
     {
         return OpenFailureCause::Damaged;
     }
@@ -687,6 +694,48 @@ mod tests {
                 "unexpected eof",
                 OpenFailureCause::Damaged,
                 "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "ICO image data is outside the file",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "ICO directory contains no image",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "ICO image offset overflowed",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "TIFF page returned an invalid RGB buffer",
+                OpenFailureCause::Damaged,
+                "The file is damaged or incomplete.",
+                false,
+            ),
+            (
+                "ICO image is larger than addressable memory",
+                OpenFailureCause::TooLarge,
+                "The image is larger than viewr opens safely.",
+                false,
+            ),
+            (
+                "ICO image could not allocate a decode buffer",
+                OpenFailureCause::TooLarge,
+                "The image is larger than viewr opens safely.",
+                false,
+            ),
+            (
+                "TIFF CMYK page could not allocate an RGB buffer",
+                OpenFailureCause::TooLarge,
+                "The image is larger than viewr opens safely.",
                 false,
             ),
             (

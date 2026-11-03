@@ -105,7 +105,8 @@ pub(crate) enum FolderSort {
     /// Show the most recently modified image first.
     #[default]
     Latest,
-    /// Use case-insensitive natural filename order.
+    /// Use natural filename order. An equal number keeps the shorter digit run
+    /// first, and names that still match use byte order.
     Name,
 }
 
@@ -1897,9 +1898,22 @@ pub fn supported_extensions() -> impl Iterator<Item = &'static str> {
 }
 
 /// Return `true` if `path` has an extension viewr knows about (core or worker).
+///
+/// `AppleDouble` sidecars are metadata files copied beside a photo. Their names
+/// start with `._` and reuse the photo's extension, so extension alone would
+/// put them in the folder between real images.
 #[must_use]
 pub fn is_supported_image(path: &Path) -> bool {
+    if is_apple_double_sidecar(path) {
+        return false;
+    }
     extension_kind(path).is_some()
+}
+
+/// `._photo.jpg` is the `AppleDouble` record for `photo.jpg`, not a second image.
+fn is_apple_double_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.as_encoded_bytes().starts_with(b"._"))
 }
 
 /// Return `true` if the file must be decoded in the isolated worker process.
@@ -2221,16 +2235,18 @@ pub(crate) fn folder_entry_cmp(
     right_path: &Path,
     right_provenance: Option<ScanProvenance>,
 ) -> Ordering {
-    let by_name = || {
-        let left = left_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        let right = right_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        natural_cmp(left, right)
+    let by_name = || match (left_path.file_name(), right_path.file_name()) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(left), Some(right)) => {
+            // Lossy text keeps human order for ordinary names. The original
+            // name breaks a tie, including names that are not Unicode, so a
+            // refresh does not follow directory enumeration order.
+            let left_text = left.to_string_lossy();
+            let right_text = right.to_string_lossy();
+            natural_cmp(&left_text, &right_text).then_with(|| left.cmp(right))
+        }
     };
     match sort {
         FolderSort::Name => by_name(),
@@ -2280,21 +2296,27 @@ fn extension_kind(path: &Path) -> Option<ExtensionKind> {
     }
 }
 
-/// Compare two file names the way a human reads them: runs of digits are
-/// compared by numeric value, so `img2` orders before `img10`. Comparison is
-/// case-insensitive elsewhere.
+/// Compare two file names the way a human reads them.
+///
+/// Runs of digits compare by numeric value, so `img2` orders before `img10`.
+/// An equal value keeps the shorter run first, so `img2` also orders before
+/// `img02`. Letters compare case-insensitively. Names that match under those
+/// rules use byte order, so a folder refresh does not follow directory
+/// enumeration order.
 #[must_use]
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     let mut ai = a.chars().peekable();
     let mut bi = b.chars().peekable();
     loop {
         match (ai.peek().copied(), bi.peek().copied()) {
-            (None, None) => return Ordering::Equal,
+            (None, None) => return a.cmp(b),
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(ca), Some(cb)) => {
                 if ca.is_ascii_digit() && cb.is_ascii_digit() {
-                    match take_number(&mut ai).cmp(&take_number(&mut bi)) {
+                    let (left, left_len) = take_number(&mut ai);
+                    let (right, right_len) = take_number(&mut bi);
+                    match left.cmp(&right).then(left_len.cmp(&right_len)) {
                         Ordering::Equal => {}
                         non_eq => return non_eq,
                     }
@@ -2312,15 +2334,19 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// Consume a run of ASCII digits from `it` and return its numeric value,
-/// saturating rather than overflowing on absurdly long runs.
-fn take_number(it: &mut Peekable<Chars>) -> u64 {
+/// Consume a run of ASCII digits and return its value and width.
+///
+/// The value saturates instead of panicking on a run longer than `u64`. The
+/// width still distinguishes a saturated run from a shorter one.
+fn take_number(it: &mut Peekable<Chars>) -> (u64, u32) {
     let mut n: u64 = 0;
+    let mut width: u32 = 0;
     while let Some(d) = it.peek().and_then(|c| c.to_digit(10)) {
         n = n.saturating_mul(10).saturating_add(u64::from(d));
+        width = width.saturating_add(1);
         it.next();
     }
-    n
+    (n, width)
 }
 
 /// Open a file while making a best-effort attempt to avoid updating its
@@ -2348,9 +2374,10 @@ mod tests {
     use super::scan_image_entries_sorted_with_hook;
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, FolderSort, canonical_file_path,
-        catalog_paths_match, error_kind_is_definitely_missing, is_core_format, is_supported_image,
-        is_worker_format, natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while,
-        scan_images, scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
+        catalog_paths_match, error_kind_is_definitely_missing, folder_entry_cmp, is_core_format,
+        is_supported_image, is_worker_format, natural_cmp, scan_image_entries_sorted_while,
+        scan_image_entries_while, scan_images, scan_images_while, scan_images_with_limit,
+        sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
@@ -2383,6 +2410,11 @@ mod tests {
         assert!(!is_supported_image(Path::new("notes.txt")));
         assert!(!is_supported_image(Path::new("noext")));
         assert!(!is_supported_image(Path::new("archive.zip")));
+        assert!(!is_supported_image(Path::new("._photo.jpg")));
+        assert!(!is_supported_image(Path::new("album/._shot.ARW")));
+        assert!(is_supported_image(Path::new("photo.jpg")));
+        assert!(is_supported_image(Path::new(".photo.jpg")));
+        assert!(is_supported_image(Path::new("photo._copy.jpg")));
     }
 
     #[test]
@@ -2390,11 +2422,135 @@ mod tests {
         assert_eq!(natural_cmp("img2.jpg", "img10.jpg"), Ordering::Less);
         assert_eq!(natural_cmp("img10.jpg", "img2.jpg"), Ordering::Greater);
         assert_eq!(natural_cmp("a.jpg", "a.jpg"), Ordering::Equal);
+        assert_eq!(natural_cmp("img2.jpg", "img02.jpg"), Ordering::Less);
+        assert_eq!(natural_cmp("img02.jpg", "img002.jpg"), Ordering::Less);
+        assert_eq!(natural_cmp("img002.jpg", "img2.jpg"), Ordering::Greater);
     }
 
     #[test]
     fn natural_order_case_insensitive() {
-        assert_eq!(natural_cmp("Photo.jpg", "photo.jpg"), Ordering::Equal);
+        assert_eq!(natural_cmp("a.jpg", "B.jpg"), Ordering::Less);
+        assert_eq!(natural_cmp("B.jpg", "a.jpg"), Ordering::Greater);
+        assert_eq!(natural_cmp("Photo.jpg", "photo.jpg"), Ordering::Less);
+        assert_eq!(natural_cmp("photo.jpg", "Photo.jpg"), Ordering::Greater);
+    }
+
+    #[test]
+    fn natural_order_is_total_for_padding_and_case() {
+        let names = [
+            "img2.jpg",
+            "img02.jpg",
+            "img002.jpg",
+            "img10.jpg",
+            "Photo.jpg",
+            "photo.jpg",
+            "PHOTO.JPG",
+            "a.jpg",
+            "B.jpg",
+            "img2",
+            "img2a",
+            "img10a",
+            "",
+        ];
+        for left in names {
+            assert_eq!(natural_cmp(left, left), Ordering::Equal);
+            for right in names {
+                let order = natural_cmp(left, right);
+                assert_eq!(
+                    natural_cmp(right, left),
+                    order.reverse(),
+                    "{left:?} vs {right:?}"
+                );
+                assert_eq!(order == Ordering::Equal, left == right);
+                for third in names {
+                    if order != Ordering::Greater && natural_cmp(right, third) != Ordering::Greater
+                    {
+                        assert_ne!(
+                            natural_cmp(left, third),
+                            Ordering::Greater,
+                            "{left:?} <= {right:?} <= {third:?}"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(natural_cmp("img02.jpg", "img10.jpg"), Ordering::Less);
+    }
+
+    #[test]
+    fn names_that_are_not_unicode_still_sort_by_their_bytes() {
+        let (left, right) = non_unicode_name_pair();
+        let forward = folder_entry_cmp(
+            FolderSort::Name,
+            Path::new(&left),
+            None,
+            Path::new(&right),
+            None,
+        );
+        let backward = folder_entry_cmp(
+            FolderSort::Name,
+            Path::new(&right),
+            None,
+            Path::new(&left),
+            None,
+        );
+        assert_ne!(forward, Ordering::Equal);
+        assert_eq!(backward, forward.reverse());
+        assert_eq!(
+            folder_entry_cmp(FolderSort::Name, Path::new(""), None, Path::new(""), None),
+            Ordering::Equal
+        );
+        assert_eq!(
+            folder_entry_cmp(
+                FolderSort::Name,
+                Path::new(""),
+                None,
+                Path::new("a.jpg"),
+                None
+            ),
+            Ordering::Less
+        );
+        assert_eq!(
+            folder_entry_cmp(
+                FolderSort::Name,
+                Path::new("a.jpg"),
+                None,
+                Path::new(""),
+                None
+            ),
+            Ordering::Greater
+        );
+    }
+
+    fn non_unicode_name_pair() -> (std::ffi::OsString, std::ffi::OsString) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            (
+                std::ffi::OsString::from_vec(b"\xff.jpg".to_vec()),
+                std::ffi::OsString::from_vec(b"\xfe.jpg".to_vec()),
+            )
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            (
+                std::ffi::OsString::from_wide(&[
+                    0xDC00,
+                    u16::from(b'.'),
+                    u16::from(b'j'),
+                    u16::from(b'p'),
+                    u16::from(b'g'),
+                ]),
+                std::ffi::OsString::from_wide(&[
+                    0xDC01,
+                    u16::from(b'.'),
+                    u16::from(b'j'),
+                    u16::from(b'p'),
+                    u16::from(b'g'),
+                ]),
+            )
+        }
     }
 
     #[test]
@@ -2505,7 +2661,15 @@ mod tests {
     #[test]
     fn scans_only_supported_files_in_natural_order() {
         let workspace = TempWorkspace::new("folder_scan").unwrap();
-        for name in ["img10.png", "img2.jpg", "notes.txt", "img1.avif"] {
+        for name in [
+            "img10.png",
+            "img2.jpg",
+            "img02.png",
+            "._img2.jpg",
+            ".hidden.png",
+            "notes.txt",
+            "img1.avif",
+        ] {
             fs::write(workspace.path().join(name), b"fixture").unwrap();
         }
         fs::create_dir(workspace.path().join("nested.png")).unwrap();
@@ -2515,7 +2679,16 @@ mod tests {
             .into_iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        assert_eq!(names, ["img1.avif", "img2.jpg", "img10.png"]);
+        assert_eq!(
+            names,
+            [
+                ".hidden.png",
+                "img1.avif",
+                "img2.jpg",
+                "img02.png",
+                "img10.png"
+            ]
+        );
 
         let aliased_directory = workspace.path().join("nested.png").join("..");
         let paths = scan_images(&aliased_directory).unwrap();
@@ -2573,6 +2746,30 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(tied, ["image2.png", "image10.png"]);
         assert_eq!(FolderSort::default(), FolderSort::Latest);
+    }
+
+    #[test]
+    fn latest_folder_sort_tie_keeps_the_shorter_digit_run_first() {
+        let workspace = TempWorkspace::new("folder_scan_padding").unwrap();
+        let short = workspace.path().join("img2.png");
+        let padded = workspace.path().join("img02.png");
+        fs::write(&short, b"short").unwrap();
+        fs::write(&padded, b"padded").unwrap();
+        let same = std::time::SystemTime::now() - std::time::Duration::from_mins(1);
+        for path in [&short, &padded] {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(same))
+                .unwrap();
+        }
+        let tied = scan_image_entries_sorted_while(workspace.path(), FolderSort::Latest, || true)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.path().file_name().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(tied, ["img2.png", "img02.png"]);
     }
 
     #[test]

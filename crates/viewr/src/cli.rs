@@ -1286,9 +1286,9 @@ mod tests {
     use super::{
         HelpTopic, Invocation, OFFICIAL_LATEST_RELEASE_URL, OFFICIAL_RELEASES_URL, ReportStyle,
         UNIX_INSTALL_COMMAND, WINDOWS_INSTALL_COMMAND, bench_one_bytes, benchmark_to,
-        console_columns, count_tag_rows, decode_self_test, doctor_closing, doctor_to, help_text,
-        median, no_color_disables, paint_tag, parse_args, parse_args_with, run_with_io, style_for,
-        window_readiness, wrap_logical_line, wrap_text,
+        console_columns, count_tag_rows, decode_self_test, doctor_closing, doctor_to,
+        encode_png_memory, help_text, median, no_color_disables, paint_tag, parse_args,
+        parse_args_with, run_with_io, style_for, window_readiness, wrap_logical_line, wrap_text,
     };
     use crate::ephemeral::TempWorkspace;
     use crate::startup::DOCTOR_FAIL;
@@ -2124,6 +2124,31 @@ mod tests {
         assert_eq!(output, "");
         assert!(error.contains("benchmark failed: not a directory:"));
         assert!(error.contains("photo.jpg"));
+    }
+
+    #[test]
+    fn directory_benchmark_skips_apple_double_sidecars() {
+        let workspace = TempWorkspace::new("cli_benchmark_apple_double").unwrap();
+        let png = encode_png_memory(1, 1).unwrap();
+        std::fs::write(workspace.path().join("photo.png"), &png).unwrap();
+        std::fs::write(workspace.path().join("._photo.png"), b"sidecar").unwrap();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        benchmark_to(
+            Some(workspace.path()),
+            &mut stdout,
+            &mut stderr,
+            false,
+            false,
+        )
+        .unwrap();
+        let output = String::from_utf8(stdout).unwrap();
+        assert!(output.contains("photo.png"), "{output}");
+        assert!(
+            !output.contains("._photo.png"),
+            "benchmark listed an AppleDouble sidecar: {output}"
+        );
+        assert!(stderr.is_empty(), "{}", String::from_utf8_lossy(&stderr));
     }
 
     #[test]

@@ -445,7 +445,8 @@ Shipped:
   generation-cancellation controls for helpers.
 - **`fs`**: recognizing regular image files (core and worker extensions), excluding
   symlinks from automatic scans, descending modification-time or natural-name
-  ordering with natural ties (`img2` before `img10`), and versioned native file
+  ordering with natural ties (`img2` before `img02` before `img10`; case-only
+  names stay in byte order), skipping AppleDouble `._` sidecars, and versioned native file
   identity used to bind a displayed source to guarded mutation.
 - **`ratings`**: bounded JPEG header, XMP, and existing IFD0 `0x4746` parsing;
   complete rating-state reconciliation; and the narrow JPEG source-write

@@ -5,6 +5,13 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Folder order no longer follows the order a directory was read. The same
+  number with fewer digits stays first, so `img2` comes before `img02` and
+  before `img10` when modification times match. Names that differ only by
+  case stay adjacent in byte order.
+- Folder scans and `viewr benchmark` skip AppleDouble sidecar files whose
+  names start with `._`. Those files are metadata copied beside a photo.
+  Opening one by an explicit path still attempts to decode it.
 - Linux accessibility and D-Bus use async-executor 1.14.1. Version 1.14.0 was
   yanked because a waker could use memory after the executor was dropped.
 - A failed open names HEIC, AVIF, and camera RAW instead of offering Retry.

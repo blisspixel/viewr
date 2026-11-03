@@ -19,7 +19,7 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.7](https://github.com/blisspixel/viewr/releases/tag/v0.7.7), the damaged JPEG, ICO, Image Information, CLI help, and Save Path patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.8`, preparing the missing-format, damaged WebP and TIFF, command, and installer-script patch |
+| Workspace version | `0.7.8`, preparing the missing-format, damaged WebP and TIFF, command, stable folder order, AppleDouble, and installer-script patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
 | Next tag allowed | **v0.7.8** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
@@ -238,6 +238,8 @@ or accessibility evidence gates.
 | Version command contract | Implemented, unreleased | `viewr version --help` and `viewr help version` print help. An extra argument exits 2. `--version` and `-V` still print the version. |
 | Benchmark path errors | Implemented, unreleased | A missing directory and a file are different errors, the path is included as typed, and no table header is printed until the path is a directory. |
 | Installer script scope | Implemented, unreleased | The install command downloads one immutable installer script. The script installs the newest stable release unless a version is set. |
+| Stable folder order | Implemented, unreleased | Digit runs of equal value keep the shorter run first, so `img2` stays before `img02` and `img10`. Names that differ only by case stay adjacent in byte order. A folder refresh does not follow directory read order. |
+| AppleDouble sidecars | Implemented, unreleased | Folder scans and `viewr benchmark` skip files whose names start with `._`. Opening that path explicitly still attempts to decode it. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
@@ -247,8 +249,9 @@ Transparency inspection, the local decode proof, the doctor decode self-test,
 and removal of an installer-owned tree shipped in v0.7.6. Damaged JPEG opens,
 RGB PNG icon entries, localized Image Information values, aligned CLI help,
 and typed Save Path shipped in v0.7.7. Named missing-format opens, damaged
-WebP and TIFF files, the version command, benchmark path errors, and the
-installer-script explanation are implemented and unreleased. The
+WebP and TIFF files, the version command, benchmark path errors, stable folder
+order, AppleDouble sidecars, and the installer-script explanation are
+implemented and unreleased. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points

@@ -275,7 +275,13 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Navigation (the most-touched interaction)
 - Folder scans use descending file modification time by default, with natural
-  filename order as the stable tie break. View > Folder Sort can switch the open
+  filename order as the stable tie break. Digit runs compare by value, and the
+  same value keeps the shorter run first, so `img2` stays before `img02` and
+  `img10`. Names that differ only by case stay adjacent in byte order. The
+  order does not follow the order the directory was read. A file whose name
+  starts with `._` is an AppleDouble sidecar copied beside a photo, not another
+  image, so folder membership skips it. Opening that path explicitly still
+  decodes it. View > Folder Sort can switch the open
   folder to natural filename order without losing selection, rating state, or the
   active rating projection. The choice becomes the default for future folders and
   launches, and File > Preferences exposes the same selected radio group. A current

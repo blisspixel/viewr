@@ -281,7 +281,7 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
   order does not follow the order the directory was read. A file whose name
   starts with `._` is an AppleDouble sidecar copied beside a photo, not another
   image, so folder membership skips it. Opening that path explicitly still
-  decodes it. View > Folder Sort can switch the open
+  attempts to decode it. View > Folder Sort can switch the open
   folder to natural filename order without losing selection, rating state, or the
   active rating projection. The choice becomes the default for future folders and
   launches, and File > Preferences exposes the same selected radio group. A current

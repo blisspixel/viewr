@@ -17,6 +17,11 @@ and organized by user-visible concern.
 - A failed open names HEIC, AVIF, and camera RAW instead of offering Retry.
   Truncated WebP, TIFF, and ICO files report that the file is damaged or
   incomplete, the same sentence truncated JPEG, PNG, and GIF already use.
+- A JPEG whose final 4 KiB contains no end-of-image marker fails to open.
+  The message says the file is damaged or incomplete, and Retry is not
+  offered. A cut-off scan can otherwise decode as a full image that does not
+  end in the grey fill used for unwritten pixels. A JPEG that still has the
+  marker opens unchanged.
 - `viewr version --help` and `viewr help version` print help for that command.
   `viewr version` with an extra argument exits 2. `--version` and `-V` still
   print the version.

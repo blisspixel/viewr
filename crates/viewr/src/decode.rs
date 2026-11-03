@@ -1047,18 +1047,19 @@ impl DecodedImage {
     where
         R: BufRead + Seek,
     {
-        let is_jpeg = reader.format() == Some(image::ImageFormat::Jpeg);
-        let has_eoi = if is_jpeg {
+        if reader.format() == Some(image::ImageFormat::Jpeg) {
             let mut inner = reader.into_inner();
-            let has_eoi = jpeg_stream_has_eoi(&mut inner)?;
+            // A missing end marker is rejected before decode. The decoder can
+            // finish a cut-off scan as a full image, and that image does not
+            // always end in the grey fill used for unwritten pixels.
+            if !jpeg_stream_has_eoi(&mut inner)? {
+                return Err(Error::Decode("the file is damaged or incomplete".into()));
+            }
             inner
                 .rewind()
                 .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
             reader = image::ImageReader::with_format(inner, image::ImageFormat::Jpeg);
-            has_eoi
-        } else {
-            true
-        };
+        }
 
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(MAX_DECODE_DIMENSION);
@@ -1075,9 +1076,6 @@ impl DecodedImage {
             .map_err(|e| Error::Decode(format!("could not read image orientation: {e}")))?;
         let mut dynamic_image = image::DynamicImage::from_decoder(decoder)
             .map_err(|e| Error::Decode(format!("decode failed: {e}")))?;
-        if is_jpeg && !has_eoi && dynamic_image_ends_with_truncated_grey_fill(&dynamic_image) {
-            return Err(Error::Decode("the file is damaged or incomplete".into()));
-        }
         dynamic_image.apply_orientation(orientation);
         color_normalizer
             .normalize_if_current(SourceImage::from_dynamic_image(dynamic_image)?, generation)
@@ -1733,6 +1731,9 @@ fn validate_decoder_allocation(decoder: &impl image::ImageDecoder) -> Result<(),
     Ok(())
 }
 
+/// The end marker is sought only in the tail. A header segment must not
+/// vouch for a scan that never reaches its end, and 4 KiB covers the marker
+/// plus ordinary trailing padding.
 fn jpeg_stream_has_eoi<R: BufRead + Seek>(reader: &mut R) -> Result<bool, Error> {
     let stream_len = reader
         .seek(SeekFrom::End(0))
@@ -1751,23 +1752,6 @@ fn jpeg_stream_has_eoi<R: BufRead + Seek>(reader: &mut R) -> Result<bool, Error>
         .read_exact(&mut tail)
         .map_err(|error| Error::Decode(format!("open/decode failed: {error}")))?;
     Ok(tail.windows(2).any(|pair| pair == [0xFF, 0xD9]))
-}
-
-fn dynamic_image_ends_with_truncated_grey_fill(image: &image::DynamicImage) -> bool {
-    // zune-jpeg fills all unwritten pixels with 128 (0x80) when the bitstream terminates early.
-    // An aborted scan leaves at least one MCU block (or row) filled with 128.
-    const MIN_GREY_RUN: usize = 32;
-
-    let bytes = image.as_bytes();
-    if bytes.is_empty() {
-        return false;
-    }
-    if bytes.len() < MIN_GREY_RUN {
-        return bytes.iter().all(|&b| b == 128);
-    }
-    bytes[bytes.len() - MIN_GREY_RUN..]
-        .iter()
-        .all(|&b| b == 128)
 }
 
 /// Convert a non-negative CSS/SVG length to a whole pixel count of at least 1.
@@ -3128,65 +3112,63 @@ mod tests {
     }
 
     #[test]
-    fn truncated_jpeg_detection() {
-        let width = 128u32;
-        let height = 128u32;
-        let mut raw_pixels = Vec::with_capacity((width * height * 3) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                let r = ((x * 255) / width) as u8;
-                let g = ((y * 255) / height) as u8;
-                let b = 42u8;
-                raw_pixels.extend_from_slice(&[r, g, b]);
-            }
-        }
+    fn jpeg_without_end_marker_is_damaged_and_does_not_offer_retry() {
+        let image = image::RgbImage::from_fn(128, 128, |x, y| {
+            image::Rgb([((x * 17) % 251) as u8, ((y * 29) % 251) as u8, 200])
+        });
         let mut full = Vec::new();
-        image::write_buffer_with_format(
-            &mut std::io::Cursor::new(&mut full),
-            &raw_pixels,
-            width,
-            height,
-            image::ColorType::Rgb8,
-            image::ImageFormat::Jpeg,
-        )
-        .expect("encode JPEG");
-
-        assert!(DecodedImage::load_from_memory(&full).is_ok());
-
-        let half = &full[..full.len() / 2];
-        match DecodedImage::load_from_memory(half) {
-            Err(err) => {
+        image
+            .write_to(&mut Cursor::new(&mut full), image::ImageFormat::Jpeg)
+            .expect("encode JPEG");
+        assert!(
+            DecodedImage::load_from_memory(&full).is_ok(),
+            "complete JPEG fixture"
+        );
+        let mut padded = full.clone();
+        padded.extend_from_slice(&[0u8; 128]);
+        assert!(
+            DecodedImage::load_from_memory(&padded).is_ok(),
+            "marker still inside the final 4 KiB"
+        );
+        let mut buried = full.clone();
+        buried.extend(std::iter::repeat_n(0u8, 4096));
+        match DecodedImage::load_from_memory(&buried) {
+            Err(error) => {
                 let failure = crate::presentation::explain_open_failure(
                     crate::locale::Language::English,
-                    &err,
+                    &error,
                 );
                 assert_eq!(
                     failure.cause,
                     crate::presentation::OpenFailureCause::Damaged
                 );
-                assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+                assert!(!failure.allows_retry(), "{error}");
             }
-            Ok(_) => panic!("truncated JPEG at 50% unexpectedly decoded successfully"),
+            Ok(_) => panic!("end marker more than 4 KiB from the end decoded"),
         }
 
-        let ninety = &full[..(full.len() * 9) / 10];
-        match DecodedImage::load_from_memory(ninety) {
-            Err(err) => {
-                let failure = crate::presentation::explain_open_failure(
-                    crate::locale::Language::English,
-                    &err,
-                );
-                assert_eq!(
-                    failure.cause,
-                    crate::presentation::OpenFailureCause::Damaged
-                );
-                assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+        // A cut of a few bytes can still decode as a full image. Some of
+        // those images differ from the complete file and do not end in the
+        // grey fill. The end marker is the proof the scan reached its end.
+        for cut in [1usize, 2, 3, 8, 16, full.len() / 10, full.len() / 2] {
+            let end = full.len() - cut;
+            match DecodedImage::load_from_memory(&full[..end]) {
+                Err(error) => {
+                    let failure = crate::presentation::explain_open_failure(
+                        crate::locale::Language::English,
+                        &error,
+                    );
+                    assert_eq!(
+                        failure.cause,
+                        crate::presentation::OpenFailureCause::Damaged,
+                        "minus {cut}: {error}"
+                    );
+                    assert_eq!(failure.sentence, "The file is damaged or incomplete.");
+                    assert!(!failure.allows_retry(), "minus {cut}: {error}");
+                }
+                Ok(_) => panic!("JPEG missing its end marker decoded at minus {cut}"),
             }
-            Ok(_) => panic!("truncated JPEG at 90% unexpectedly decoded successfully"),
         }
-
-        let minus_three = &full[..full.len() - 3];
-        assert!(DecodedImage::load_from_memory(minus_three).is_ok());
     }
 
     #[test]

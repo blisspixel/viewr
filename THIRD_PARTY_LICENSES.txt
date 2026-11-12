@@ -4095,7 +4095,7 @@ used_by:
   event-listener-strategy 0.5.4
   event-listener 5.4.2
   fastrand 2.5.0
-  flate2 1.1.10
+  flate2 1.1.11
   form_urlencoded 1.2.2
   futures-lite 2.6.1
   gethostname 1.1.0

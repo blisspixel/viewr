@@ -4095,7 +4095,7 @@ used_by:
   event-listener-strategy 0.5.4
   event-listener 5.4.2
   fastrand 2.5.0
-  flate2 1.1.10
+  flate2 1.1.11
   form_urlencoded 1.2.2
   futures-lite 2.6.1
   gethostname 1.1.0
@@ -4133,7 +4133,7 @@ used_by:
   roxmltree 0.21.2
   rustc-hash 1.1.0
   rustix 0.38.44
-  rustix 1.1.4
+  rustix 1.1.6
   scoped-tls 1.0.1
   scopeguard 1.2.0
   signal-hook-registry 1.4.8

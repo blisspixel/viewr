@@ -759,6 +759,33 @@ installed over the published v0.7.6 viewer, and this check did not change the
 user PATH or Start menu. Representative-hardware and native screen-reader
 acceptance remain uncollected.
 
+For v0.7.8, [main CI run 43902099041](https://github.com/blisspixel/viewr/actions/runs/43902099041),
+[fuzz run 43902222765](https://github.com/blisspixel/viewr/actions/runs/43902222765),
+and [CodeQL run 43902097663](https://github.com/blisspixel/viewr/actions/runs/43902097663)
+passed on candidate commit `3098ede5c398569c4ae6fe2dc3d086f0549e8d62`.
+The fuzz workflow was dispatched for that commit because a docs-only push does
+not start it.
+One non-publishing [candidate run 43903900271](https://github.com/blisspixel/viewr/actions/runs/43903900271)
+repeated the complete quality and fuzz gates and built all four archives.
+Publication stayed skipped. All four downloads passed their sidecars and the
+official 56-file manifest verifier. Each archive includes the v0.7.8 notes and
+the RUSTSEC-2026-0486 wording. The complete fixture set also verified
+against manifest SHA-256
+`0ca94fd40b372c94fcdf45d7c530829cb2345b597725db7bbbfacc1b07fc12a2`.
+
+| Candidate target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `d717a2fc37bfbc2bf9a4fce704295d9c74bc6861d002912d2eadd0144ef7fa20` |
+| macOS Intel | `331872d26a9d714c4d2e32056a1b7e2b2f8c193ccda89a58151a502caad31e11` |
+| macOS Apple Silicon | `fcaac4bbc3e0bdefaee81c7849aab03fad9e7c0d6ae14959b71cf1a11e2f1ae0` |
+| Linux x64 | `73a574e2ba38de8174150cbaebc51cd452183e8126f6528619388815f8f05355` |
+
+The extracted Linux candidate reports `viewr 0.7.8`, and its doctor report
+passed every critical check without opening a window. The decode worker beside
+the executable passed its in-memory probe. The archive was not installed.
+Representative-hardware and native screen-reader acceptance remain uncollected.
+This candidate is not a public release.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)

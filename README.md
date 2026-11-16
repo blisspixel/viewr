@@ -189,6 +189,7 @@ remains available for exact pixel inspection.
 | Exit | File > Exit or Quit viewr; `Ctrl/Cmd+Q` |
 | Move current image to Trash | Delete |
 | Undo the latest recoverable Trash action | `U` |
+| Keyboard shortcuts | `?` or `F1`, or Help > Keyboard Shortcuts |
 
 Menus expose the same actions and shortcuts. There is no flag, review queue,
 batch-trash mode, or bare-letter delete shortcut. Detailed interaction behavior is

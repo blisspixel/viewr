@@ -612,6 +612,12 @@ generative fill, and an unbounded Poisson solve are outside this focused tool.
 
 ### Help, updates, and product identity
 
+- Help > Keyboard Shortcuts, `?`, and F1 open a centered modal with the same
+  shortcut catalog as About. It blocks background input. Close, a backdrop
+  click, Escape, or another key dismisses it and returns focus to the photo.
+  Holding the key that opened the list does not dismiss it.
+  Crop, Spot Heal, and a text field keep those keys. Opening the list does
+  not cancel a decode or a neighbor prefetch.
 - Help > About viewr opens a centered modal that blocks background input and
   closes with its Close button, backdrop click, or Escape. On a short window the
   body scrolls so Close stays reachable.

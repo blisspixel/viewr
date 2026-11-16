@@ -232,6 +232,13 @@ pub(crate) const ABOUT_SHORTCUT_GROUPS: &[ShortcutGroup] = &[
         ],
     },
     ShortcutGroup {
+        heading: "Help",
+        items: &[ShortcutSpec {
+            keys: "F1 / ?",
+            action: "Keyboard shortcuts",
+        }],
+    },
+    ShortcutGroup {
         heading: "Mouse",
         items: &[
             ShortcutSpec {
@@ -507,6 +514,62 @@ mod tests {
         }
         assert!(!rendered.iter().any(|line| line.contains("A / D")));
         assert_eq!(format_shortcut_keys("{primary}+0", "Cmd"), "Cmd+0");
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "F1 / ? Keyboard shortcuts")
+        );
+    }
+
+    #[test]
+    fn readme_shortcut_rows_appear_in_the_catalog() {
+        let readme = include_str!("../../../README.md");
+        let table = readme
+            .split_once("| Action | Control |\n| --- | --- |\n")
+            .expect("README shortcut table")
+            .1;
+        let catalog: Vec<String> = ABOUT_SHORTCUT_GROUPS
+            .iter()
+            .flat_map(|group| group.items.iter())
+            .map(|item| {
+                format!(
+                    "{} {}",
+                    format_shortcut_keys(item.keys, "Ctrl"),
+                    item.action
+                )
+            })
+            .collect();
+        let joined = catalog.join("\n");
+        let mut rows = 0;
+        for line in table.lines() {
+            if !line.starts_with('|') {
+                break;
+            }
+            let mut cells = line.trim_matches('|').split('|');
+            let action = cells.next().unwrap_or("").trim();
+            rows += 1;
+            let needle = match action {
+                "Open typed path" => "Open file",
+                "Folder order" | "Interface language" => continue,
+                "Previous or next image" => "Previous / next image",
+                "Previous or next page or frame" => "Previous / next page or frame",
+                "Pan" => "Drag to pan",
+                "Fit or actual size" => "Actual size",
+                "Tools, folder previews, image information" => "Panels",
+                "Rate or clear rating" => "Clear or set rating",
+                "Reload after an external edit" => "Reload file",
+                "Move current image to Trash" => "Move to Trash",
+                "Undo the latest recoverable Trash action" => "Undo Trash",
+                "Browse with the mouse" => "Back / Forward buttons browse images",
+                other => other,
+            };
+            let slash = needle.replace(" or ", " / ");
+            assert!(
+                joined.contains(needle) || joined.contains(&slash),
+                "README row {action:?} is missing from the shortcut catalog as {needle:?}"
+            );
+        }
+        assert!(rows >= 20, "README shortcut table parsed {rows} rows");
     }
 
     #[test]

@@ -1,25 +1,35 @@
 # viewr
 
-**Fast photos on Windows, macOS and Linux. No account. No tracking. No subscription.**
+**Fast, private photo viewing on Windows, macOS and Linux.**
 
 [![CI](https://github.com/blisspixel/viewr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/blisspixel/viewr/actions/workflows/ci.yml)
 
-Tired of photo software that wants to become a cloud library, storefront, and
-subscription? viewr rejects the spyware-and-bloatware pattern of turning a simple
-utility into a data-collection platform. It keeps the photo at the center. Open a
-file or folder, move through photos quickly, see a full-image collage of the
-current group, inspect metadata, use ratings to narrow the keepers, crop or
-rotate, repair a small blemish with Spot Heal, save a JPEG, PNG, WebP, or BMP
-copy, and get back to what you were doing.
+Open a photo or a whole folder and move through it. Make light edits without
+leaving the viewer: crop, rotate, fix a small blemish with Spot Heal, and save
+a copy. Cull as you go: rate JPEG keepers from 1 to 5, written into the file as
+standard XMP so other apps can read them, and send the rest to Trash with Undo.
+It is native Rust, with no account, no telemetry, and no application network
+client.
 
-viewr is a focused desktop image viewer for Windows, macOS, and Linux. Focused
-does not mean bare. Its small editing tools are deliberate parts of the viewing
-workflow, without the catalog, project, cloud, and subscription machinery of a
-full editing suite. **No tracking is literal.** The application has no account,
-cloud service, telemetry, analytics, advertising, background indexer, activity
-history, crash-report uploader, or automatic update check.
+Camera RAW is not in this version. The embedded-preview slices are
+[#224](https://github.com/blisspixel/viewr/issues/224),
+[#225](https://github.com/blisspixel/viewr/issues/225), and
+[#226](https://github.com/blisspixel/viewr/issues/226). The broader request is
+[#185](https://github.com/blisspixel/viewr/issues/185).
+
+## View, edit, cull
+
+Open a folder with `Ctrl/Cmd+Shift+O`, or drop it. Left and Right move through
+the folder. Home and End jump to the ends. `1` through `5` rate a JPEG, and
+`0` clears that rating. Delete moves the current image to Trash, and `U`
+undoes that Trash action. View's rating filter limits this session to a
+minimum star count. `Ctrl/Cmd+Shift+S` saves a copy.
 
 ## Why viewr
+
+Tired of photo software that wants to become a cloud library, storefront, and
+subscription? viewr keeps the photo at the center, without a catalog, cloud
+library, or subscription.
 
 - **Fast by design.** Decoding begins while the window initializes, neighboring
   images are prefetched within fixed memory limits, extra cores fill those slots,
@@ -29,7 +39,10 @@ history, crash-report uploader, or automatic update check.
 - **Private by construction.** The application dependency graph contains no HTTP
   or TLS client. Photos, paths, metadata, ratings, and diagnostics stay local.
   Local network shares (NAS, SMB, NFS) are accessed through standard operating-system
-  file paths without an application network client.
+  file paths without an application network client. No tracking is literal:
+  there is no account, cloud service, telemetry, analytics, advertising,
+  background indexer, activity history, crash-report uploader, or automatic
+  update check.
 - **Focused, not bare.** Folder navigation, ratings, rotation, crop, bounded Spot
   Heal, Save As, and conversion are intentional core viewer tools. Deeper work
   stays with an editor you choose through native Open With, without adding a
@@ -37,6 +50,20 @@ history, crash-report uploader, or automatic update check.
 - **Cross-platform.** The same Rust codebase is built and tested on Windows,
   macOS, and Linux, with native dialogs and shortcuts, accessible menus, and
   accessibility semantics.
+
+## Check it yourself
+
+These are checks you can run. They are not a promise beyond the startup policy
+in [Privacy](docs/PRIVACY.md). Watch the `viewr` process. The installer scripts
+are separate tools and contact GitHub only after you run them.
+
+- **Linux, run on 2026-11-16.** `strace -f -e trace=network viewr <folder>`
+  showed Unix-domain sockets for the display and the session bus. The Internet
+  socket call returned `EPERM`.
+- **macOS, not run for this note.** Watch the process in `nettop` or a firewall
+  app while browsing a folder.
+- **Windows, not run for this note.** Open Resource Monitor, choose the Network
+  tab, and filter to `viewr.exe` while browsing a folder.
 
 ## Interface
 

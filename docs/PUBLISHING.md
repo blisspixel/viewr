@@ -107,18 +107,22 @@ workflow results, and release assets remain the source of truth:
 - [x] Publish and verify annotated tag `v0.7.7`, the damaged JPEG, ICO,
   Image Information, CLI help, and Save Path patch. The immutable [v0.7.7 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.7)
   discloses the same open acceptance rows and unsigned status.
+- [x] Publish and verify annotated tag `v0.7.8`, the missing-format,
+  damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder
+  order, AppleDouble, and installer-script patch. The immutable [v0.7.8 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.8)
+  discloses the same open acceptance rows and unsigned status.
 
 ## Version state policy
 
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.7. README and INSTALL use its fixed immutable URLs.
+   currently v0.7.8. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.8`, verified candidate and tag-ready missing-format, damaged WebP,
-   TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble,
-   and installer-script patch.
+   `0.7.8`, the published missing-format, damaged WebP, TIFF, and ICO,
+   JPEG end-marker, command, stable folder order, AppleDouble, and
+   installer-script patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -790,6 +794,32 @@ remain identical to the verified candidate. Representative-hardware and native
 screen-reader acceptance remain uncollected. This candidate is not a public
 release.
 
+[Tag-ready main CI run 43915020422](https://github.com/blisspixel/viewr/actions/runs/43915020422),
+[fuzz run 43915098414](https://github.com/blisspixel/viewr/actions/runs/43915098414),
+and [CodeQL run 43915019982](https://github.com/blisspixel/viewr/actions/runs/43915019982)
+passed on tag commit `d4e3f089f9e80d3a6fab9f15bdee6a196dcc304a`.
+The fuzz workflow was dispatched for that commit because a docs-only push does
+not start it.
+[Tag release run 43917419083](https://github.com/blisspixel/viewr/actions/runs/43917419083)
+repeated the complete gates, rebuilt all four archives, and published the
+immutable twelve-asset [v0.7.8 release](https://github.com/blisspixel/viewr/releases/tag/v0.7.8)
+on 2026-11-16. All twelve public assets passed checksum and exact-tag provenance
+verification. All four archives passed the official 56-file manifest verifier.
+The published archives were rebuilt from the tag commit, so their digests differ
+from the candidate table above.
+
+| Published target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `7971752b01ed6a7c4c16ac7571961c4b34e3e2ba48353d78a367ed8c0e8115c4` |
+| macOS Intel | `d051de90bfacccd475b48e9c3b5b3855cde57a21e85a3a927bb0b63d2e58792c` |
+| macOS Apple Silicon | `42f59eaf7e375c419d0bd1fdcac1c190d65fadc5a931000b7ae9b9e728ea1891` |
+| Linux x64 | `c1ac435e15e39765f210b1815b2c561341f3afee2283b29f08cd086a76ae597a` |
+
+The extracted published Linux archive reports `viewr 0.7.8`, and its doctor
+report passed every critical check without opening a window. The decode worker
+beside the executable passed its in-memory probe. The archive was not installed.
+Representative-hardware and native screen-reader acceptance remain uncollected.
+
 ## Required before a broadly recommended 1.0
 
 The [version path in the roadmap](ROADMAP.md#order-of-operations-to-10)
@@ -814,9 +844,9 @@ fidelity, coherence, and release-candidate gates.
 
 ## Current limits
 
-- v0.7.7 is public, immutable, checksummed, and attested, and v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
+- v0.7.8 is public, immutable, checksummed, and attested, and v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0, v0.2.0, v0.1.5, v0.1.4,
   v0.1.3, v0.1.2, v0.1.1, and v0.1.0 remain published, the first preview with a
-  known-issues note. v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
+  known-issues note. v0.7.8, v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, and v0.6.5 through v0.6.0 carry no representative-hardware
   acceptance evidence, which their release notes state. Their executable archives
   are not Authenticode-signed or Apple-notarized, so each release remains an
   explicitly unsigned pre-1.0 preview.

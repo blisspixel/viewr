@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.7.7](https://github.com/blisspixel/viewr/releases/tag/v0.7.7), the damaged JPEG, ICO, Image Information, CLI help, and Save Path patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.8`, verified candidate and tag-ready missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch |
+| Published install target | Immutable [v0.7.8](https://github.com/blisspixel/viewr/releases/tag/v0.7.8), the missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.8`, the published missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.8** after green exact-commit tag-ready CI and fuzz; its complete candidate gate passed; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -31,7 +31,7 @@ honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
 explicitly deferred from 1.0.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.7.7 archives. The v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.8 archives. The v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -125,7 +125,7 @@ v0.7.6  Transparency patch                [released, acceptance rows open]
 v0.7.7  Damaged-file and Save Path patch  [released, acceptance rows open]
    |
    v
-v0.7.8  Format and command patch          [candidate]
+v0.7.8  Format and command patch          [released, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -233,15 +233,15 @@ or accessibility evidence gates.
 | Localized Image Information values | Shipped v0.7.7 | File size, aperture, focal length, and exposure use the active language's decimal separator. English keeps a period. Spanish, French, and German use a comma. Counts below 1 KiB stay whole numbers. |
 | CLI help columns | Shipped v0.7.7 | `viewr help` keeps the command and description columns aligned. A narrower terminal wraps the description under that column. |
 | Typed Save Path | Shipped v0.7.7 | File > Save Path types a destination when the native chooser returns no path. The field starts with the suggested JPEG name beside the open file. An existing destination still asks before replacement, and an invalid path reports Save failed. The path is not persisted. |
-| Named missing formats | Implemented, unreleased | A failed open names AVIF, HEIC, and camera RAW and does not offer Retry. The worker error carries a stable format token. Camera RAW stays deferred. |
-| Damaged WebP and TIFF | Implemented, unreleased | Truncated WebP and TIFF files report that the file is damaged or incomplete, the same sentence truncated JPEG, PNG, and GIF use. |
-| Damaged ICO | Implemented, unreleased | A truncated ICO whose image data lies outside the file reports that the file is damaged or incomplete and does not offer Retry. An empty ICO directory and an overflowing image offset use that same sentence. |
-| JPEG end marker | Implemented, unreleased | A JPEG whose final 4 KiB contains no end-of-image marker fails to open as damaged and does not offer Retry. A cut-off scan can decode as a full image that does not end in the grey fill, so those pixels are not shown. A JPEG that still has the marker is unchanged. The shipped v0.7.7 row above records the narrower grey-fill rule. |
-| Version command contract | Implemented, unreleased | `viewr version --help` and `viewr help version` print help. An extra argument exits 2. `--version` and `-V` still print the version. |
-| Benchmark path errors | Implemented, unreleased | A missing directory and a file are different errors, the path is included as typed, and no table header is printed until the path is a directory. |
-| Installer script scope | Implemented, unreleased | The install command downloads one immutable installer script. The script installs the newest stable release unless a version is set. |
-| Stable folder order | Implemented, unreleased | Digit runs of equal value keep the shorter run first, so `img2` stays before `img02` and `img10`. Names that differ only by case stay adjacent in byte order. A folder refresh does not follow directory read order. |
-| AppleDouble sidecars | Implemented, unreleased | Folder scans and `viewr benchmark` skip files whose names start with `._`. Opening that path explicitly still attempts to decode it. |
+| Named missing formats | Shipped v0.7.8 | A failed open names AVIF, HEIC, and camera RAW and does not offer Retry. The worker error carries a stable format token. Camera RAW stays deferred. |
+| Damaged WebP and TIFF | Shipped v0.7.8 | Truncated WebP and TIFF files report that the file is damaged or incomplete, the same sentence truncated JPEG, PNG, and GIF use. |
+| Damaged ICO | Shipped v0.7.8 | A truncated ICO whose image data lies outside the file reports that the file is damaged or incomplete and does not offer Retry. An empty ICO directory and an overflowing image offset use that same sentence. |
+| JPEG end marker | Shipped v0.7.8 | A JPEG whose final 4 KiB contains no end-of-image marker fails to open as damaged and does not offer Retry. A cut-off scan can decode as a full image that does not end in the grey fill, so those pixels are not shown. A JPEG that still has the marker is unchanged. The shipped v0.7.7 row above records the narrower grey-fill rule. |
+| Version command contract | Shipped v0.7.8 | `viewr version --help` and `viewr help version` print help. An extra argument exits 2. `--version` and `-V` still print the version. |
+| Benchmark path errors | Shipped v0.7.8 | A missing directory and a file are different errors, the path is included as typed, and no table header is printed until the path is a directory. |
+| Installer script scope | Shipped v0.7.8 | The install command downloads one immutable installer script. The script installs the newest stable release unless a version is set. |
+| Stable folder order | Shipped v0.7.8 | Digit runs of equal value keep the shorter run first, so `img2` stays before `img02` and `img10`. Names that differ only by case stay adjacent in byte order. A folder refresh does not follow directory read order. |
+| AppleDouble sidecars | Shipped v0.7.8 | Folder scans and `viewr benchmark` skip files whose names start with `._`. Opening that path explicitly still attempts to decode it. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
@@ -252,21 +252,21 @@ and removal of an installer-owned tree shipped in v0.7.6. Damaged JPEG opens,
 RGB PNG icon entries, localized Image Information values, aligned CLI help,
 and typed Save Path shipped in v0.7.7. Named missing-format opens, damaged
 WebP, TIFF, and ICO files, the version command, benchmark path errors, stable folder
-order, AppleDouble sidecars, and the installer-script explanation are
-implemented and unreleased. The
+order, AppleDouble sidecars, and the installer-script explanation shipped
+in v0.7.8. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.7.7` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Public release | `0.7.8` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
 | Focused patch released | `0.7.3` | Candidate commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe`, [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410), and tag commit `10002a0f8e13de160b41bf95978ab96df2e404a9` | [Release run 37112869774](https://github.com/blisspixel/viewr/actions/runs/37112869774) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; v0.8 remains open |
 | Linux entry patch released | `0.7.4` | Candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a`, [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754), and tag commit `e9c12c336da0a8a6cb4284ae94c2739ddcf7cafc` | [Release run 37152808216](https://github.com/blisspixel/viewr/actions/runs/37152808216) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Copy and recovery patch released | `0.7.5` | Candidate commit `933e6aa44d961e961b53292306f54c54518d3530`, [candidate run 39552315440](https://github.com/blisspixel/viewr/actions/runs/39552315440), and tag commit `653b0a7f5606b1cafb02cf37ad93f1939a946688` | [Release run 39557759631](https://github.com/blisspixel/viewr/actions/runs/39557759631) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Transparency patch released | `0.7.6` | Candidate commit `8a12def388f2a43399fa5bff9ede571ae907729f`, [candidate run 40076650027](https://github.com/blisspixel/viewr/actions/runs/40076650027), and tag commit `349440a1ffab1a6ff0c98d8206277b7798e0fa5c` | [Release run 40080077413](https://github.com/blisspixel/viewr/actions/runs/40080077413) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
 | Damaged-file patch released | `0.7.7` | Candidate commit `809bc555515488de62eb970a77f941873090f316`, [candidate run 41383540069](https://github.com/blisspixel/viewr/actions/runs/41383540069), and tag commit `b2aca9940b1c61a8399f254d85c848491f01c1ce` | [Release run 41389245578](https://github.com/blisspixel/viewr/actions/runs/41389245578) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
-| Patch tag-ready | `0.7.8` | Candidate commit `3098ede5c398569c4ae6fe2dc3d086f0549e8d62` and [candidate run 43903900271](https://github.com/blisspixel/viewr/actions/runs/43903900271) | Complete automated gate, all four archives, and fixture verified; public target remains v0.7.7 until publication |
+| Format and command patch released | `0.7.8` | Candidate commit `3098ede5c398569c4ae6fe2dc3d086f0549e8d62`, [candidate run 43903900271](https://github.com/blisspixel/viewr/actions/runs/43903900271), and tag commit `d4e3f089f9e80d3a6fab9f15bdee6a196dcc304a` | [Release run 43917419083](https://github.com/blisspixel/viewr/actions/runs/43917419083) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Linux doctor passed. v0.8 remains open |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
@@ -302,7 +302,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped through v0.7.7; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
+| Integrated product quality | Shipped through v0.7.8; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
 | Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI updates published v0.7.4 to the candidate on Linux and Windows, including the Linux launcher identity. Uninstall of an installer-owned tree is covered by the Unix installer tests and the Windows smoke check. Clean install on macOS, full file-association acceptance, and macOS update remain open. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -347,7 +347,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.7.7; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.8; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -675,7 +675,7 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set from the current release line. v0.6.0 through v0.7.7 were
+  candidate set from the current release line. v0.6.0 through v0.7.8 were
   tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.

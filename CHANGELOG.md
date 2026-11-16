@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- A saved or cleared rating message leaves the top bar when the visible
+  photo changes. It still disappears after three seconds if the same photo
+  stays on screen. A rating that finishes after the view has moved on does
+  not place that message on the next photo.
+
 ## 0.7.8 - 2026-11-16
 
 - The locked rustix 1.1 line is 1.1.6. Releases from 1.0.0 through 1.1.5

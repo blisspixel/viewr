@@ -96,7 +96,7 @@ use crate::rating_state::{
     next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
     rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
     rating_recovery_blocker, rating_write_failure_message, rating_write_target_is_current,
-    reconcile_rating_write, settled_write_view,
+    reconcile_rating_write, settled_write_view, show_settled_rating_outcome,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, WindowLossResult,
@@ -1036,6 +1036,9 @@ struct StatusToast {
     message: Option<String>,
     announcement: ToastAnnouncement,
     until: Option<Instant>,
+    /// A timed outcome that names the current photo. Navigation clears it
+    /// before the ordinary three-second deadline.
+    clear_on_navigation: bool,
 }
 
 impl StatusToast {
@@ -1043,12 +1046,24 @@ impl StatusToast {
         self.message = Some(message.into());
         self.announcement = announcement;
         self.until = Some(now + TOAST_DURATION);
+        self.clear_on_navigation = false;
+    }
+
+    fn show_image_outcome(
+        &mut self,
+        message: impl Into<String>,
+        announcement: ToastAnnouncement,
+        now: Instant,
+    ) {
+        self.show(message, announcement, now);
+        self.clear_on_navigation = true;
     }
 
     fn show_until_navigation(&mut self, message: impl Into<String>) {
         self.message = Some(message.into());
         self.announcement = ToastAnnouncement::Visual;
         self.until = None;
+        self.clear_on_navigation = false;
     }
 
     fn expire(&mut self, now: Instant) {
@@ -1058,7 +1073,15 @@ impl StatusToast {
     }
 
     fn dismiss_navigation_notice(&mut self) {
-        if self.until.is_none() {
+        if self.until.is_none() || self.clear_on_navigation {
+            *self = Self::default();
+        }
+    }
+
+    /// Clear a rating sentence once a different photo is actually presented.
+    /// Folder-scan notices and ordinary timed outcomes stay.
+    fn dismiss_image_outcome(&mut self) {
+        if self.clear_on_navigation {
             *self = Self::default();
         }
     }
@@ -2469,7 +2492,8 @@ impl App {
         self.current_preview = preview.cloned();
         self.current_source = source;
         self.current_image_reuse = kind.image_reuse();
-        let rating_transition = if self.session.presented_path.as_deref() == Some(path) {
+        let same_photo = self.session.presented_path.as_deref() == Some(path);
+        let rating_transition = if same_photo {
             PresentedRatingTransition::Retain
         } else {
             PresentedRatingTransition::Replace(
@@ -2480,6 +2504,9 @@ impl App {
                     }),
             )
         };
+        if !same_photo {
+            self.toast.dismiss_image_outcome();
+        }
         self.session.set_presented(path.to_owned());
         self.presented_rating = next_presented_rating(self.presented_rating, rating_transition);
         let recovery_transition = rating_recovery_after_presentation(
@@ -3140,17 +3167,7 @@ impl App {
                     SettledWriteView::AdoptBehindIncoming => self.stop_coherence_watch(),
                     SettledWriteView::ReloadSelected | SettledWriteView::FolderOnly => {}
                 }
-                match worker.assignment {
-                    RatingAssignment::Clear => {
-                        self.show_status_toast(self.language.localize(tr!("Rating cleared.")));
-                    }
-                    RatingAssignment::Set(rating) => {
-                        self.show_status_toast(self.language.fill(
-                            tr!("Rating {rating} of 5 saved."),
-                            &[("rating", &rating.get().to_string())],
-                        ));
-                    }
-                }
+                self.announce_settled_rating(view, worker.assignment);
             }
             Err(error) => {
                 log::warn!("rating write failed: {error}");
@@ -5412,6 +5429,35 @@ impl App {
     /// message kind rather than its wording in any one language.
     fn show_status_toast(&mut self, msg: Localized) {
         self.present_toast(msg, ToastAnnouncement::PoliteStatus);
+    }
+
+    /// Announce a successful rating only while its photo is still the one on
+    /// screen or the one being reloaded. A later photo does not inherit it.
+    fn announce_settled_rating(&mut self, view: SettledWriteView, assignment: RatingAssignment) {
+        if !show_settled_rating_outcome(view) {
+            return;
+        }
+        let message = match assignment {
+            RatingAssignment::Clear => self.language.localize(tr!("Rating cleared.")),
+            RatingAssignment::Set(rating) => self.language.fill(
+                tr!("Rating {rating} of 5 saved."),
+                &[("rating", &rating.get().to_string())],
+            ),
+        };
+        self.show_image_status_toast(message);
+    }
+
+    /// Announce a rating outcome for the photo on screen. Moving to another
+    /// photo clears it, and it still expires after three seconds.
+    fn show_image_status_toast(&mut self, msg: Localized) {
+        self.toast.show_image_outcome(
+            msg.into_string(),
+            ToastAnnouncement::PoliteStatus,
+            Instant::now(),
+        );
+        if let Some(renderer) = self.renderer.as_ref() {
+            renderer.window().request_redraw();
+        }
     }
 
     fn present_toast(&mut self, msg: Localized, announcement: ToastAnnouncement) {
@@ -9943,6 +9989,70 @@ mod test {
         assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
         toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
         assert_eq!(toast.message(), None);
+    }
+
+    #[test]
+    fn rating_outcome_clears_when_the_visible_photo_changes() {
+        let start = Instant::now();
+        let mut toast = StatusToast::default();
+        toast.show_image_outcome(
+            "Rating 4 of 5 saved.",
+            ToastAnnouncement::PoliteStatus,
+            start,
+        );
+        assert_eq!(
+            toast.view().map(|view| view.announcement),
+            Some(ToastAnnouncement::PoliteStatus)
+        );
+
+        toast.dismiss_navigation_notice();
+        assert_eq!(toast.message(), None);
+
+        toast.show_image_outcome(
+            "Rating 4 of 5 saved.",
+            ToastAnnouncement::PoliteStatus,
+            start,
+        );
+        toast.expire(start + TOAST_DURATION);
+        assert_eq!(toast.message(), Some("Rating 4 of 5 saved."));
+        toast.expire(start + TOAST_DURATION + Duration::from_millis(1));
+        assert_eq!(toast.message(), None);
+
+        toast.show_image_outcome(
+            "Rating 4 of 5 saved.",
+            ToastAnnouncement::PoliteStatus,
+            start,
+        );
+        toast.show(
+            "Moved to Trash. Undo with U.",
+            ToastAnnouncement::Visual,
+            start,
+        );
+        toast.dismiss_navigation_notice();
+        assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
+
+        toast.show_image_outcome(
+            "Rating 4 of 5 saved.",
+            ToastAnnouncement::PoliteStatus,
+            start,
+        );
+        toast.dismiss_image_outcome();
+        assert_eq!(toast.message(), None);
+
+        toast.show(
+            "Moved to Trash. Undo with U.",
+            ToastAnnouncement::Visual,
+            start,
+        );
+        toast.dismiss_image_outcome();
+        assert_eq!(toast.message(), Some("Moved to Trash. Undo with U."));
+
+        toast.show_until_navigation("Opened the first image in this folder.");
+        toast.dismiss_image_outcome();
+        assert_eq!(
+            toast.message(),
+            Some("Opened the first image in this folder.")
+        );
     }
 
     #[test]

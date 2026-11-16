@@ -674,6 +674,12 @@ const MESSAGES: &[Message] = &[
         german: "Über viewr",
     },
     Message {
+        english: "Keyboard shortcuts",
+        spanish: "Atajos de teclado",
+        french: "Raccourcis clavier",
+        german: "Tastenkürzel",
+    },
+    Message {
         english: "Preferences",
         spanish: "Preferencias",
         french: "Préférences",

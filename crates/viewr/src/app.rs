@@ -280,6 +280,7 @@ fn run_internal(
             language_recovery,
         ),
         show_about: false,
+        show_keyboard_shortcuts: false,
         show_update: false,
         show_preferences: false,
         show_file_associations: false,
@@ -1245,6 +1246,8 @@ struct App {
     preference_recovery_notice: Option<&'static str>,
     /// Whether the accessible About window is open.
     show_about: bool,
+    /// Whether the keyboard shortcut catalog is open.
+    show_keyboard_shortcuts: bool,
     /// Whether the accessible local update-instructions window is open.
     show_update: bool,
     /// Whether the accessible persistent-preferences window is open.
@@ -4739,6 +4742,17 @@ impl App {
             self.transform.flip_v = !self.transform.flip_v;
             self.request_redraw();
         }
+    }
+
+    /// Open the shortcut list. This only changes chrome. It does not cancel a
+    /// decode, a neighbor prefetch, or any other background job.
+    fn show_keyboard_shortcuts_panel(&mut self) {
+        self.show_keyboard_shortcuts = true;
+        self.show_about = false;
+        self.show_update = false;
+        self.show_preferences = false;
+        self.show_file_associations = false;
+        self.request_redraw();
     }
 
     fn handle_single_key_shortcut(&mut self, key: &str) {
@@ -8470,8 +8484,17 @@ impl ApplicationHandler<UserEvent> for App {
                             && !text_input_owns_event
                             && event.state == winit::event::ElementState::Pressed
                             && mosaic_key_reaches_app(&event.logical_key))
+                        || crate::keyboard_route::shortcuts_panel_takes_key(
+                            self.show_keyboard_shortcuts,
+                            crate::keyboard_route::shortcut_key_is_a_new_press(
+                                event.state == winit::event::ElementState::Pressed,
+                                event.repeat,
+                            ),
+                            text_input_owns_event,
+                        )
                         || (!application_shortcuts_blocked([
                             self.show_about,
+                            self.show_keyboard_shortcuts,
                             self.show_update,
                             self.show_preferences,
                             self.show_file_associations,
@@ -8766,6 +8789,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 let shortcuts_blocked = application_shortcuts_blocked([
                     self.show_about,
+                    self.show_keyboard_shortcuts,
                     self.show_update,
                     self.show_preferences,
                     self.show_file_associations,
@@ -8775,6 +8799,15 @@ impl ApplicationHandler<UserEvent> for App {
                     self.context_menu_pos.is_some(),
                     text_input_owns_event,
                 ]);
+                if crate::keyboard_route::shortcuts_panel_takes_key(
+                    self.show_keyboard_shortcuts,
+                    crate::keyboard_route::shortcut_key_is_a_new_press(pressed, repeat),
+                    text_input_owns_event,
+                ) {
+                    self.show_keyboard_shortcuts = false;
+                    self.request_redraw();
+                    return;
+                }
                 if is_space && !pressed {
                     if self.space_held {
                         self.space_held = false;
@@ -8831,6 +8864,18 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
                 if shortcuts_blocked {
+                    return;
+                }
+                let help_blocked = self.transform.is_cropping || self.heal.active;
+                if pressed
+                    && !repeat
+                    && crate::keyboard_route::opens_keyboard_shortcuts(
+                        &logical_key,
+                        self.modifiers,
+                        help_blocked,
+                    )
+                {
+                    self.show_keyboard_shortcuts_panel();
                     return;
                 }
                 // Space: hold = temporary hand tool; tap (no drag) = fit.
@@ -9126,6 +9171,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let retain_exif = self.retain_exif;
                 let theme_preference = self.theme_preference;
                 let show_about = self.show_about;
+                let show_keyboard_shortcuts = self.show_keyboard_shortcuts;
                 let show_update = self.show_update;
                 let show_preferences = self.show_preferences;
                 let show_file_associations = self.show_file_associations;
@@ -9273,6 +9319,7 @@ impl ApplicationHandler<UserEvent> for App {
                     theme_preference,
                     theme_mode,
                     show_about,
+                    show_keyboard_shortcuts,
                     show_update,
                     show_preferences,
                     show_file_associations,
@@ -9369,6 +9416,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let mut rating_disclosure_owns_dispatch = false;
                 let mut update_modal_owns_dispatch = false;
                 let mut about_modal_owns_dispatch = false;
+                let mut keyboard_shortcuts_modal_owns_dispatch = false;
                 let mut preferences_modal_owns_dispatch = false;
                 let mut file_associations_modal_owns_dispatch = false;
                 for action in ui_actions {
@@ -9401,6 +9449,14 @@ impl ApplicationHandler<UserEvent> for App {
                         self.show_about,
                         &action,
                         crate::ui::about_modal_action_allowed,
+                    ) {
+                        continue;
+                    }
+                    if !modal_dispatch_allows(
+                        &mut keyboard_shortcuts_modal_owns_dispatch,
+                        self.show_keyboard_shortcuts,
+                        &action,
+                        crate::ui::keyboard_shortcuts_modal_action_allowed,
                     ) {
                         continue;
                     }
@@ -9506,6 +9562,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         crate::ui::UiAction::ShowAbout => {
                             self.show_about = true;
+                            self.show_keyboard_shortcuts = false;
                             self.show_update = false;
                             self.show_preferences = false;
                             self.show_file_associations = false;
@@ -9515,9 +9572,17 @@ impl ApplicationHandler<UserEvent> for App {
                             self.show_about = false;
                             self.request_redraw();
                         }
+                        crate::ui::UiAction::ShowKeyboardShortcuts => {
+                            self.show_keyboard_shortcuts_panel();
+                        }
+                        crate::ui::UiAction::CloseKeyboardShortcuts => {
+                            self.show_keyboard_shortcuts = false;
+                            self.request_redraw();
+                        }
                         crate::ui::UiAction::ShowUpdate => {
                             self.show_update = true;
                             self.show_about = false;
+                            self.show_keyboard_shortcuts = false;
                             self.show_preferences = false;
                             self.show_file_associations = false;
                             self.request_redraw();
@@ -9529,6 +9594,7 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::ShowPreferences => {
                             self.show_preferences = true;
                             self.show_about = false;
+                            self.show_keyboard_shortcuts = false;
                             self.show_update = false;
                             self.show_file_associations = false;
                             self.request_redraw();
@@ -9540,6 +9606,7 @@ impl ApplicationHandler<UserEvent> for App {
                         crate::ui::UiAction::ShowFileAssociations => {
                             self.show_file_associations = true;
                             self.show_about = false;
+                            self.show_keyboard_shortcuts = false;
                             self.show_update = false;
                             self.show_preferences = false;
                             self.request_redraw();

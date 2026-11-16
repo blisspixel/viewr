@@ -5,6 +5,9 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Help > Keyboard Shortcuts, `?`, and F1 open the same shortcut list as
+  About. Escape, the Close button, or another key closes it. The list
+  stays closed while Crop, Spot Heal, or a text field has the keyboard.
 - A saved or cleared rating message leaves the top bar when the visible
   photo changes. It still disappears after three seconds if the same photo
   stays on screen. A rating that finishes after the view has moved on does

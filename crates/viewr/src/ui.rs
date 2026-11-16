@@ -188,6 +188,10 @@ pub(crate) enum UiAction {
     ShowAbout,
     /// Close the About viewr surface.
     CloseAbout,
+    /// Open the keyboard shortcut catalog.
+    ShowKeyboardShortcuts,
+    /// Close the keyboard shortcut catalog.
+    CloseKeyboardShortcuts,
     /// Open the local update-instructions surface.
     ShowUpdate,
     /// Close the local update-instructions surface.
@@ -328,6 +332,8 @@ pub(crate) struct UiFrameOwned {
     pub theme_mode: crate::theme::Mode,
     /// Whether the About viewr surface is open.
     pub show_about: bool,
+    /// Whether the keyboard shortcut catalog is open.
+    pub show_keyboard_shortcuts: bool,
     /// Whether the local update-instructions surface is open.
     pub show_update: bool,
     /// Whether persistent application preferences are open.
@@ -661,6 +667,11 @@ pub(crate) const fn about_modal_action_allowed(action: &UiAction) -> bool {
 }
 
 #[must_use]
+pub(crate) const fn keyboard_shortcuts_modal_action_allowed(action: &UiAction) -> bool {
+    matches!(action, UiAction::CloseKeyboardShortcuts)
+}
+
+#[must_use]
 pub(crate) const fn file_associations_modal_action_allowed(action: &UiAction) -> bool {
     matches!(action, UiAction::CloseFileAssociations)
 }
@@ -683,6 +694,7 @@ enum ModalKind {
     RatingDisclosure,
     Update,
     About,
+    KeyboardShortcuts,
     Preferences,
     FileAssociations,
 }
@@ -696,6 +708,8 @@ fn active_modal(frame: &UiFrameOwned) -> Option<ModalKind> {
         Some(ModalKind::Update)
     } else if frame.show_about {
         Some(ModalKind::About)
+    } else if frame.show_keyboard_shortcuts {
+        Some(ModalKind::KeyboardShortcuts)
     } else if frame.show_preferences {
         Some(ModalKind::Preferences)
     } else if frame.show_file_associations {
@@ -800,6 +814,8 @@ fn actions_owned_by_modal(mut actions: Vec<UiAction>, frame: &UiFrameOwned) -> V
         actions.retain(update_modal_action_allowed);
     } else if frame.show_about {
         actions.retain(about_modal_action_allowed);
+    } else if frame.show_keyboard_shortcuts {
+        actions.retain(keyboard_shortcuts_modal_action_allowed);
     } else if frame.show_preferences {
         actions.retain(preferences_modal_action_allowed);
     } else if frame.show_file_associations {
@@ -837,6 +853,8 @@ pub(crate) fn render(ui: &mut egui::Ui, frame: &UiFrameOwned) -> Vec<UiAction> {
         render_update(ui, &mut actions, frame);
     } else if frame.show_about {
         render_about(ui, &mut actions, frame);
+    } else if frame.show_keyboard_shortcuts {
+        render_keyboard_shortcuts(ui, &mut actions, frame);
     } else if frame.show_preferences {
         render_preferences(ui, &mut actions, frame);
     } else if frame.show_file_associations {
@@ -2778,6 +2796,13 @@ fn help_menu(
                 ui.close();
             }
             ui.separator();
+            if ui
+                .add(egui::Button::new(frame.text(tr!("Keyboard shortcuts"))).shortcut_text("F1"))
+                .clicked()
+            {
+                actions.push(UiAction::ShowKeyboardShortcuts);
+                ui.close();
+            }
             if ui.button(frame.text(tr!("About viewr"))).clicked() {
                 actions.push(UiAction::ShowAbout);
                 ui.close();
@@ -2852,6 +2877,61 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
     mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseAbout);
+    }
+}
+
+fn render_keyboard_shortcuts(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameOwned) {
+    let colors = chrome_colors(ui);
+    let mut close_clicked = false;
+    let focus_close = claim_initial_modal_focus(ui.ctx());
+    let response = egui::Modal::new(egui::Id::new("keyboard_shortcuts"))
+        .backdrop_color(Color32::from_black_alpha(140))
+        .frame(
+            Frame::new()
+                .fill(colors.panel)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(20)),
+        )
+        .show(ui.ctx(), |ui| {
+            ui.set_max_width(520.0);
+            let body_height = (ui.ctx().content_rect().height() - 80.0).clamp(180.0, 640.0);
+            ScrollArea::vertical()
+                .id_salt("keyboard_shortcuts_body")
+                .max_height(body_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading(
+                            RichText::new(frame.text(tr!("Keyboard shortcuts")))
+                                .size(22.0)
+                                .color(colors.text),
+                        );
+                    });
+                    ui.add_space(8.0);
+                    render_about_shortcut_groups(ui, colors, frame);
+                });
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let close = ui.button(frame.text(tr!("Close")));
+                if focus_close {
+                    close.request_focus();
+                }
+                if close.clicked() {
+                    close_clicked = true;
+                }
+            });
+        });
+    response.response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Window,
+            true,
+            frame.text(tr!("Keyboard shortcuts")),
+        )
+    });
+    mark_as_modal_dialog(&response.response);
+    if close_clicked || response.should_close() {
+        actions.push(UiAction::CloseKeyboardShortcuts);
     }
 }
 
@@ -5907,6 +5987,7 @@ mod tests {
             theme_preference: crate::theme::Preference::System,
             theme_mode: crate::theme::Mode::Dark,
             show_about: false,
+            show_keyboard_shortcuts: false,
             show_update: false,
             show_preferences: false,
             show_file_associations: false,
@@ -6521,8 +6602,13 @@ mod tests {
             );
             let help = labels_after_key(&frame, egui::Key::H, egui::Modifiers::ALT);
             assert!(
-                help.iter().any(|label| label.starts_with("About viewr")),
+                help.iter()
+                    .any(|label| label.starts_with("Keyboard shortcuts")),
                 "Alt+H opens Help"
+            );
+            assert!(
+                help.iter().any(|label| label.starts_with("About viewr")),
+                "Alt+H lists About"
             );
         }
 
@@ -10037,10 +10123,15 @@ mod tests {
     #[test]
     fn every_modal_is_a_modal_dialog_and_about_focuses_close() {
         let mut scenarios = pseudo_language_scenarios();
+        let mut shortcuts = accessibility_test_frame();
+        shortcuts.language = Language::Pseudo;
+        shortcuts.show_keyboard_shortcuts = true;
+        scenarios.push(("keyboard shortcuts", shortcuts));
         scenarios.retain(|(name, _)| {
             matches!(
                 *name,
                 "about"
+                    | "keyboard shortcuts"
                     | "update"
                     | "preferences"
                     | "default viewer"
@@ -10048,7 +10139,7 @@ mod tests {
                     | "rating disclosure"
             )
         });
-        assert_eq!(scenarios.len(), 6);
+        assert_eq!(scenarios.len(), 7);
         for (name, mut frame) in scenarios {
             frame.language = Language::English;
             let nodes = accesskit_nodes(&frame);
@@ -10123,7 +10214,11 @@ mod tests {
 
     #[test]
     fn every_rendered_text_and_accessible_name_comes_from_the_catalog() {
-        let scenarios = pseudo_language_scenarios();
+        let mut scenarios = pseudo_language_scenarios();
+        let mut shortcuts = accessibility_test_frame();
+        shortcuts.language = Language::Pseudo;
+        shortcuts.show_keyboard_shortcuts = true;
+        scenarios.push(("keyboard shortcuts", shortcuts));
         let mut failures = Vec::new();
         for (name, frame) in &scenarios {
             let offenders = untranslated_texts(frame);
@@ -10289,6 +10384,75 @@ mod tests {
                 .iter()
                 .any(|action| matches!(action, UiAction::CloseAbout)),
             "Escape did not close About"
+        );
+    }
+
+    #[test]
+    fn keyboard_shortcuts_surface_is_a_named_dialog() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut frame = accessibility_test_frame();
+        frame.show_keyboard_shortcuts = true;
+        let output = context.run_ui(accessibility_input(), |ui| {
+            let _ = render(ui, &frame);
+        });
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit update should be generated");
+        let dialog = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .find(|node| node.role() == egui::accesskit::Role::Dialog)
+            .expect("shortcut panel dialog");
+        assert!(dialog.is_modal());
+        assert_eq!(dialog.label(), Some("Keyboard shortcuts"));
+        let exposed = update
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        for expected in [
+            "Keyboard shortcuts",
+            "F1 / ?  Keyboard shortcuts",
+            "Close",
+            "U  Undo Trash",
+        ] {
+            assert!(
+                exposed.iter().any(|text| text.contains(expected)),
+                "missing shortcut panel node: {expected}; exposed: {exposed:?}"
+            );
+        }
+        let filtered = actions_owned_by_modal(
+            vec![
+                UiAction::Open,
+                UiAction::CloseKeyboardShortcuts,
+                UiAction::Trash,
+            ],
+            &frame,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(filtered[0], UiAction::CloseKeyboardShortcuts));
+
+        let mut escape_input = accessibility_input();
+        escape_input.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut escape_actions = Vec::new();
+        let _ = context.run_ui(escape_input, |ui| {
+            escape_actions = render(ui, &frame);
+        });
+        assert!(
+            escape_actions
+                .iter()
+                .any(|action| matches!(action, UiAction::CloseKeyboardShortcuts)),
+            "Escape did not close the shortcut panel"
         );
     }
 

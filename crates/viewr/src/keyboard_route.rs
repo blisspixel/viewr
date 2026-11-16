@@ -185,7 +185,7 @@ pub(crate) fn route_consumed_keyboard_key_in_context(key: &Key, context: EscapeC
     match key {
         Key::Character(character) => {
             let character = character.as_str();
-            matches!(character, "+" | "=" | "-" | "_" | "/" | "[" | "]")
+            matches!(character, "+" | "=" | "-" | "_" | "/" | "?" | "[" | "]")
                 || [
                     "o", "t", "g", "i", "r", "l", "h", "v", "s", "c", "j", "u", "f", "z", "y",
                 ]
@@ -200,6 +200,7 @@ pub(crate) fn route_consumed_keyboard_key_in_context(key: &Key, context: EscapeC
             | NamedKey::End
             | NamedKey::PageUp
             | NamedKey::PageDown
+            | NamedKey::F1
             | NamedKey::F5
             | NamedKey::F11,
         ) => true,
@@ -232,6 +233,47 @@ pub(crate) const fn deletion_shortcut(shift: bool) -> DeletionShortcut {
     } else {
         DeletionShortcut::Trash
     }
+}
+
+/// `?` and F1 open the shortcut panel. Shift+`/` is the same physical key as
+/// `?` when the logical character stays `/`. Crop, Spot Heal, a text field,
+/// and another modal pass `blocked` so those owners keep the key.
+#[must_use]
+pub(crate) fn opens_keyboard_shortcuts(
+    key: &Key,
+    modifiers: ModifiersState,
+    blocked: bool,
+) -> bool {
+    if blocked || modifiers.control_key() || modifiers.alt_key() || modifiers.super_key() {
+        return false;
+    }
+    match key {
+        Key::Named(NamedKey::F1) => !modifiers.shift_key(),
+        Key::Character(character) => {
+            let character = character.as_str();
+            character == "?" || (character == "/" && modifiers.shift_key())
+        }
+        _ => false,
+    }
+}
+
+/// A held key's repeat is not a new press. Holding `?` or F1 after it opens
+/// the shortcut panel must not dismiss that panel.
+#[must_use]
+pub(crate) const fn shortcut_key_is_a_new_press(pressed: bool, repeat: bool) -> bool {
+    pressed && !repeat
+}
+
+/// While the shortcut panel is open, a new key press closes it and must not
+/// also run that key's command. Pass [`shortcut_key_is_a_new_press`] as
+/// `pressed` so a key repeat stays with the panel.
+#[must_use]
+pub(crate) const fn shortcuts_panel_takes_key(
+    panel_open: bool,
+    pressed: bool,
+    text_input: bool,
+) -> bool {
+    panel_open && pressed && !text_input
 }
 
 /// Keys collage must receive even when a photo button holds AccessKit focus.
@@ -423,6 +465,72 @@ mod tests {
             false,
             false,
         ));
+    }
+
+    #[test]
+    fn question_mark_and_f1_open_the_shortcut_panel() {
+        assert!(route_consumed_keyboard_key(
+            &Key::Named(NamedKey::F1),
+            false,
+            false,
+            false,
+        ));
+        assert!(route_consumed_keyboard_key(
+            &Key::Character("?".into()),
+            false,
+            false,
+            false,
+        ));
+        assert!(opens_keyboard_shortcuts(
+            &Key::Named(NamedKey::F1),
+            ModifiersState::default(),
+            false,
+        ));
+        assert!(opens_keyboard_shortcuts(
+            &Key::Character("?".into()),
+            ModifiersState::SHIFT,
+            false,
+        ));
+        assert!(opens_keyboard_shortcuts(
+            &Key::Character("/".into()),
+            ModifiersState::SHIFT,
+            false,
+        ));
+        assert!(!opens_keyboard_shortcuts(
+            &Key::Character("/".into()),
+            ModifiersState::default(),
+            false,
+        ));
+        assert!(!opens_keyboard_shortcuts(
+            &Key::Named(NamedKey::F1),
+            ModifiersState::default(),
+            true,
+        ));
+        assert!(!opens_keyboard_shortcuts(
+            &Key::Named(NamedKey::F1),
+            ModifiersState::CONTROL,
+            false,
+        ));
+    }
+
+    #[test]
+    fn shortcut_panel_closes_on_a_new_key_press() {
+        assert!(shortcut_key_is_a_new_press(true, false));
+        assert!(!shortcut_key_is_a_new_press(true, true));
+        assert!(!shortcut_key_is_a_new_press(false, false));
+        assert!(shortcuts_panel_takes_key(
+            true,
+            shortcut_key_is_a_new_press(true, false),
+            false,
+        ));
+        assert!(!shortcuts_panel_takes_key(
+            true,
+            shortcut_key_is_a_new_press(true, true),
+            false,
+        ));
+        assert!(!shortcuts_panel_takes_key(true, true, true));
+        assert!(!shortcuts_panel_takes_key(false, true, false));
+        assert!(!shortcuts_panel_takes_key(true, false, false));
     }
 
     #[test]

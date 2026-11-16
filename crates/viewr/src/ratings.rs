@@ -3042,7 +3042,7 @@ mod tests {
         #[cfg(unix)]
         source.set_mode(0o444).unwrap();
         #[cfg(target_os = "windows")]
-        source.set_readonly(true).unwrap();
+        source.set_readonly(&path, true).unwrap();
         let requested = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         source.restore_modified_time(&path, requested).unwrap();
         let modified = source.modified_time().unwrap();

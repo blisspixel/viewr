@@ -864,11 +864,28 @@ impl ImageSource {
     }
 
     /// Mark or clear the retained object's Windows read-only attribute.
+    ///
+    /// The retained handle is read-only, and Windows will not change attributes
+    /// through it. Reopen for attribute access, require the same object, and
+    /// set the bit there.
     #[cfg(all(target_os = "windows", test))]
-    pub(crate) fn set_readonly(&self, readonly: bool) -> io::Result<()> {
-        let mut permissions = self.file.metadata()?.permissions();
+    pub(crate) fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+        let file = open_timestamp_no_follow(path)?;
+        let metadata = file.metadata()?;
+        if !metadata_is_markable_regular(&metadata) {
+            return Err(io::Error::other(
+                "attribute handle is not the verified regular file",
+            ));
+        }
+        let identity = file_identity(&file, &metadata)?;
+        if self.identity != Some(identity) {
+            return Err(io::Error::other(
+                "attribute handle does not name the verified file",
+            ));
+        }
+        let mut permissions = metadata.permissions();
         permissions.set_readonly(readonly);
-        self.file.set_permissions(permissions)
+        file.set_permissions(permissions)
     }
 
     /// Whether the retained object has the Windows read-only attribute.

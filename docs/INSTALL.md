@@ -197,10 +197,17 @@ installation. The builder also verifies the archive before returning, while the
 last command demonstrates the standalone verification path used after download.
 
 CI installs published v0.7.4 with that release's own installer, then installs
-the candidate over it. The candidate step sets `VIEWR_LOCAL_RELEASE` (or
-`-LocalRelease` on Windows) to the absolute directory that contains the archive
-and its `.sha256` sidecar, together with an explicit version. Checksum, manifest,
-version, and doctor checks still run. An empty value keeps the public download.
+the workspace candidate over it on Linux, Windows, and the portable Apple
+Silicon command. The published step passes version 0.7.4. Linux and macOS use
+`VIEWR_VERSION`, and Windows uses `-Version`. Without that pin the published
+installer selects the latest stable release, which is no longer v0.7.4. The
+candidate step sets `VIEWR_LOCAL_RELEASE` (or `-LocalRelease` on Windows) to
+the absolute directory that contains the archive and its `.sha256` sidecar,
+together with an explicit version. Checksum, manifest, version, and doctor
+checks still run. An empty value keeps the public download. The macOS job
+checks the portable command, preserved preferences, and the retained v0.7.4
+tree. It does not register a file type or build the application bundle. A
+hosted Apple Silicon runner is not an original-M1 receipt.
 
 Optional AVIF and HEIC support requires native libheif dependencies and a separate
 worker build:

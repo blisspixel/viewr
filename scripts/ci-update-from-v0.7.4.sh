@@ -93,7 +93,18 @@ mime_query() {
 }
 mime_before=$(mime_query)
 
-sh "$published_installer"
+# The published installer defaults to the latest stable release. Pass 0.7.4
+# so this job still installs that archive after a newer release exists.
+VIEWR_VERSION=0.7.4 sh "$published_installer"
+
+published_release="$VIEWR_INSTALL_ROOT/releases/v0.7.4/viewr"
+[ -f "$published_release" ] || {
+  echo "published install did not write $published_release" >&2
+  exit 1
+}
+published_version=$("$published_release" --version)
+[ "$published_version" = "viewr 0.7.4" ]
+[ "$(readlink "$VIEWR_BIN_DIR/viewr")" = "$published_release" ]
 
 old_desktop="$XDG_DATA_HOME/applications/com.github.blisspixel.viewr.desktop"
 new_desktop="$XDG_DATA_HOME/applications/io.github.blisspixel.viewr.desktop"
@@ -113,6 +124,9 @@ VIEWR_VERSION=0.7.8 VIEWR_LOCAL_RELEASE="$candidate_dir" sh "$repo/install.sh"
 
 installed_version=$("$VIEWR_INSTALL_ROOT/releases/v0.7.8/viewr" --version)
 [ "$installed_version" = "viewr 0.7.8" ]
+[ "$(readlink "$VIEWR_BIN_DIR/viewr")" = "$VIEWR_INSTALL_ROOT/releases/v0.7.8/viewr" ]
+retained_version=$("$published_release" --version)
+[ "$retained_version" = "viewr 0.7.4" ]
 
 installed_hash=$(sha256sum "$VIEWR_INSTALL_ROOT/releases/v0.7.8/viewr" | awk '{print $1}')
 candidate_hash=$(sha256sum "$candidate_binary" | awk '{print $1}')

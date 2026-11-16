@@ -136,6 +136,15 @@ ownership markers before replacing a release directory, preserving those bytes.
 Linux launcher and icon when those are regular files. It leaves an unexpected
 file, a command outside the install root, and MIME defaults in place, and it
 does not contact the network.
+The update jobs install the attested published v0.7.4 archive with that
+release's installer, then install the workspace candidate. Linux and macOS pass
+`VIEWR_VERSION=0.7.4` because the published installer otherwise selects the
+latest stable release. Windows passes `-Version 0.7.4` and retries only a
+transient release lookup. The macOS job checks the portable Apple Silicon
+command, preserved preferences, and the retained v0.7.4 tree. The sandbox must
+not gain a desktop entry or an application bundle. Launch Services lives
+outside that sandbox, so this is not file-association acceptance, and the
+hosted runner is not an original-M1 receipt.
 
 ## 3. Build the exact target
 

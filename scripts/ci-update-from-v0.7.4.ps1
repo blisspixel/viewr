@@ -72,7 +72,32 @@ $classesAfter = Join-Path $root "classes-after.reg"
 & reg.exe export "HKCU\Software\Classes" $classesBefore /y
 if ($LASTEXITCODE -ne 0) { throw "could not export HKCU\Software\Classes" }
 
-& $publishedInstaller -Version 0.7.4 -InstallDir $installDir -NoPath -NoShortcut
+# The published v0.7.4 installer resolves its release with an anonymous
+# GitHub API call and treats a transport failure as fatal. That lookup has
+# failed once and then succeeded on an identical rerun. Retry only that
+# message. The published installer stays unchanged, and any other failure
+# still stops the job on the first attempt. The candidate installer below
+# uses -LocalRelease, so it does not make this call.
+$resolveFailure = "could not resolve the selected official GitHub release"
+$publishedInstalled = $false
+foreach ($attempt in 1..3) {
+    try {
+        & $publishedInstaller -Version 0.7.4 -InstallDir $installDir -NoPath -NoShortcut
+        $publishedInstalled = $true
+        break
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        if (-not $message.Contains($resolveFailure) -or $attempt -eq 3) {
+            throw
+        }
+        Write-Host "published v0.7.4 installer could not resolve the release on attempt ${attempt}; retrying"
+        Start-Sleep -Seconds (5 * $attempt)
+    }
+}
+if (-not $publishedInstalled) {
+    throw "published v0.7.4 installer did not finish"
+}
 & "$PSScriptRoot\..\install.ps1" -Version 0.7.8 -InstallDir $installDir -NoPath -NoShortcut -LocalRelease $candidateDir
 
 $installed = Join-Path $installDir "viewr.exe"

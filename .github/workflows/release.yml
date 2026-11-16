@@ -11,6 +11,7 @@ permissions:
 concurrency:
   group: release-artifacts-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 env:
   CARGO_TERM_COLOR: always

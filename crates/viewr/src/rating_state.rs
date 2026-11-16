@@ -115,6 +115,14 @@ pub(crate) const fn settled_write_view(
     }
 }
 
+/// A successful rating sentence names the written file. Show it while that
+/// file is still on screen or is the file being reloaded. A view that has
+/// already moved on keeps the folder record and does not borrow the sentence.
+#[must_use]
+pub(crate) const fn show_settled_rating_outcome(view: SettledWriteView) -> bool {
+    !matches!(view, SettledWriteView::FolderOnly)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RatingDiscoveryTransition {
     Apply,
@@ -546,5 +554,21 @@ mod tests {
             SettledWriteView::FolderOnly,
             "a settled presentation of the written file already verified its source"
         );
+    }
+
+    #[test]
+    fn a_rating_outcome_stays_with_the_written_file() {
+        use super::{SettledWriteView, show_settled_rating_outcome};
+
+        assert!(show_settled_rating_outcome(
+            SettledWriteView::AdoptPresented
+        ));
+        assert!(show_settled_rating_outcome(
+            SettledWriteView::AdoptBehindIncoming
+        ));
+        assert!(show_settled_rating_outcome(
+            SettledWriteView::ReloadSelected
+        ));
+        assert!(!show_settled_rating_outcome(SettledWriteView::FolderOnly));
     }
 }

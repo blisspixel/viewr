@@ -525,11 +525,14 @@ and unsupported containers, remain visibly read-only.
 
 ### Substitution notices
 
-- Routine outcome toasts clear after three seconds. A folder-scan outcome that
-  explains which image is on screen, such as a requested image that is no longer
-  available so viewr opened the first image in its folder, or browsing limited
-  to one file, stays in the top status until the user navigates, opens another
-  source, or a newer message replaces it.
+- Routine outcome toasts clear after three seconds. A saved or cleared
+  rating also clears when the visible photo changes, so that sentence does
+  not stay beside the next photo. A rating that finishes after the view has
+  moved on does not place the sentence on the later photo. A folder-scan
+  outcome that explains which image is on screen, such as a requested image
+  that is no longer available so viewr opened the first image in its folder,
+  or browsing limited to one file, stays in the top status until the user
+  navigates, opens another source, or a newer message replaces it.
 
 ### Source pages
 

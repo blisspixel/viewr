@@ -1503,6 +1503,17 @@ fn map_io_error(error: &io::Error) -> RatingWriteError {
     }
 }
 
+/// Put the accepted file's modification time back on a verified replacement.
+///
+/// Latest First sorts by that time. Restoring it keeps a rating from moving
+/// the photo and from publishing when the rating was written. Change time and
+/// the content witness still record the new bytes, so a same-length
+/// substitution that copies the old modification time stays rejected.
+fn restore_prior_modified_time(path: &Path, modified: std::time::SystemTime) -> io::Result<()> {
+    let file = File::options().write(true).open(path)?;
+    file.set_times(std::fs::FileTimes::new().set_modified(modified))
+}
+
 pub(crate) fn write_rating(
     path: &Path,
     source: &ImageSource,
@@ -1544,6 +1555,9 @@ fn write_rating_unix(
     if source_metadata.len() > MAX_JPEG_BYTES {
         return Err(RatingWriteError::UnsupportedMetadata);
     }
+    let original_modified = source_metadata
+        .modified()
+        .map_err(|error| map_io_error(&error))?;
     drop(source_file);
 
     let mut pristine =
@@ -1645,6 +1659,26 @@ fn write_rating_unix(
     {
         return Err(rollback());
     }
+    drop(verified);
+    restore_prior_modified_time(path, original_modified).map_err(|_| rollback())?;
+    let verified = ImageSource::open(path).map_err(|_| rollback())?;
+    let verified_file = verified.clone_for_decode().map_err(|_| rollback())?;
+    let restored_is_valid = verify_candidate(
+        &verified_file,
+        pristine.as_file(),
+        original_header.encoded_len,
+        &expected_header,
+        assignment,
+    )
+    .is_ok();
+    drop(verified_file);
+    if !restored_is_valid
+        || candidate_binding_error(&verified, path).is_some()
+        || !source.same_object_at_path(&backup)
+        || !accepted_matches_snapshot(source, pristine.as_file()).unwrap_or(false)
+    {
+        return Err(rollback());
+    }
     if std::fs::remove_file(&backup).is_err() {
         return Err(rollback());
     }
@@ -1700,6 +1734,9 @@ fn write_rating_windows(
     if source_metadata.len() > MAX_JPEG_BYTES {
         return Err(RatingWriteError::UnsupportedMetadata);
     }
+    let original_modified = source_metadata
+        .modified()
+        .map_err(|error| map_io_error(&error))?;
     let mut security_descriptor =
         file_security_descriptor(&source_file).map_err(|error| map_io_error(&error))?;
     drop(source_file);
@@ -1826,6 +1863,45 @@ fn write_rating_windows(
         ));
     }
     if verified.matches_path(path) != ImageSourceMatch::Same
+        || !source.same_object_at_path(&backup_path)
+        || !accepted_matches_snapshot(source, &pristine).unwrap_or(false)
+    {
+        return Err(rollback_after_verification_failure(
+            path,
+            &backup_path,
+            source,
+            &pristine,
+            Some(&verified),
+        ));
+    }
+    if restore_prior_modified_time(path, original_modified).is_err() {
+        return Err(rollback_after_verification_failure(
+            path,
+            &backup_path,
+            source,
+            &pristine,
+            Some(&verified),
+        ));
+    }
+    let restored = ImageSource::open(path).map_err(|_| {
+        rollback_after_verification_failure(path, &backup_path, source, &pristine, Some(&verified))
+    })?;
+    drop(verified);
+    let verified = restored;
+    let verified_file = verified.clone_for_decode().map_err(|_| {
+        rollback_after_verification_failure(path, &backup_path, source, &pristine, Some(&verified))
+    })?;
+    let restored_is_valid = verify_candidate(
+        &verified_file,
+        &pristine,
+        original_header.encoded_len,
+        &expected_header,
+        assignment,
+    )
+    .is_ok();
+    drop(verified_file);
+    if !restored_is_valid
+        || verified.matches_path(path) != ImageSourceMatch::Same
         || !source.same_object_at_path(&backup_path)
         || !accepted_matches_snapshot(source, &pristine).unwrap_or(false)
     {
@@ -2972,6 +3048,50 @@ mod tests {
             entries,
             [std::ffi::OsString::from("photo.jpg")],
             "unexpected transaction files"
+        );
+    }
+
+    #[test]
+    fn jpeg_rating_write_keeps_the_previous_modification_time() {
+        let workspace = TempWorkspace::new("rating_mtime").unwrap();
+        let earlier = workspace.path().join("a.jpg");
+        let later = workspace.path().join("b.jpg");
+        let bytes = jpeg(&[segment(0xe1, &xmp_with_rating("1"))]);
+        fs::write(&earlier, &bytes).unwrap();
+        fs::write(&later, &bytes).unwrap();
+        let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        for path in [&earlier, &later] {
+            File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(modified))
+                .unwrap();
+        }
+        let modified = fs::metadata(&later).unwrap().modified().unwrap();
+        let source = ImageSource::open(&later).unwrap();
+
+        let written = write_rating(&later, &source, RatingAssignment::Set(Rating(5))).unwrap();
+
+        assert_eq!(written.state, RatingState::Rated(Rating(5)));
+        assert_eq!(fs::metadata(&later).unwrap().modified().unwrap(), modified);
+        assert_eq!(written.source.matches_path(&later), ImageSourceMatch::Same);
+        assert!(written.source.version_is_current());
+        let names = crate::fs::scan_image_entries_sorted_while(
+            workspace.path(),
+            crate::fs::FolderSort::Latest,
+            || true,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.path().file_name().unwrap().to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                std::ffi::OsString::from("a.jpg"),
+                std::ffi::OsString::from("b.jpg")
+            ]
         );
     }
 

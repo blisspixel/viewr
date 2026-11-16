@@ -5,6 +5,9 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Rating a JPEG puts that file's previous modification time back. Latest
+  First keeps the photo in place, and the file time does not show when the
+  rating was written. A change during the write still restores the original.
 - Help > Keyboard Shortcuts, `?`, and F1 open the same shortcut list as
   About. Escape, the Close button, or another key closes it. The list
   stays closed while Crop, Spot Heal, or a text field has the keyboard.

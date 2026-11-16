@@ -24,7 +24,13 @@ reason to introduce background indexing.
   stars.
 - Clearing removes `xmp:Rating` and writes zero into an existing valid `0x4746`
   mirror. viewr does not add or update creator-tool, metadata-date, history,
-  identifier, timestamp, or activity fields merely to store a rating.
+  identifier, timestamp, or activity fields merely to store a rating. After
+  the replacement is verified, the writer puts the file's previous modification
+  time back. Latest First therefore keeps the photo in place, and the file
+  time does not show when the rating was written. Change time and the content
+  witness still move, so a same-length substitution that copies the old
+  modification time remains rejected. A failed time restore puts the original
+  file back.
 - There is no global rating database, folder manifest, companion sidecar,
   alternate data stream, extended attribute, recent-file record, or disk cache.
   The source image is the durable record. A rating therefore follows a normal
@@ -163,10 +169,12 @@ The writer is enabled only for a source that passes all of these checks:
    Windows uses `ReplaceFileW`. Unix first creates and verifies a same-directory
    hard-link backup, then atomically renames the candidate over the source name.
    Post-commit verification reopens the candidate, checks its rating and complete
-   image tail, rechecks candidate and backup path binding, and only then removes
-   the original. Verification failure restores the retained original when that can
-   still be proven. An uncertain restore keeps the application open, disables
-   further writes, and exposes fixed recovery guidance instead of claiming the
+   image tail, rechecks candidate and backup path binding, restores the previous
+   modification time, rechecks the reopened candidate, and only then removes
+   the original. Verification or time-restore failure restores the retained
+   original when that can still be proven. An uncertain restore keeps the
+   application open, disables further writes, and exposes fixed recovery
+   guidance instead of claiming the
    previous rating is safe.
 5. The rewriter changes only `xmp:Rating` and an existing valid `0x4746` value.
    Image payload, segment order, comments, ICC, IPTC, EXIF, XMP subject, unknown

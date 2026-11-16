@@ -182,7 +182,8 @@ opens, truncated WebP, TIFF, and ICO files, the version command, benchmark path
 errors, stable folder order, AppleDouble sidecars, and the installer-script
 explanation already reviewed on main. It
 includes the reviewed async-executor 1.14.1 replacement for the yanked 1.14.0
-release. It requires the complete automated gate and one exact candidate. It does not
+release, the rustix 1.1.6 bump for RUSTSEC-2026-0486, and the flate2 1.1.11
+lock. It requires the complete automated gate and one exact candidate. It does not
 close hardware, native assistive-technology, the repeated 50,000-file rating
 probe, macOS update, full file-association acceptance, or the rest of the v0.8
 acceptance work.

@@ -147,6 +147,14 @@ Prefer tests that would fail if the behavior regressed. Playlist, cull,
 file-coherence, and job-currency races need state assertions, not a function
 that merely runs.
 
+Workflow runs are not canceled, including a superseded pull request. A
+concurrency group is only for work that must not overlap, such as one
+release ref or one Dependabot records refresh. Every such group sets
+`cancel-in-progress: false` and `queue: max`. Do not add a group whose
+only effect is to drop an older commit's result. `queue: max` still
+drops a run after 100 are already waiting, which is beyond this
+repository's push rate.
+
 Green CI is the floor. Release-impacting work uses the full gate in
 `docs/VERIFY.md`, which lists the exact `cargo-deny`, `cargo-audit`, and
 privacy commands. The coverage command lives only in the `coverage` job of

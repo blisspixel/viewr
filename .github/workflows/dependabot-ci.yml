@@ -20,6 +20,7 @@ permissions:
 concurrency:
   group: dependabot-required-${{ inputs.pin }}
   cancel-in-progress: false
+  queue: max
 
 env:
   CARGO_TERM_COLOR: always

@@ -792,6 +792,77 @@ impl ImageSource {
             .is_some_and(|(left, right)| left == right)
     }
 
+    /// Modification time of the retained object, read from its open handle.
+    pub(crate) fn modified_time(&self) -> io::Result<std::time::SystemTime> {
+        self.file.metadata()?.modified()
+    }
+
+    /// Put a modification time on the retained object.
+    ///
+    /// Unix uses the no-follow descriptor already held for this source, which
+    /// can stamp a file the owner cannot open for writing. Windows reopens
+    /// `path` for attribute access only, refuses a reparse point, and stamps
+    /// only when that handle is still this object.
+    pub(crate) fn restore_modified_time(
+        &self,
+        path: &Path,
+        modified: std::time::SystemTime,
+    ) -> io::Result<()> {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = path;
+            self.file
+                .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let file = open_timestamp_no_follow(path)?;
+            let metadata = file.metadata()?;
+            if !metadata_is_markable_regular(&metadata) {
+                return Err(io::Error::other(
+                    "timestamp handle is not the verified regular file",
+                ));
+            }
+            let identity = file_identity(&file, &metadata)?;
+            if self.identity != Some(identity) {
+                return Err(io::Error::other(
+                    "timestamp handle does not name the verified file",
+                ));
+            }
+            file.set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        }
+        if self.modified_time()? != modified {
+            return Err(io::Error::other("modification time was not restored"));
+        }
+        Ok(())
+    }
+
+    /// Re-read length and timestamps after this process changed only the
+    /// retained object's time or mode. The accepted content witness stays.
+    #[cfg(test)]
+    pub(crate) fn refresh_version(&mut self) -> io::Result<()> {
+        let metadata = self.file.metadata()?;
+        self.version = Some(file_version(&self.file, &metadata)?);
+        Ok(())
+    }
+
+    /// Set the retained object's permission bits from its open handle.
+    #[cfg(all(unix, test))]
+    pub(crate) fn set_mode(&self, mode: u32) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        self.file
+            .set_permissions(std::fs::Permissions::from_mode(mode))
+    }
+
+    /// Permission bits of the retained object, from its open handle.
+    #[cfg(all(unix, test))]
+    pub(crate) fn mode(&self) -> io::Result<u32> {
+        use std::os::unix::fs::MetadataExt;
+
+        Ok(self.file.metadata()?.mode() & 0o777)
+    }
+
     /// Extra directory entries share this inode. Rating writes refuse that object
     /// so a rename cannot silently change another name.
     #[must_use]
@@ -1311,6 +1382,22 @@ pub(crate) fn replace_file(
     } else {
         Ok(())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn open_timestamp_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES,
+    };
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    options.open(path)
 }
 
 #[cfg(target_os = "windows")]

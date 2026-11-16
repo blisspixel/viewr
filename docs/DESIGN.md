@@ -275,10 +275,12 @@ inertia, or reduced-motion behavior that has not been implemented and tested.
 
 ### Navigation (the most-touched interaction)
 - Folder scans use descending file modification time by default, with natural
-  filename order as the stable tie break. Digit runs compare by value, and the
-  same value keeps the shorter run first, so `img2` stays before `img02` and
-  `img10`. Names that differ only by case stay adjacent in byte order. The
-  order does not follow the order the directory was read. A file whose name
+  filename order as the stable tie break. A JPEG rating write restores the
+  file's previous modification time, so that photo stays in this order. Digit
+  runs compare by value, and the same value keeps the shorter run first, so
+  `img2` stays before `img02` and `img10`. Names that differ only by case stay
+  adjacent in byte order. The order does not follow the order the directory
+  was read. A file whose name
   starts with `._` is an AppleDouble sidecar copied beside a photo, not another
   image, so folder membership skips it. Opening that path explicitly still
   attempts to decode it. View > Folder Sort can switch the open

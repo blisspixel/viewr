@@ -783,6 +783,34 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn('"viewr 0.7.4"', windows)
         self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
 
+    def test_windows_update_retries_only_a_transient_release_lookup(self) -> None:
+        windows = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.ps1").read_text(
+            encoding="utf-8"
+        )
+        resolve = "could not resolve the selected official GitHub release"
+        self.assertEqual(windows.count(resolve), 1)
+        self.assertEqual(windows.count("foreach ($attempt in 1..3)"), 1)
+        self.assertEqual(windows.count("-Version 0.7.4"), 1)
+        self.assertIn(
+            "if (-not $message.Contains($resolveFailure) -or $attempt -eq 3)",
+            windows,
+        )
+        self.assertLess(
+            windows.index(resolve),
+            windows.index("published v0.7.4 installer did not finish"),
+        )
+        self.assertLess(
+            windows.index("published v0.7.4 installer did not finish"),
+            windows.index("-Version 0.7.8"),
+        )
+        self.assertEqual(
+            windows.count(
+                '& "$PSScriptRoot\\..\\install.ps1" -Version 0.7.8 '
+                "-InstallDir $installDir -NoPath -NoShortcut -LocalRelease $candidateDir"
+            ),
+            1,
+        )
+
     def test_linux_update_mime_probe_keeps_an_existing_png_default(self) -> None:
         script = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.sh").read_text(
             encoding="utf-8"

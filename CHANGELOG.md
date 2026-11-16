@@ -6,7 +6,7 @@ and organized by user-visible concern.
 ## Unreleased
 
 - The locked rustix 1.1 line is 1.1.6. Releases from 1.0.0 through 1.1.5
-  could mark unread bytes as initialized when an extended-attribute read
+  could mark unwritten bytes as initialized when an extended-attribute read
   was given an empty buffer (RUSTSEC-2026-0486). The 0.38 line required
   by winit is outside that advisory.
 - Folder order no longer follows the order a directory was read. The same

@@ -76,6 +76,7 @@ jobs:
         run: |
           sh -n install.sh
           bash -n scripts/ci-update-from-v0.7.4.sh
+          bash -n scripts/ci-update-from-v0.7.4-macos.sh
 
       - name: Validate Windows installer syntax
         if: runner.os == 'Windows'

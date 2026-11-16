@@ -116,8 +116,9 @@ Four version states must not be conflated:
    currently v0.7.7. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.8`, preparing the missing-format, damaged WebP, TIFF, and ICO, command,
-   stable folder order, AppleDouble, and installer-script patch.
+   `0.7.8`, verified candidate and tag-ready missing-format, damaged WebP,
+   TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble,
+   and installer-script patch.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -783,8 +784,11 @@ against manifest SHA-256
 The extracted Linux candidate reports `viewr 0.7.8`, and its doctor report
 passed every critical check without opening a window. The decode worker beside
 the executable passed its in-memory probe. The archive was not installed.
-Representative-hardware and native screen-reader acceptance remain uncollected.
-This candidate is not a public release.
+The tag-ready follow-up changes release status, immutable links, and version
+assertions only. Application source, dependencies, workflows, and packaging
+remain identical to the verified candidate. Representative-hardware and native
+screen-reader acceptance remain uncollected. This candidate is not a public
+release.
 
 ## Required before a broadly recommended 1.0
 

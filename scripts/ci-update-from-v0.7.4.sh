@@ -66,15 +66,22 @@ cat > "$XDG_CONFIG_HOME/mimeapps.list" <<'EOF'
 [Default Applications]
 image/png=org.example.image.desktop
 EOF
-# xdg-mime ignores a default whose desktop file or Exec target is missing, then
-# falls through to the handler cache. The example file has to exist so the
-# query keeps this association after viewr is installed.
+# xdg-mime keeps a default only when that desktop file's Exec target exists
+# as a file. The name "true" is a shell builtin, so the lookup treats it as
+# missing and reads mimeinfo.cache instead. update-desktop-database then lists
+# the installed viewr entry first, and the query changes even though
+# mimeapps.list was not rewritten. An absolute target keeps this association.
+[ -x /usr/bin/true ] || {
+  echo "PNG default probe needs an executable /usr/bin/true" >&2
+  exit 1
+}
 mkdir -p "$XDG_DATA_HOME/applications"
 cat > "$XDG_DATA_HOME/applications/org.example.image.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Example Image
-Exec=true
+Exec=/usr/bin/true
+MimeType=image/png;
 EOF
 
 mime_query() {

@@ -863,37 +863,6 @@ impl ImageSource {
         Ok(self.file.metadata()?.mode() & 0o777)
     }
 
-    /// Mark or clear the retained object's Windows read-only attribute.
-    ///
-    /// The retained handle is read-only, and Windows will not change attributes
-    /// through it. Reopen for attribute access, require the same object, and
-    /// set the bit there.
-    #[cfg(all(target_os = "windows", test))]
-    pub(crate) fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
-        let file = open_timestamp_no_follow(path)?;
-        let metadata = file.metadata()?;
-        if !metadata_is_markable_regular(&metadata) {
-            return Err(io::Error::other(
-                "attribute handle is not the verified regular file",
-            ));
-        }
-        let identity = file_identity(&file, &metadata)?;
-        if self.identity != Some(identity) {
-            return Err(io::Error::other(
-                "attribute handle does not name the verified file",
-            ));
-        }
-        let mut permissions = metadata.permissions();
-        permissions.set_readonly(readonly);
-        file.set_permissions(permissions)
-    }
-
-    /// Whether the retained object has the Windows read-only attribute.
-    #[cfg(all(target_os = "windows", test))]
-    pub(crate) fn is_readonly(&self) -> io::Result<bool> {
-        Ok(self.file.metadata()?.permissions().readonly())
-    }
-
     /// Extra directory entries share this inode. Rating writes refuse that object
     /// so a rename cannot silently change another name.
     #[must_use]

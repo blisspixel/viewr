@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import struct
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -780,6 +782,75 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn('"viewr 0.7.8"', windows)
         self.assertNotIn('"viewr 0.7.4"', windows)
         self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
+
+    def test_linux_update_mime_probe_keeps_an_existing_png_default(self) -> None:
+        script = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Exec=/usr/bin/true", script)
+        self.assertIn("MimeType=image/png;", script)
+        self.assertNotIn("\nExec=true\n", script)
+        if shutil.which("xdg-mime") is None or not Path("/usr/bin/true").is_file():
+            return
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            config = home / ".config"
+            applications = home / ".local" / "share" / "applications"
+            applications.mkdir(parents=True)
+            config.mkdir(parents=True)
+            (config / "mimeapps.list").write_text(
+                "[Default Applications]\nimage/png=org.example.image.desktop\n",
+                encoding="utf-8",
+            )
+            desktop = (
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=Example Image\n"
+                "Exec=/usr/bin/true\n"
+                "MimeType=image/png;\n"
+            )
+            (applications / "org.example.image.desktop").write_text(
+                desktop, encoding="utf-8"
+            )
+            (applications / "io.github.blisspixel.viewr.desktop").write_text(
+                desktop.replace("Name=Example Image", "Name=viewr"),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(home)
+            env["XDG_CONFIG_HOME"] = str(config)
+            env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+            env.pop("DISPLAY", None)
+            env.pop("WAYLAND_DISPLAY", None)
+            database = shutil.which("update-desktop-database")
+            if database is not None:
+                subprocess.run(
+                    [database, os.fspath(applications)],
+                    check=False,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                (applications / "mimeinfo.cache").write_text(
+                    "[MIME Cache]\n"
+                    "image/png=io.github.blisspixel.viewr.desktop;"
+                    "org.example.image.desktop;\n",
+                    encoding="utf-8",
+                )
+
+            query = subprocess.run(
+                ["xdg-mime", "query", "default", "image/png"],
+                check=False,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(query.returncode, 0, query.stderr)
+        self.assertEqual(query.stdout.strip(), "org.example.image.desktop")
 
     def test_release_caller_grants_the_nested_update_permissions(self) -> None:
         release = (PROJECT_ROOT / ".github" / "workflows" / "release.yml").read_text(

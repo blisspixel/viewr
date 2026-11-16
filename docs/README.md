@@ -4,7 +4,7 @@ Start with the document that matches the task.
 
 ## Using viewr
 
-- [Install and update](INSTALL.md): source builds, immutable v0.7.7
+- [Install and update](INSTALL.md): source builds, immutable v0.7.8
   installer scripts, manual downloads, default-app setup, platform
   integration, and uninstall.
 - [Design](DESIGN.md): controls, folder order, full-image collage, editing,
@@ -19,7 +19,7 @@ Start with the document that matches the task.
 - [Product quality](PRODUCT-QUALITY.md): first-time, power-user, admin,
   failure-recovery, and visual-polish matrix plus the candidate-artifact and
   evidence-validation contract for v0.6. Representative hardware evidence is
-  still open; the v0.7.7 preview discloses this evidence gap.
+  still open; the v0.7.8 preview discloses this evidence gap.
 - [Performance](PERFORMANCE.md): measured budgets and current evidence.
 
 ## Understanding and contributing
@@ -37,12 +37,13 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
-- [v0.7.8 candidate notes](releases/v0.7.8.md): the prepared missing-format,
+- [v0.7.8 release notes](releases/v0.7.8.md): the missing-format,
   damaged WebP, TIFF, and ICO, JPEG end-marker, version-command, benchmark,
-  stable folder order, AppleDouble sidecar, and installer-script patch,
-  pending the complete release gate.
-- [v0.7.7 release notes](releases/v0.7.7.md): the damaged JPEG, ICO, Image
-  Information, CLI help, and Save Path patch and its explicit evidence limits.
+  stable folder order, AppleDouble sidecar, and installer-script patch and
+  its explicit evidence limits.
+- [v0.7.7 release notes](releases/v0.7.7.md): the previous damaged JPEG, ICO,
+  Image Information, CLI help, and Save Path patch and its explicit evidence
+  limits.
 - [v0.7.6 release notes](releases/v0.7.6.md): the previous transparency,
   local-decode-proof, and installer-uninstall patch and its explicit evidence
   limits.

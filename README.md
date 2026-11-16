@@ -51,17 +51,17 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.7 is the preview described here. Its portable archives are checksummed and
+v0.7.8 is the preview described here. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
-[v0.7.7 notes](docs/releases/v0.7.7.md) record that gap exactly.
+[v0.7.8 notes](docs/releases/v0.7.8.md) record that gap exactly.
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.7/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -71,23 +71,23 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.7/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
 macOS plus x86-64 glibc Linux.
 
-The command downloads the immutable v0.7.7 installer script. That script
+The command downloads the immutable v0.7.8 installer script. That script
 installs the newest stable release unless you set a version, and it verifies
 the archive SHA-256 sidecar and internal manifest before installation. It does
 not give the application network access. Run the same command again to install
-the newest stable release. To install v0.7.7 itself, set `VIEWR_VERSION=0.7.7`
+the newest stable release. To install v0.7.8 itself, set `VIEWR_VERSION=0.7.8`
 before `sh` on macOS or Linux, or save the PowerShell script and run it with
-`-Version 0.7.7`. For review-first installation,
+`-Version 0.7.8`. For review-first installation,
 manual archive verification, uninstall steps, platform prerequisites, or a source
 build, see [Installing viewr](docs/INSTALL.md).
 
-The v0.7.7 archive uses the `io.github.blisspixel.viewr` desktop ID.
+The v0.7.8 archive uses the `io.github.blisspixel.viewr` desktop ID.
 Existing source installs should follow the launcher's
 [identity migration steps](docs/INSTALL.md#linux-identity-migration).
 
@@ -214,16 +214,17 @@ has room; image zoom does not change.
 
 ## Project status
 
-v0.7.7 adds damaged-JPEG rejection, PNG icon decoding, localized Image
-Information values, aligned CLI help, and a typed Save Path to the focused
-viewer. The representative-hardware and screen-reader acceptance rows remain
-open; this patch does not complete the v0.8 release-readiness milestone.
+v0.7.8 adds named missing-format opens, damaged WebP, TIFF, and ICO reports,
+JPEG end-marker rejection, version-command help, benchmark path errors, stable
+folder order, AppleDouble skipping, and the installer-script explanation to the
+focused viewer. The representative-hardware and screen-reader acceptance rows
+remain open; this patch does not complete the v0.8 release-readiness milestone.
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.6 remain
+v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.7 remain
 published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.8.0** release
 readiness through v0.9 publisher authentication, then v1.0.
-The [current release notes](docs/releases/v0.7.7.md) state the exact published
+The [current release notes](docs/releases/v0.7.8.md) state the exact published
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
 Unpublished candidates are identified by exact commit and workflow run. The

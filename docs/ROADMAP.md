@@ -148,7 +148,7 @@ v1.0.0  Broadly recommended release
 | **v0.5.0** | Format-contract preview | Format breadth without honest page and color contracts misleads users | Multi-page and multi-frame containers expose bounded, identifiable navigation. The format table distinguishes decode, animation, page, metadata, and color behavior. Camera RAW either meets the isolated-worker bar or is explicitly deferred from 1.0. |
 | **v0.6.0** | Integrated product-quality beta | Isolated green checks do not prove the product feels right | Primary first-time, power-user, admin, failure-recovery, and visual-polish paths pass on representative Windows, macOS, and Linux hardware. Startup, navigation, memory, mixed-DPI, multi-monitor, empty, loading, and error states meet budgets with no unresolved high-severity product-quality issue. |
 | **v0.7.0** | Accessibility preview | Implementation can be green while real AT fails | Automated semantic, contrast, keyboard, native Windows UI Automation, and cross-platform build checks pass. Release notes disclose missing Narrator, VoiceOver, Orca, and representative-hardware evidence. A known critical or high-severity defect still blocks publication. |
-| **v0.8.0** | Release-readiness beta | Install and update must be boring before trust theater | The release workflow verifies attestations before a draft is published, and CI installs published v0.7.4 and updates it to the candidate on Linux and Windows. Uninstall, rollback, macOS update, and full file-association acceptance remain open. Keep missing representative-hardware and assistive-technology rows visible without claiming acceptance. Unsigned candidates remain acceptable only with an explicit trust boundary. |
+| **v0.8.0** | Release-readiness beta | Install and update must be boring before trust theater | The release workflow verifies attestations before a draft is published, and CI installs published v0.7.4 and updates it to the workspace candidate on Linux, Windows, and the portable Apple Silicon command. Uninstall, rollback, an application-bundle install, full file-association acceptance, and an original-M1 receipt remain open. Keep missing representative-hardware and assistive-technology rows visible without claiming acceptance. Unsigned candidates remain acceptable only with an explicit trust boundary. |
 | **v0.9.0** | Publisher-authenticated release candidate | Signing is last because scope must be frozen first | Windows Authenticode-signed delivery; macOS Developer ID-signed, hardened, notarized, and stapled; normal Linux package verified on Wayland and X11. Full security, dependency, fuzz, coverage, performance, privacy, accessibility, packaging, upgrade, rollback, documentation, and hardware matrices pass on the exact candidate. |
 | **v1.0.0** | Broadly recommended release | Not a new feature tranche after v0.9 | Proven v0.9 scope ships. Docs match artifacts. Normal workflows need no developer tools. No known critical or high-severity defect remains. |
 
@@ -182,9 +182,11 @@ claim attached retroactively to the immutable v0.6.0 release.
    release directory. Uninstall now removes only an installer-owned tree:
    Unix tests and the Windows smoke check refuse an unexpected file, leave
    associations untouched, and on Windows remove a disposable PATH entry and a
-   shortcut that opens that installation. macOS update, full file-association
-   acceptance, and provenance beyond the existing release-workflow check remain
-   open.
+   shortcut that opens that installation. CI also installs published v0.7.4 on
+   the portable Apple Silicon command and updates it to the workspace candidate.
+   That job does not accept a file association, an application bundle, or an
+   original M1. Full file-association acceptance, application-bundle install,
+   and provenance beyond the existing release-workflow check remain open.
 3. Prepare the v0.8.0 version and release notes before building one exact-commit
    non-publishing candidate. Require green CI, coverage, privacy, and fuzzing;
    verify every archive and the published limits under
@@ -304,7 +306,7 @@ but completed history does not override an open gate here.
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
 | Integrated product quality | Shipped through v0.7.8; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
-| Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI updates published v0.7.4 to the candidate on Linux and Windows, including the Linux launcher identity. Uninstall of an installer-owned tree is covered by the Unix installer tests and the Windows smoke check. Clean install on macOS, full file-association acceptance, and macOS update remain open. Keep uncollected manual acceptance rows visible as separate claims. |
+| Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI installs published v0.7.4 and updates it to the workspace candidate on Linux, Windows, and the portable Apple Silicon command. The Linux job checks launcher identity. The macOS job checks the portable command, preserved preferences, and the retained v0.7.4 tree. It does not accept a file association or an application bundle, and a macos-latest run is not an original-M1 receipt. Uninstall of an installer-owned tree is covered by the Unix installer tests and the Windows smoke check. Application-bundle install and full file-association acceptance remain open. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
 
 The first public pre-1.0 release may remain clearly labeled as unsigned. A broadly
@@ -724,11 +726,13 @@ broad feature category. They prove and refine the accumulated viewer.
 - [ ] Prove clean install, same-version reinstall, update from each supported
   pre-1.0 line, file-association opt-in, and injected rollback on the signed
   release candidates. CI installs published v0.7.4 and updates it to the
-  candidate on Linux and Windows. That job checks the Linux launcher migration,
-  preserved preferences, staging cleanup, an unchanged Linux image handler, and
-  an unchanged Windows `HKCU\Software\Classes` tree. Uninstall of an
-  installer-owned tree is covered by the disposable Unix tests and Windows
-  smoke check. The signed-candidate lines here remain open.
+  workspace candidate on Linux, Windows, and the portable Apple Silicon
+  command. Those jobs check the Linux launcher migration, preserved
+  preferences, staging cleanup, an unchanged Linux image handler, an unchanged
+  Windows `HKCU\Software\Classes` tree, and the retained v0.7.4 macOS command.
+  The macOS job does not accept a file association or an application bundle.
+  Uninstall of an installer-owned tree is covered by the disposable Unix tests
+  and Windows smoke check. The signed-candidate lines here remain open.
 - [ ] Evaluate launcher-provided neighboring-file order without inventing a
   cross-platform promise. A future Windows packaged delivery may consume the
   documented neighboring-files query. macOS and Linux may preserve an explicit

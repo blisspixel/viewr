@@ -751,22 +751,58 @@ class ReleaseArtifactTests(unittest.TestCase):
         windows = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.ps1").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(workflow.count("--expected-tag v0.7.8"), 2)
+        self.assertEqual(workflow.count("--expected-tag v0.7.8"), 3)
         self.assertNotIn("--expected-tag v0.7.4", workflow)
         self.assertNotIn("--expected-tag v0.7.5", workflow)
         self.assertNotIn("--expected-tag v0.7.6", workflow)
         self.assertNotIn("--expected-tag v0.7.7", workflow)
-        self.assertEqual(workflow.count("Update from published v0.7.4"), 2)
+        self.assertEqual(workflow.count("Update from published v0.7.4"), 3)
+        self.assertIn("aarch64-apple-darwin", workflow)
+        self.assertIn("bash scripts/ci-update-from-v0.7.4-macos.sh", workflow)
 
         self.assertEqual(linux.count("gh release download v0.7.4"), 1)
         self.assertEqual(linux.count("viewr-0.7.4-x86_64-unknown-linux-gnu.zip"), 3)
         self.assertEqual(linux.count("viewr-0.7.8-x86_64-unknown-linux-gnu.zip"), 1)
+        self.assertEqual(linux.count("VIEWR_VERSION=0.7.4"), 1)
         self.assertEqual(linux.count("VIEWR_VERSION=0.7.8"), 1)
-        self.assertNotIn("VIEWR_VERSION=0.7.4", linux)
-        self.assertEqual(linux.count("releases/v0.7.8/viewr"), 2)
-        self.assertNotIn("releases/v0.7.4/viewr", linux)
+        self.assertLess(
+            linux.index("VIEWR_VERSION=0.7.4"),
+            linux.index("VIEWR_VERSION=0.7.8"),
+        )
+        self.assertEqual(linux.count("releases/v0.7.4/viewr"), 1)
+        self.assertEqual(linux.count("releases/v0.7.8/viewr"), 3)
+        self.assertLess(
+            linux.index("releases/v0.7.4/viewr"),
+            linux.index("releases/v0.7.8/viewr"),
+        )
+        self.assertEqual(linux.count('"viewr 0.7.4"'), 2)
         self.assertIn('"viewr 0.7.8"', linux)
+        self.assertLess(linux.index('"viewr 0.7.4"'), linux.index('"viewr 0.7.8"'))
         self.assertEqual(linux.count("--source-ref refs/tags/v0.7.4"), 2)
+
+        macos = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4-macos.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(macos.count("gh release download v0.7.4"), 1)
+        self.assertEqual(macos.count("viewr-0.7.4-aarch64-apple-darwin.zip"), 3)
+        self.assertEqual(macos.count("viewr-0.7.8-aarch64-apple-darwin.zip"), 1)
+        self.assertNotIn("x86_64-apple-darwin", macos)
+        self.assertNotIn("xdg-mime", macos)
+        self.assertNotIn("image/png", macos)
+        self.assertEqual(macos.count("VIEWR_VERSION=0.7.4"), 1)
+        self.assertEqual(macos.count("VIEWR_VERSION=0.7.8"), 1)
+        self.assertLess(
+            macos.index("VIEWR_VERSION=0.7.4"),
+            macos.index("VIEWR_VERSION=0.7.8"),
+        )
+        self.assertEqual(macos.count("releases/v0.7.4/viewr"), 1)
+        self.assertEqual(macos.count("releases/v0.7.8/viewr"), 1)
+        self.assertEqual(macos.count('"viewr 0.7.4"'), 2)
+        self.assertIn('"viewr 0.7.8"', macos)
+        self.assertLess(macos.index('"viewr 0.7.4"'), macos.index('"viewr 0.7.8"'))
+        self.assertEqual(macos.count("--source-ref refs/tags/v0.7.4"), 2)
+        self.assertIn("Application Support/viewr", macos)
+        self.assertIn("this update check runs on Apple Silicon", macos)
 
         self.assertEqual(windows.count("gh release download v0.7.4"), 1)
         self.assertEqual(

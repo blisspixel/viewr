@@ -385,8 +385,28 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("libheif 1.21", seccomp)
         self.assertIn("Ubuntu 26.04, the pinned Linux C-decoder", wrapper)
         self.assertIn('features = ["v1_17"]', wrapper)
+        self.assertIn(
+            "The Linux release archive is built on `ubuntu-26.04`.",
+            architecture,
+        )
+        self.assertIn("can still select Ubuntu 24.04", architecture)
 
-    def test_quality_commands_match_the_executable_ci_contract(self) -> None:
+    def test_linux_release_archive_builds_on_ubuntu_26_04(self) -> None:
+        workflow = (REPOSITORY_ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "- os: ubuntu-26.04\n            target: x86_64-unknown-linux-gnu",
+            workflow,
+        )
+        self.assertNotIn(
+            "- os: ubuntu-latest\n            target: x86_64-unknown-linux-gnu",
+            workflow,
+        )
+        self.assertIn("key: release-${{ matrix.os }}-${{ matrix.target }}", workflow)
+        self.assertNotIn("key: release-${{ matrix.target }}\n", workflow)
+        self.assertIn("- os: windows-latest", workflow)
+        self.assertEqual(workflow.count("- os: macos-latest"), 2)
         core_commands = (
             "cargo fmt --all -- --check",
             "cargo clippy --workspace --all-targets --locked -- -D warnings",

@@ -834,6 +834,10 @@ no longer pulls those development files in. `libaom-dev` imports
 `c-decoder-policy-ubuntu-26.04` and includes the installed x265 version.
 rust-cache otherwise treats Ubuntu 24.04 and 26.04 as the same Linux x64
 host, and an archive built against another libx265 is not restored.
+The Linux release archive is built on `ubuntu-26.04`. The published v0.7.8
+archive used that image through the `ubuntu-latest` label, and the label
+can still select Ubuntu 24.04 through 2026-11-19. The release rust-cache
+key includes the runner label because rust-cache does not record the image.
 
 ## Security boundaries
 

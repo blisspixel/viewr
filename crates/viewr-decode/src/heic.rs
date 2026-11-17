@@ -78,14 +78,18 @@ fn select_color_profile(
     // coexist. Under the v10 passthrough contract, no additional color-space
     // conversion is requested, so the source ICC still describes the RGB
     // output even when the decoder also exposes bitstream-only NCLX metadata.
-    // Older v8/v9 decoders target sRGB implicitly; only that contract makes a
-    // retained source ICC unverifiable without an explicit source NCLX.
+    // libheif 1.21 reports decoding-options version 8. It applies its implicit
+    // sRGB target only when a color conversion runs, and that conversion writes
+    // the output NCLX onto the decoded image. A missing output profile means
+    // the conversion did not run, so the source ICC still describes the pixels.
+    // A recorded output profile is the converted encoding and replaces the ICC.
     if let Some(profile) = source_icc {
         return match color_contract {
             OutputColorContract::SourcePreserved => WorkerColorProfile::Icc(profile),
-            OutputColorContract::DecoderSrgbTarget => {
-                output_nclx.map_or(WorkerColorProfile::Unknown, WorkerColorProfile::Cicp)
-            }
+            OutputColorContract::DecoderSrgbTarget => match output_nclx {
+                Some(cicp) => WorkerColorProfile::Cicp(cicp),
+                None => WorkerColorProfile::Icc(profile),
+            },
         };
     }
     output_nclx.or(source_nclx).map_or(
@@ -759,12 +763,12 @@ mod tests {
         );
         assert_eq!(
             select_color_profile(
-                Some(unverified_icc),
+                Some(unverified_icc.clone()),
                 None,
                 None,
                 OutputColorContract::DecoderSrgbTarget,
             ),
-            WorkerColorProfile::Unknown
+            WorkerColorProfile::Icc(unverified_icc)
         );
     }
 

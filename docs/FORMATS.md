@@ -115,9 +115,10 @@ returns no authority for file mutation.
   output primaries or transfer demonstrate that a requested transform changed the
   pixel encoding. ICC remains authoritative when version-10 passthrough performs
   no extra gamut conversion, including when matching bitstream-only NCLX evidence
-  coexists. Version 8 and 9 runtimes expose decoded output CICP, or unknown if the
-  decoder supplies none, rather than retaining ICC after their implicit sRGB
-  target. The embedded 1.23 CI lane requires libde265 1.0.7 or newer because
+  coexists. Version 8 and 9 runtimes report decoded output CICP when libheif
+  records one. They keep the source ICC when that record is absent, because
+  libheif 1.21 writes output NCLX whenever its implicit sRGB conversion runs.
+  The embedded 1.23 CI lane requires libde265 1.0.7 or newer because
   earlier adapters do not propagate HEVC VUI color. Untagged output follows
   libheif's deterministic sRGB decode fallback. ICC input is normalized to sRGB,
   explicit sRGB CICP is accepted as tagged sRGB, Display P3 CICP is converted

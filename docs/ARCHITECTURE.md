@@ -279,9 +279,10 @@ Shipped:
   NCLX. Because that contract performs no additional gamut conversion, an ICC
   remains authoritative when ICC and bitstream NCLX coexist; decoded CICP replaces
   it only when source and output evidence demonstrate a changed color encoding.
-  Version 8 and 9 runtimes conservatively expose their decoded output CICP, or
-  unknown when none is available, instead of retaining an ICC after their implicit
-  sRGB transform. A separate embedded libheif 1.23 CI lane, gated on libde265
+  Version 8 and 9 runtimes report decoded output CICP when libheif records one.
+  They keep the source ICC when that record is absent, because libheif 1.21
+  writes output NCLX whenever its implicit sRGB conversion runs. A separate
+  embedded libheif 1.23 CI lane, gated on libde265
   1.0.7 or newer, verifies container and HEVC-VUI-only paths, including matching
   ICC plus VUI metadata. The parent acknowledges each complete pixel stream
   before the worker returns to the idle pool and accepts another request.

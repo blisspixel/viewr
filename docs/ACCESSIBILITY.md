@@ -87,7 +87,12 @@ The minimum contract is:
   local-only privacy line as visible text, followed by separately named Open File
   and Open Folder actions. Opening and failure headings name the selected file.
   Failure copy stays one short sentence. Retry is named only when a later try
-  can succeed. Image Information keeps the decoder's own line.
+  can succeed. Image Information keeps the decoder's own line. A failed open
+  inside an already open folder keeps the folder position. When no photo is on
+  screen, a compact notice names the file in a polite heading, repeats the same
+  short sentence, and does not offer Open File, Open Folder, or Paste Path.
+  When a later photo exists in the active view, it names Right. A photo already
+  on screen stays visible.
 - Crop exposes exact source-pixel origin, output dimensions, ratio, eight resize
   handles, and keyboard controls at every positive selection size. If application
   fails while the same source is current, the exact selection returns as the
@@ -281,7 +286,7 @@ Run the same workflow on every platform:
 | Metadata | Inspect Source Privacy with no EXIF and with each supported risk category, then toggle Keep camera metadata when saving | Tag count, category presence, and limited-scan caveat are announced without raw sensitive values; absent supported EXIF is not called clean; retention starts unchecked, announces checked state, and remains session-only |
 | Save | Open Save As to a new disposable destination and complete or cancel it; then choose an existing disposable destination, inspect the app-owned overwrite modal, cancel once, and repeat to confirm replacement | The native dialog is usable; the modal has an accurate name and recheck disclosure, initially focuses Cancel, exposes only Cancel and Replace file as enabled actions, changes nothing when canceled, replaces only the confirmed destination when accepted, and returns focus predictably after either outcome |
 | Trash | Use File > Move to Trash and repeated `Delete` on fully presented disposable copies while earlier moves are active; press Delete once while the next image is still loading; confirm bare `B`, `M`, and normal-mode `X` do nothing; restore with `U`; inspect settled, active, and uncertain Undo ownership; try Delete during active Spot Heal; inspect a control-character filename in permanent-delete confirmation but cancel | Every fully presented image is accepted and advances without waiting for the prior platform move, platform operations remain serialized, the loading image is not queued and gets a visible wait reason, the removed culling keys trigger no destructive or review action, active work has a specific result, confirmation is path-free and visually unambiguous, cancel is safe, unsettled Undo does not claim settled state, cross-folder Undo does not insert into the unrelated view, and restore uses only the exact receipt. The transient result stays in top chrome outside immersive surfaces and does not cover the photo |
-| Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading and failure name only the selected filename. Retry does the same when a later try can succeed. A malformed or unsupported file does not offer Retry. Each transition is announced once; menus and recovery actions remain reachable. Image Information shows the decoder line |
+| Loading and errors | Open a large valid image, an unsupported file, and a malformed supported file | Loading and failure name only the selected filename. Retry does the same when a later try can succeed. A malformed or unsupported file does not offer Retry. Inside an open folder, that failure keeps the folder position. When no photo is on screen, a compact notice does not offer the first-run actions. A photo already on screen stays visible. Each transition is announced once; menus and recovery actions remain reachable. Image Information shows the decoder line |
 | Contrast and scale | Repeat key flows at 100%, 150%, and 200% scale in Light, Dark, and Console with white and dark image backgrounds | Focus and text stay visible; no clipping, overlap, or image-covering panel appears |
 
 ## Linux-specific checks

@@ -170,6 +170,12 @@ is and exits, because there is no protocol frame on a terminal to answer.
 | HEIC / HEIF | `.heic`, `.heif` | This build can't open HEIC photos. | `--features heic` (+ system libheif) |
 | Camera RAW | `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`, `.orf`, `.raf` | viewr does not open camera RAW files yet. Deferred from 1.0. | Feature `raw` reserved; no decode, orientation, or color implementation ships in 1.0 |
 
+Those RAW names stay in a folder. Opening the folder selects the first photo
+viewr can show, and stays on the first file when every file is deferred. When
+no photo is on screen, moving onto a RAW file keeps the folder position and
+shows the same sentence in a compact notice. A photo already on screen stays
+visible.
+
 ### Building the worker with C backends
 
 ```text

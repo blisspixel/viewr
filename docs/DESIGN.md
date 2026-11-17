@@ -127,9 +127,16 @@ disappears. This spec is the converged result of two rounds of design critique
   The empty state explains drop, ambient sibling browsing, and explicit session
   folder selection without adding a confirmation step. Opening names the selected
   file. A failed open keeps one short sentence. Retry appears only when a later
-  try can succeed, and Image Information keeps the decoder's own line. The card's
-  measured geometry is stable across unchanged frames, so no resting content drifts
-  vertically.
+  try can succeed, and Image Information keeps the decoder's own line. A failed
+  open while a folder is already open keeps that folder position in the top bar.
+  When no photo is on screen, the same sentence is a compact notice without
+  Open File, Open Folder, or Paste Path. When a later photo exists in the active
+  view, it says to press Right. A photo already on screen stays there, and the
+  failure stays in the existing top-bar status. Opening a folder selects the
+  first file that is not a deferred camera RAW photo. When every file is
+  deferred, the folder stays on the first file and shows the notice. The startup
+  card's measured geometry is stable across unchanged frames, so no resting
+  content drifts vertically.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws
   a precise border, rule-of-thirds guides, eight visible pointer handles, exact
   output dimensions, a compact aspect popover, and Apply/Cancel. The popover
@@ -532,9 +539,11 @@ and unsupported containers, remain visibly read-only.
   not stay beside the next photo. A rating that finishes after the view has
   moved on does not place the sentence on the later photo. A folder-scan
   outcome that explains which image is on screen, such as a requested image
-  that is no longer available so viewr opened the first image in its folder,
+  that is no longer available so viewr opened the first photo it can show,
   or browsing limited to one file, stays in the top status until the user
-  navigates, opens another source, or a newer message replaces it.
+  navigates, opens another source, or a newer message replaces it. When the
+  other photos cannot be shown, that notice says so and stays while the
+  previous photo remains on screen.
 
 ### Source pages
 

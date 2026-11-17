@@ -43,8 +43,9 @@ previews with full-resolution export, last-good-frame navigation, async crop and
 Save As, image information, Reload (`F5`), Spot Heal, About, and System, Light,
 Dark, and Console appearances. The current product also includes a transient
 full-image collage, now capped at 12 aspect-aware tiles without a catalog or
-thumbnail substitution. Current development opens folders newest-modified first,
-retains a saved natural-name alternative, keeps routine Trash outcomes in top chrome,
+thumbnail substitution. Current development opens a folder on the first photo
+it can show, newest-modified by default, retains a saved natural-name
+alternative, keeps routine Trash outcomes in top chrome,
 makes Spot Heal persistence explicit, provides an opt-in platform association
 guide for PNG, JPEG, and other selected types, accepts repeated fully presented
 images through one bounded serialized Trash queue, and bundles English, Spanish,

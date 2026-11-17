@@ -5,6 +5,13 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Opening a folder starts on the first photo viewr can show. A camera RAW
+  file stays in the folder. When no photo is on screen, moving onto a file
+  that cannot be shown keeps the folder position and a short notice, without
+  Open File, Open Folder, or Paste Path. When a later photo exists, the
+  notice says to press Right. A photo already on screen stays visible. If
+  the selected file is gone and the other photos cannot be shown, that
+  recovery notice stays until navigation.
 - Rating a JPEG puts that file's previous modification time back. Latest
   First keeps the photo in place, and the file time does not show when the
   rating was written. A change during the write still restores the original.

@@ -202,9 +202,26 @@ jobs:
       - name: Set up pinned Rust
         run: rustup show
 
+      # rust-cache keys on Linux and x64, not the Ubuntu image. An embedded
+      # libheif built on Ubuntu 24.04 calls x265_api_get_199. Ubuntu 26.04
+      # ships libx265 4.1, which exports x265_api_get_215. The key names this
+      # image, and the installed x265 version joins the environment hash so a
+      # later soname change misses that archive.
+      - name: Record the x265 version for the decoder cache
+        run: |
+          version="$(pkg-config --modversion x265)"
+          case "$version" in
+            ""|*[!0-9A-Za-z._+-]*)
+              echo "unexpected x265 version: ${version}" >&2
+              exit 1
+              ;;
+          esac
+          echo "x265 ${version}"
+          echo "VIEW_X265_VERSION=${version}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: c-decoder-policy
+          key: c-decoder-policy-ubuntu-26.04
+          env-vars: VIEW_X265_VERSION
 
       - name: Lint feature-gated Linux policies and decoders
         run: |

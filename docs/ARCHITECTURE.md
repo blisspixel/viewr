@@ -829,7 +829,10 @@ required context. The GUI performance job and the C-decoder job are pinned to
 libheif 1.17 API floor. Ubuntu 26.04 supplies libheif 1.21 for the system
 library those release-mode decodes link. The embedded libheif 1.23 lane
 also installs `libaom-dev` and `libdav1d-dev`. Ubuntu 26.04's `libheif-dev`
-no longer pulls those development files in.
+no longer pulls those development files in. The C-decoder cache key is
+`c-decoder-policy-ubuntu-26.04` and includes the installed x265 version.
+rust-cache otherwise treats Ubuntu 24.04 and 26.04 as the same Linux x64
+host, and an archive built against another libx265 is not restored.
 
 ## Security boundaries
 

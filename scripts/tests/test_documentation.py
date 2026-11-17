@@ -349,6 +349,12 @@ class DocumentationTests(unittest.TestCase):
             self.assertEqual(workflow.count("runs-on: ubuntu-26.04"), 2)
             self.assertIn("libaom-dev", workflow)
             self.assertIn("libdav1d-dev", workflow)
+            self.assertIn("pkg-config --modversion x265", workflow)
+            self.assertIn("VIEW_X265_VERSION=${version}", workflow)
+            self.assertIn("unexpected x265 version", workflow)
+            self.assertIn("key: c-decoder-policy-ubuntu-26.04", workflow)
+            self.assertIn("env-vars: VIEW_X265_VERSION", workflow)
+            self.assertNotIn("key: c-decoder-policy\n", workflow)
             self.assertIn(
                 "os: [ubuntu-latest, macos-latest, windows-latest]",
                 workflow,
@@ -367,6 +373,11 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertIn("The quality matrix keeps `ubuntu-latest`.", architecture)
         self.assertIn("pinned to\n`ubuntu-26.04`.", architecture)
+        self.assertIn(
+            "The C-decoder cache key is\n`c-decoder-policy-ubuntu-26.04`",
+            architecture,
+        )
+        self.assertIn("includes the installed x265 version", architecture)
         self.assertIn("Ubuntu 26.04 GUI performance job", performance)
         self.assertIn("runs on Ubuntu 26.04", seccomp)
         self.assertIn("libheif 1.21", seccomp)

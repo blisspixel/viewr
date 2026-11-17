@@ -21,7 +21,7 @@ default = []
 avif = ["dep:libavif-image", "dep:libavif-sys"]
 heic = ["dep:libheif-rs", "dep:libheif-sys"]
 # CI-only compatibility proof against the currently vendored libheif release.
-# Shipping builds keep the Ubuntu 24.04-compatible v1.17 API floor.
+# Shipping builds keep the v1.17 API floor.
 heic-latest-ci = [
     "heic",
     "libheif-rs/latest",
@@ -37,9 +37,9 @@ viewr-protocol = { path = "../viewr-protocol" }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 libavif-image = { version = "0.14", optional = true }
 libavif-sys = { version = "0.17", optional = true }
-# Ubuntu 24.04, the pinned Linux C-decoder validation host, provides libheif
-# 1.17. Keep the wrapper's declared API floor aligned with the APIs used here
-# instead of its newer default `latest` feature.
+# Ubuntu 26.04, the pinned Linux C-decoder validation host, provides libheif
+# 1.21. The wrapper stays on the v1.17 API floor so a build against that older
+# line still compiles. The newer default `latest` feature stays off here.
 libheif-rs = {
     version = "2.7",
     optional = true,

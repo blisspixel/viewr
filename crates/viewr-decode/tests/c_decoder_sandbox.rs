@@ -291,6 +291,9 @@ fn heic_decodes_under_the_production_worker_policy() {
 #[cfg(feature = "heic")]
 #[test]
 fn heic_icc_profile_takes_precedence_over_synthesized_nclx() {
+    // libheif 1.21 uses decoding-options version 8. It converts to sRGB only
+    // when it also records output NCLX. This fixture has an ICC and no
+    // container NCLX, so the worker returns that ICC.
     let display_p3 = moxcms::ColorProfile::new_display_p3()
         .encode()
         .expect("encode Display P3 fixture profile");

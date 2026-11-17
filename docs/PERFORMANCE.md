@@ -116,7 +116,7 @@ currently claimed.
 
 ## CI budgets
 
-The Ubuntu 24.04 GUI performance job builds the locked release workspace and runs
+The Ubuntu 26.04 GUI performance job builds the locked release workspace and runs
 the probe under Xvfb with Mesa's software GPU. The harness creates deterministic
 PNGs, hard-links or copies them into temporary corpora, and deletes the entire
 temporary workspace on exit. The 1920x1080 timing and folder-scaling corpora run

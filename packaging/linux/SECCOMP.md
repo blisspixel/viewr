@@ -100,8 +100,8 @@ also proves that the policy allows a real thread and read-only open while denyin
 write-open, asynchronous-signal configuration, socket, fork, and direct
 cross-process signal calls, and that `clone3` reports `ENOSYS`.
 
-The `c-decoder-policy` CI job runs on Ubuntu 24.04 with the pinned Rust toolchain,
-libheif 1.17, and native AV1/HEVC codecs. It generates small AVIF and HEIC images
+The `c-decoder-policy` CI job runs on Ubuntu 26.04 with the pinned Rust toolchain,
+libheif 1.21, and native AV1/HEVC codecs. It generates small AVIF and HEIC images
 in memory, launches the release-mode worker through the real framed protocol,
 and requires both decodes to complete under the installed default-deny policy.
 A package-level test additionally launches a worker probe through `viewr` inside

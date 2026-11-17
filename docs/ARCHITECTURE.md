@@ -279,9 +279,10 @@ Shipped:
   NCLX. Because that contract performs no additional gamut conversion, an ICC
   remains authoritative when ICC and bitstream NCLX coexist; decoded CICP replaces
   it only when source and output evidence demonstrate a changed color encoding.
-  Version 8 and 9 runtimes conservatively expose their decoded output CICP, or
-  unknown when none is available, instead of retaining an ICC after their implicit
-  sRGB transform. A separate embedded libheif 1.23 CI lane, gated on libde265
+  Version 8 and 9 runtimes report decoded output CICP when libheif records one.
+  They keep the source ICC when that record is absent, because libheif 1.21
+  writes output NCLX whenever its implicit sRGB conversion runs. A separate
+  embedded libheif 1.23 CI lane, gated on libde265
   1.0.7 or newer, verifies container and HEVC-VUI-only paths, including matching
   ICC plus VUI metadata. The parent acknowledges each complete pixel stream
   before the worker returns to the idle pool and accepts another request.
@@ -816,6 +817,23 @@ published. It is not Intel hardware acceptance.
 Declared floors and the original M1 baseline are in the
 [install guide](INSTALL.md). This lane does not change the plist, the Rust
 deployment target, the runner label, or the required check name.
+
+## Linux lane
+
+The quality matrix keeps `ubuntu-latest`. That label is the required check
+`fmt / clippy / test (ubuntu-latest)`. GitHub is moving the label from Ubuntu
+24.04 to 26.04 through 2026-11-19, so renaming the matrix would drop the
+required context. The GUI performance job and the C-decoder job are pinned to
+`ubuntu-26.04`. Their required names stay `GUI performance budgets` and
+`C decoders under default-deny seccomp`. The C-decoder wrapper stays on the
+libheif 1.17 API floor. Ubuntu 26.04 supplies libheif 1.21 for the system
+library those release-mode decodes link. The embedded libheif 1.23 lane
+also installs `libaom-dev` and `libdav1d-dev`. Ubuntu 26.04's `libheif-dev`
+no longer pulls those development files in. `libaom-dev` imports
+`/usr/bin/aomdec`, so the same lane also installs `aom-tools`. The C-decoder cache key is
+`c-decoder-policy-ubuntu-26.04` and includes the installed x265 version.
+rust-cache otherwise treats Ubuntu 24.04 and 26.04 as the same Linux x64
+host, and an archive built against another libx265 is not restored.
 
 ## Security boundaries
 

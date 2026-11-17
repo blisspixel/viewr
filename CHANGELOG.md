@@ -5,6 +5,9 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- The window and controls use the current wgpu 30 and egui 0.37 lines.
+  Page-step triangles stay drawn by the bundled icon font. Pictures stay
+  on the historical sRGB surface.
 - A DNG or Sony ARW file shows its largest decodable embedded baseline
   JPEG and labels that size as a preview. A larger frame that cannot be
   shown does not hide a smaller one. The sensor image is not decoded. A

@@ -149,7 +149,7 @@ rating filter is a derived projection of indices, never a second mutable playlis
 
 The writer is enabled only for a source that passes all of these checks:
 
-1. The rating path uses `quick-xml` 0.41 directly, outside the advisory-affected
+1. The rating path uses `quick-xml` 0.42 directly, outside the advisory-affected
    transitive versions. JPEG header bytes, segment count, XMP packet size, XML
    events, depth, attributes, namespace declarations, rating text, TIFF entry
    count, and total encoded bytes are all bounded. DTDs, extended XMP, duplicate
@@ -185,7 +185,7 @@ The writer is enabled only for a source that passes all of these checks:
 
 The old `little_exif` and build-time Wayland paths still resolve advisory-affected
 `quick-xml` versions under their existing narrow exceptions. They never receive
-raw user XMP in viewr's reviewed paths. Ratings use the separate patched 0.41
+raw user XMP in viewr's reviewed paths. Ratings use the separate patched 0.42
 dependency, so the new untrusted parser does not broaden either exception.
 
 ## Validation contract and known boundary

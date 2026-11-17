@@ -23,7 +23,7 @@ pub(crate) fn image(
         return None;
     }
     let size = physical_size(display_scale);
-    let key = egui::Id::new("viewr_pan_cursors");
+    let key = egui::Id::unique("viewr_pan_cursors");
     context.data_mut(|data| {
         let cached = data
             .get_temp::<Hands>(key)

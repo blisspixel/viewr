@@ -24,7 +24,7 @@ ignore = [
     # metadata crosses viewr's bounded TIFF parser into typed Metadata and is
     # never supplied as raw XML. Neither affected parser sees user XML. Both
     # dependents pin pre-0.41 APIs, so no compatible patched upgrade exists yet.
-    # The bounded rating path depends directly on patched quick-xml 0.41 and does
+    # The bounded rating path depends directly on patched quick-xml 0.42 and does
     # not broaden either exception. Tracked for removal when little_exif and
     # wayland-scanner update.
     # Runtime-reachable vulnerabilities are never ignored; see docs/STANDARDS.md.
@@ -40,7 +40,7 @@ ignore = [
     # zbus 6 merged the standalone zvariant, zvariant_derive, and zbus_names
     # crates and left those names unmaintained. This is not a vulnerability.
     # accesskit_unix 0.24 still links zbus 5, and viewr's reviewed Linux portal
-    # client is zbus 5.18 on that same line. Moving only the direct client to
+    # client is zbus 5.19 on that same line. Moving only the direct client to
     # zbus 6 would duplicate the major version, which the ban above rejects, and
     # no patched standalone upgrade exists. Reassess when AccessKit publishes a
     # zbus 6 adapter and the portal calls move with it.
@@ -65,7 +65,6 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
-    "CC0-1.0",
     "BSL-1.0",
     # Bundled default UI fonts from egui (`epaint_default_fonts`). Display-only;
     # not used on the image-decode path.
@@ -87,9 +86,9 @@ skip = [
     { crate = "block2@0.5.1", reason = "winit and AccessKit macOS adapters require block2 0.5" },
     { crate = "calloop@0.13.0", reason = "winit 0.30 requires the smithay-client-toolkit 0.19 event loop" },
     { crate = "calloop-wayland-source@0.3.0", reason = "smithay-client-toolkit 0.19 requires this source adapter" },
-    { crate = "foldhash@0.1.5", reason = "gpu-descriptor's hashbrown 0.15 requires this hash implementation" },
+    { crate = "foldhash@0.1.5", reason = "egui-winit's arboard clipboard path keeps hashbrown 0.15, which requires foldhash 0.1" },
     { crate = "getrandom@0.3.4", reason = "the locked ahash line requires getrandom 0.3" },
-    { crate = "hashbrown@0.15.5", reason = "gpu-descriptor 0.3 requires hashbrown 0.15" },
+    { crate = "hashbrown@0.15.5", reason = "egui-winit's arboard clipboard path requires hashbrown 0.15 through petgraph" },
     { crate = "hashbrown@0.16.1", reason = "the locked AccessKit and wgpu lines require hashbrown 0.16" },
     { crate = "jni-sys@0.3.1", reason = "the Android NDK line and jni-sys 0.4 bridge require this ABI line" },
     { crate = "linux-raw-sys@0.4.15", reason = "winit's rustix 0.38 path requires linux-raw-sys 0.4" },
@@ -98,7 +97,6 @@ skip = [
     { crate = "objc2-app-kit@0.2.2", reason = "winit and AccessKit macOS adapters require AppKit 0.2" },
     { crate = "objc2-foundation@0.2.2", reason = "winit and AccessKit macOS adapters require Foundation 0.2" },
     { crate = "objc2-ui-kit@0.2.2", reason = "winit 0.30 requires UIKit 0.2" },
-    { crate = "pollster@0.4.0", reason = "rfd 0.17 requires pollster 0.4 while viewr uses pollster 1" },
     { crate = "r-efi@5.3.0", reason = "the locked getrandom 0.3 path requires r-efi 5" },
     { crate = "redox_syscall@0.4.1", reason = "winit 0.30 requires the Redox 0.4 syscall line" },
     { crate = "redox_syscall@0.5.18", reason = "parking_lot_core 0.9 requires the Redox 0.5 syscall line" },

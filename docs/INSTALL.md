@@ -338,7 +338,7 @@ applies to the sandbox bundle. The pinned Rust toolchain, 1.99.1, links
 It also links `x86_64-apple-darwin` at deployment target 10.12.
 The repository does not set `MACOSX_DEPLOYMENT_TARGET`.
 winit 0.30.13 documents macOS 10.11.
-wgpu-hal 29.0.4 documents a Metal minimum of macOS 10.13.
+wgpu-hal 30.0.2 documents a Metal minimum of macOS 10.13.
 For the bundle, the strictest declared floor is macOS 12.0.
 For the portable Apple Silicon archive, the declared floor is the 11.0 link target.
 These figures are declarations, not a runtime qualification.

@@ -10,7 +10,8 @@ use crate::fs::{ImageSource, ImageSourceMatch, RatingScanSource};
 use quick_xml::Writer;
 use quick_xml::events::BytesStart;
 use quick_xml::events::Event;
-use quick_xml::name::{Namespace, ResolveResult};
+use quick_xml::events::attributes::Attribute;
+use quick_xml::name::{Namespace, QName, ResolveResult};
 use quick_xml::reader::NsReader;
 use std::fmt;
 use std::fs::File;
@@ -23,9 +24,9 @@ use std::time::{Duration, Instant};
 const XMP_APP1_PREFIX: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 const EXTENDED_XMP_APP1_PREFIX: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
 const EXIF_APP1_PREFIX: &[u8] = b"Exif\0\0";
-const XMP_META_NAMESPACE: &[u8] = b"adobe:ns:meta/";
-const XMP_NAMESPACE: &[u8] = b"http://ns.adobe.com/xap/1.0/";
-const RDF_NAMESPACE: &[u8] = b"http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+const XMP_META_NAMESPACE: &str = "adobe:ns:meta/";
+const XMP_NAMESPACE: &str = "http://ns.adobe.com/xap/1.0/";
+const RDF_NAMESPACE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const SIMPLE_RATING_TAG: u16 = 0x4746;
 const MAX_JPEG_BYTES: u64 = viewr_protocol::MAX_ENCODED_INPUT_BYTES;
 const MAX_HEADER_BYTES: usize = 16 * 1024 * 1024;
@@ -34,6 +35,8 @@ const MAX_XMP_PACKET_BYTES: usize = 65_502;
 const MAX_XML_DEPTH: usize = 32;
 const MAX_XML_ATTRIBUTES_PER_ELEMENT: usize = 64;
 const MAX_XML_ATTRIBUTES_TOTAL: usize = 4096;
+/// `xmlns` bindings allowed in scope at once. `quick-xml` 0.42 counts the live
+/// binding stack, which is at least as strict as the previous per-element cap.
 const MAX_XML_NAMESPACE_DECLARATIONS: usize = 32;
 const MAX_XML_EVENTS: usize = 4096;
 const COPY_BUFFER_BYTES: usize = 128 * 1024;
@@ -805,7 +808,7 @@ fn parse_xmp_rating(packet: &[u8]) -> Result<Option<RatingState>, MetadataError>
     let mut reader = NsReader::from_reader(packet);
     reader
         .resolver_mut()
-        .set_max_declarations_per_element(MAX_XML_NAMESPACE_DECLARATIONS);
+        .set_max_namespace_bindings(MAX_XML_NAMESPACE_DECLARATIONS);
     let mut buffer = Vec::new();
     let mut depth = 0_usize;
     let mut events = 0_usize;
@@ -837,11 +840,11 @@ fn parse_xmp_rating(packet: &[u8]) -> Result<Option<RatingState>, MetadataError>
                     return Err(MetadataError::Unsupported);
                 }
                 let is_xmpmeta =
-                    resolved_element_is(&reader, &element, XMP_META_NAMESPACE, b"xmpmeta")?;
-                let is_rdf = resolved_element_is(&reader, &element, RDF_NAMESPACE, b"RDF")?;
+                    resolved_element_is(&reader, &element, XMP_META_NAMESPACE, "xmpmeta")?;
+                let is_rdf = resolved_element_is(&reader, &element, RDF_NAMESPACE, "RDF")?;
                 let is_description =
-                    resolved_element_is(&reader, &element, RDF_NAMESPACE, b"Description")?;
-                let is_rating = resolved_element_is(&reader, &element, XMP_NAMESPACE, b"Rating")?;
+                    resolved_element_is(&reader, &element, RDF_NAMESPACE, "Description")?;
+                let is_rating = resolved_element_is(&reader, &element, XMP_NAMESPACE, "Rating")?;
                 if rating_element_depth.is_some() {
                     return Err(MetadataError::Unsupported);
                 }
@@ -897,11 +900,11 @@ fn parse_xmp_rating(packet: &[u8]) -> Result<Option<RatingState>, MetadataError>
                     return Err(MetadataError::Unsupported);
                 }
                 let is_xmpmeta =
-                    resolved_element_is(&reader, &element, XMP_META_NAMESPACE, b"xmpmeta")?;
-                let is_rdf = resolved_element_is(&reader, &element, RDF_NAMESPACE, b"RDF")?;
+                    resolved_element_is(&reader, &element, XMP_META_NAMESPACE, "xmpmeta")?;
+                let is_rdf = resolved_element_is(&reader, &element, RDF_NAMESPACE, "RDF")?;
                 let is_description =
-                    resolved_element_is(&reader, &element, RDF_NAMESPACE, b"Description")?;
-                let is_rating = resolved_element_is(&reader, &element, XMP_NAMESPACE, b"Rating")?;
+                    resolved_element_is(&reader, &element, RDF_NAMESPACE, "Description")?;
+                let is_rating = resolved_element_is(&reader, &element, XMP_NAMESPACE, "Rating")?;
                 if is_rating || rating_element_depth.is_some() {
                     return Err(MetadataError::Unsupported);
                 }
@@ -938,8 +941,7 @@ fn parse_xmp_rating(packet: &[u8]) -> Result<Option<RatingState>, MetadataError>
                 }
             }
             Event::Text(text) if rating_element_depth == Some(depth) => {
-                let decoded = text.decode().map_err(|_| MetadataError::Unsupported)?;
-                let unescaped = quick_xml::escape::unescape(&decoded)
+                let unescaped = quick_xml::escape::unescape(text.as_ref())
                     .map_err(|_| MetadataError::Unsupported)?;
                 if rating_text.len().saturating_add(unescaped.len()) > 32 {
                     return Err(MetadataError::Unsupported);
@@ -947,11 +949,11 @@ fn parse_xmp_rating(packet: &[u8]) -> Result<Option<RatingState>, MetadataError>
                 rating_text.push_str(&unescaped);
             }
             Event::CData(text) if rating_element_depth == Some(depth) => {
-                let decoded = text.decode().map_err(|_| MetadataError::Unsupported)?;
+                let decoded = text.as_ref();
                 if rating_text.len().saturating_add(decoded.len()) > 32 {
                     return Err(MetadataError::Unsupported);
                 }
-                rating_text.push_str(&decoded);
+                rating_text.push_str(decoded);
             }
             Event::End(_) => {
                 if rating_element_depth == Some(depth) {
@@ -972,8 +974,7 @@ fn parse_xmp_rating(packet: &[u8]) -> Result<Option<RatingState>, MetadataError>
             }
             Event::DocType(_) => return Err(MetadataError::Unsupported),
             Event::Text(text) if description_depth.is_none() && rating_element_depth.is_none() => {
-                let decoded = text.decode().map_err(|_| MetadataError::Unsupported)?;
-                if !decoded.trim().is_empty() {
+                if !text.as_ref().trim().is_empty() {
                     return Err(MetadataError::Unsupported);
                 }
             }
@@ -1065,20 +1066,20 @@ fn inspect_attributes(
         if matches!(namespace, ResolveResult::Unknown(_)) {
             return Err(MetadataError::Unsupported);
         }
-        if namespace_is(&namespace, XMP_NAMESPACE) && local.as_ref() == b"Rating" {
+        if namespace_is(&namespace, XMP_NAMESPACE) && local.as_ref() == "Rating" {
             if !top_description || rating.is_some() {
                 return Err(MetadataError::Unsupported);
             }
             let value = attribute
-                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
                 .map_err(|_| MetadataError::Unsupported)?;
             *rating = Some(parse_rating_text(&value)?);
-        } else if namespace_is(&namespace, RDF_NAMESPACE) && local.as_ref() == b"about" {
+        } else if namespace_is(&namespace, RDF_NAMESPACE) && local.as_ref() == "about" {
             if !top_description || about.is_some() {
                 return Err(MetadataError::Unsupported);
             }
             let value = attribute
-                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
                 .map_err(|_| MetadataError::Unsupported)?;
             about = Some(value.into_owned());
         }
@@ -1089,8 +1090,8 @@ fn inspect_attributes(
 fn resolved_element_is(
     reader: &NsReader<&[u8]>,
     element: &BytesStart<'_>,
-    expected_namespace: &[u8],
-    expected_local: &[u8],
+    expected_namespace: &str,
+    expected_local: &str,
 ) -> Result<bool, MetadataError> {
     let (namespace, local) = reader.resolver().resolve_element(element.name());
     if matches!(namespace, ResolveResult::Unknown(_)) {
@@ -1099,7 +1100,7 @@ fn resolved_element_is(
     Ok(namespace_is(&namespace, expected_namespace) && local.as_ref() == expected_local)
 }
 
-fn namespace_is(namespace: &ResolveResult<'_>, expected: &[u8]) -> bool {
+fn namespace_is(namespace: &ResolveResult<'_>, expected: &str) -> bool {
     matches!(namespace, ResolveResult::Bound(Namespace(value)) if *value == expected)
 }
 
@@ -1353,7 +1354,7 @@ fn rewrite_xmp_packet(
     let mut reader = NsReader::from_reader(packet);
     reader
         .resolver_mut()
-        .set_max_declarations_per_element(MAX_XML_NAMESPACE_DECLARATIONS);
+        .set_max_namespace_bindings(MAX_XML_NAMESPACE_DECLARATIONS);
     let mut writer = Writer::new(Vec::with_capacity(packet.len().saturating_add(96)));
     let mut buffer = Vec::new();
     let mut skip_depth = 0_usize;
@@ -1368,12 +1369,12 @@ fn rewrite_xmp_packet(
         match event {
             Event::Start(element) => {
                 let element_depth = depth.checked_add(1).ok_or(MetadataError::Unsupported)?;
-                let is_rdf = resolved_element_is(&reader, &element, RDF_NAMESPACE, b"RDF")?;
+                let is_rdf = resolved_element_is(&reader, &element, RDF_NAMESPACE, "RDF")?;
                 let is_description = rdf_depth == Some(depth)
-                    && resolved_element_is(&reader, &element, RDF_NAMESPACE, b"Description")?;
+                    && resolved_element_is(&reader, &element, RDF_NAMESPACE, "Description")?;
                 if skip_depth > 0 {
                     skip_depth = skip_depth.saturating_add(1);
-                } else if resolved_element_is(&reader, &element, XMP_NAMESPACE, b"Rating")? {
+                } else if resolved_element_is(&reader, &element, XMP_NAMESPACE, "Rating")? {
                     skip_depth = 1;
                 } else {
                     let rewritten =
@@ -1389,9 +1390,9 @@ fn rewrite_xmp_packet(
             }
             Event::Empty(element) => {
                 let is_description = rdf_depth == Some(depth)
-                    && resolved_element_is(&reader, &element, RDF_NAMESPACE, b"Description")?;
+                    && resolved_element_is(&reader, &element, RDF_NAMESPACE, "Description")?;
                 if skip_depth == 0
-                    && !resolved_element_is(&reader, &element, XMP_NAMESPACE, b"Rating")?
+                    && !resolved_element_is(&reader, &element, XMP_NAMESPACE, "Rating")?
                 {
                     let rewritten =
                         rewrite_start(&reader, element, is_description, assignment, &mut inserted)?;
@@ -1438,53 +1439,55 @@ fn rewrite_start(
     assignment: RatingAssignment,
     inserted: &mut bool,
 ) -> Result<BytesStart<'static>, MetadataError> {
-    let mut retained = Vec::<(Vec<u8>, Vec<u8>)>::new();
+    let mut retained = Vec::<(String, String)>::new();
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(|_| MetadataError::Unsupported)?;
         let (namespace, local) = reader.resolver().resolve_attribute(attribute.key);
-        if namespace_is(&namespace, XMP_NAMESPACE) && local.as_ref() == b"Rating" {
+        if namespace_is(&namespace, XMP_NAMESPACE) && local.as_ref() == "Rating" {
             continue;
         }
+        // Keep the raw escaped value. `Attribute::from((&str, &str))` would
+        // escape it again.
         retained.push((
-            attribute.key.as_ref().to_vec(),
-            attribute.value.as_ref().to_vec(),
+            attribute.key.as_ref().to_owned(),
+            attribute.value.as_ref().to_owned(),
         ));
     }
     let mut rewritten = element.into_owned();
     rewritten.clear_attributes();
     for (key, value) in &retained {
-        rewritten.push_attribute((key.as_slice(), value.as_slice()));
+        rewritten.push_attribute(Attribute {
+            key: QName(key.as_str()),
+            value: std::borrow::Cow::Borrowed(value),
+        });
     }
     if is_description && !*inserted {
         if let RatingAssignment::Set(rating) = assignment {
             let prefix = unique_rating_prefix(&retained);
-            let mut declaration = b"xmlns:".to_vec();
-            declaration.extend_from_slice(&prefix);
-            let mut key = prefix;
-            key.extend_from_slice(b":Rating");
+            let declaration = format!("xmlns:{prefix}");
+            let key = format!("{prefix}:Rating");
             let value = rating.get().to_string();
-            rewritten.push_attribute((declaration.as_slice(), XMP_NAMESPACE));
-            rewritten.push_attribute((key.as_slice(), value.as_bytes()));
+            rewritten.push_attribute((declaration.as_str(), XMP_NAMESPACE));
+            rewritten.push_attribute((key.as_str(), value.as_str()));
         }
         *inserted = true;
     }
     Ok(rewritten)
 }
 
-fn unique_rating_prefix(attributes: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
+fn unique_rating_prefix(attributes: &[(String, String)]) -> String {
     for suffix in 0_u8..=64 {
         let candidate = if suffix == 0 {
-            b"viewrRating".to_vec()
+            "viewrRating".to_owned()
         } else {
-            format!("viewrRating{suffix}").into_bytes()
+            format!("viewrRating{suffix}")
         };
-        let mut declaration = b"xmlns:".to_vec();
-        declaration.extend_from_slice(&candidate);
+        let declaration = format!("xmlns:{candidate}");
         if attributes.iter().all(|(key, _)| key != &declaration) {
             return candidate;
         }
     }
-    b"viewrRatingSafe".to_vec()
+    "viewrRatingSafe".to_owned()
 }
 
 fn map_metadata_write_error(error: MetadataError) -> RatingWriteError {
@@ -2428,9 +2431,7 @@ mod tests {
 
     fn xmp_with_rating(value: &str) -> Vec<u8> {
         xmp_packet(&format!(
-            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{rdf}"><rdf:Description rdf:about="" xmlns:xmp="{xmp}" xmp:Rating="{value}" keep="yes"/></rdf:RDF></x:xmpmeta>"#,
-            rdf = std::str::from_utf8(RDF_NAMESPACE).unwrap(),
-            xmp = std::str::from_utf8(XMP_NAMESPACE).unwrap(),
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{RDF_NAMESPACE}"><rdf:Description rdf:about="" xmlns:xmp="{XMP_NAMESPACE}" xmp:Rating="{value}" keep="yes"/></rdf:RDF></x:xmpmeta>"#,
         ))
     }
 
@@ -2496,9 +2497,7 @@ mod tests {
         assert_eq!(parse(&attribute).unwrap().1, RatingState::Rated(Rating(4)));
 
         let element = xmp_packet(&format!(
-            r#"<rdf:RDF xmlns:rdf="{rdf}" xmlns:score="{xmp}"><rdf:Description rdf:about=""><score:Rating> 5 </score:Rating></rdf:Description></rdf:RDF>"#,
-            rdf = std::str::from_utf8(RDF_NAMESPACE).unwrap(),
-            xmp = std::str::from_utf8(XMP_NAMESPACE).unwrap(),
+            r#"<rdf:RDF xmlns:rdf="{RDF_NAMESPACE}" xmlns:score="{XMP_NAMESPACE}"><rdf:Description rdf:about=""><score:Rating> 5 </score:Rating></rdf:Description></rdf:RDF>"#,
         ));
         assert_eq!(
             parse(&jpeg(&[segment(0xe1, &element)])).unwrap().1,
@@ -2535,9 +2534,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_extended_and_malformed_metadata() {
         let duplicate = xmp_packet(&format!(
-            r#"<rdf:RDF xmlns:rdf="{rdf}" xmlns:xmp="{xmp}"><rdf:Description rdf:about="" xmp:Rating="3"><xmp:Rating>3</xmp:Rating></rdf:Description></rdf:RDF>"#,
-            rdf = std::str::from_utf8(RDF_NAMESPACE).unwrap(),
-            xmp = std::str::from_utf8(XMP_NAMESPACE).unwrap(),
+            r#"<rdf:RDF xmlns:rdf="{RDF_NAMESPACE}" xmlns:xmp="{XMP_NAMESPACE}"><rdf:Description rdf:about="" xmp:Rating="3"><xmp:Rating>3</xmp:Rating></rdf:Description></rdf:RDF>"#,
         ));
         assert!(matches!(
             parse(&jpeg(&[segment(0xe1, &duplicate)])),
@@ -2562,10 +2559,8 @@ mod tests {
 
     #[test]
     fn validates_xmp_rdf_structure_and_description_subjects() {
-        let rdf = std::str::from_utf8(RDF_NAMESPACE).unwrap();
-        let xmp = std::str::from_utf8(XMP_NAMESPACE).unwrap();
         let valid = format!(
-            r#"<rdf:RDF xmlns:rdf="{rdf}" xmlns:xmp="{xmp}"><rdf:Description rdf:about="urn:photo" keep="one"/><rdf:Description rdf:about="urn:photo" xmp:Rating="4" keep="two"/></rdf:RDF>"#,
+            r#"<rdf:RDF xmlns:rdf="{RDF_NAMESPACE}" xmlns:xmp="{XMP_NAMESPACE}"><rdf:Description rdf:about="urn:photo" keep="one"/><rdf:Description rdf:about="urn:photo" xmp:Rating="4" keep="two"/></rdf:RDF>"#,
         );
         assert_eq!(
             parse_xmp_rating(valid.as_bytes()),
@@ -2587,16 +2582,16 @@ mod tests {
 
         let invalid = [
             format!(
-                r#"<rdf:RDF xmlns:rdf="{rdf}" xmlns:xmp="{xmp}"><rdf:Description xmp:Rating="4"/></rdf:RDF>"#,
+                r#"<rdf:RDF xmlns:rdf="{RDF_NAMESPACE}" xmlns:xmp="{XMP_NAMESPACE}"><rdf:Description xmp:Rating="4"/></rdf:RDF>"#,
             ),
             format!(
-                r#"<rdf:RDF xmlns:rdf="{rdf}" xmlns:xmp="{xmp}"><rdf:Description rdf:about="one"/><rdf:Description rdf:about="two" xmp:Rating="4"/></rdf:RDF>"#,
+                r#"<rdf:RDF xmlns:rdf="{RDF_NAMESPACE}" xmlns:xmp="{XMP_NAMESPACE}"><rdf:Description rdf:about="one"/><rdf:Description rdf:about="two" xmp:Rating="4"/></rdf:RDF>"#,
             ),
             format!(
-                r#"<rdf:RDF xmlns:rdf="{rdf}" xmlns:xmp="{xmp}" xmlns:n="urn:nested"><rdf:Description rdf:about=""><n:value><xmp:Rating>4</xmp:Rating></n:value></rdf:Description></rdf:RDF>"#,
+                r#"<rdf:RDF xmlns:rdf="{RDF_NAMESPACE}" xmlns:xmp="{XMP_NAMESPACE}" xmlns:n="urn:nested"><rdf:Description rdf:about=""><n:value><xmp:Rating>4</xmp:Rating></n:value></rdf:Description></rdf:RDF>"#,
             ),
             format!(
-                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/" xmlns:rdf="{rdf}"><rdf:Description rdf:about=""/></x:xmpmeta>"#,
+                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/" xmlns:rdf="{RDF_NAMESPACE}"><rdf:Description rdf:about=""/></x:xmpmeta>"#,
             ),
         ];
         for packet in invalid {

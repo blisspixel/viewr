@@ -498,9 +498,9 @@ function Get-Element {
     else {
         $null
     }
-    # AccessKit exposes egui modal content and its semantic Window marker as
-    # siblings under the application root. Constrain a modal-scoped query to the
-    # marker's screen bounds instead of pretending that UIA reports parentage.
+    # The modal dialog is the content container, exposed to UIA as a window.
+    # Its bounds cover the controls. Scope a modal query to that rectangle so
+    # a same-named control outside the dialog is not treated as part of it.
     $nodes = $applicationRoot.FindAll(
         [System.Windows.Automation.TreeScope]::Subtree,
         [System.Windows.Automation.Condition]::TrueCondition

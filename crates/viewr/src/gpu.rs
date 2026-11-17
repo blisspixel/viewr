@@ -141,6 +141,9 @@ impl Renderer {
                 power_preference: wgpu::PowerPreference::LowPower,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                // Limit buckets change reported device limits. Keep the
+                // adapter's own limits, which this viewer already requests.
+                apply_limit_buckets: false,
             })
             .await
             .map_err(|e| Error::Gpu(format!("request_adapter: {e}")))?;
@@ -181,6 +184,9 @@ impl Renderer {
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            // Auto keeps the historical sRGB framebuffer. It does not select
+            // wide-gamut or HDR output.
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&device, &config);
 
@@ -766,7 +772,7 @@ impl Renderer {
             self.ui_started.elapsed().as_secs_f64(),
         );
         self.append_accessibility_actions(&mut raw_input);
-        let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
+        let mut full_output = self.egui_ctx.run_ui(raw_input, |ui| {
             app_ui(ui);
         });
         let repaint_after = full_output
@@ -789,9 +795,14 @@ impl Renderer {
         let tris = self
             .egui_ctx
             .tessellate(full_output.shapes, full_output.pixels_per_point);
-        for (id, image_delta) in &full_output.textures_delta.set {
-            self.egui_renderer
-                .update_texture(&self.device, &self.queue, *id, image_delta);
+        // egui 0.37 debug-asserts if these updates are dropped while still
+        // queued. Draining them is the painter taking ownership, matching
+        // egui-wgpu: upload before the render passes, free after submit.
+        for (id, image_deltas) in full_output.textures_delta.set.drain() {
+            for image_delta in image_deltas {
+                self.egui_renderer
+                    .update_texture(&self.device, &self.queue, id, &image_delta);
+            }
         }
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
@@ -890,10 +901,13 @@ impl Renderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        // The texture view borrows the surface texture. Drop it before the
+        // queue takes ownership for presentation.
+        drop(view);
+        self.queue.present(frame);
 
-        for id in &full_output.textures_delta.free {
-            self.egui_renderer.free_texture(id);
+        for id in full_output.textures_delta.free.drain() {
+            self.egui_renderer.free_texture(&id);
         }
 
         let result = if suboptimal {

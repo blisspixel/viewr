@@ -67,6 +67,10 @@ pipeline instead of inheriting one.
   folder previews, Image Information panel, crop controls, and dialogs. Optional
   panels are fully hideable; tools and information independently dock left or
   right; every visible panel reserves image-viewport space instead of floating.
+  The 0.37 line keeps `default_fonts` explicit and enables
+  `monochrome_emoji_fonts`, so the page-step triangles still come from the
+  bundled icon font. Outline checks stay on skrifa 0.44 because epaint pins
+  that parser.
 - **AccessKit** nodes describe custom controls and crop state. A direct,
   default-feature-disabled `accesskit_winit` adapter delivers them to native
   assistive technology on all three targets. On Linux, cargo-deny confines the
@@ -120,7 +124,8 @@ area filter and fallible output allocation, while full decoded pixels remain
 available to export. Embedded RGB ICC profiles are normalized into sRGB before
 upload. Source pixels, the normalized working encoding, and the renderer-owned
 output transform are distinct contracts. The renderer currently accepts only
-RGBA8 sRGB working pixels and an sRGB presentation surface. Unmanaged
+RGBA8 sRGB working pixels and an sRGB presentation surface. On wgpu 30 that
+surface is `SurfaceColorSpace::Auto`, the historical sRGB default. Unmanaged
 Windows-legacy and real X11 convert those working pixels into the admitted
 display ICC at upload. That is a strong SDR baseline, not a completed
 wide-gamut or HDR pipeline; higher-precision working pixels remain in
@@ -268,12 +273,12 @@ meets the isolated-worker bar.
 | Need | Crate | Note |
 |---|---|---|
 | Windowing + input | `winit` | de-facto standard, minimal |
-| GPU rendering | `wgpu` | our own pipeline on top |
-| Text rendering | `egui` | immediate mode GUI overlay |
-| Accessibility | `accesskit` / `accesskit_winit` | semantic tree and native delivery on Windows/macOS/Linux; Linux local IPC is runtime confined |
+| GPU rendering | `wgpu` | our own pipeline on top; swapchain color space stays Auto (historical sRGB) on the wgpu 30 line |
+| Text rendering | `egui` | immediate-mode GUI overlay on 0.37, including the bundled icon font for the page-step triangles |
+| Accessibility | `accesskit` / `accesskit_winit` | semantic tree and native delivery on Windows/macOS/Linux; `accesskit_winit` 0.34 matches egui's accesskit 0.25; Linux local IPC is runtime confined |
 | Decode (common formats) | `image` | pure-Rust |
 | Decode JPEG XL | `jxl-oxide` | pure-Rust; reviewed local `jxl-color` and `jxl-render` patches enforce the 10 MiB ICC initialization ceiling and reject a malformed unused LF-frame level without panicking |
-| Input ICC conversion | `moxcms` | bounded pure-Rust RGB profile transform into the current sRGB path |
+| Input ICC conversion | `moxcms` | bounded pure-Rust RGB profile transform into the current sRGB path; stays 0.8.1 because image and jxl-oxide require that line |
 | Trash / recycle | `trash` | recoverable deletes |
 | OS theme | `winit` window theme | default image background only; no extra dependency |
 | File dialogs | `rfd` | native open, folder, save, and warning dialogs; OS-managed recent-item history is documented as a platform boundary |

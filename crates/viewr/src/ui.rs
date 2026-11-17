@@ -798,23 +798,29 @@ fn claim_initial_modal_focus(ctx: &egui::Context) -> bool {
     })
 }
 
-/// A centered modal whose area is a plain container.
+/// A centered modal.
 ///
-/// egui 0.37 gives `UiKind::Modal` the dialog role. The named modal dialog is
-/// the area response, marked by `mark_as_modal_dialog`. Leaving the area as a
-/// dialog would publish a second dialog with no name.
+/// egui 0.37 gives `UiKind::Modal` the dialog role on the area content, which
+/// is the node that owns the controls. The area response is only the move
+/// handle, so it stays unnamed.
 fn chrome_modal(id: impl core::hash::Hash + core::fmt::Debug) -> egui::Modal {
-    let mut modal = egui::Modal::new(egui::Id::unique(id));
-    modal.area = modal.area.role(egui::accesskit::Role::GenericContainer);
-    modal
+    egui::Modal::new(egui::Id::unique(id))
 }
 
-/// Assistive technology needs a modal dialog, which Windows announces as
-/// opened and which confines virtual navigation.
-fn mark_as_modal_dialog(response: &egui::Response) {
-    response.ctx.accesskit_node_builder(response.id, |node| {
+/// Name the content container as the one modal dialog.
+///
+/// The area response is `area_id.with("move")`. That handle is not focusable,
+/// so it has no AccessKit node while the content container is built and the
+/// controls attach to the container. Naming the handle leaves an empty dialog
+/// beside those controls, which a platform cannot enter.
+fn mark_as_modal_dialog(response: &egui::Response, label: &str) {
+    let content_id = response.parent_id();
+    response.ctx.accesskit_node_builder(content_id, |node| {
         node.set_role(egui::accesskit::Role::Dialog);
         node.set_modal();
+        if !label.is_empty() {
+            node.set_label(label);
+        }
     });
 }
 
@@ -2899,14 +2905,12 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
                 }
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Window,
-            true,
-            frame.text(tr!("About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.")),
-        )
-    });
-    mark_as_modal_dialog(&response.response);
+    mark_as_modal_dialog(
+        &response.response,
+        frame.text(tr!(
+            "About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing."
+        )),
+    );
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseAbout);
     }
@@ -2954,10 +2958,7 @@ fn render_keyboard_shortcuts(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fra
                 }
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(Role::Window, true, frame.text(tr!("Keyboard shortcuts")))
-    });
-    mark_as_modal_dialog(&response.response);
+    mark_as_modal_dialog(&response.response, frame.text(tr!("Keyboard shortcuts")));
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseKeyboardShortcuts);
     }
@@ -3149,14 +3150,12 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
                 });
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Window,
-            true,
-            frame.text(tr!("Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.")),
-        )
-    });
-    mark_as_modal_dialog(&response.response);
+    mark_as_modal_dialog(
+        &response.response,
+        frame.text(tr!(
+            "Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater."
+        )),
+    );
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseUpdate);
     }
@@ -3244,16 +3243,12 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
                 }
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Window,
-            true,
-            frame.text(tr!(
-                "Preferences. Default folder sort and opt-in default image viewer settings."
-            )),
-        )
-    });
-    mark_as_modal_dialog(&response.response);
+    mark_as_modal_dialog(
+        &response.response,
+        frame.text(tr!(
+            "Preferences. Default folder sort and opt-in default image viewer settings."
+        )),
+    );
     if close_clicked || response.should_close() {
         actions.push(UiAction::ClosePreferences);
     }
@@ -3357,14 +3352,12 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                 });
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Window,
-            true,
-            frame.text(tr!("Default image viewer. File associations change only after an explicit operating-system choice.")),
-        )
-    });
-    mark_as_modal_dialog(&response.response);
+    mark_as_modal_dialog(
+        &response.response,
+        frame.text(tr!(
+            "Default image viewer. File associations change only after an explicit operating-system choice."
+        )),
+    );
     if close_clicked || response.should_close() {
         actions.push(UiAction::CloseFileAssociations);
     }
@@ -3495,14 +3488,12 @@ fn render_save_overwrite_confirmation(
                 }
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Window,
-            true,
-            frame.text(tr!("Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.")),
-        )
-    });
-    mark_as_modal_dialog(&response.response);
+    mark_as_modal_dialog(
+        &response.response,
+        frame.text(tr!(
+            "Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it."
+        )),
+    );
     if confirm_clicked {
         actions.push(UiAction::ConfirmSaveOverwrite);
     } else if cancel_clicked || response.should_close() {
@@ -3575,20 +3566,14 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
                 }
             });
         });
-    response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Window,
-            true,
-            frame
-                .language
-                .fill(
-                    tr!("{title}. Ratings are written into this image file and may be visible to other apps."),
-                    &[("title", &title)],
-                )
-                .into_string(),
+    let disclosure = frame
+        .language
+        .fill(
+            tr!("{title}. Ratings are written into this image file and may be visible to other apps."),
+            &[("title", &title)],
         )
-    });
-    mark_as_modal_dialog(&response.response);
+        .into_string();
+    mark_as_modal_dialog(&response.response, &disclosure);
     if confirm_clicked {
         actions.push(UiAction::ConfirmRatingDisclosure);
     } else if cancel_clicked || response.should_close() {
@@ -10328,7 +10313,7 @@ mod tests {
         );
     }
 
-    fn accesskit_nodes(frame: &UiFrameOwned) -> Vec<egui::accesskit::Node> {
+    fn accesskit_update(frame: &UiFrameOwned) -> egui::accesskit::TreeUpdate {
         let context = egui::Context::default();
         context.enable_accesskit();
         let mut update = None;
@@ -10338,12 +10323,43 @@ mod tests {
             });
             update = output.platform_output.accesskit_update;
         }
-        update
-            .expect("AccessKit update")
+        update.expect("AccessKit update")
+    }
+
+    fn accesskit_nodes(frame: &UiFrameOwned) -> Vec<egui::accesskit::Node> {
+        accesskit_update(frame)
             .nodes
             .into_iter()
             .map(|(_, node)| node)
             .collect()
+    }
+
+    /// True when `label` is on a node under `root`, not on `root` itself.
+    fn descendant_exposes(
+        nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+        root: egui::accesskit::NodeId,
+        label: &str,
+    ) -> bool {
+        let mut pending = nodes
+            .iter()
+            .find(|(id, _)| *id == root)
+            .map(|(_, node)| node.children().to_vec())
+            .unwrap_or_default();
+        let mut seen = Vec::new();
+        while let Some(id) = pending.pop() {
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            let Some((_, node)) = nodes.iter().find(|(node_id, _)| *node_id == id) else {
+                continue;
+            };
+            if node.label() == Some(label) || node.value() == Some(label) {
+                return true;
+            }
+            pending.extend(node.children().iter().copied());
+        }
+        false
     }
 
     #[test]
@@ -10645,12 +10661,23 @@ mod tests {
         assert_eq!(scenarios.len(), 7);
         for (name, mut frame) in scenarios {
             frame.language = Language::English;
-            let nodes = accesskit_nodes(&frame);
+            let update = accesskit_update(&frame);
+            let dialogs: Vec<_> = update
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
+                .collect();
+            assert_eq!(dialogs.len(), 1, "{name} should expose one dialog");
+            let (dialog_id, dialog) = dialogs[0];
+            assert!(dialog.is_modal(), "{name} dialog is not modal");
             assert!(
-                nodes
-                    .iter()
-                    .any(|node| node.role() == egui::accesskit::Role::Dialog && node.is_modal()),
-                "{name} is not exposed as a modal dialog"
+                !dialog.children().is_empty(),
+                "{name} dialog has no controls"
+            );
+            assert!(
+                descendant_exposes(&update.nodes, *dialog_id, "Close")
+                    || descendant_exposes(&update.nodes, *dialog_id, "Cancel"),
+                "{name} dialog does not contain Close or Cancel"
             );
         }
 
@@ -10903,16 +10930,23 @@ mod tests {
             .platform_output
             .accesskit_update
             .expect("AccessKit update should be generated");
-        let dialog = update
+        let (dialog_id, dialog) = update
             .nodes
             .iter()
-            .map(|(_, node)| node)
-            .find(|node| {
+            .find(|(_, node)| {
                 node.role() == egui::accesskit::Role::Dialog
                     && node.label() == Some("Keyboard shortcuts")
             })
             .expect("shortcut panel dialog");
         assert!(dialog.is_modal());
+        assert!(
+            !dialog.children().is_empty(),
+            "the shortcut dialog should own its controls"
+        );
+        assert!(
+            descendant_exposes(&update.nodes, *dialog_id, "Close"),
+            "Close should be inside the shortcut dialog"
+        );
         assert_eq!(
             update
                 .nodes

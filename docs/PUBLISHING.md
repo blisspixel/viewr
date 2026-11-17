@@ -120,9 +120,11 @@ Four version states must not be conflated:
    currently v0.7.8. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.8`, the published missing-format, damaged WebP, TIFF, and ICO,
-   JPEG end-marker, command, stable folder order, AppleDouble, and
-   installer-script patch.
+   `0.7.8`, the same number as the published missing-format, damaged WebP,
+   TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble,
+   and installer-script patch. Ordinary commits since that tag keep this
+   number. Their behavior is Unreleased in the changelog and is not part of
+   the published archives.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by

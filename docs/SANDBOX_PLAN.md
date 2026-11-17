@@ -3,8 +3,11 @@
 ## The Problem
 Optional AVIF and HEIC support needs a mature C-backed decoder. Linking libheif
 directly into the main binary would violate the small trusted-core boundary.
-Camera RAW would require another large native stack and is explicitly deferred
-from 1.0 rather than weakening that boundary or overstating support.
+Camera RAW sensor data would require another large native stack and is
+explicitly deferred from 1.0 rather than weakening that boundary or
+overstating support. A DNG or Sony ARW embedded baseline JPEG is a labelled
+preview through the existing worker. That path does not decode the sensor
+image and does not enable the reserved `raw` feature.
 
 1. They bring in heavy build systems (`cmake`) and massive dependency trees.
 2. Parsing complex, untrusted images in C/C++ is historically the largest source of memory safety bugs (buffer overflows, RCEs).

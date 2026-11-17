@@ -11,10 +11,12 @@ standard XMP so other apps can read them, and send the rest to Trash with Undo.
 It is native Rust, with no account, no telemetry, and no application network
 client.
 
-Camera RAW is not in this version. The embedded-preview slices are
-[#224](https://github.com/blisspixel/viewr/issues/224),
-[#225](https://github.com/blisspixel/viewr/issues/225), and
-[#226](https://github.com/blisspixel/viewr/issues/226). The broader request is
+The published v0.7.8 preview does not open camera RAW. On main, a DNG
+or Sony ARW file shows its largest decodable embedded baseline JPEG
+and labels that size as a preview. The sensor image stays unread.
+A DNG or ARW with no such preview, and every other camera RAW type,
+still says that viewr does not open camera RAW files yet. Full sensor
+RAW remains
 [#185](https://github.com/blisspixel/viewr/issues/185).
 
 ## View, edit, cull
@@ -119,6 +121,10 @@ Existing source installs should follow the launcher's
 [identity migration steps](docs/INSTALL.md#linux-identity-migration).
 
 ## What it does
+
+The published v0.7.8 preview does the following. Behavior on main since
+that tag is named in Project status and the changelog. It is not in the
+archives above.
 
 - Opens JPEG, PNG, GIF, WebP, TIFF, SVG, JPEG XL, OpenEXR, and common bitmap
   formats, including bounded animation and multi-page image navigation.
@@ -247,6 +253,16 @@ JPEG end-marker rejection, version-command help, benchmark path errors, stable
 folder order, AppleDouble skipping, and the installer-script explanation to the
 focused viewer. The representative-hardware and screen-reader acceptance rows
 remain open; this patch does not complete the v0.8 release-readiness milestone.
+Behavior on main since that tag is under Unreleased in
+[CHANGELOG.md](CHANGELOG.md). It includes the labelled DNG and Sony ARW
+embedded preview, opening a folder on the first photo that can be shown,
+JPEG ratings that put the previous modification time back, the shortcut
+list from Help, `?`, and F1, and a rating message that leaves when the
+visible photo changes. The window and controls use wgpu 30 and egui 0.37.
+Pictures stay on the historical sRGB surface. Those changes are in this
+source tree. They are not in the v0.7.8 archives, and the install
+commands above stay on that tag.
+
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
 v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.7 remain
 published. `main` continues the logical order in the

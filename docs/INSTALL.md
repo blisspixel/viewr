@@ -151,6 +151,10 @@ cd viewr
 cargo build --release --workspace --locked
 ```
 
+A clone of the default branch includes behavior recorded as Unreleased in
+the changelog. That behavior is not in the v0.7.8 archives above. The
+workspace version stays 0.7.8 until release preparation.
+
 The binaries are written to `target/release`. Keep the main executable and worker
 from the same build together. On Linux, the build also needs the normal Wayland/X11
 development packages listed in `.github/workflows/ci.yml`.

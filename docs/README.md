@@ -91,8 +91,9 @@ Start with the document that matches the task.
   the repeatable pre-1.0 tag procedure, verification, and the
   stronger 1.0 trust gate.
 - [Security policy](../SECURITY.md): supported versions and private reporting.
-- [Changelog](../CHANGELOG.md): user-visible changes by release.
+- [Changelog](../CHANGELOG.md): user-visible changes. Unreleased is the
+  current source tree. A version heading is a published tag.
 
-The project overview remains in [README.md](../README.md). These documents describe
-the current implementation unless a section is explicitly labeled as proposed or
-deferred.
+The project overview remains in [README.md](../README.md). Guides describe
+the current source tree unless a section is explicitly labeled as proposed,
+deferred, or a published preview. Release notes describe the tagged archive.

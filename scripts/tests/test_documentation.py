@@ -585,7 +585,7 @@ class DocumentationTests(unittest.TestCase):
         assert channel is not None
         self.assertIn(f"pinned Rust toolchain, {channel.group(1)},", install)
 
-        for package, documented in (("winit", "0.30.13"), ("wgpu-hal", "29.0.4")):
+        for package, documented in (("winit", "0.30.13"), ("wgpu-hal", "30.0.2")):
             version = self.package_version(lock, package)
             self.assertEqual(version, documented)
             self.assertIn(f"{package} {version}", install)

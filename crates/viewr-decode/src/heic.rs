@@ -317,10 +317,10 @@ type CancelDecoding = Option<unsafe extern "C" fn(*mut c_void) -> i32>;
 
 // libheif's public decoding-options ABI is append-only. Version 8 added an
 // output NCLX pointer, but the distro-floor Rust bindings intentionally expose
-// only the version-5 prefix. This mirror lets a binary built against the floor
-// request source-profile preservation when it runs with libheif 1.21 or newer.
-// The latest-libheif CI configuration verifies the field offset against the
-// current generated binding.
+// only the version-5 prefix. This mirror reads that version. Source-profile
+// passthrough is the version-10 field. libheif 1.21 reports version 8, so it
+// does not receive that field. The latest-libheif CI configuration verifies
+// the field offset against the current generated binding.
 #[repr(C)]
 struct DecodingOptionsV8 {
     version: u8,

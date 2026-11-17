@@ -3349,10 +3349,16 @@ const MESSAGES: &[Message] = &[
         german: "Das Durchsuchen des Ordners ist nicht verfügbar. Nur diese Datei wird angezeigt. Verwenden Sie Ordner öffnen, um den Rest zu durchsuchen.",
     },
     Message {
-        english: "The selected image is no longer available. Opening the first image in the folder.",
-        spanish: "La imagen seleccionada ya no está disponible. Se abre la primera imagen de la carpeta.",
-        french: "L’image sélectionnée n’est plus disponible. Ouverture de la première image du dossier.",
-        german: "Das ausgewählte Bild ist nicht mehr verfügbar. Das erste Bild im Ordner wird geöffnet.",
+        english: "The selected image is no longer available. Opening the first photo viewr can show.",
+        spanish: "La imagen seleccionada ya no está disponible. Se abre la primera foto que viewr puede mostrar.",
+        french: "L’image sélectionnée n’est plus disponible. Ouverture de la première photo que viewr peut afficher.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar. Das erste Foto, das viewr zeigen kann, wird geöffnet.",
+    },
+    Message {
+        english: "The selected image is no longer available. The other photos cannot be shown yet.",
+        spanish: "La imagen seleccionada ya no está disponible. Las demás fotos todavía no se pueden mostrar.",
+        french: "L’image sélectionnée n’est plus disponible. Les autres photos ne peuvent pas encore être affichées.",
+        german: "Das ausgewählte Bild ist nicht mehr verfügbar. Die anderen Fotos können noch nicht angezeigt werden.",
     },
     Message {
         english: "The selected image is no longer available, and the folder contains no other supported images.",
@@ -3461,6 +3467,12 @@ const MESSAGES: &[Message] = &[
         spanish: "viewr todavía no abre archivos RAW de cámara.",
         french: "viewr n’ouvre pas encore les fichiers RAW d’appareil photo.",
         german: "viewr öffnet Kamera-RAW-Dateien noch nicht.",
+    },
+    Message {
+        english: "Right for the next photo.",
+        spanish: "Derecha para la siguiente foto.",
+        french: "Droite pour la photo suivante.",
+        german: "Rechts für das nächste Foto.",
     },
     Message {
         english: "This format needs the viewr-decode helper. Run viewr doctor.",
@@ -4213,7 +4225,10 @@ mod tests {
     /// rather than a `tr!` literal, so the build cannot check it.
     #[test]
     fn toast_sources_passed_by_value_are_cataloged() {
-        use crate::entry_state::{FolderScanDisposition as Scan, folder_scan_user_message};
+        use crate::entry_state::{
+            FolderScanDisposition as Scan, folder_scan_user_message,
+            missing_selection_recovery_message,
+        };
         let folder_scan = [
             Scan::Discard,
             Scan::InstallScanAt(0),
@@ -4231,6 +4246,9 @@ mod tests {
         ]
         .into_iter()
         .filter_map(folder_scan_user_message);
+        let recovery = [true, false]
+            .into_iter()
+            .map(missing_selection_recovery_message);
         let constants = [
             crate::session::MISSING_IMAGE_STATUS,
             crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS,
@@ -4243,7 +4261,7 @@ mod tests {
             save_failure_message(),
         ];
         let mut checked = 0;
-        for source in folder_scan.chain(constants) {
+        for source in folder_scan.chain(recovery).chain(constants) {
             assert!(is_cataloged(source), "uncataloged toast source: {source}");
             for language in [Language::Spanish, Language::French, Language::German] {
                 assert_ne!(
@@ -4254,7 +4272,7 @@ mod tests {
             }
             checked += 1;
         }
-        assert_eq!(checked, 18);
+        assert_eq!(checked, 19);
     }
 
     #[test]

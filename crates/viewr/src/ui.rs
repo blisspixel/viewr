@@ -902,7 +902,11 @@ fn render_background(
     }
 
     if !frame.dock.has_image {
-        render_empty_state(ui, actions, frame, chrome);
+        if show_catalog_open_notice(frame) {
+            render_catalog_open_notice(ui, actions, frame, chrome);
+        } else {
+            render_empty_state(ui, actions, frame, chrome);
+        }
         if frame.dock.immersive
             && let Some(toast) = &frame.toast
         {
@@ -3662,6 +3666,116 @@ fn render_filtered_empty_state(
                     true,
                     frame.text(tr!("No images match rating filter")),
                 )
+            });
+        });
+}
+
+/// A folder is open, the selected file failed, and that open is no longer running.
+fn show_catalog_open_notice(frame: &UiFrameOwned) -> bool {
+    frame.playlist_pos.is_some()
+        && !frame.dock.has_image
+        && frame.load_error.is_some()
+        && !frame.is_opening
+        && !frame.folder_scan_busy
+}
+
+/// Right reaches a later photo in the same position the top bar is showing.
+fn later_photo_in_active_view(frame: &UiFrameOwned) -> bool {
+    let position = match frame.rating.filter {
+        crate::ratings::RatingFilter::All => frame.playlist_pos,
+        crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
+    };
+    position.is_some_and(|(index, total)| index < total)
+}
+
+/// Compact failure for one file inside an already open folder.
+///
+/// Open File, Open Folder, and Paste Path stay on the startup card. This notice
+/// does not take keyboard focus, so Right still browses the folder.
+fn render_catalog_open_notice(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) {
+    let copy = crate::shortcuts::empty_state_copy(
+        frame.language,
+        false,
+        frame.load_error.as_deref(),
+        frame.load_retry_allowed,
+        frame.selected_file_name.as_deref(),
+    );
+    let colors = chrome_colors(ui);
+    let screen = ui.ctx().content_rect();
+    let card_width = (screen.width() - 40.0).clamp(280.0, 420.0);
+    let card_position = Pos2::new(
+        screen.center().x - card_width * 0.5,
+        screen.center().y - 72.0,
+    );
+    Area::new("catalog_open_notice".into())
+        .fixed_pos(card_position)
+        .constrain_to(screen)
+        .movable(false)
+        .fade_in(false)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            ui.set_width(card_width);
+            let card = Frame::new()
+                .fill(colors.panel)
+                .corner_radius(CornerRadius::same(12))
+                .stroke(Stroke::new(1.0, colors.border))
+                .inner_margin(egui::Margin::symmetric(24, 20))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        let (icon_rect, _) =
+                            ui.allocate_exact_size(Vec2::splat(36.0), Sense::hover());
+                        paint_failed_image_icon(ui.painter(), icon_rect, colors);
+                        ui.add_space(10.0);
+                        let heading = ui.add(
+                            egui::Label::new(
+                                RichText::new(&copy.heading)
+                                    .size(18.0)
+                                    .color(colors.text)
+                                    .strong(),
+                            )
+                            .truncate()
+                            .show_tooltip_when_elided(true),
+                        );
+                        mark_as_polite_status(&heading);
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(&copy.description)
+                                .size(13.0)
+                                .color(colors.muted),
+                        );
+                        if later_photo_in_active_view(frame) {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new(frame.text(tr!("Right for the next photo.")))
+                                    .size(13.0)
+                                    .color(colors.text),
+                            );
+                        }
+                        if copy.show_retry {
+                            ui.add_space(12.0);
+                            ui.add_enabled_ui(
+                                chrome.is_enabled(ChromeControl::OpenSource)
+                                    && chrome.is_enabled(ChromeControl::RetryLoad),
+                                |ui| {
+                                    add_empty_retry_button(
+                                        ui,
+                                        actions,
+                                        frame.language,
+                                        frame.selected_file_name.as_deref(),
+                                        colors,
+                                    );
+                                },
+                            );
+                        }
+                    });
+                });
+            card.response.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Panel, true, copy.heading.as_str())
             });
         });
 }
@@ -8821,6 +8935,235 @@ mod tests {
         );
     }
 
+    fn folder_failure_frame(position: (usize, usize), allow_retry: bool) -> UiFrameOwned {
+        let mut frame = accessibility_test_frame();
+        frame.dock.has_image = false;
+        frame.playlist_pos = Some(position);
+        frame.selected_file_name = Some("DSC_0001.ARW".to_owned());
+        frame.file_path = Some("C:/photos/DSC_0001.ARW".to_owned());
+        frame.load_error = Some("viewr does not open camera RAW files yet.".to_owned());
+        frame.load_retry_allowed = allow_retry;
+        frame.filmstrip.clear();
+        frame
+    }
+
+    fn accesskit_tree_in(
+        frame: &UiFrameOwned,
+        size: egui::Vec2,
+    ) -> (egui::accesskit::TreeUpdate, egui::Rect) {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        let mut input = accessibility_input();
+        input.screen_rect = Some(screen);
+        let output = context.run_ui(input, |ui| {
+            let _ = render(ui, frame);
+        });
+        (
+            output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update"),
+            screen,
+        )
+    }
+
+    #[test]
+    fn folder_failure_keeps_position_and_skips_first_run_actions() {
+        let raw_sentence = "viewr does not open camera RAW files yet.";
+        let heading = "Could not open DSC_0001.ARW";
+        let next_photo = "Right for the next photo.";
+        let minimum = egui::Vec2::new(640.0, 480.0);
+        let (update, screen) = accesskit_tree_in(&folder_failure_frame((2, 43), false), minimum);
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        let labels = nodes
+            .iter()
+            .filter_map(|node| node.label())
+            .collect::<Vec<_>>();
+        let values = nodes
+            .iter()
+            .filter_map(|node| node.value())
+            .collect::<Vec<_>>();
+
+        assert!(
+            values.contains(&"2 / 43"),
+            "folder position left the window: {values:?}"
+        );
+        assert!(
+            nodes.iter().any(|node| {
+                node.role() == egui::accesskit::Role::Label
+                    && node.value() == Some(heading)
+                    && node.live() == Some(egui::accesskit::Live::Polite)
+            }),
+            "failure heading was not a polite status: {values:?}"
+        );
+        assert!(
+            values.contains(&raw_sentence),
+            "missing RAW sentence: {values:?}"
+        );
+        assert!(
+            values.contains(&next_photo),
+            "a later photo did not name Right: {values:?}"
+        );
+        for absent in ["Open File", "Open Folder", "Paste Path"] {
+            assert!(
+                !labels.contains(&absent),
+                "{absent} returned on the folder notice: {labels:?}"
+            );
+        }
+        assert!(
+            labels.iter().all(|label| !label.contains("Retry")),
+            "a deferred RAW file offered Retry: {labels:?}"
+        );
+        assert!(
+            values.iter().all(|value| *value != LOCAL_PRIVACY_SUMMARY),
+            "the folder notice repeated the startup privacy line"
+        );
+        let card = nodes
+            .iter()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Pane && node.label() == Some(heading)
+            })
+            .expect("folder notice card");
+        let card_bounds = card.bounds().expect("folder notice bounds");
+        assert!(
+            card_bounds.x0 >= f64::from(screen.left())
+                && card_bounds.x1 <= f64::from(screen.right())
+                && card_bounds.y0 >= f64::from(screen.top())
+                && card_bounds.y1 <= f64::from(screen.bottom()),
+            "folder notice escaped the minimum window: {card_bounds:?}"
+        );
+        for (name, text) in [
+            ("heading", heading),
+            ("sentence", raw_sentence),
+            ("next photo", next_photo),
+        ] {
+            let node = nodes
+                .iter()
+                .find(|node| {
+                    node.role() == egui::accesskit::Role::Label && node.value() == Some(text)
+                })
+                .unwrap_or_else(|| panic!("missing {name}"));
+            assert_accesskit_node_within(name, node, card);
+        }
+        let focused = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .map(|(_, node)| node.label().unwrap_or(""));
+        assert!(
+            focused.is_none_or(|label| {
+                !label.contains("Open File")
+                    && !label.contains("Open Folder")
+                    && !label.contains("Paste")
+                    && !label.contains("Retry")
+            }),
+            "folder notice took keyboard focus: {focused:?}"
+        );
+    }
+
+    #[test]
+    fn folder_failure_names_right_only_when_a_later_photo_exists() {
+        let raw_sentence = "viewr does not open camera RAW files yet.";
+        let next_photo = "Right for the next photo.";
+        let minimum = egui::Vec2::new(640.0, 480.0);
+        let values = |frame: &UiFrameOwned| {
+            accesskit_tree_in(frame, minimum)
+                .0
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| node.value().map(str::to_owned))
+                .collect::<Vec<_>>()
+        };
+
+        let sole = values(&folder_failure_frame((1, 1), false));
+        assert!(
+            sole.iter().any(|value| value == raw_sentence),
+            "a one-file folder hid the failure: {sole:?}"
+        );
+        assert!(
+            sole.iter().all(|value| value != next_photo),
+            "a one-file folder promised another photo: {sole:?}"
+        );
+
+        let last = values(&folder_failure_frame((43, 43), false));
+        assert!(
+            last.iter().all(|value| value != next_photo),
+            "the last photo promised a later one: {last:?}"
+        );
+
+        let mut filtered = folder_failure_frame((43, 43), false);
+        filtered.rating.filter = crate::ratings::RatingFilter::AtLeast(
+            crate::ratings::Rating::new(4).expect("valid test rating"),
+        );
+        filtered.rating.visible_position = Some((1, 3));
+        let filtered_values = values(&filtered);
+        assert!(
+            filtered_values.iter().any(|value| value == next_photo),
+            "a later filtered photo did not name Right: {filtered_values:?}"
+        );
+    }
+
+    #[test]
+    fn folder_failure_offers_retry_without_startup_actions() {
+        let minimum = egui::Vec2::new(640.0, 480.0);
+        let retry = accesskit_tree_in(&folder_failure_frame((2, 43), true), minimum).0;
+        let labels = retry
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        assert!(
+            labels.contains(&"Retry opening DSC_0001.ARW"),
+            "a retryable folder failure hid Retry: {labels:?}"
+        );
+        for absent in ["Open File", "Open Folder", "Paste Path"] {
+            assert!(
+                !labels.contains(&absent),
+                "{absent} returned beside Retry: {labels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn opening_and_folderless_failure_keep_their_existing_cards() {
+        let next_photo = "Right for the next photo.";
+        let minimum = egui::Vec2::new(640.0, 480.0);
+        let mut opening = folder_failure_frame((2, 43), false);
+        opening.is_opening = true;
+        let opening_tree = accesskit_tree_in(&opening, minimum).0;
+        let opening_values = opening_tree
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value())
+            .collect::<Vec<_>>();
+        assert!(
+            opening_values.contains(&"Opening DSC_0001.ARW"),
+            "an in-progress open left the startup card: {opening_values:?}"
+        );
+        assert!(
+            opening_values.iter().all(|value| *value != next_photo),
+            "an in-progress open promised the next photo: {opening_values:?}"
+        );
+
+        let mut startup = folder_failure_frame((1, 1), false);
+        startup.playlist_pos = None;
+        let startup_tree = accesskit_tree_in(&startup, minimum).0;
+        let startup_labels = startup_tree
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect::<Vec<_>>();
+        assert!(
+            startup_labels.contains(&"Open File"),
+            "a failed file with no folder lost the startup card: {startup_labels:?}"
+        );
+    }
+
     fn empty_state_pane_label(frame: &UiFrameOwned) -> String {
         if frame.folder_scan_busy {
             return frame
@@ -9076,7 +9419,7 @@ mod tests {
     }
 
     const MISSING_NOTICE: &str =
-        "The selected image is no longer available. Opening the first image in the folder.";
+        "The selected image is no longer available. Opening the first photo viewr can show.";
 
     /// Render twice so a changed appearance has applied its fonts, then return
     /// the second frame's tree, the notice's painted galley, and the
@@ -9209,14 +9552,21 @@ mod tests {
                 let mut frame = page_frame(true, true);
                 frame.language = language;
                 frame.theme_mode = mode;
-                frame.toast = Some(visual_toast(language.text(tr!(
-                    "The selected image is no longer available. Opening the first image in the folder."
-                ))));
-                let (_, galley, _) = strip_with_notice(&frame, 1_600.0);
-                assert!(
-                    !galley.elided,
-                    "{language:?} {mode:?}: clipped recovery copy"
-                );
+                for sentence in [
+                    tr!(
+                        "The selected image is no longer available. Opening the first photo viewr can show."
+                    ),
+                    tr!(
+                        "The selected image is no longer available. The other photos cannot be shown yet."
+                    ),
+                ] {
+                    frame.toast = Some(visual_toast(language.text(sentence)));
+                    let (_, galley, _) = strip_with_notice(&frame, 1_600.0);
+                    assert!(
+                        !galley.elided,
+                        "{language:?} {mode:?}: clipped recovery copy: {sentence}"
+                    );
+                }
             }
         }
     }
@@ -9685,6 +10035,49 @@ mod tests {
         offenders
     }
 
+    fn pseudo_page_frame(frame: &mut UiFrameOwned) {
+        frame.dock.show_tools = true;
+        frame.dock.show_filmstrip = true;
+        frame.dock.show_image_info = true;
+        frame.decode_proof = Some(crate::decode::DecodeProof {
+            duration: std::time::Duration::from_micros(6_940),
+            route: crate::decode::DecodeRoute::InProcess,
+        });
+        let position = Language::Pseudo
+            .fill(
+                tr!("Page {index} of {count}"),
+                &[("index", "2"), ("count", "3")],
+            )
+            .into_string();
+        frame.pages = Some(PageUiInfo {
+            index: 1,
+            count: 3,
+            noun: "Page",
+            can_previous: true,
+            can_next: true,
+            accessibility_label: Language::Pseudo
+                .fill(
+                    tr!("{position}, {width} by {height}"),
+                    &[("position", &position), ("width", "800"), ("height", "600")],
+                )
+                .into_string(),
+            visible_label: position,
+        });
+    }
+
+    fn pseudo_folder_open_failure(frame: &mut UiFrameOwned) {
+        frame.dock.has_image = false;
+        frame.load_retry_allowed = false;
+        frame.selected_file_name = Some("DSC_0001.ARW".to_owned());
+        frame.playlist_pos = Some((2, 43));
+        frame.load_error = Some(
+            frame
+                .language
+                .text(tr!("viewr does not open camera RAW files yet."))
+                .to_owned(),
+        );
+    }
+
     /// Every interface state the pseudo-language test renders, by name.
     fn pseudo_language_scenarios() -> Vec<(&'static str, UiFrameOwned)> {
         fn variant(mutate: impl FnOnce(&mut UiFrameOwned)) -> UiFrameOwned {
@@ -9701,38 +10094,7 @@ mod tests {
         let at_least_four =
             crate::ratings::RatingFilter::AtLeast(crate::ratings::Rating::new(4).expect("rating"));
         vec![
-            (
-                "image with panels",
-                variant(|frame| {
-                    frame.dock.show_tools = true;
-                    frame.dock.show_filmstrip = true;
-                    frame.dock.show_image_info = true;
-                    frame.decode_proof = Some(crate::decode::DecodeProof {
-                        duration: std::time::Duration::from_micros(6_940),
-                        route: crate::decode::DecodeRoute::InProcess,
-                    });
-                    let position = Language::Pseudo
-                        .fill(
-                            tr!("Page {index} of {count}"),
-                            &[("index", "2"), ("count", "3")],
-                        )
-                        .into_string();
-                    frame.pages = Some(PageUiInfo {
-                        index: 1,
-                        count: 3,
-                        noun: "Page",
-                        can_previous: true,
-                        can_next: true,
-                        accessibility_label: Language::Pseudo
-                            .fill(
-                                tr!("{position}, {width} by {height}"),
-                                &[("position", &position), ("width", "800"), ("height", "600")],
-                            )
-                            .into_string(),
-                        visible_label: position,
-                    });
-                }),
-            ),
+            ("image with panels", variant(pseudo_page_frame)),
             ("empty state", variant(without_image)),
             ("about", variant(|frame| frame.show_about = true)),
             ("update", variant(|frame| frame.show_update = true)),
@@ -9786,6 +10148,7 @@ mod tests {
                 "load failure",
                 variant(|frame| frame.load_error = Some("truncated".to_owned())),
             ),
+            ("folder open failure", variant(pseudo_folder_open_failure)),
         ]
     }
 

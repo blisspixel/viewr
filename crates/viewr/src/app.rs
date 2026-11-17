@@ -60,8 +60,9 @@ use crate::entry_state::{
     CatalogSpelling, FolderScanDisposition, FolderScanSuccess, PathEntry,
     catalog_path_set_contains, catalog_spelling, committed_scan_entry_is_admissible,
     folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
-    folder_scan_user_message, path_entry, removal_names_path, selected_file_index_by,
-    selected_scan_is_current, sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
+    folder_scan_user_message, missing_selection_recovery_message, path_entry, removal_names_path,
+    selected_file_index_by, selected_scan_is_current, sibling_scan_still_applies,
+    unmatched_sibling_scan_adopts_catalog,
 };
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -88,7 +89,7 @@ use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
     decode_failure_toast, durable_presentation_error, explain_open_failure,
     external_edit_pending_after_frame_transition, failure_notice, image_open_in_progress,
-    navigation_image_plan, preview_job_matches,
+    keep_folder_notice_over_open_failure, navigation_image_plan, preview_job_matches,
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
@@ -2235,9 +2236,22 @@ impl App {
                     self.invalidate_displayed_image();
                     return true;
                 }
-                let first = entries[0].path().to_owned();
-                self.replace_playlist_from_scan(entries, 0);
-                self.begin_image_load(first, false);
+                let index = crate::playlist::initial_folder_index(
+                    entries.iter().map(crate::fs::ScannedImage::path),
+                );
+                let selected = entries[index].path().to_owned();
+                if matches!(
+                    disposition,
+                    FolderScanDisposition::InstallScanFirstAfterSelectedMissing
+                ) {
+                    self.show_notice_until_navigation(self.language.localize(
+                        missing_selection_recovery_message(!crate::fs::is_deferred_camera_raw(
+                            &selected,
+                        )),
+                    ));
+                }
+                self.replace_playlist_from_scan(entries, index);
+                self.begin_image_load(selected, false);
                 self.kick_prefetch();
             }
             (
@@ -7234,7 +7248,11 @@ impl App {
                             failure.detail.clone(),
                             failure.allows_retry(),
                         );
-                        if self.current_image.is_some() {
+                        let folder_notice =
+                            self.toast.message().is_some() && self.toast.deadline().is_none();
+                        if self.current_image.is_some()
+                            && !keep_folder_notice_over_open_failure(failure.cause, folder_notice)
+                        {
                             self.show_toast(decode_failure_toast(self.language, &error, true));
                         }
                         self.request_redraw();
@@ -10020,7 +10038,7 @@ mod test {
         let mut toast = StatusToast::default();
         toast.show("Rating saved", ToastAnnouncement::PoliteStatus, start);
         toast.show_until_navigation(
-            "The selected image is no longer available. Opening the first image in the folder.",
+            "The selected image is no longer available. Opening the first photo viewr can show.",
         );
         assert_eq!(toast.deadline(), None);
         assert_eq!(
@@ -10033,7 +10051,7 @@ mod test {
         assert_eq!(
             toast.message(),
             Some(
-                "The selected image is no longer available. Opening the first image in the folder."
+                "The selected image is no longer available. Opening the first photo viewr can show."
             )
         );
 

@@ -2015,6 +2015,25 @@ pub fn is_core_format(path: &Path) -> bool {
     matches!(extension_kind(path), Some(ExtensionKind::Core))
 }
 
+/// Camera RAW extensions that stay in a folder but do not open through 1.0.
+const DEFERRED_RAW_EXTENSIONS: &[&str] = &["cr2", "nef", "arw", "dng", "rw2", "orf", "raf"];
+
+/// Return `true` when the file is a deferred camera RAW photo.
+///
+/// These names stay in the folder so navigation can land on them. Opening a
+/// folder does not start on one when a showable photo is also present.
+#[must_use]
+pub fn is_deferred_camera_raw(path: &Path) -> bool {
+    if is_apple_double_sidecar(path) {
+        return false;
+    }
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let extension = extension.to_ascii_lowercase();
+    DEFERRED_RAW_EXTENSIONS.contains(&extension.as_str())
+}
+
 /// Return whether a pathname is definitely absent without treating other
 /// metadata failures or an unsupported entry kind as deletion.
 #[must_use]
@@ -2462,15 +2481,15 @@ mod tests {
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, FolderSort, canonical_file_path,
         catalog_paths_match, error_kind_is_definitely_missing, folder_entry_cmp, is_core_format,
-        is_supported_image, is_worker_format, natural_cmp, scan_image_entries_sorted_while,
-        scan_image_entries_while, scan_images, scan_images_while, scan_images_with_limit,
-        sort_while, supported_extensions,
+        is_deferred_camera_raw, is_supported_image, is_worker_format, natural_cmp,
+        scan_image_entries_sorted_while, scan_image_entries_while, scan_images, scan_images_while,
+        scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
     use std::fs;
     use std::io::{self, Read, Seek, SeekFrom, Write};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Barrier};
 
     #[test]
@@ -2490,6 +2509,22 @@ mod tests {
         assert!(is_worker_format(Path::new("shot.avif")));
         assert!(!is_core_format(Path::new("shot.avif")));
         assert!(!is_worker_format(Path::new("a.png")));
+    }
+
+    #[test]
+    fn deferred_camera_raw_stays_browsable_and_is_not_a_starting_photo() {
+        for extension in ["cr2", "nef", "arw", "dng", "rw2", "orf", "raf"] {
+            let path = PathBuf::from(format!("shot.{extension}"));
+            assert!(is_supported_image(&path), "{extension}");
+            assert!(is_worker_format(&path), "{extension}");
+            assert!(is_deferred_camera_raw(&path), "{extension}");
+            assert!(!is_core_format(&path), "{extension}");
+            let upper = PathBuf::from(format!("shot.{}", extension.to_ascii_uppercase()));
+            assert!(is_deferred_camera_raw(&upper), "{extension}");
+        }
+        assert!(!is_deferred_camera_raw(Path::new("shot.avif")));
+        assert!(!is_deferred_camera_raw(Path::new("shot.jpg")));
+        assert!(!is_deferred_camera_raw(Path::new("album/._shot.ARW")));
     }
 
     #[test]

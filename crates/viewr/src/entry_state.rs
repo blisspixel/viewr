@@ -66,7 +66,7 @@ pub(crate) enum FolderScanFailure {
 pub(crate) enum PathEntry {
     /// Present this file and browse the folder that contains it.
     Image,
-    /// Browse this folder and present its first image in the session sort.
+    /// Browse this folder and present the first photo viewr can show in the session sort.
     Folder,
 }
 
@@ -74,9 +74,9 @@ pub(crate) enum PathEntry {
 ///
 /// The command line, a desktop Open With, a drop on the window, and the macOS
 /// open-file event all deliver a bare path, and `viewr help` documents that a
-/// folder opens its most recently modified image first. A directory therefore starts
-/// the same browse the Open Folder button starts, rather than reaching a
-/// decoder that can only report that the source is not a regular file.
+/// folder opens the most recently modified photo viewr can show. A directory
+/// therefore starts the same browse the Open Folder button starts, rather than
+/// reaching a decoder that can only report that the source is not a regular file.
 ///
 /// A path that does not exist stays an image request. The decode error then
 /// names the missing file, which is the honest report; treating it as a folder
@@ -358,9 +358,6 @@ pub(crate) const fn folder_scan_user_message(
         FolderScanDisposition::InstallSelectedOnlyScanFailed => Some(
             "Folder browsing is unavailable. Browsing only this file. Use Open Folder to browse the rest.",
         ),
-        FolderScanDisposition::InstallScanFirstAfterSelectedMissing => Some(
-            "The selected image is no longer available. Opening the first image in the folder.",
-        ),
         FolderScanDisposition::SelectedMissing => Some(
             "The selected image is no longer available, and the folder contains no other supported images.",
         ),
@@ -382,7 +379,20 @@ pub(crate) const fn folder_scan_user_message(
         FolderScanDisposition::Discard
         | FolderScanDisposition::InstallScanAt(_)
         | FolderScanDisposition::InstallSelectedOnly
+        | FolderScanDisposition::InstallScanFirstAfterSelectedMissing
         | FolderScanDisposition::OpenFolderFirst => None,
+    }
+}
+
+/// Recovery copy after the selected file disappeared and another catalog entry remains.
+///
+/// `showable` means that replacement is not a deferred camera RAW photo.
+#[must_use]
+pub(crate) const fn missing_selection_recovery_message(showable: bool) -> &'static str {
+    if showable {
+        "The selected image is no longer available. Opening the first photo viewr can show."
+    } else {
+        "The selected image is no longer available. The other photos cannot be shown yet."
     }
 }
 
@@ -737,9 +747,15 @@ mod tests {
         );
         assert_eq!(
             folder_scan_user_message(FolderScanDisposition::InstallScanFirstAfterSelectedMissing),
-            Some(
-                "The selected image is no longer available. Opening the first image in the folder."
-            )
+            None
+        );
+        assert_eq!(
+            missing_selection_recovery_message(true),
+            "The selected image is no longer available. Opening the first photo viewr can show."
+        );
+        assert_eq!(
+            missing_selection_recovery_message(false),
+            "The selected image is no longer available. The other photos cannot be shown yet."
         );
         for message in [
             folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyScanFailed),

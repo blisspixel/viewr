@@ -374,6 +374,17 @@ pub(super) fn decode_failure_toast(
     )
 }
 
+/// A folder-scan notice already explains an unshowable replacement.
+///
+/// The timed RAW toast would erase that notice while the last frame is still up.
+#[must_use]
+pub(crate) const fn keep_folder_notice_over_open_failure(
+    cause: OpenFailureCause,
+    folder_notice_visible: bool,
+) -> bool {
+    folder_notice_visible && matches!(cause, OpenFailureCause::RawDeferred)
+}
+
 pub(super) fn preview_job_matches(
     job_generation: u64,
     job_path: &Path,
@@ -394,8 +405,8 @@ mod tests {
         ImageReuseEligibility, NavigationImagePlan, OpenFailureCause, PresentationKind,
         PresentedFrameTransition, decode_failure_toast, durable_presentation_error,
         explain_open_failure, external_edit_pending_after_frame_transition, failure_notice,
-        image_open_in_progress, navigation_image_plan, preview_job_matches,
-        user_facing_decode_error,
+        image_open_in_progress, keep_folder_notice_over_open_failure, navigation_image_plan,
+        preview_job_matches, user_facing_decode_error,
     };
     use crate::locale::Language;
     use std::path::Path;
@@ -537,6 +548,26 @@ mod tests {
             durable_presentation_error(PresentationKind::Cropped, message),
             None
         );
+    }
+
+    #[test]
+    fn deferred_raw_failure_keeps_a_visible_folder_notice() {
+        assert!(keep_folder_notice_over_open_failure(
+            OpenFailureCause::RawDeferred,
+            true
+        ));
+        assert!(!keep_folder_notice_over_open_failure(
+            OpenFailureCause::RawDeferred,
+            false
+        ));
+        assert!(!keep_folder_notice_over_open_failure(
+            OpenFailureCause::Damaged,
+            true
+        ));
+        assert!(!keep_folder_notice_over_open_failure(
+            OpenFailureCause::Unsupported,
+            true
+        ));
     }
 
     #[test]

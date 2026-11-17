@@ -158,8 +158,9 @@ Shipped:
   feeds one immutable frame snapshot to the UI. Every path that arrives from
   outside the window, whether from the command line, a drop, a desktop Open
   With, or the macOS open-file event, is classified once by `entry_state`: a
-  folder starts the same browse the Open Folder button starts, and everything
-  else is presented as a file so a missing path still names itself.
+  folder starts the same browse the Open Folder button starts and selects the
+  first photo viewr can show, and everything else is presented as a file so a
+  missing path still names itself.
 - **`job`**: the bounded, one-result ownership boundary used by current-image
   details, animation discovery, rating observation, folder scans, Save As, crop,
   over-limit display previews, each active filmstrip thumbnail, and each

@@ -57,10 +57,11 @@ of by review:
   a toast fails to compile. `fill` substitutes each `{name}` once, never
   rescans an inserted value, and leaves an unknown placeholder visible.
 - `ui::every_rendered_text_and_accessible_name_comes_from_the_catalog` renders
-  the main view, empty state, every dialog, the filtered empty state, Spot
-  Heal, crop, and a load failure in a test-only pseudo language that brackets
-  every cataloged string. Any visible text or accessible name without the
-  brackets fails, except the data exceptions that test names explicitly:
+  the main view, empty state, in-folder open failure, every dialog, the filtered
+  empty state, Spot Heal, crop, and a load failure in a test-only pseudo
+  language that brackets every cataloged string. Any visible text or
+  accessible name without the brackets fails, except the data exceptions that
+  the test names explicitly:
   numbers with universal units, fixture filenames, native language names, the
   product and license names, and platform commands.
 - `locale::toast_sources_passed_by_value_are_cataloged` covers the constants

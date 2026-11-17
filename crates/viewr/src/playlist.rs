@@ -23,6 +23,19 @@ pub(crate) enum FilterSelection {
     Empty,
 }
 
+/// Index a newly opened folder should select.
+///
+/// Deferred camera RAW stays in the catalog. A folder that also contains a
+/// showable photo does not start on the RAW file. An empty catalog and a
+/// catalog of only deferred RAW both return 0.
+#[must_use]
+pub(crate) fn initial_folder_index<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) -> usize {
+    paths
+        .into_iter()
+        .position(|path| !crate::fs::is_deferred_camera_raw(path.as_ref()))
+        .unwrap_or(0)
+}
+
 /// True when applying the filter selection must clear or replace the current image.
 #[must_use]
 pub(crate) const fn filter_selection_changes_source(
@@ -764,6 +777,22 @@ mod tests {
             playlist.set_rating(&path(index), state);
         }
         playlist
+    }
+
+    #[test]
+    fn initial_folder_index_skips_deferred_camera_raw() {
+        let mixed = [
+            "DSC_0000.ARW",
+            "DSC_0000.dng",
+            "DSC_0000.JPG",
+            "DSC_0001.CR2",
+        ];
+        assert_eq!(initial_folder_index(mixed.iter().copied()), 2);
+        assert_eq!(initial_folder_index(["only.nef"]), 0);
+        assert_eq!(initial_folder_index(["first.png", "second.arw"]), 0);
+        assert_eq!(initial_folder_index(["a.ARW", "b.avif", "c.heic"]), 1);
+        assert_eq!(initial_folder_index(["a.HEIC", "b.jpg"]), 0);
+        assert_eq!(initial_folder_index(std::iter::empty::<&str>()), 0);
     }
 
     #[test]

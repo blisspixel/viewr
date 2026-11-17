@@ -295,7 +295,7 @@ fn run_internal(
         source_gone: false,
         modifiers: ModifiersState::default(),
         toast: StatusToast::default(),
-        dng_recovery_waits_for_preview: false,
+        dng_recovery_generation: None,
         egui_repaint_at: None,
         cursor_pos: (0.0, 0.0),
         last_click: None,
@@ -1274,8 +1274,8 @@ struct App {
     modifiers: ModifiersState,
     /// Outcome message shown in chrome when chrome is visible.
     toast: StatusToast,
-    /// The missing-selection replacement is a DNG whose preview is not known yet.
-    dng_recovery_waits_for_preview: bool,
+    /// Generation of the missing-selection DNG load whose preview is not known yet.
+    dng_recovery_generation: Option<u64>,
     /// Deadline requested by egui for delayed UI state such as tooltips.
     egui_repaint_at: Option<Instant>,
     /// Latest cursor position in physical pixels.
@@ -1539,7 +1539,7 @@ impl App {
     }
 
     fn begin_image_load(&mut self, path: PathBuf, preserve_missing_recovery: bool) {
-        self.dng_recovery_waits_for_preview = false;
+        self.dng_recovery_generation = None;
         self.cancel_open_with_check();
         self.stop_coherence_watch();
         self.pending_gone_notice = false;
@@ -2255,15 +2255,17 @@ impl App {
                 }
                 self.replace_playlist_from_scan(entries, index);
                 self.begin_image_load(selected, false);
-                // A cached preview is already on screen and left no receiver.
-                // Arming the wait afterwards would treat a later failure as this
-                // recovery.
-                self.dng_recovery_waits_for_preview = matches!(
+                // Record the load that just started. A cached present leaves
+                // no receiver. A later load clears this before it can fail.
+                if matches!(
                     disposition,
                     FolderScanDisposition::InstallScanFirstAfterSelectedMissing
-                ) && notice
-                    == MissingSelectionNotice::WaitForPreview
-                    && self.session.receiver.is_some();
+                ) && notice == MissingSelectionNotice::WaitForPreview
+                    && self.session.receiver.is_some()
+                {
+                    self.dng_recovery_generation =
+                        Some(self.session.generation.load(Ordering::Acquire));
+                }
                 self.kick_prefetch();
             }
             (
@@ -2550,7 +2552,7 @@ impl App {
         );
         match kind {
             PresentationKind::Loaded => {
-                self.dng_recovery_waits_for_preview = false;
+                self.dng_recovery_generation = None;
                 self.unsaved_crop = false;
                 self.source_gone = false;
                 self.prefetch_schedule.allow(path);
@@ -3447,6 +3449,7 @@ impl App {
     }
 
     fn cancel_pending_image_load(&mut self) {
+        self.dng_recovery_generation = None;
         self.session.cancel_pending_load();
         self.preview_job = None;
         self.preview_load_retry_blocked = false;
@@ -7141,6 +7144,9 @@ impl App {
         refresh_scanned: bool,
         preserve_missing_recovery: bool,
     ) {
+        // This load is not the missing-selection wait. The scan handler
+        // records the generation only after the recovery load is queued.
+        self.dng_recovery_generation = None;
         let generation = self
             .session
             .generation
@@ -7218,6 +7224,7 @@ impl App {
             WorkerPoll::Ready(completion) => completion,
             WorkerPoll::Disconnected => {
                 self.session.receiver = None;
+                self.dng_recovery_generation = None;
                 let message = self
                     .language
                     .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS);
@@ -7233,6 +7240,7 @@ impl App {
 
         self.session.receiver = None;
         if self.session.selected_path.as_ref() != Some(&path) {
+            self.dng_recovery_generation = None;
             return;
         }
         match result {
@@ -7249,6 +7257,7 @@ impl App {
                 );
                 match disposition {
                     ForegroundLoadFailureDisposition::MissingSelection => {
+                        self.dng_recovery_generation = None;
                         log::info!("selected image disappeared before presentation");
                         self.handle_missing_selected_path(path);
                     }
@@ -7261,11 +7270,14 @@ impl App {
                             failure.detail.clone(),
                             failure.allows_retry(),
                         );
-                        let waited = self.dng_recovery_waits_for_preview;
-                        self.dng_recovery_waits_for_preview = false;
-                        if deferred_preview_failure_needs_unshowable_notice(waited, failure.cause)
-                            && let Some(text) =
-                                missing_selection_notice_text(MissingSelectionNotice::Unshowable)
+                        let armed = self.dng_recovery_generation.take();
+                        let current = self.session.generation.load(Ordering::Acquire);
+                        if deferred_preview_failure_needs_unshowable_notice(
+                            armed,
+                            current,
+                            failure.cause,
+                        ) && let Some(text) =
+                            missing_selection_notice_text(MissingSelectionNotice::Unshowable)
                         {
                             self.show_notice_until_navigation(self.language.localize(text));
                         }

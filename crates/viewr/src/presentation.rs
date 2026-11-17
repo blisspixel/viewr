@@ -385,16 +385,22 @@ pub(crate) const fn keep_folder_notice_over_open_failure(
     folder_notice_visible && matches!(cause, OpenFailureCause::RawDeferred)
 }
 
-/// A DNG replacement waited for its preview, and that preview is absent.
+/// A DNG replacement waited for its preview, and that same load found none.
 ///
-/// The durable "cannot be shown" notice belongs here. A timed RAW toast would
-/// replace it while the previous photo is still on screen.
+/// The durable "cannot be shown" notice belongs to that load only. A later
+/// photo, including another deferred RAW file, keeps the ordinary RAW toast.
 #[must_use]
 pub(crate) const fn deferred_preview_failure_needs_unshowable_notice(
-    waited_for_preview: bool,
+    armed_generation: Option<u64>,
+    current_generation: u64,
     cause: OpenFailureCause,
 ) -> bool {
-    waited_for_preview && matches!(cause, OpenFailureCause::RawDeferred)
+    match armed_generation {
+        Some(generation) => {
+            generation == current_generation && matches!(cause, OpenFailureCause::RawDeferred)
+        }
+        None => false,
+    }
 }
 
 pub(super) fn preview_job_matches(
@@ -582,15 +588,23 @@ mod tests {
             true
         ));
         assert!(deferred_preview_failure_needs_unshowable_notice(
-            true,
+            Some(4),
+            4,
             OpenFailureCause::RawDeferred
         ));
         assert!(!deferred_preview_failure_needs_unshowable_notice(
-            false,
+            Some(4),
+            5,
             OpenFailureCause::RawDeferred
         ));
         assert!(!deferred_preview_failure_needs_unshowable_notice(
-            true,
+            None,
+            4,
+            OpenFailureCause::RawDeferred
+        ));
+        assert!(!deferred_preview_failure_needs_unshowable_notice(
+            Some(4),
+            4,
             OpenFailureCause::Damaged
         ));
     }

@@ -46,28 +46,44 @@ struct Ifd {
 
 /// Decode the largest embedded baseline JPEG preview.
 ///
-/// `None` means the bytes are not a classic TIFF with such a preview. Callers
-/// keep the camera-RAW refusal in that case.
+/// A frame past the pixel budget, or a frame the JPEG decoder rejects, is
+/// skipped. A smaller baseline preview in the same file can still be shown.
+/// `None` means no such preview could be shown. Callers keep the camera-RAW
+/// refusal in that case.
 pub(crate) fn decode_embedded_preview(bytes: &[u8]) -> Option<DecodedOutput> {
-    let candidate = largest_baseline_jpeg(bytes)?;
-    let jpeg = bytes.get(candidate.offset..candidate.offset.checked_add(candidate.len)?)?;
-    let (width, height, rgba) = decode_baseline_jpeg(jpeg)?;
-    if viewr_protocol::checked_rgba_len(width, height).ok()? != rgba.len() {
-        return None;
+    for candidate in baseline_previews(bytes) {
+        let Some(end) = candidate.offset.checked_add(candidate.len) else {
+            continue;
+        };
+        let Some(jpeg) = bytes.get(candidate.offset..end) else {
+            continue;
+        };
+        let Some((width, height, rgba)) = decode_baseline_jpeg(jpeg) else {
+            continue;
+        };
+        if viewr_protocol::checked_rgba_len(width, height).ok() != Some(rgba.len()) {
+            continue;
+        }
+        return Some(DecodedOutput {
+            width,
+            height,
+            rgba,
+            color_profile: WorkerColorProfile::Unknown,
+        });
     }
-    Some(DecodedOutput {
-        width,
-        height,
-        rgba,
-        color_profile: WorkerColorProfile::Unknown,
-    })
+    None
 }
 
-fn largest_baseline_jpeg(bytes: &[u8]) -> Option<Candidate> {
-    let le = tiff_little_endian(bytes)?;
-    let mut queue = vec![usize::try_from(read_u32(bytes, 4, le)?).ok()?];
+fn baseline_previews(bytes: &[u8]) -> Vec<Candidate> {
+    let Some(le) = tiff_little_endian(bytes) else {
+        return Vec::new();
+    };
+    let Some(first) = read_u32(bytes, 4, le).and_then(|offset| usize::try_from(offset).ok()) else {
+        return Vec::new();
+    };
+    let mut queue = vec![first];
     let mut seen = HashSet::new();
-    let mut best: Option<Candidate> = None;
+    let mut found = Vec::new();
     while let Some(offset) = queue.pop() {
         if !seen.insert(offset) || seen.len() > MAX_IFDS {
             continue;
@@ -79,15 +95,12 @@ fn largest_baseline_jpeg(bytes: &[u8]) -> Option<Candidate> {
             queue.push(next);
         }
         queue.extend(ifd.sub_ifds);
-        let replace = ifd.preview.as_ref().is_some_and(|preview| {
-            best.as_ref()
-                .is_none_or(|current| preview.area > current.area)
-        });
-        if replace {
-            best = ifd.preview;
+        if let Some(preview) = ifd.preview {
+            found.push(preview);
         }
     }
-    best
+    found.sort_by_key(|preview| std::cmp::Reverse(preview.area));
+    found
 }
 
 fn tiff_little_endian(bytes: &[u8]) -> Option<bool> {
@@ -641,5 +654,17 @@ mod tests {
         let decoded = decode_embedded_preview(&file).expect("smaller preview");
         assert_eq!((decoded.width, decoded.height), (1, 1));
         assert!(decode_embedded_preview(&preview_file(true, &huge, &huge)).is_none());
+    }
+
+    #[test]
+    fn an_undecodable_larger_frame_does_not_hide_a_smaller_preview() {
+        let mut broken = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x0B, 0x08];
+        broken.extend(8u16.to_be_bytes());
+        broken.extend(8u16.to_be_bytes());
+        broken.extend_from_slice(&[0x01, 0x01, 0x11, 0x00, 0xFF, 0xD9]);
+        let small = jpeg(1, 1);
+        let decoded =
+            decode_embedded_preview(&preview_file(true, &small, &broken)).expect("smaller preview");
+        assert_eq!((decoded.width, decoded.height), (1, 1));
     }
 }

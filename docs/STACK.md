@@ -242,8 +242,9 @@ binding. Default CI cannot carry LibRaw. Redistributable, representative camera
 samples are not in the tree. A DNG-only TIFF walk that presented itself
 as a camera RAW develop would claim RAW without meeting that bar.
 
-A DNG can also carry a baseline JPEG preview. viewr shows the largest such
-preview through the path-free worker and labels its pixel size as a preview.
+A DNG can also carry a baseline JPEG preview. viewr shows the largest
+decodable preview through the path-free worker and labels its pixel size as
+a preview. A larger frame that cannot be shown does not hide a smaller one.
 That path does not read the sensor image, does not enable `libraw-rs`, and
 does not call the preview a camera RAW develop.
 

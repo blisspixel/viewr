@@ -1262,17 +1262,11 @@ fn validate_svg_element(
     geometry_bytes: &mut usize,
     geometry_tokens: &mut usize,
 ) -> Result<(), Error> {
-    let qualified_name = element.name();
-    let local_name = qualified_name
-        .as_ref()
-        .rsplit(|byte| *byte == b':')
-        .next()
-        .unwrap_or_default();
+    let local_name = quick_xml::name::LocalName::from(element.name()).into_inner();
     match local_name {
-        b"image" => return Err(Error::Decode(SVG_IMAGE_RESOURCE_ERROR.into())),
-        b"use" | b"marker" | b"filter" | b"mask" | b"clipPath" | b"pattern" | b"text"
-        | b"tspan" | b"textPath" | b"tref" | b"style" | b"linearGradient" | b"radialGradient"
-        | b"stop" => {
+        "image" => return Err(Error::Decode(SVG_IMAGE_RESOURCE_ERROR.into())),
+        "use" | "marker" | "filter" | "mask" | "clipPath" | "pattern" | "text" | "tspan"
+        | "textPath" | "tref" | "style" | "linearGradient" | "radialGradient" | "stop" => {
             return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
         }
         _ => {}
@@ -1289,11 +1283,11 @@ fn validate_svg_element(
             return Err(Error::Decode(SVG_MARKUP_COMPLEXITY_ERROR.into()));
         }
         let local_name = attribute.key.local_name();
-        if matches!(local_name.as_ref(), b"style" | b"stroke-dasharray") {
+        if matches!(local_name.as_ref(), "style" | "stroke-dasharray") {
             return Err(Error::Decode(SVG_COMPLEX_FEATURE_ERROR.into()));
         }
-        if matches!(local_name.as_ref(), b"d" | b"points") {
-            let value = attribute.value.as_ref();
+        if matches!(local_name.as_ref(), "d" | "points") {
+            let value = attribute.value.as_bytes();
             *geometry_bytes = geometry_bytes.saturating_add(value.len());
             *geometry_tokens = geometry_tokens.saturating_add(svg_geometry_tokens(value));
             if *geometry_bytes > MAX_SVG_GEOMETRY_BYTES
@@ -1398,8 +1392,9 @@ fn validate_svg_group_budget(
                 budget.record_path_segments(path.data().segments().count())?;
                 if let Some(fill) = path.fill() {
                     validate_svg_paint(fill.paint())?;
-                    if path.is_visible() {
-                        let bounds = path.abs_bounding_box();
+                    if path.is_visible()
+                        && let Some(bounds) = path.abs_bounding_box()
+                    {
                         budget.charge_paint_bounds(bounds.width(), bounds.height())?;
                     }
                 }
@@ -1431,7 +1426,9 @@ fn svg_group_layer_pixels(
     canvas_width: u32,
     canvas_height: u32,
 ) -> Result<u64, Error> {
-    let bounding_box = group.abs_layer_bounding_box();
+    let Some(bounding_box) = group.abs_layer_bounding_box() else {
+        return Ok(0);
+    };
     let max_width = u64::from(canvas_width).saturating_mul(5);
     let max_height = u64::from(canvas_height).saturating_mul(5);
     let width = u64::from(positive_f32_to_px(bounding_box.width()))

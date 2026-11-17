@@ -160,11 +160,11 @@ mod tests {
         ];
         assert!(first_available(&candidates).is_none());
         let valid = directory.path().join("valid.ttf");
-        std::fs::write(&valid, bundled_sans().font.as_ref()).unwrap();
+        std::fs::write(&valid, bundled_sans().bytes()).unwrap();
         let mut candidates = candidates;
         candidates.push(valid);
         let loaded = first_available(&candidates).expect("valid font after rejected candidates");
-        assert_eq!(loaded.font.as_ref(), bundled_sans().font.as_ref());
+        assert_eq!(loaded.bytes(), bundled_sans().bytes());
     }
 
     #[test]
@@ -206,7 +206,7 @@ mod tests {
                 assert!(
                     definitions.families[&family].iter().any(|name| {
                         let data = &definitions.font_data[name];
-                        FontRef::from_index(data.font.as_ref(), data.index)
+                        FontRef::from_index(data.bytes(), data.index)
                             .unwrap()
                             .charmap()
                             .map(character)
@@ -218,7 +218,7 @@ mod tests {
         }
         let context = egui::Context::default();
         context.set_fonts(definitions);
-        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
             for family in [FontFamily::Proportional, FontFamily::Monospace] {
                 let galley = ui.fonts_mut(|fonts| {
                     fonts.layout_no_wrap(
@@ -231,5 +231,7 @@ mod tests {
                 assert!(galley.size().x > 0.0 && galley.size().y > 0.0);
             }
         });
+        // egui 0.37 debug-asserts if texture updates are dropped unapplied.
+        output.textures_delta.clear();
     }
 }

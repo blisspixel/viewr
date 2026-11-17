@@ -25,39 +25,45 @@ path = "src/main.rs"
 [dependencies]
 # Trusted core only. See docs/STANDARDS.md dependency policy.
 winit = "0.30"        # stable GA line; 0.31 is still beta
-wgpu = "29"
+wgpu = "30"
 pollster = "1"
 log = "0.4"
 env_logger = "0.11"
 thiserror = "2"
 anyhow = "1"
-rfd = { version = "0.17.2", features = ["common-controls-v6"] }
+rfd = { version = "0.18.0", features = ["common-controls-v6"] }
 jxl-oxide = { version = "0.12.6", features = ["image"] }
 # Direct use verifies that the locally patched decoder and viewr enforce one
 # shared embedded-ICC ceiling during JPEG XL initialization and conversion.
 jxl-color = "0.11.0"
 viewr-protocol = { path = "../viewr-protocol" }
-egui = "0.35"
-egui-winit = "0.35"
-egui-wgpu = "0.35"
-# The same parser already used by egui validates bounded local system fonts.
-skrifa = "0.42.1"
+# default_fonts stays explicit: 0.37 no longer enables the bundled fallback
+# faces by default, and platform fonts are inserted in front of those faces.
+# monochrome_emoji_fonts restores the icon font that draws the page-step
+# triangles. Those faces are local and add no crate.
+egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }
+egui-winit = "0.37"
+egui-wgpu = "0.37"
+# egui 0.37's epaint pins skrifa 0.44. A second 0.50 copy would not change
+# the renderer and would fail the duplicate-version ban.
+skrifa = "0.44.0"
 bytemuck = "1.25.2"
 # Pure-Rust SVG rasterizer (STACK Decision 4 / Phase 6 vector support).
 # Default features off: skip system fonts / text shaping so we do not pull
 # unmaintained rustybuzz or OFL-licensed font blobs into the trusted core.
 # Shapes, fills, and paths still render; text glyphs fall back to outlines when
 # present as paths. Feature expansion for full SVG text is a deliberate later choice.
-resvg = { version = "0.47", default-features = false, features = ["raster-images"] }
+resvg = { version = "0.50", default-features = false, features = ["raster-images"] }
 trash = { version = "5.2.6", default-features = false, features = ["coinit_apartmentthreaded"] }
 little_exif = "0.6.23"
 same-file = "1.0.6"
 # Save As is assembled beside the destination and persisted only after pixels
 # and optional metadata are both complete.
 tempfile = "3.27.0"
-# The rating path parses only bounded JPEG XMP packets. Version 0.41 fixes the
-# attribute and namespace denial-of-service advisories affecting earlier lines.
-quick-xml = { version = "0.41.0", default-features = false }
+# The rating path parses only bounded JPEG XMP packets. 0.42 stores text as
+# UTF-8, and the parser still caps events, attributes, and in-scope xmlns
+# bindings. Earlier lines had attribute and namespace denial-of-service bugs.
+quick-xml = { version = "0.42.0", default-features = false }
 # Pure-Rust bounded inspection of compressed PNG ICC metadata before image-rs
 # materializes the profile.
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
@@ -69,11 +75,13 @@ crc32fast = "1.5.0"
 tiff = "0.11"
 # Already used transitively by image-rs. Declared directly for bounded,
 # pure-Rust embedded ICC conversion into the renderer's sRGB pipeline.
+# image 0.25.10 and jxl-oxide 0.12.6 still require 0.8. The direct pin stays
+# on that line so the viewer does not ship two color engines.
 moxcms = "0.8.1"
 
 # Windows Job Object limits for the decode worker (kill-on-close with parent).
 [target.'cfg(windows)'.dependencies]
-accesskit_winit = { version = "0.33", default-features = false, features = ["rwh_06"] }
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
 windows-sys = { version = "0.59", features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",
@@ -103,7 +111,7 @@ libc = "0.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 # Native error layout for winit's existing Xlib hook, already in its locked graph.
 x11-dl = "=2.21.0"
-accesskit_winit = { version = "0.33", default-features = false, features = [
+accesskit_winit = { version = "0.34", default-features = false, features = [
     "accesskit_unix",
     "async-io",
     "rwh_06",
@@ -112,13 +120,13 @@ viewr-seccomp = { path = "../viewr-seccomp" }
 # Session-bus OpenURI chooser and the portal Settings read for high contrast and
 # text size. cargo-deny confines zbus to AccessKit plus these reviewed portal
 # calls; startup still allows only unix: D-Bus transports.
-zbus = { version = "5.18.0", default-features = false, features = ["blocking-api"] }
+zbus = { version = "5.19.0", default-features = false, features = ["blocking-api"] }
 
 # Launch Services delivers Finder/Open With requests through the application
 # delegate rather than argv. Keep this glue macOS-only and use the same objc2
 # versions already selected by winit.
 [target.'cfg(target_os = "macos")'.dependencies]
-accesskit_winit = { version = "0.33", default-features = false, features = ["rwh_06"] }
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSAccessibility",

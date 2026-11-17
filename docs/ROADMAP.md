@@ -561,8 +561,9 @@ the window. Apple exposes display profiles and transforms through
 [ColorSync](https://developer.apple.com/documentation/colorsync), while Windows
 exposes device profile associations and transforms through the
 [Windows Color System](https://learn.microsoft.com/en-us/windows/win32/api/_wcs/).
-wgpu 30 adds explicit surface color spaces and display HDR information; viewr is
-currently on wgpu 29. See the official
+wgpu 30 adds explicit surface color spaces and display HDR information. viewr
+is on that line and configures the surface with `SurfaceColorSpace::Auto`,
+the historical sRGB default. See the official
 [`SurfaceConfiguration`](https://docs.rs/wgpu/latest/wgpu/type.SurfaceConfiguration.html)
 and [`Surface`](https://docs.rs/wgpu/latest/wgpu/struct.Surface.html) APIs.
 
@@ -592,8 +593,9 @@ and [`Surface`](https://docs.rs/wgpu/latest/wgpu/struct.Surface.html) APIs.
   renderer owns the matching output transform and requires an sRGB surface. Unit
   and integration tests cover core, animation, worker, edit, preview, thumbnail,
   export, upload, and surface-selection paths.
-- [ ] Upgrade the wgpu/egui-wgpu integration only after a focused compatibility
-  spike proves surface color-space and HDR behavior on all three backends.
+- [x] Move the wgpu and egui-wgpu integration to wgpu 30. The surface color
+  space is `SurfaceColorSpace::Auto`, the historical sRGB default, and limit
+  buckets stay off.
 - [x] Resolve and refresh the profile for the display that currently contains the
   window, including a move between differently profiled monitors. Monitor
   identity is now observed through a covered `display_state` seam. Linux

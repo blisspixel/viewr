@@ -21,7 +21,7 @@ use egui::containers::scroll_area::ScrollBarVisibility;
 use egui::text::LayoutJob;
 use egui::{
     Align2, Area, Color32, CornerRadius, CursorIcon, FontId, Frame, Panel, Pos2, Rect, RichText,
-    ScrollArea, Sense, Stroke, TextFormat, Vec2, WidgetInfo, WidgetType,
+    Role, ScrollArea, Sense, Stroke, TextFormat, Vec2, WidgetInfo,
 };
 
 /// Complete egui-winit input using observed dimensions rather than querying a
@@ -79,7 +79,7 @@ fn chrome_colors_for(mode: crate::theme::Mode) -> ChromeColors {
 
 fn chrome_colors(ui: &egui::Ui) -> ChromeColors {
     ui.ctx()
-        .data(|data| data.get_temp(egui::Id::new("viewr_chrome_colors")))
+        .data(|data| data.get_temp(egui::Id::unique("viewr_chrome_colors")))
         .unwrap_or_else(|| chrome_colors_for(crate::theme::Mode::Dark))
 }
 
@@ -737,7 +737,7 @@ struct ModalFocus {
 /// menu item that opened the modal has closed with its menu, and focus on a
 /// control that is not drawn names an accessibility node that does not exist.
 fn sync_modal_focus(ctx: &egui::Context, active: Option<ModalKind>) {
-    let state_id = egui::Id::new(MODAL_FOCUS_STATE);
+    let state_id = egui::Id::unique(MODAL_FOCUS_STATE);
     let focused = ctx.memory(egui::Memory::focused);
     let restore = ctx.data_mut(|data| {
         let state = data.get_temp::<ModalFocus>(state_id);
@@ -784,7 +784,7 @@ pub(crate) fn settle_accessibility_focus(update: &mut egui::accesskit::TreeUpdat
 /// True exactly once per opened modal, when its default control should take
 /// keyboard focus.
 fn claim_initial_modal_focus(ctx: &egui::Context) -> bool {
-    let state_id = egui::Id::new(MODAL_FOCUS_STATE);
+    let state_id = egui::Id::unique(MODAL_FOCUS_STATE);
     ctx.data_mut(|data| {
         let Some(mut state) = data.get_temp::<ModalFocus>(state_id) else {
             return false;
@@ -798,8 +798,19 @@ fn claim_initial_modal_focus(ctx: &egui::Context) -> bool {
     })
 }
 
-/// egui names a modal as a window; assistive technology needs a modal dialog,
-/// which Windows announces as opened and which confines virtual navigation.
+/// A centered modal whose area is a plain container.
+///
+/// egui 0.37 gives `UiKind::Modal` the dialog role. The named modal dialog is
+/// the area response, marked by `mark_as_modal_dialog`. Leaving the area as a
+/// dialog would publish a second dialog with no name.
+fn chrome_modal(id: impl core::hash::Hash + core::fmt::Debug) -> egui::Modal {
+    let mut modal = egui::Modal::new(egui::Id::unique(id));
+    modal.area = modal.area.role(egui::accesskit::Role::GenericContainer);
+    modal
+}
+
+/// Assistive technology needs a modal dialog, which Windows announces as
+/// opened and which confines virtual navigation.
 fn mark_as_modal_dialog(response: &egui::Response) {
     response.ctx.accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Dialog);
@@ -964,7 +975,7 @@ fn render_mosaic_overlay(
         );
         let response = ui.interact(
             rect,
-            egui::Id::new(("full_image_mosaic", cell.catalog_index)),
+            egui::Id::unique(("full_image_mosaic", cell.catalog_index)),
             egui::Sense::click(),
         );
         let label = language
@@ -976,7 +987,7 @@ fn render_mosaic_overlay(
                 ],
             )
             .into_string();
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label.clone()));
+        response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label.clone()));
         mark_as_list_item(&response, cell.selected);
         // Left and Right move the collage selection, so keyboard focus follows
         // it. Otherwise egui's own arrow focus could leave a screen reader on
@@ -1015,7 +1026,7 @@ fn render_mosaic_overlay(
     }
 
     let (status, accessible_status) = mosaic_status(language, mosaic);
-    egui::Area::new("full_image_mosaic_status".into())
+    egui::Area::new(egui::Id::unique("full_image_mosaic_status"))
         .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -14.0])
         .order(egui::Order::Foreground)
         .show(ui.ctx(), |ui| {
@@ -1090,7 +1101,7 @@ fn render_context_menu(
     };
     let mut close = false;
     egui::Window::new(frame.text(tr!("Quick Tools")))
-        .id(egui::Id::new("quick_tools"))
+        .id(egui::Id::unique("quick_tools"))
         .fixed_pos(Pos2::new(pos[0], pos[1]))
         .constrain_to(ui.ctx().content_rect())
         .title_bar(false)
@@ -1164,8 +1175,7 @@ fn render_context_menu(
             }
             let enabled = chrome.is_enabled(ChromeControl::OpenWith);
             let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
-            open_with
-                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, "Open With..."));
+            open_with.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, "Open With..."));
             if open_with
                 .on_hover_text(frame.text(OPEN_WITH_HELP))
                 .clicked()
@@ -1192,9 +1202,7 @@ fn context_copy_button(ui: &mut egui::Ui, frame: &UiFrameOwned, chrome: ChromeVi
         copy_enabled,
         egui::Button::new(frame.text(tr!("Copy"))).shortcut_text(&copy_shortcut),
     );
-    copy.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Button, copy_enabled, frame.text(tr!("Copy")))
-    });
+    copy.widget_info(|| WidgetInfo::labeled(Role::Button, copy_enabled, frame.text(tr!("Copy"))));
     copy.ctx.accesskit_node_builder(copy.id, |node| {
         node.set_keyboard_shortcut(copy_shortcut.as_str());
         node.set_description(frame.text(COPY_IMAGE_HELP));
@@ -1210,9 +1218,7 @@ fn menu_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Response 
             .shortcut_text(view.shortcut)
             .selected(view.selected),
     );
-    response.widget_info(|| {
-        WidgetInfo::selected(WidgetType::Button, enabled, view.selected, view.label)
-    });
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, view.selected, view.label));
     response.ctx.accesskit_node_builder(response.id, |node| {
         node.set_keyboard_shortcut(view.shortcut);
     });
@@ -1226,8 +1232,7 @@ fn context_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Respon
         view.enabled,
         egui::Button::new(&label).selected(view.selected),
     );
-    response
-        .widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, view.selected, &label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, view.selected, &label));
     response.ctx.accesskit_node_builder(response.id, |node| {
         node.set_keyboard_shortcut(view.shortcut);
     });
@@ -1236,7 +1241,7 @@ fn context_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Respon
 
 fn apply_chrome_theme(ctx: &egui::Context, mode: crate::theme::Mode) {
     let colors = chrome_colors_for(mode);
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new("viewr_chrome_colors"), colors));
+    ctx.data_mut(|data| data.insert_temp(egui::Id::unique("viewr_chrome_colors"), colors));
     let mut visuals = if mode.is_light() {
         egui::Visuals::light()
     } else {
@@ -1359,6 +1364,9 @@ fn render_top_menu(
                 if let Some((_, button)) = menus.iter().find(|(menu, _)| Some(*menu) == requested) {
                     open_top_menu(button);
                 }
+                // The centered row can round the menu titles and the metadata
+                // strip onto the same pixel. One point keeps their hit targets apart.
+                ui.add_space(1.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // The reading strip owns its own separation instead of
                     // inheriting whatever spacing the menu titles need.
@@ -1862,7 +1870,7 @@ fn render_image_zoom(
             .response
         })
         .inner;
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label.as_str()));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, label.as_str()));
     response.on_hover_text(label.as_str())
 }
 
@@ -2004,7 +2012,7 @@ fn exit_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, language: Lang
     // the visible accelerator in the name as other menu commands do.
     response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Button,
+            Role::Button,
             true,
             format!("{} {shortcut}", language.text(label)),
         )
@@ -2054,9 +2062,8 @@ fn undo_trash_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: 
         view.enabled,
         egui::Button::new(view.label).shortcut_text(view.shortcut),
     );
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Button, view.enabled, &view.accessibility_label)
-    });
+    response
+        .widget_info(|| WidgetInfo::labeled(Role::Button, view.enabled, &view.accessibility_label));
     if response.on_hover_text(view.help).clicked() {
         actions.push(UiAction::UndoTrash);
         ui.close();
@@ -2174,7 +2181,7 @@ fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeVie
         );
         response.widget_info(|| {
             WidgetInfo::selected(
-                WidgetType::RadioButton,
+                Role::RadioButton,
                 choice.enabled,
                 choice.selected,
                 &choice.accessibility_label,
@@ -2355,7 +2362,7 @@ fn add_retry_button(
     let response = ui
         .add(egui::Button::new(language.text(tr!("Retry"))).min_size(Vec2::new(58.0, 30.0)))
         .on_hover_text(&label);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), &label));
     if response.clicked() {
         actions.push(UiAction::RetryLoad);
     }
@@ -2386,7 +2393,7 @@ fn add_empty_retry_button(
                 .min_size(Vec2::new(92.0, 36.0)),
         )
         .on_hover_text(&label);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), &label));
     if response.clicked() {
         actions.push(UiAction::RetryLoad);
     }
@@ -2489,12 +2496,7 @@ fn folder_sort_radios(
         let label = language.text(sort.label());
         let response = ui.radio(selected == sort, label);
         response.widget_info(|| {
-            WidgetInfo::selected(
-                WidgetType::RadioButton,
-                ui.is_enabled(),
-                selected == sort,
-                label,
-            )
+            WidgetInfo::selected(Role::RadioButton, ui.is_enabled(), selected == sort, label)
         });
         if response.clicked() {
             actions.push(UiAction::SetFolderSort(sort));
@@ -2614,7 +2616,7 @@ fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Ch
         let response = ui.radio(choice.selected, &choice.label);
         response.widget_info(|| {
             WidgetInfo::selected(
-                WidgetType::RadioButton,
+                Role::RadioButton,
                 ui.is_enabled(),
                 choice.selected,
                 &choice.accessibility_label,
@@ -2709,7 +2711,7 @@ fn render_dock_side_choices(
         let response = ui.radio(choice.selected, choice.label);
         response.widget_info(|| {
             WidgetInfo::selected(
-                WidgetType::RadioButton,
+                Role::RadioButton,
                 ui.is_enabled(),
                 choice.selected,
                 &choice.accessibility_label,
@@ -2790,7 +2792,7 @@ fn appearance_menu(
         let response = ui.add(egui::RadioButton::new(choice.selected, label));
         response.widget_info(|| {
             WidgetInfo::selected(
-                WidgetType::RadioButton,
+                Role::RadioButton,
                 ui.is_enabled(),
                 choice.selected,
                 &choice.accessibility_label,
@@ -2846,7 +2848,7 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let focus_close = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("about_viewr"))
+    let response = chrome_modal("about_viewr")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -2899,7 +2901,7 @@ fn render_about(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrameO
         });
     response.response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Window,
+            Role::Window,
             true,
             frame.text(tr!("About viewr. Private local-first image viewer. No network access, telemetry, accounts, or background indexing.")),
         )
@@ -2914,7 +2916,7 @@ fn render_keyboard_shortcuts(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fra
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let focus_close = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("keyboard_shortcuts"))
+    let response = chrome_modal("keyboard_shortcuts")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -2953,11 +2955,7 @@ fn render_keyboard_shortcuts(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fra
             });
         });
     response.response.widget_info(|| {
-        WidgetInfo::labeled(
-            WidgetType::Window,
-            true,
-            frame.text(tr!("Keyboard shortcuts")),
-        )
+        WidgetInfo::labeled(Role::Window, true, frame.text(tr!("Keyboard shortcuts")))
     });
     mark_as_modal_dialog(&response.response);
     if close_clicked || response.should_close() {
@@ -3115,7 +3113,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let focus_close = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("update_viewr"))
+    let response = chrome_modal("update_viewr")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -3153,7 +3151,7 @@ fn render_update(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFrame
         });
     response.response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Window,
+            Role::Window,
             true,
             frame.text(tr!("Update viewr. One explicit action opens the latest official GitHub release. No automatic network check or background updater.")),
         )
@@ -3168,7 +3166,7 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let focus_close = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("preferences"))
+    let response = chrome_modal("preferences")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -3248,7 +3246,7 @@ fn render_preferences(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &Ui
         });
     response.response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Window,
+            Role::Window,
             true,
             frame.text(tr!(
                 "Preferences. Default folder sort and opt-in default image viewer settings."
@@ -3300,7 +3298,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
     let colors = chrome_colors(ui);
     let mut close_clicked = false;
     let focus_close = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("file_associations"))
+    let response = chrome_modal("file_associations")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -3361,7 +3359,7 @@ fn render_file_associations(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
         });
     response.response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Window,
+            Role::Window,
             true,
             frame.text(tr!("Default image viewer. File associations change only after an explicit operating-system choice.")),
         )
@@ -3452,7 +3450,7 @@ fn render_save_overwrite_confirmation(
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
     let focus_cancel = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("save_overwrite_confirmation"))
+    let response = chrome_modal("save_overwrite_confirmation")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -3499,7 +3497,7 @@ fn render_save_overwrite_confirmation(
         });
     response.response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Window,
+            Role::Window,
             true,
             frame.text(tr!("Replace existing file? The selected Save As destination exists. Confirm replacement or cancel without changing it.")),
         )
@@ -3536,7 +3534,7 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
     let focus_cancel = claim_initial_modal_focus(ui.ctx());
-    let response = egui::Modal::new(egui::Id::new("rating_write_disclosure"))
+    let response = chrome_modal("rating_write_disclosure")
         .backdrop_color(Color32::from_black_alpha(140))
         .frame(
             Frame::new()
@@ -3579,7 +3577,7 @@ fn render_rating_disclosure(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, fram
         });
     response.response.widget_info(|| {
         WidgetInfo::labeled(
-            WidgetType::Window,
+            Role::Window,
             true,
             frame
                 .language
@@ -3616,7 +3614,7 @@ fn render_filtered_empty_state(
     let colors = chrome_colors(ui);
     let screen = ui.ctx().content_rect();
     let card_width = (screen.width() - 40.0).clamp(280.0, 430.0);
-    Area::new("rating_filter_empty_state".into())
+    Area::new(egui::Id::unique("rating_filter_empty_state"))
         .fixed_pos(screen.center())
         .pivot(Align2::CENTER_CENTER)
         .constrain_to(screen)
@@ -3642,7 +3640,7 @@ fn render_filtered_empty_state(
                         let heading_response =
                             ui.heading(RichText::new(&heading).size(20.0).color(colors.text));
                         heading_response
-                            .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &heading));
+                            .widget_info(|| WidgetInfo::labeled(Role::Label, true, &heading));
                         mark_as_polite_status(&heading_response);
                         ui.add_space(8.0);
                         ui.label(
@@ -3673,7 +3671,7 @@ fn render_filtered_empty_state(
                             );
                         show_all.widget_info(|| {
                             WidgetInfo::labeled(
-                                WidgetType::Button,
+                                Role::Button,
                                 true,
                                 frame.text(tr!("Show all images")),
                             )
@@ -3688,7 +3686,7 @@ fn render_filtered_empty_state(
                 });
             card.response.widget_info(|| {
                 WidgetInfo::labeled(
-                    WidgetType::Panel,
+                    Role::Pane,
                     true,
                     frame.text(tr!("No images match rating filter")),
                 )
@@ -3738,7 +3736,7 @@ fn render_catalog_open_notice(
         screen.center().x - card_width * 0.5,
         screen.center().y - 72.0,
     );
-    Area::new("catalog_open_notice".into())
+    Area::new(egui::Id::unique("catalog_open_notice"))
         .fixed_pos(card_position)
         .constrain_to(screen)
         .movable(false)
@@ -3800,9 +3798,8 @@ fn render_catalog_open_notice(
                         }
                     });
                 });
-            card.response.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Panel, true, copy.heading.as_str())
-            });
+            card.response
+                .widget_info(|| WidgetInfo::labeled(Role::Pane, true, copy.heading.as_str()));
         });
 }
 
@@ -3846,7 +3843,7 @@ fn render_empty_state(
             selected_file_name,
         )
     };
-    Area::new("empty_state".into())
+    Area::new(egui::Id::unique("empty_state"))
         .fixed_pos(card_position)
         .constrain_to(screen)
         .movable(false)
@@ -3902,9 +3899,8 @@ fn render_empty_state(
                         );
                     });
                 });
-            card.response.widget_info(|| {
-                WidgetInfo::labeled(WidgetType::Panel, true, copy.heading.as_str())
-            });
+            card.response
+                .widget_info(|| WidgetInfo::labeled(Role::Pane, true, copy.heading.as_str()));
         });
 }
 
@@ -3984,7 +3980,7 @@ fn render_path_entry(
                         (ui.available_width() - 80.0 - ui.spacing().item_spacing.x).max(80.0);
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut text)
-                            .id(egui::Id::new(field_id))
+                            .id(egui::Id::unique(field_id))
                             .desired_width(width)
                             .min_size(Vec2::new(0.0, 32.0))
                             .margin(egui::Margin::symmetric(6, 8))
@@ -4038,7 +4034,7 @@ fn render_save_path_entry(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame:
                 let width = (ui.available_width() - 80.0 - ui.spacing().item_spacing.x).max(80.0);
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut text)
-                        .id(egui::Id::new("menu_save_path_input"))
+                        .id(egui::Id::unique("menu_save_path_input"))
                         .desired_width(width)
                         .min_size(Vec2::new(0.0, 32.0))
                         .margin(egui::Margin::symmetric(6, 8))
@@ -4089,7 +4085,7 @@ pub(crate) fn path_input_has_focus(ctx: &egui::Context) -> bool {
             "menu_save_path_input",
         ]
         .into_iter()
-        .any(|id| memory.focused() == Some(egui::Id::new(id)))
+        .any(|id| memory.focused() == Some(egui::Id::unique(id)))
     })
 }
 
@@ -4340,11 +4336,7 @@ fn render_page_controls(
         let label = pages.visible_label.clone();
         let response = ui.label(RichText::new(&label).color(colors.muted));
         response.widget_info(|| {
-            WidgetInfo::labeled(
-                WidgetType::Label,
-                ui.is_enabled(),
-                &pages.accessibility_label,
-            )
+            WidgetInfo::labeled(Role::Label, ui.is_enabled(), &pages.accessibility_label)
         });
     });
 }
@@ -4372,7 +4364,7 @@ fn render_sequence_step_button(
     let response = ui
         .add_enabled(enabled, button)
         .on_hover_text(format!("{accessible_name} ({shortcut})"));
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, accessible_name));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, accessible_name));
     response.ctx.accesskit_node_builder(response.id, |node| {
         node.set_keyboard_shortcut(shortcut);
     });
@@ -4652,8 +4644,7 @@ fn disclosure_button(
 ) -> egui::Response {
     let colors = chrome_colors(ui);
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(36.0), Sense::click());
-    response
-        .widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), expanded, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, ui.is_enabled(), expanded, label));
     let response = response
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text(label);
@@ -4809,7 +4800,7 @@ fn icon_btn(ui: &mut egui::Ui, icon: ToolIcon, tip: &str, active: bool, on_click
     let colors = chrome_colors(ui);
     let size = Vec2::splat(38.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), active, tip));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, ui.is_enabled(), active, tip));
     let response = response
         .on_hover_cursor(CursorIcon::PointingHand)
         .on_hover_text(tip);
@@ -5171,7 +5162,7 @@ fn render_heal_overlay(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         .ctx()
         .layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
-            egui::Id::new("spot_heal_draw"),
+            egui::Id::unique("spot_heal_draw"),
         ))
         .with_clip_rect(image_viewport);
     let radius = frame.heal_brush_screen_radius.max(1.0);
@@ -5326,9 +5317,8 @@ fn render_filmstrip_item(
         colors.panel
     };
     let accessibility_label = filmstrip_accessibility_label(language, item);
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &accessibility_label)
-    });
+    response
+        .widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), &accessibility_label));
     mark_as_list_item(&response, selected);
     let response = response
         .on_hover_cursor(CursorIcon::PointingHand)
@@ -5413,7 +5403,7 @@ fn filmstrip_accessibility_label(language: Language, item: &FilmstripItem) -> St
 fn render_toast(ui: &mut egui::Ui, toast: &ToastView, frame: &UiFrameOwned) {
     let colors = chrome_colors(ui);
     let image_viewport = image_viewport_rect(ui.ctx(), frame);
-    Area::new("toast".into())
+    Area::new(egui::Id::unique("toast"))
         .fixed_pos(Pos2::new(
             image_viewport.center().x,
             image_viewport.bottom() - 12.0,
@@ -5461,7 +5451,7 @@ fn render_crop_toolbar(
     let toolbar_width = (image_viewport.width() - 24.0).clamp(240.0, 520.0);
     let toolbar_origin = Pos2::new(image_viewport.center().x, image_viewport.top() + 8.0);
 
-    Area::new("crop_ratios".into())
+    Area::new(egui::Id::unique("crop_ratios"))
         .fixed_pos(toolbar_origin)
         .pivot(Align2::CENTER_TOP)
         .constrain_to(image_viewport)
@@ -5664,7 +5654,7 @@ fn expose_image_canvas(ctx: &egui::Context, frame: &UiFrameOwned) {
     };
     let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
     let viewport = image_viewport_rect(ctx, frame);
-    ctx.accesskit_node_builder(egui::Id::new(IMAGE_CANVAS_NODE), |node| {
+    ctx.accesskit_node_builder(egui::Id::unique(IMAGE_CANVAS_NODE), |node| {
         node.set_role(egui::accesskit::Role::Image);
         node.set_label(name);
         if let Some((width, height)) = frame.img_size {
@@ -5702,7 +5692,7 @@ fn render_crop_selection(ui: &mut egui::Ui, frame: &UiFrameOwned, actions: &mut 
             .ctx()
             .layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
-                egui::Id::new("crop_draw"),
+                egui::Id::unique("crop_draw"),
             ))
             .with_clip_rect(image_viewport);
         painter.rect_stroke(
@@ -5840,7 +5830,7 @@ fn render_crop_dimensions_and_move(
     }
     let response = ui.interact(
         semantic_rect,
-        egui::Id::new("crop_rect_sense"),
+        egui::Id::unique("crop_rect_sense"),
         if can_drag {
             Sense::drag()
         } else {
@@ -5870,9 +5860,7 @@ fn render_crop_dimensions_and_move(
         (pixel_x, pixel_y, pixel_width, pixel_height),
         can_drag,
     );
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Panel, ui.is_enabled(), &accessibility_label)
-    });
+    response.widget_info(|| WidgetInfo::labeled(Role::Pane, ui.is_enabled(), &accessibility_label));
 }
 
 fn crop_accessibility_label(
@@ -5987,7 +5975,7 @@ fn render_crop_handles(
         let response = ui
             .interact(
                 hit_rect,
-                egui::Id::new(("crop_handle", index)),
+                egui::Id::unique(("crop_handle", index)),
                 // Pointer only. Keyboard users move and resize the crop from
                 // the crop pane, whose name states those keys, so a handle is
                 // neither a Tab stop nor a node that cannot be activated.
@@ -5995,7 +5983,7 @@ fn render_crop_handles(
             )
             .on_hover_cursor(cursor);
         response.widget_info(|| {
-            WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), language.text(name))
+            WidgetInfo::labeled(Role::Button, ui.is_enabled(), language.text(name))
         });
         response.ctx.accesskit_node_builder(response.id, |node| {
             node.set_hidden();
@@ -6299,7 +6287,7 @@ mod tests {
             ..egui::RawInput::default()
         };
 
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let mut actions = Vec::new();
             undo_trash_menu_item(ui, &mut actions, frame.chrome_view_model());
             assert!(actions.is_empty());
@@ -6389,7 +6377,7 @@ mod tests {
         let status = "Restoring 1 file from Trash...";
         frame.curation_status = Some(status.to_owned());
         frame.context_menu_pos = Some([100.0, 100.0]);
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -6437,7 +6425,7 @@ mod tests {
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.filmstrip.clear();
-        let empty_output = empty_context.run_ui(accessibility_input(), |ui| {
+        let empty_output = run_frame(&empty_context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let empty_update = empty_output
@@ -6468,7 +6456,7 @@ mod tests {
         assert!(control_enabled(&frame, ChromeControl::EditTransform));
         assert!(!control_enabled(&frame, ChromeControl::SaveAs));
 
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -6496,7 +6484,7 @@ mod tests {
         assert!(control_enabled(&frame, ChromeControl::Crop));
         assert!(!control_enabled(&frame, ChromeControl::ApplyCrop));
 
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -6525,7 +6513,7 @@ mod tests {
         assert!(control_enabled(&frame, ChromeControl::Crop));
         assert!(!control_enabled(&frame, ChromeControl::ApplyCrop));
 
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -6548,7 +6536,7 @@ mod tests {
             frame.preview_load_retry_blocked = true;
 
             assert!(!control_enabled(&frame, ChromeControl::RetryLoad));
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             let update = output
@@ -6577,7 +6565,7 @@ mod tests {
         frame.preview_recovery_unsettled = true;
 
         assert!(control_enabled(&frame, ChromeControl::RetryLoad));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -6601,7 +6589,7 @@ mod tests {
         let recovery =
             "Trash restore stopped unexpectedly. Review the folder and system Trash, then retry U.";
         recovery_frame.curation_recovery_status = Some(recovery.to_owned());
-        let recovery_output = recovery_context.run_ui(accessibility_input(), |ui| {
+        let recovery_output = run_frame(&recovery_context, accessibility_input(), |ui| {
             let _ = render(ui, &recovery_frame);
         });
         let recovery_update = recovery_output
@@ -6622,7 +6610,7 @@ mod tests {
         let load_failure_context = egui::Context::default();
         load_failure_context.enable_accesskit();
         recovery_frame.load_error = Some("controlled load failure".to_owned());
-        let load_failure_output = load_failure_context.run_ui(accessibility_input(), |ui| {
+        let load_failure_output = run_frame(&load_failure_context, accessibility_input(), |ui| {
             let _ = render(ui, &recovery_frame);
         });
         let load_failure_update = load_failure_output
@@ -6651,7 +6639,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.rating.recovery_unsettled = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -6665,7 +6653,7 @@ mod tests {
 
         let menu_context = egui::Context::default();
         menu_context.enable_accesskit();
-        let menu_output = menu_context.run_ui(accessibility_input(), |ui| {
+        let menu_output = run_frame(&menu_context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             rating_menu(ui, &mut actions, frame.chrome_view_model());
             assert!(actions.is_empty());
@@ -6713,11 +6701,10 @@ mod tests {
     ) -> Vec<String> {
         let context = egui::Context::default();
         context.enable_accesskit();
-        let _ = context.run_ui(accessibility_input(), |ui| {
+        let _ = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, frame);
         });
         let mut pressed = accessibility_input();
-        pressed.modifiers = modifiers;
         pressed.events.push(egui::Event::Key {
             key,
             physical_key: None,
@@ -6725,10 +6712,10 @@ mod tests {
             repeat: false,
             modifiers,
         });
-        let _ = context.run_ui(pressed, |ui| {
+        let _ = run_frame(&context, pressed, |ui| {
             let _ = render(ui, frame);
         });
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, frame);
         });
         output
@@ -6781,6 +6768,58 @@ mod tests {
                 .any(|label| label.starts_with("Open File...")),
             "a modal keeps the menu bar closed"
         );
+    }
+
+    /// Run one egui pass and discard its texture updates.
+    ///
+    /// egui 0.37 debug-asserts when texture updates are dropped while they are
+    /// still queued. The renderer drains those updates after uploading them.
+    /// Tests never upload.
+    fn run_frame(
+        context: &egui::Context,
+        input: egui::RawInput,
+        mut add_contents: impl FnMut(&mut egui::Ui),
+    ) -> egui::FullOutput {
+        // An event-free pass that still wants an immediate repaint is the
+        // Area sizing pass: its card and menu are omitted from that tree.
+        // One follow-up pass is the tree the next frame presents.
+        let follow_up = input.events.is_empty().then(|| input.clone());
+        let mut output = paint_frame(context, input, &mut add_contents);
+        if let Some(follow_up) = follow_up
+            && output
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|viewport| viewport.repaint_delay == std::time::Duration::ZERO)
+        {
+            output = paint_frame(context, follow_up, &mut add_contents);
+        }
+        output
+    }
+
+    fn paint_frame(
+        context: &egui::Context,
+        input: egui::RawInput,
+        add_contents: impl FnMut(&mut egui::Ui),
+    ) -> egui::FullOutput {
+        let mut output = context.run_ui(input, add_contents);
+        // egui 0.37 debug-asserts if texture updates are dropped unapplied.
+        // The renderer drains them after upload. Tests never upload.
+        output.textures_delta.clear();
+        output
+    }
+
+    /// Run a pass, then the immediate repaint an `Area` sizing pass requests.
+    ///
+    /// The first pass of an `Area` is invisible, so its card, notice, and
+    /// window are absent from that AccessKit tree. The following pass is the
+    /// tree a screen reader receives after the requested repaint.
+    fn run_settled_frame(
+        context: &egui::Context,
+        mut input: impl FnMut() -> egui::RawInput,
+        mut add_contents: impl FnMut(&mut egui::Ui),
+    ) -> egui::FullOutput {
+        let _ = run_frame(context, input(), &mut add_contents);
+        run_frame(context, input(), &mut add_contents)
     }
 
     fn accessibility_input() -> egui::RawInput {
@@ -6987,7 +7026,7 @@ mod tests {
         frame.is_opening = true;
         frame.playlist_pos = Some((2, 2));
 
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -7046,7 +7085,7 @@ mod tests {
         });
         let mut update = None;
         for _ in 0..2 {
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             update = output.platform_output.accesskit_update;
@@ -7116,7 +7155,7 @@ mod tests {
         failed.toast = Some(visual_toast(
             "Could not display image: adapter rejected upload",
         ));
-        let failed_output = failed_context.run_ui(accessibility_input(), |ui| {
+        let failed_output = run_frame(&failed_context, accessibility_input(), |ui| {
             let _ = render(ui, &failed);
         });
         let failed_update = failed_output
@@ -7152,7 +7191,7 @@ mod tests {
         preview.selected_file_name = Some("target.png".to_owned());
         preview.is_loading = true;
         preview.is_opening = false;
-        let preview_output = preview_context.run_ui(accessibility_input(), |ui| {
+        let preview_output = run_frame(&preview_context, accessibility_input(), |ui| {
             let _ = render(ui, &preview);
         });
         let preview_update = preview_output
@@ -7185,7 +7224,7 @@ mod tests {
         empty.is_opening = true;
         empty.playlist_pos = None;
         empty.filmstrip.clear();
-        let empty_output = empty_context.run_ui(accessibility_input(), |ui| {
+        let empty_output = run_frame(&empty_context, accessibility_input(), |ui| {
             let _ = render(ui, &empty);
         });
         let empty_update = empty_output
@@ -7232,7 +7271,7 @@ mod tests {
             egui::Vec2::new(640.0, 480.0),
         ));
 
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -7283,7 +7322,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let frame = accessibility_test_frame();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -7323,7 +7362,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let frame = accessibility_test_frame();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             panels_menu(ui, &mut actions, frame.chrome_view_model());
         });
@@ -7352,7 +7391,7 @@ mod tests {
         fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
             let context = egui::Context::default();
             context.enable_accesskit();
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, frame);
             });
             output
@@ -7401,7 +7440,7 @@ mod tests {
         fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
             let context = egui::Context::default();
             context.enable_accesskit();
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, frame);
             });
             output
@@ -7436,7 +7475,7 @@ mod tests {
         fn exposed_text(frame: &UiFrameOwned) -> Vec<String> {
             let context = egui::Context::default();
             context.enable_accesskit();
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, frame);
             });
             output
@@ -7485,7 +7524,7 @@ mod tests {
     fn accesskit_texts(frame: &UiFrameOwned) -> Vec<String> {
         let context = egui::Context::default();
         context.enable_accesskit();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, frame);
         });
         output
@@ -7513,7 +7552,7 @@ mod tests {
     fn placed_texts(frame: &UiFrameOwned) -> Vec<PlacedText> {
         let context = egui::Context::default();
         context.enable_accesskit();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, frame);
         });
         let update = output
@@ -7616,7 +7655,7 @@ mod tests {
             });
             let colors = chrome_colors_for(mode);
             let context = egui::Context::default();
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &framed);
             });
             let painted = painted_text_color(&output, proof)
@@ -7663,7 +7702,7 @@ mod tests {
         fn labels(frame: &UiFrameOwned) -> Vec<String> {
             let context = egui::Context::default();
             context.enable_accesskit();
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, frame);
             });
             output
@@ -7732,7 +7771,7 @@ mod tests {
         frame.rating.state = crate::ratings::RatingState::Rated(
             crate::ratings::Rating::new(4).expect("valid test rating"),
         );
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             rating_menu(ui, &mut actions, frame.chrome_view_model());
         });
@@ -7778,7 +7817,7 @@ mod tests {
         frame.open_path_text = "photo.jpg".to_owned();
         frame.open_path_error = Some("Could not find path: very/long/missing/photo.jpg".repeat(5));
         let mut actions = Vec::new();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             ui.set_width(330.0);
             render_path_entry(
                 ui,
@@ -7806,11 +7845,11 @@ mod tests {
         assert_eq!(error.live(), Some(egui::accesskit::Live::Polite));
         assert!(error.bounds().unwrap().width() <= 330.0);
 
-        context.memory_mut(|memory| memory.request_focus(egui::Id::new("empty_path_input")));
+        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("empty_path_input")));
         assert!(path_input_has_focus(&context));
         let mut input = accessibility_input();
         input.events = vec![egui::Event::Text("5".to_owned())];
-        let _ = context.run_ui(input, |ui| {
+        let _ = run_frame(&context, input, |ui| {
             render_path_entry(
                 ui,
                 &mut actions,
@@ -7837,7 +7876,7 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }];
-        let _ = context.run_ui(input, |ui| {
+        let _ = run_frame(&context, input, |ui| {
             render_path_entry(
                 ui,
                 &mut actions,
@@ -7851,7 +7890,7 @@ mod tests {
                 .iter()
                 .any(|action| matches!(action, UiAction::OpenEnteredPath))
         );
-        context.memory_mut(|memory| memory.request_focus(egui::Id::new("zoom_button")));
+        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("zoom_button")));
         assert!(!path_input_has_focus(&context));
     }
 
@@ -7864,7 +7903,7 @@ mod tests {
         frame.save_path_error =
             Some("Save failed: could not verify the Save As destination parent".repeat(4));
         let mut actions = Vec::new();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             ui.set_width(330.0);
             render_save_path_entry(ui, &mut actions, &frame);
         });
@@ -7886,11 +7925,11 @@ mod tests {
         assert_eq!(error.live(), Some(egui::accesskit::Live::Polite));
         assert!(error.bounds().unwrap().width() <= 330.0);
 
-        context.memory_mut(|memory| memory.request_focus(egui::Id::new("menu_save_path_input")));
+        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("menu_save_path_input")));
         assert!(path_input_has_focus(&context));
         let mut input = accessibility_input();
         input.events = vec![egui::Event::Text("2".to_owned())];
-        let _ = context.run_ui(input, |ui| {
+        let _ = run_frame(&context, input, |ui| {
             render_save_path_entry(ui, &mut actions, &frame);
         });
         let edited = actions
@@ -7911,7 +7950,7 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }];
-        let _ = context.run_ui(input, |ui| {
+        let _ = run_frame(&context, input, |ui| {
             render_save_path_entry(ui, &mut actions, &frame);
         });
         assert!(
@@ -7954,7 +7993,7 @@ mod tests {
         frame.is_opening = false;
         frame.folder_scan_busy = false;
 
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             rating_menu(ui, &mut actions, frame.chrome_view_model());
         });
@@ -7983,7 +8022,7 @@ mod tests {
         frame.rating.filter = crate::ratings::RatingFilter::AtLeast(
             crate::ratings::Rating::new(3).expect("valid test rating"),
         );
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             rating_filter_menu(ui, &mut actions, frame.chrome_view_model());
         });
@@ -8026,10 +8065,10 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.save_overwrite_pending = true;
 
-        let _ = context.run_ui(accessibility_input(), |ui| {
+        let _ = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8133,7 +8172,7 @@ mod tests {
         frame.rating.pending_disclosure = Some(crate::ratings::RatingAssignment::Set(
             crate::ratings::Rating::new(4).expect("valid test rating"),
         ));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8179,7 +8218,7 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         });
-        let tab_output = context.run_ui(tab_input, |ui| {
+        let tab_output = run_frame(&context, tab_input, |ui| {
             let _ = render(ui, &frame);
         });
         let tab_update = tab_output
@@ -8207,7 +8246,7 @@ mod tests {
         frame.file_path = None;
         frame.playlist_pos = None;
         frame.filmstrip.clear();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8255,7 +8294,7 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.folder_scan_busy = true;
         frame.playlist_pos = None;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8275,7 +8314,7 @@ mod tests {
         frame.dock.has_image = false;
         frame.folder_scan_busy = true;
         frame.playlist_pos = None;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8299,7 +8338,7 @@ mod tests {
             text: "Rating 4 of 5 saved.".to_owned(),
             announcement: ToastAnnouncement::PoliteStatus,
         });
-        let rating_output = rating_context.run_ui(accessibility_input(), |ui| {
+        let rating_output = run_frame(&rating_context, accessibility_input(), |ui| {
             let _ = render(ui, &rating_frame);
         });
         let rating_update = rating_output
@@ -8315,7 +8354,7 @@ mod tests {
         ordinary_context.enable_accesskit();
         let mut ordinary_frame = accessibility_test_frame();
         ordinary_frame.toast = Some(visual_toast("Saved copy · EXIF retained"));
-        let ordinary_output = ordinary_context.run_ui(accessibility_input(), |ui| {
+        let ordinary_output = run_frame(&ordinary_context, accessibility_input(), |ui| {
             let _ = render(ui, &ordinary_frame);
         });
         let ordinary_update = ordinary_output
@@ -8334,7 +8373,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.toast = Some(visual_toast("Moved to Trash. Undo with U."));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8361,7 +8400,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.has_unsaved_pixel_edits = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8380,7 +8419,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let frame = accessibility_test_frame();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             folder_sort_menu(ui, &mut Vec::new(), &frame);
         });
         let update = output
@@ -8428,7 +8467,7 @@ mod tests {
             has_maker_specific_data: true,
             ..Default::default()
         });
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8466,7 +8505,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.details = Some(crate::image_info::ImageDetails::default());
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8501,7 +8540,7 @@ mod tests {
             accessibility_label: "Page 2 of 3, 800 by 600".into(),
             visible_label: "Page 2 of 3".into(),
         });
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8551,7 +8590,7 @@ mod tests {
                 can_previous: true,
                 can_next: true,
             });
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             let update = output
@@ -8596,7 +8635,7 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.context_menu_pos = Some([100.0, 100.0]);
         assert!(control_enabled(&frame, ChromeControl::OpenWith));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8628,7 +8667,7 @@ mod tests {
         let mut frame = accessibility_test_frame();
         frame.context_menu_pos = Some([100.0, 100.0]);
         assert!(control_enabled(&frame, ChromeControl::CopyImage));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8649,7 +8688,7 @@ mod tests {
 
         frame.crop_busy = true;
         assert!(!control_enabled(&frame, ChromeControl::CopyImage));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8675,7 +8714,7 @@ mod tests {
         frame.heal_supported = false;
         frame.heal_busy = true;
 
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8706,7 +8745,7 @@ mod tests {
         heal_frame.dock.heal_active = true;
         heal_frame.heal_busy = true;
         let heal = heal_frame.chrome_view_model().heal_control();
-        let adapter_output = adapter_context.run_ui(accessibility_input(), |ui| {
+        let adapter_output = run_frame(&adapter_context, accessibility_input(), |ui| {
             let _ = context_tool_button(ui, crop);
             let _ = menu_tool_button(ui, heal);
         });
@@ -8728,7 +8767,7 @@ mod tests {
 
         let dock_context = egui::Context::default();
         dock_context.enable_accesskit();
-        let dock_output = dock_context.run_ui(accessibility_input(), |ui| {
+        let dock_output = run_frame(&dock_context, accessibility_input(), |ui| {
             let _ = render(ui, &heal_frame);
         });
         let dock_update = dock_output
@@ -8751,7 +8790,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.source_gone = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8771,7 +8810,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.external_edit_pending = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -8800,7 +8839,7 @@ mod tests {
         ));
         let mut badge_text_width = 0.0;
         let mut primary_token_width = 0.0;
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             badge_text_width = ui
                 .painter()
                 .layout_no_wrap(
@@ -8858,7 +8897,7 @@ mod tests {
             egui::Vec2::new(TOP_STATUS_COMPACT_MAX_WIDTH, 48.0),
         ));
         let mut responses = None;
-        let _ = layout_context.run_ui(layout_input, |ui| {
+        let _ = run_frame(&layout_context, layout_input, |ui| {
             responses = add_top_status_with_external_edit(
                 ui,
                 "Could not open target.png",
@@ -8895,7 +8934,7 @@ mod tests {
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(640.0, 480.0));
         input.screen_rect = Some(screen_rect);
 
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -9002,7 +9041,7 @@ mod tests {
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
         let mut input = accessibility_input();
         input.screen_rect = Some(screen);
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, frame);
         });
         (
@@ -9277,11 +9316,23 @@ mod tests {
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(1_000.0, 720.0));
         let mut observed = Vec::new();
         let pane_label = empty_state_pane_label(frame);
+        // The first Area pass only measures. Bounds below are the settled card.
+        let _ = run_frame(
+            &context,
+            {
+                let mut input = accessibility_input();
+                input.screen_rect = Some(screen_rect);
+                input
+            },
+            |ui| {
+                let _ = render(ui, frame);
+            },
+        );
 
         for _ in 0..8 {
             let mut input = accessibility_input();
             input.screen_rect = Some(screen_rect);
-            let output = context.run_ui(input, |ui| {
+            let output = run_frame(&context, input, |ui| {
                 let _ = render(ui, frame);
             });
             let update = output
@@ -9342,7 +9393,7 @@ mod tests {
             egui::Vec2::new(1_200.0, 800.0),
         ));
 
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -9396,7 +9447,7 @@ mod tests {
             egui::Pos2::ZERO,
             egui::Vec2::new(width, 800.0),
         ));
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, frame);
         });
         let update = output
@@ -9534,7 +9585,7 @@ mod tests {
                 egui::Pos2::ZERO,
                 egui::Vec2::new(width, 750.0),
             ));
-            let output = context.run_ui(input, |ui| {
+            let output = run_frame(&context, input, |ui| {
                 let _ = render(ui, frame);
                 name_width =
                     egui::WidgetText::from(egui::RichText::new("current.png").size(13.5).strong())
@@ -9723,7 +9774,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let frame = page_frame(false, true);
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -9778,7 +9829,7 @@ mod tests {
         let context = egui::Context::default();
         context.enable_accesskit();
         let frame = page_frame(true, true);
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -9804,7 +9855,7 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 },
             ];
-            let _ = context.run_ui(input, |ui| {
+            let _ = run_frame(&context, input, |ui| {
                 actions.extend(render(ui, &frame));
             });
         }
@@ -9841,7 +9892,7 @@ mod tests {
                         egui::Pos2::ZERO,
                         egui::vec2(width, 480.0),
                     ));
-                    let output = context.run_ui(input, |ui| {
+                    let output = run_frame(&context, input, |ui| {
                         let _ = render(ui, &frame);
                     });
                     update = output.platform_output.accesskit_update;
@@ -9897,7 +9948,7 @@ mod tests {
         };
         let mut update = None;
         for _ in 0..2 {
-            let output = context.run_ui(input(), |ui| {
+            let output = run_frame(context, input(), |ui| {
                 let _ = render(ui, frame);
             });
             update = output.platform_output.accesskit_update;
@@ -9926,7 +9977,7 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 },
             ];
-            let _ = context.run_ui(input, |ui| actions.extend(render(ui, frame)));
+            let _ = run_frame(context, input, |ui| actions.extend(render(ui, frame)));
         }
         actions
     }
@@ -9964,7 +10015,7 @@ mod tests {
                 egui::Pos2::ZERO,
                 egui::vec2(640.0, 480.0),
             ));
-            let output = context.run_ui(input, |ui| {
+            let output = run_frame(&context, input, |ui| {
                 let _ = render(ui, &frame);
             });
             let update = output
@@ -10048,7 +10099,7 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 });
             }
-            let _ = context.run_ui(input, |ui| {
+            let _ = run_frame(&context, input, |ui| {
                 let mut actions = Vec::new();
                 let response = super::render_image_zoom(
                     ui,
@@ -10103,7 +10154,7 @@ mod tests {
         context.enable_accesskit();
         let mut update = None;
         for _ in 0..2 {
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, frame);
             });
             update = output.platform_output.accesskit_update;
@@ -10282,7 +10333,7 @@ mod tests {
         context.enable_accesskit();
         let mut update = None;
         for _ in 0..2 {
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, frame);
             });
             update = output.platform_output.accesskit_update;
@@ -10308,7 +10359,7 @@ mod tests {
         }];
         let frame = accessibility_test_frame();
         for _ in 0..3 {
-            let _ = context.run_ui(input.clone(), |ui| {
+            let _ = run_frame(&context, input.clone(), |ui| {
                 let _ = render(ui, &frame);
             });
         }
@@ -10325,12 +10376,11 @@ mod tests {
         for _ in 0..3 {
             let mut input = accessibility_input();
             input.events.push(egui::Event::PointerMoved(pointer));
-            cursor = context
-                .run_ui(input, |ui| {
-                    let _ = render(ui, frame);
-                })
-                .platform_output
-                .cursor_icon;
+            cursor = run_frame(&context, input, |ui| {
+                let _ = render(ui, frame);
+            })
+            .platform_output
+            .cursor_icon;
         }
         cursor
     }
@@ -10378,7 +10428,7 @@ mod tests {
             input
                 .events
                 .push(egui::Event::PointerMoved(egui::pos2(600.0, 400.0)));
-            let _ = context.run_ui(input, |ui| {
+            let _ = run_frame(&context, input, |ui| {
                 let _ = render(ui, &frame);
             });
         }
@@ -10421,7 +10471,7 @@ mod tests {
                         modifiers: egui::Modifiers::NONE,
                     });
                 }
-                let _ = context.run_ui(input, |ui| actions.extend(render(ui, &frame)));
+                let _ = run_frame(&context, input, |ui| actions.extend(render(ui, &frame)));
             }
             assert!(
                 !actions.iter().any(|action| matches!(
@@ -10460,8 +10510,8 @@ mod tests {
     fn modal_focus_is_claimed_once_and_returned_where_the_user_was() {
         use super::{ModalKind, claim_initial_modal_focus, sync_modal_focus};
         let context = egui::Context::default();
-        let before = egui::Id::new("control before the modal");
-        let _ = context.run_ui(accessibility_input(), |ui| {
+        let before = egui::Id::unique("control before the modal");
+        let _ = run_frame(&context, accessibility_input(), |ui| {
             let _ = ui.push_id(before, |ui| ui.button("Before"));
             ui.interact(
                 egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(8.0)),
@@ -10480,7 +10530,7 @@ mod tests {
             claim_initial_modal_focus(&context),
             "a replacing modal takes focus for its own default control"
         );
-        context.memory_mut(|memory| memory.request_focus(egui::Id::new("inside")));
+        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("inside")));
 
         sync_modal_focus(&context, None);
         assert_eq!(
@@ -10503,7 +10553,7 @@ mod tests {
         let focus_is_in_tree = |update: &egui::accesskit::TreeUpdate| {
             update.nodes.iter().any(|(id, _)| *id == update.focus)
         };
-        let opener = context.run_ui(accessibility_input(), |ui| {
+        let opener = run_frame(&context, accessibility_input(), |ui| {
             let response = ui.button("Preferences...");
             response.request_focus();
             let _ = render(ui, &frame);
@@ -10517,7 +10567,7 @@ mod tests {
         frame.show_preferences = true;
         for show_file_associations in [false, true, false] {
             frame.show_file_associations = show_file_associations;
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             assert!(focus_is_in_tree(
@@ -10529,7 +10579,7 @@ mod tests {
         }
         frame.show_preferences = false;
         for _ in 0..2 {
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             let update = output
@@ -10545,14 +10595,14 @@ mod tests {
 
     #[test]
     fn accessibility_focus_on_a_missing_node_falls_back_to_the_root() {
-        use egui::accesskit::{Node, NodeId, Role, Tree, TreeId, TreeUpdate};
+        use egui::accesskit::{Node, NodeId, Role, TreeId, TreeInfo, TreeUpdate};
         let root = NodeId(1);
         let mut update = TreeUpdate {
             nodes: vec![
                 (root, Node::new(Role::Window)),
                 (NodeId(2), Node::new(Role::Button)),
             ],
-            tree: Some(Tree::new(root)),
+            tree: Some(TreeInfo::new(root)),
             tree_id: TreeId::ROOT,
             focus: NodeId(99),
         };
@@ -10610,7 +10660,7 @@ mod tests {
         context.enable_accesskit();
         let mut update = None;
         for _ in 0..2 {
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             update = output.platform_output.accesskit_update;
@@ -10657,8 +10707,8 @@ mod tests {
         let status = nodes
             .iter()
             .find(|node| {
-                node.label() == Some("Repairing in memory...")
-                    || node.value() == Some("Repairing in memory...")
+                node.role() == egui::accesskit::Role::Label
+                    && node.value() == Some("Repairing in memory...")
             })
             .expect("repair status node");
         assert!(status.is_busy());
@@ -10699,7 +10749,7 @@ mod tests {
             let mut frame = accessibility_test_frame();
             frame.language = language;
             frame.rating.capability = crate::ratings::RatingWriteCapability::ReadOnlyFormat;
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             let update = output.platform_output.accesskit_update.unwrap();
@@ -10738,7 +10788,7 @@ mod tests {
             egui::Pos2::ZERO,
             egui::Vec2::new(1_200.0, 800.0),
         ));
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -10764,7 +10814,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.show_about = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -10829,7 +10879,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         });
         let mut escape_actions = Vec::new();
-        let _ = context.run_ui(escape_input, |ui| {
+        let _ = run_frame(&context, escape_input, |ui| {
             escape_actions = render(ui, &frame);
         });
         assert!(
@@ -10846,7 +10896,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.show_keyboard_shortcuts = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -10857,10 +10907,21 @@ mod tests {
             .nodes
             .iter()
             .map(|(_, node)| node)
-            .find(|node| node.role() == egui::accesskit::Role::Dialog)
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Dialog
+                    && node.label() == Some("Keyboard shortcuts")
+            })
             .expect("shortcut panel dialog");
         assert!(dialog.is_modal());
-        assert_eq!(dialog.label(), Some("Keyboard shortcuts"));
+        assert_eq!(
+            update
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
+                .count(),
+            1,
+            "a modal should expose one dialog"
+        );
         let exposed = update
             .nodes
             .iter()
@@ -10898,7 +10959,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         });
         let mut escape_actions = Vec::new();
-        let _ = context.run_ui(escape_input, |ui| {
+        let _ = run_frame(&context, escape_input, |ui| {
             escape_actions = render(ui, &frame);
         });
         assert!(
@@ -10927,7 +10988,7 @@ mod tests {
             for _ in 0..2 {
                 let mut input = accessibility_input();
                 input.screen_rect = Some(screen_rect);
-                let output = context.run_ui(input, |ui| {
+                let output = run_frame(&context, input, |ui| {
                     let _ = render(ui, &frame);
                 });
                 let update = output
@@ -10964,7 +11025,7 @@ mod tests {
         frame.selected_file_name = Some("night.png".to_owned());
         let long_error = format!("{}\nsecond line", "é".repeat(200));
         frame.load_error = Some(long_error.clone());
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_settled_frame(&context, accessibility_input, |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -10995,7 +11056,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.show_update = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11047,7 +11108,7 @@ mod tests {
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(640.0, 480.0));
         let mut input = accessibility_input();
         input.screen_rect = Some(screen_rect);
-        let output = context.run_ui(input, |ui| {
+        let output = run_frame(&context, input, |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11076,7 +11137,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.show_preferences = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11141,7 +11202,7 @@ mod tests {
         frame.show_preferences = true;
         frame.language_preference = crate::locale::Preference::Spanish;
         frame.language = crate::locale::Language::Spanish;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11175,7 +11236,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.show_file_associations = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11233,7 +11294,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.dock.heal_active = true;
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11277,7 +11338,7 @@ mod tests {
             let context = egui::Context::default();
             let mut frame = accessibility_test_frame();
             frame.theme_mode = mode;
-            let output = context.run_ui(accessibility_input(), |ui| {
+            let output = run_frame(&context, accessibility_input(), |ui| {
                 let _ = render(ui, &frame);
             });
             assert_ne!(output.shapes, [] as [egui::epaint::ClippedShape; 0]);
@@ -11288,7 +11349,7 @@ mod tests {
     fn appearance_menu_exposes_scope_and_descriptive_radio_names() {
         let context = egui::Context::default();
         context.enable_accesskit();
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             appearance_menu(
                 ui,
@@ -11352,7 +11413,7 @@ mod tests {
         context.enable_accesskit();
         let mut frame = accessibility_test_frame();
         frame.toast = Some(visual_toast(NOTICE));
-        let output = context.run_ui(accessibility_input(), |ui| {
+        let output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let update = output
@@ -11373,7 +11434,7 @@ mod tests {
         frame.is_cropping = true;
         frame.crop_screen = Some([160.0, 120.0, 720.0, 560.0]);
         frame.crop_uv = Some([0.1, 0.2, 0.7, 0.8]);
-        let crop_output = context.run_ui(accessibility_input(), |ui| {
+        let crop_output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let crop_update = crop_output
@@ -11408,7 +11469,7 @@ mod tests {
             "Crop selection: {pixel_width} by {pixel_height} output pixels, source starts at x \
              {pixel_x}, y {pixel_y}. Arrow keys move; Shift plus Arrow keys resize."
         );
-        let crop_output = context.run_ui(accessibility_input(), |ui| {
+        let crop_output = run_frame(&context, accessibility_input(), |ui| {
             let _ = render(ui, &frame);
         });
         let crop_update = crop_output

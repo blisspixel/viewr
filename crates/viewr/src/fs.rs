@@ -2015,7 +2015,11 @@ pub fn is_core_format(path: &Path) -> bool {
     matches!(extension_kind(path), Some(ExtensionKind::Core))
 }
 
-/// Camera RAW extensions that stay in a folder but do not open through 1.0.
+/// Camera RAW extensions that stay in a folder.
+///
+/// Opening a folder does not start on one when another photo is present. A
+/// `.dng` file may still show an embedded preview once it is opened. The other
+/// extensions do not.
 const DEFERRED_RAW_EXTENSIONS: &[&str] = &["cr2", "nef", "arw", "dng", "rw2", "orf", "raf"];
 
 /// Return `true` when the file is a deferred camera RAW photo.
@@ -2024,14 +2028,25 @@ const DEFERRED_RAW_EXTENSIONS: &[&str] = &["cr2", "nef", "arw", "dng", "rw2", "o
 /// folder does not start on one when a showable photo is also present.
 #[must_use]
 pub fn is_deferred_camera_raw(path: &Path) -> bool {
+    raw_extension(path)
+        .is_some_and(|extension| DEFERRED_RAW_EXTENSIONS.contains(&extension.as_str()))
+}
+
+/// Return `true` when opening this file may show an embedded DNG preview.
+///
+/// The preview is still not a sensor decode. Folder start keeps treating the
+/// file as deferred because a DNG with no preview cannot be shown.
+#[must_use]
+pub fn is_dng_preview_candidate(path: &Path) -> bool {
+    raw_extension(path).is_some_and(|extension| extension == "dng")
+}
+
+fn raw_extension(path: &Path) -> Option<String> {
     if is_apple_double_sidecar(path) {
-        return false;
+        return None;
     }
-    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    let extension = extension.to_ascii_lowercase();
-    DEFERRED_RAW_EXTENSIONS.contains(&extension.as_str())
+    let extension = path.extension().and_then(|value| value.to_str())?;
+    Some(extension.to_ascii_lowercase())
 }
 
 /// Return whether a pathname is definitely absent without treating other
@@ -2481,9 +2496,9 @@ mod tests {
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, FolderSort, canonical_file_path,
         catalog_paths_match, error_kind_is_definitely_missing, folder_entry_cmp, is_core_format,
-        is_deferred_camera_raw, is_supported_image, is_worker_format, natural_cmp,
-        scan_image_entries_sorted_while, scan_image_entries_while, scan_images, scan_images_while,
-        scan_images_with_limit, sort_while, supported_extensions,
+        is_deferred_camera_raw, is_dng_preview_candidate, is_supported_image, is_worker_format,
+        natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while, scan_images,
+        scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
@@ -2521,10 +2536,22 @@ mod tests {
             assert!(!is_core_format(&path), "{extension}");
             let upper = PathBuf::from(format!("shot.{}", extension.to_ascii_uppercase()));
             assert!(is_deferred_camera_raw(&upper), "{extension}");
+            assert_eq!(
+                is_dng_preview_candidate(&path),
+                extension == "dng",
+                "{extension}"
+            );
+            assert_eq!(
+                is_dng_preview_candidate(&upper),
+                extension == "dng",
+                "{extension}"
+            );
         }
         assert!(!is_deferred_camera_raw(Path::new("shot.avif")));
         assert!(!is_deferred_camera_raw(Path::new("shot.jpg")));
         assert!(!is_deferred_camera_raw(Path::new("album/._shot.ARW")));
+        assert!(!is_dng_preview_candidate(Path::new("album/._shot.DNG")));
+        assert!(!is_dng_preview_candidate(Path::new("shot.arw")));
     }
 
     #[test]

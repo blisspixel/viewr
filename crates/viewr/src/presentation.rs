@@ -385,6 +385,18 @@ pub(crate) const fn keep_folder_notice_over_open_failure(
     folder_notice_visible && matches!(cause, OpenFailureCause::RawDeferred)
 }
 
+/// A DNG replacement waited for its preview, and that preview is absent.
+///
+/// The durable "cannot be shown" notice belongs here. A timed RAW toast would
+/// replace it while the previous photo is still on screen.
+#[must_use]
+pub(crate) const fn deferred_preview_failure_needs_unshowable_notice(
+    waited_for_preview: bool,
+    cause: OpenFailureCause,
+) -> bool {
+    waited_for_preview && matches!(cause, OpenFailureCause::RawDeferred)
+}
+
 pub(super) fn preview_job_matches(
     job_generation: u64,
     job_path: &Path,
@@ -403,7 +415,8 @@ pub(super) fn preview_job_matches(
 mod tests {
     use super::{
         ImageReuseEligibility, NavigationImagePlan, OpenFailureCause, PresentationKind,
-        PresentedFrameTransition, decode_failure_toast, durable_presentation_error,
+        PresentedFrameTransition, decode_failure_toast,
+        deferred_preview_failure_needs_unshowable_notice, durable_presentation_error,
         explain_open_failure, external_edit_pending_after_frame_transition, failure_notice,
         image_open_in_progress, keep_folder_notice_over_open_failure, navigation_image_plan,
         preview_job_matches, user_facing_decode_error,
@@ -567,6 +580,18 @@ mod tests {
         assert!(!keep_folder_notice_over_open_failure(
             OpenFailureCause::Unsupported,
             true
+        ));
+        assert!(deferred_preview_failure_needs_unshowable_notice(
+            true,
+            OpenFailureCause::RawDeferred
+        ));
+        assert!(!deferred_preview_failure_needs_unshowable_notice(
+            false,
+            OpenFailureCause::RawDeferred
+        ));
+        assert!(!deferred_preview_failure_needs_unshowable_notice(
+            true,
+            OpenFailureCause::Damaged
         ));
     }
 

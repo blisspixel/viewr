@@ -365,6 +365,8 @@ pub(crate) struct UiFrameOwned {
     pub save_path_error: Option<String>,
     /// Pixel dimensions of the current image, if any.
     pub img_size: Option<(u32, u32)>,
+    /// The dimensions are an embedded DNG preview, not the sensor image.
+    pub embedded_preview: bool,
     /// Playback state for an animated image.
     pub animation: Option<AnimationUiInfo>,
     /// Still-page state for a multi-page TIFF or multi-size ICO.
@@ -1743,8 +1745,8 @@ fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewM
         return reserve;
     }
     if let Some((width, height)) = frame.img_size {
-        reserve +=
-            TOP_METADATA_GAP + measure(&format!("{width} × {height}"), 12.5) + TOP_METADATA_SPACING;
+        let label = pixel_size_label(frame.language, frame.embedded_preview, width, height);
+        reserve += TOP_METADATA_GAP + measure(&label, 12.5) + TOP_METADATA_SPACING;
     }
     if let Some(path) = frame.file_path.as_ref() {
         let name = crate::prefetch::privacy_safe_file_name(std::path::Path::new(path));
@@ -1768,6 +1770,25 @@ fn top_toast_max_width(available: f32, metadata_reserve: f32, content_width: f32
 
 fn is_compact_width(content_width: f32) -> bool {
     content_width < 720.0
+}
+
+fn pixel_size_label(
+    language: crate::locale::Language,
+    preview: bool,
+    width: u32,
+    height: u32,
+) -> String {
+    if !preview {
+        return format!("{width} × {height}");
+    }
+    let width = width.to_string();
+    let height = height.to_string();
+    language
+        .fill(
+            tr!("Preview {width} × {height}"),
+            &[("width", &width), ("height", &height)],
+        )
+        .into_string()
 }
 
 fn render_top_image_facts(
@@ -1800,9 +1821,14 @@ fn render_top_image_facts(
             ui.add_space(TOP_METADATA_GAP);
         }
         ui.label(
-            RichText::new(format!("{width} × {height}"))
-                .size(12.5)
-                .color(colors.muted),
+            RichText::new(pixel_size_label(
+                frame.language,
+                frame.embedded_preview,
+                width,
+                height,
+            ))
+            .size(12.5)
+            .color(colors.muted),
         );
     }
     if let Some(path) = frame.file_path.as_ref() {
@@ -4159,7 +4185,21 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
         ui.label(RichText::new(name).color(colors.text));
     }
     if let Some((width, height)) = frame.img_size {
-        ui.label(RichText::new(format!("{width} × {height}")).color(colors.muted));
+        ui.label(
+            RichText::new(pixel_size_label(
+                frame.language,
+                frame.embedded_preview,
+                width,
+                height,
+            ))
+            .color(colors.muted),
+        );
+        if frame.embedded_preview {
+            ui.label(
+                RichText::new(frame.text(tr!("Embedded preview, not the full camera RAW.")))
+                    .color(colors.muted),
+            );
+        }
         let megapixels = f64::from(width) * f64::from(height) / 1_000_000.0;
         if let Some(aspect) = crate::image_info::aspect_ratio(width, height) {
             let mp_str = frame.language.format_decimal(megapixels, 1);
@@ -5628,7 +5668,12 @@ fn expose_image_canvas(ctx: &egui::Context, frame: &UiFrameOwned) {
         node.set_role(egui::accesskit::Role::Image);
         node.set_label(name);
         if let Some((width, height)) = frame.img_size {
-            node.set_description(format!("{width} × {height}"));
+            node.set_description(pixel_size_label(
+                frame.language,
+                frame.embedded_preview,
+                width,
+                height,
+            ));
         }
         node.set_bounds(egui::accesskit::Rect {
             x0: viewport.min.x.into(),
@@ -6118,6 +6163,7 @@ mod tests {
             save_path_text: String::new(),
             save_path_error: None,
             img_size: Some((1920, 1080)),
+            embedded_preview: false,
             animation: None,
             pages: None,
             details: None,
@@ -8966,6 +9012,50 @@ mod tests {
                 .expect("AccessKit update"),
             screen,
         )
+    }
+
+    #[test]
+    fn dng_preview_is_labelled_on_the_canvas_and_in_image_information() {
+        let mut frame = accessibility_test_frame();
+        frame.embedded_preview = true;
+        frame.file_path = Some("C:/photos/frame.dng".to_owned());
+        let (update, _) = accesskit_tree_in(&frame, egui::Vec2::new(1280.0, 800.0));
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+        let preview = "Preview 1920 × 1080";
+        let sentence = "Embedded preview, not the full camera RAW.";
+        let shows = |node: &&egui::accesskit::Node, text| {
+            node.value() == Some(text) || node.label() == Some(text)
+        };
+        assert!(
+            nodes.iter().any(|node| {
+                shows(node, preview)
+                    && node
+                        .bounds()
+                        .is_some_and(|bounds| bounds.y1 <= f64::from(TOP_BAR_HEIGHT))
+            }),
+            "top bar names the preview size"
+        );
+        assert!(
+            nodes.iter().any(|node| {
+                shows(node, sentence)
+                    && node
+                        .bounds()
+                        .is_some_and(|bounds| bounds.y0 >= f64::from(TOP_BAR_HEIGHT))
+            }),
+            "image information says this is a preview"
+        );
+        assert!(nodes.iter().any(|node| {
+            node.role() == egui::accesskit::Role::Image && node.description() == Some(preview)
+        }));
+        assert!(nodes.iter().all(|node| {
+            node.value() != Some("1920 × 1080")
+                && node.label() != Some("1920 × 1080")
+                && node.description() != Some("1920 × 1080")
+        }));
     }
 
     #[test]

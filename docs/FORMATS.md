@@ -168,13 +168,14 @@ is and exits, because there is no protocol frame on a terminal to answer.
 |--------|------------|----------------------|-------------|
 | AVIF | `.avif` | This build can't open AVIF photos. | `--features avif` (+ system libavif) |
 | HEIC / HEIF | `.heic`, `.heif` | This build can't open HEIC photos. | `--features heic` (+ system libheif) |
-| Camera RAW | `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`, `.orf`, `.raf` | viewr does not open camera RAW files yet. Deferred from 1.0. | Feature `raw` reserved; no decode, orientation, or color implementation ships in 1.0 |
+| DNG preview | `.dng` | Largest embedded baseline JPEG, labelled Preview with its pixel size. A DNG with no such preview uses the camera RAW sentence. | Preview only. The sensor image is not decoded. |
+| Camera RAW | `.cr2`, `.nef`, `.arw`, `.rw2`, `.orf`, `.raf` | viewr does not open camera RAW files yet. Deferred from 1.0. | Feature `raw` reserved; no sensor decode, orientation, or color implementation ships in 1.0 |
 
 Those RAW names stay in a folder. Opening the folder selects the first photo
-viewr can show, and stays on the first file when every file is deferred. When
-no photo is on screen, moving onto a RAW file keeps the folder position and
-shows the same sentence in a compact notice. A photo already on screen stays
-visible.
+viewr can show, and stays on the first file when every file is deferred. A DNG
+shows its embedded preview when one exists. When no photo is on screen, moving
+onto a RAW file that cannot be shown keeps the folder position and shows the
+same sentence in a compact notice. A photo already on screen stays visible.
 
 ### Building the worker with C backends
 

@@ -18,7 +18,7 @@ default = []
 # Opt-in C/C++ decoder backends. Off by default so the workspace builds on CI
 # without system libraries. Enable for local/dev builds that have the deps:
 #   cargo build -p viewr-decode --features avif,heic
-avif = ["dep:image", "dep:libavif-image", "dep:libavif-sys"]
+avif = ["dep:libavif-image", "dep:libavif-sys"]
 heic = ["dep:libheif-rs", "dep:libheif-sys"]
 # CI-only compatibility proof against the currently vendored libheif release.
 # Shipping builds keep the Ubuntu 24.04-compatible v1.17 API floor.
@@ -34,7 +34,7 @@ all-c = ["avif", "heic", "raw"]
 
 [dependencies]
 viewr-protocol = { path = "../viewr-protocol" }
-image = { version = "0.25", optional = true, default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 libavif-image = { version = "0.14", optional = true }
 libavif-sys = { version = "0.17", optional = true }
 # Ubuntu 24.04, the pinned Linux C-decoder validation host, provides libheif

@@ -52,7 +52,9 @@ images through one bounded serialized Trash queue, and bundles English, Spanish,
 French, and German interface catalogs covering first-run, About, Trash, wait
 copy, rating failures, every top-chrome toast and navigation notice, and every
 dialog, panel, and control including accessible names, enforced by a
-pseudo-language render test. File > Save Path types a destination when the
+pseudo-language render test. A DNG with an embedded baseline JPEG shows
+that preview, labelled with its pixel size; the sensor image stays unread.
+File > Save Path types a destination when the
 native Save As chooser returns no path. Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
 word and contains no image path or activity data.
@@ -648,10 +650,11 @@ makes the application feel unreliable even when the decoder technically succeede
   good frame stays visible.
 - [x] Add first-class frame/page navigation for multi-page TIFF and ICO, reusing
   the bounded animation/page model without auto-playing documents.
-- [x] Decide camera RAW for 1.0: explicitly deferred. Shipping it still requires
-  the isolated-worker bar below. The `raw` feature stays reserved and continues
-  to return the documented error. Post-1.0 may reopen this if a backend meets
-  that bar.
+- [x] Decide camera RAW for 1.0: sensor decode stays explicitly deferred.
+  Shipping it still requires the isolated-worker bar below. The `raw` feature
+  stays reserved and continues to return the documented error for sensor data.
+  A DNG embedded baseline JPEG is a labelled preview, not that decode.
+  Post-1.0 may reopen sensor decode if a backend meets that bar.
 - [ ] Ship camera RAW only through the path-free bounded worker, with orientation,
   color metadata, representative camera fixtures, fuzz seeds, and the same memory
   and deadline contracts as AVIF/HEIC. This remains a post-1.0 candidate.
@@ -1068,8 +1071,8 @@ of them just works.
 - [x] SVG via pure-Rust `resvg` (shapes/paths; text shaping feature intentionally off to keep the trusted core lean).
 - [x] Add `viewr-decode` as a workspace member with feature-gated C deps (`avif` / `heic` / `raw`; default empty for CI).
 - [x] List AVIF/HEIC/RAW extensions in `fs` for browsing; decode routes through the worker.
-- [x] RAW currently returns a stable, documented unsupported error instead of a
-  false success claim.
+- [x] RAW sensor data returns a stable, documented unsupported error instead of
+  a false success claim. A DNG embedded baseline JPEG is a labelled preview.
 - [x] Explicitly defer camera RAW from 1.0. Representative families remain a
   post-1.0 isolated-worker candidate, not a reserved silent feature.
 - [x] Add multi-page TIFF and ICO navigation instead of exposing only one decoded

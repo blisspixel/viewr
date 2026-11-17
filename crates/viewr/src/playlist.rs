@@ -789,6 +789,7 @@ mod tests {
         ];
         assert_eq!(initial_folder_index(mixed.iter().copied()), 2);
         assert_eq!(initial_folder_index(["only.nef"]), 0);
+        assert_eq!(initial_folder_index(["only.dng", "also.DNG"]), 0);
         assert_eq!(initial_folder_index(["first.png", "second.arw"]), 0);
         assert_eq!(initial_folder_index(["a.ARW", "b.avif", "c.heic"]), 1);
         assert_eq!(initial_folder_index(["a.HEIC", "b.jpg"]), 0);

@@ -396,6 +396,44 @@ pub(crate) const fn missing_selection_recovery_message(showable: bool) -> &'stat
     }
 }
 
+/// What to say before opening the replacement chosen after a selection vanished.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MissingSelectionNotice {
+    /// The replacement is an ordinary photo.
+    Showable,
+    /// The replacement is deferred RAW that this build does not preview.
+    Unshowable,
+    /// A DNG may contain an embedded preview. Wait for that decode.
+    WaitForPreview,
+}
+
+/// Choose the notice for a missing-selection replacement.
+///
+/// A DNG waits because the embedded preview is known only after decode. Saying
+/// that it cannot be shown, then displaying the preview, would be false.
+#[must_use]
+pub(crate) fn missing_selection_notice(path: &Path) -> MissingSelectionNotice {
+    if !crate::fs::is_deferred_camera_raw(path) {
+        MissingSelectionNotice::Showable
+    } else if crate::fs::is_dng_preview_candidate(path) {
+        MissingSelectionNotice::WaitForPreview
+    } else {
+        MissingSelectionNotice::Unshowable
+    }
+}
+
+/// Sentence for a notice that can be shown before the replacement opens.
+#[must_use]
+pub(crate) const fn missing_selection_notice_text(
+    notice: MissingSelectionNotice,
+) -> Option<&'static str> {
+    match notice {
+        MissingSelectionNotice::Showable => Some(missing_selection_recovery_message(true)),
+        MissingSelectionNotice::Unshowable => Some(missing_selection_recovery_message(false)),
+        MissingSelectionNotice::WaitForPreview => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,6 +794,26 @@ mod tests {
         assert_eq!(
             missing_selection_recovery_message(false),
             "The selected image is no longer available. The other photos cannot be shown yet."
+        );
+        assert_eq!(
+            missing_selection_notice(&PathBuf::from("keep.jpg")),
+            MissingSelectionNotice::Showable
+        );
+        assert_eq!(
+            missing_selection_notice(&PathBuf::from("frame.dng")),
+            MissingSelectionNotice::WaitForPreview
+        );
+        assert_eq!(
+            missing_selection_notice(&PathBuf::from("frame.ARW")),
+            MissingSelectionNotice::Unshowable
+        );
+        assert_eq!(
+            missing_selection_notice_text(MissingSelectionNotice::WaitForPreview),
+            None
+        );
+        assert_eq!(
+            missing_selection_notice_text(MissingSelectionNotice::Unshowable),
+            Some(missing_selection_recovery_message(false))
         );
         for message in [
             folder_scan_user_message(FolderScanDisposition::InstallSelectedOnlyScanFailed),

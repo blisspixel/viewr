@@ -407,6 +407,28 @@ class DocumentationTests(unittest.TestCase):
         self.assertNotIn("key: release-${{ matrix.target }}\n", workflow)
         self.assertIn("- os: windows-latest", workflow)
         self.assertEqual(workflow.count("- os: macos-latest"), 2)
+
+    def test_heic_121_does_not_claim_source_profile_passthrough(self) -> None:
+        formats = (REPOSITORY_ROOT / "docs/FORMATS.md").read_text(encoding="utf-8")
+        wrapper = (REPOSITORY_ROOT / "crates/viewr-decode/src/heic.rs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "libheif 1.21 reports decoding-options version 8\n"
+            "  and has no source-profile passthrough field.",
+            formats,
+        )
+        self.assertNotIn("preserves source NCLX when running", formats)
+        self.assertNotIn(
+            "request source-profile preservation when it runs with libheif 1.21",
+            wrapper,
+        )
+        self.assertIn(
+            "Source-profile\n// passthrough is the version-10 field.",
+            wrapper,
+        )
+
+    def test_quality_commands_match_the_executable_ci_contract(self) -> None:
         core_commands = (
             "cargo fmt --all -- --check",
             "cargo clippy --workspace --all-targets --locked -- -D warnings",

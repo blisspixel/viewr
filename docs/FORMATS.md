@@ -109,9 +109,9 @@ returns no authority for file mutation.
   description. Worker protocol V2 carries either a bounded ICC profile, H.273
   CICP values, or an explicit unknown status with every RGBA8 stream. AVIF keeps
   trustworthy ICC or CICP evidence from libavif. HEIC/HEIF checks source ICC size
-  before fallible allocation and explicitly preserves source NCLX when running
-  on libheif 1.21 or newer. Libheif 1.23 additionally passes through HEVC VUI
-  color when no container NCLX exists. Decoded output CICP wins when source and
+  before fallible allocation. libheif 1.21 reports decoding-options version 8
+  and has no source-profile passthrough field. Libheif 1.23 additionally
+  passes through HEVC VUI color when no container NCLX exists. Decoded output CICP wins when source and
   output primaries or transfer demonstrate that a requested transform changed the
   pixel encoding. ICC remains authoritative when version-10 passthrough performs
   no extra gamut conversion, including when matching bitstream-only NCLX evidence

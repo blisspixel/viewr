@@ -14,7 +14,9 @@ client.
 The published v0.7.8 preview does not open camera RAW. On main, a DNG
 or Sony ARW file shows its largest decodable embedded baseline JPEG
 and labels that size as a preview. The sensor image stays unread.
-Other camera RAW types stay closed. Full sensor RAW remains
+A DNG or ARW with no such preview, and every other camera RAW type,
+still says that viewr does not open camera RAW files yet. Full sensor
+RAW remains
 [#185](https://github.com/blisspixel/viewr/issues/185).
 
 ## View, edit, cull

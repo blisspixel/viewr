@@ -812,12 +812,20 @@ fn chrome_modal(id: impl core::hash::Hash + core::fmt::Debug) -> egui::Modal {
 /// The area response is `area_id.with("move")`. That handle is not focusable,
 /// so it has no AccessKit node while the content container is built and the
 /// controls attach to the container. Naming the handle leaves an empty dialog
-/// beside those controls, which a platform cannot enter.
+/// beside those controls, which a platform cannot enter. The container also
+/// takes the area bounds: Windows scopes a modal query to that rectangle.
 fn mark_as_modal_dialog(response: &egui::Response, label: &str) {
     let content_id = response.parent_id();
+    let bounds = response.rect;
     response.ctx.accesskit_node_builder(content_id, |node| {
         node.set_role(egui::accesskit::Role::Dialog);
         node.set_modal();
+        node.set_bounds(egui::accesskit::Rect {
+            x0: bounds.min.x.into(),
+            y0: bounds.min.y.into(),
+            x1: bounds.max.x.into(),
+            y1: bounds.max.y.into(),
+        });
         if !label.is_empty() {
             node.set_label(label);
         }
@@ -10334,12 +10342,22 @@ mod tests {
             .collect()
     }
 
-    /// True when `label` is on a node under `root`, not on `root` itself.
-    fn descendant_exposes(
+    /// True when a descendant named `label` has bounds inside the dialog.
+    fn descendant_fits_dialog(
         nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
         root: egui::accesskit::NodeId,
         label: &str,
     ) -> bool {
+        let Some(outer) = nodes
+            .iter()
+            .find(|(id, _)| *id == root)
+            .and_then(|(_, node)| node.bounds())
+        else {
+            return false;
+        };
+        if outer.x1 <= outer.x0 || outer.y1 <= outer.y0 {
+            return false;
+        }
         let mut pending = nodes
             .iter()
             .find(|(id, _)| *id == root)
@@ -10355,7 +10373,13 @@ mod tests {
                 continue;
             };
             if node.label() == Some(label) || node.value() == Some(label) {
-                return true;
+                let Some(inner) = node.bounds() else {
+                    return false;
+                };
+                return inner.x0 >= outer.x0
+                    && inner.y0 >= outer.y0
+                    && inner.x1 <= outer.x1
+                    && inner.y1 <= outer.y1;
             }
             pending.extend(node.children().iter().copied());
         }
@@ -10675,9 +10699,9 @@ mod tests {
                 "{name} dialog has no controls"
             );
             assert!(
-                descendant_exposes(&update.nodes, *dialog_id, "Close")
-                    || descendant_exposes(&update.nodes, *dialog_id, "Cancel"),
-                "{name} dialog does not contain Close or Cancel"
+                descendant_fits_dialog(&update.nodes, *dialog_id, "Close")
+                    || descendant_fits_dialog(&update.nodes, *dialog_id, "Cancel"),
+                "{name} dialog does not cover Close or Cancel"
             );
         }
 
@@ -10944,8 +10968,8 @@ mod tests {
             "the shortcut dialog should own its controls"
         );
         assert!(
-            descendant_exposes(&update.nodes, *dialog_id, "Close"),
-            "Close should be inside the shortcut dialog"
+            descendant_fits_dialog(&update.nodes, *dialog_id, "Close"),
+            "Close should sit inside the shortcut dialog bounds"
         );
         assert_eq!(
             update

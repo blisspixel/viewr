@@ -365,12 +365,26 @@ fn heic_latest_preserves_icc_under_the_passthrough_contract() {
 
 #[test]
 fn dng_embedded_preview_decodes_under_the_production_worker_policy() {
+    let jpeg = one_pixel_jpeg();
+    expect_unknown_preview("dng", &one_reduced_jpeg_tiff(&jpeg, 7));
+}
+
+#[test]
+fn arw_embedded_preview_decodes_under_the_production_worker_policy() {
+    let jpeg = one_pixel_jpeg();
+    expect_unknown_preview("arw", &one_reduced_jpeg_tiff(&jpeg, 6));
+}
+
+fn one_pixel_jpeg() -> Vec<u8> {
     let mut jpeg = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
         .encode(&[9, 8, 7], 1, 1, image::ExtendedColorType::Rgb8)
         .expect("encode preview");
-    let encoded = one_preview_dng(&jpeg);
-    let mut child = worker_command("dng")
+    jpeg
+}
+
+fn expect_unknown_preview(format: &str, encoded: &[u8]) {
+    let mut child = worker_command(format)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -378,9 +392,9 @@ fn dng_embedded_preview_decodes_under_the_production_worker_policy() {
         .expect("spawn decode worker");
     let mut stdin = child.stdin.take().expect("worker stdin");
     let mut stdout = child.stdout.take().expect("worker stdout");
-    viewr_protocol::write_decode_request(&mut stdin, "dng", &encoded)
+    viewr_protocol::write_decode_request(&mut stdin, format, encoded)
         .and_then(|()| stdin.flush())
-        .expect("send DNG preview");
+        .expect("send embedded preview");
     let response = viewr_protocol::read_worker_response(&mut stdout).unwrap_or_else(|error| {
         let _ = child.kill();
         let _ = child.wait();
@@ -394,7 +408,7 @@ fn dng_embedded_preview_decodes_under_the_production_worker_policy() {
     else {
         let _ = child.kill();
         let _ = child.wait();
-        panic!("worker rejected a DNG preview: {response:?}");
+        panic!("worker rejected an embedded preview: {response:?}");
     };
     assert_eq!((width, height), (1, 1));
     assert_eq!(color_profile, viewr_protocol::WorkerColorProfile::Unknown);
@@ -408,7 +422,7 @@ fn dng_embedded_preview_decodes_under_the_production_worker_policy() {
     assert!(child.wait().expect("wait for decode worker").success());
 }
 
-fn one_preview_dng(jpeg: &[u8]) -> Vec<u8> {
+fn one_reduced_jpeg_tiff(jpeg: &[u8], compression: u16) -> Vec<u8> {
     let jpeg_at = 8u32 + 2 + 12 * 4 + 4;
     let mut file = Vec::new();
     file.extend_from_slice(b"II");
@@ -416,7 +430,7 @@ fn one_preview_dng(jpeg: &[u8]) -> Vec<u8> {
     file.extend(8u32.to_le_bytes());
     file.extend(4u16.to_le_bytes());
     file.extend(long_entry(254, 1));
-    file.extend(short_entry(259, 7));
+    file.extend(short_entry(259, compression));
     file.extend(long_entry(513, jpeg_at));
     file.extend(long_entry(514, u32::try_from(jpeg.len()).unwrap()));
     file.extend(0u32.to_le_bytes());

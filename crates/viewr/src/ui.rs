@@ -365,7 +365,7 @@ pub(crate) struct UiFrameOwned {
     pub save_path_error: Option<String>,
     /// Pixel dimensions of the current image, if any.
     pub img_size: Option<(u32, u32)>,
-    /// The dimensions are an embedded DNG preview, not the sensor image.
+    /// The dimensions are an embedded DNG or ARW preview, not the sensor image.
     pub embedded_preview: bool,
     /// Playback state for an animated image.
     pub animation: Option<AnimationUiInfo>,

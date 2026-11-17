@@ -242,24 +242,26 @@ binding. Default CI cannot carry LibRaw. Redistributable, representative camera
 samples are not in the tree. A DNG-only TIFF walk that presented itself
 as a camera RAW develop would claim RAW without meeting that bar.
 
-A DNG can also carry a baseline JPEG preview. viewr shows the largest
-decodable preview through the path-free worker and labels its pixel size as
-a preview. A larger frame that cannot be shown does not hide a smaller one.
-That path does not read the sensor image, does not enable `libraw-rs`, and
-does not call the preview a camera RAW develop.
+A DNG or Sony ARW can also carry a reduced-resolution baseline JPEG preview.
+viewr shows the largest decodable preview through the path-free worker and
+labels its pixel size as a preview. A larger frame that cannot be shown does
+not hide a smaller one. An unreduced sensor IFD stays unread, including Sony
+compression 7 and compression 32767. That path does not read the sensor
+image, does not enable `libraw-rs`, and does not call the preview a camera
+RAW develop.
 
 Folder navigation still steps onto `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`,
-`.orf`, and `.raf`. A DNG with an embedded preview shows that preview. The
-other names, and a DNG with no preview, show the failure instead of
-disappearing from the folder. The `raw` feature continues to compile the same
-honest error. Post-1.0 may reopen sensor decode only when a backend meets the
-isolated-worker bar.
+`.orf`, and `.raf`. A DNG or ARW with an embedded preview shows that preview.
+The other names, and a DNG or ARW with no preview, show the failure instead
+of disappearing from the folder. The `raw` feature continues to compile the
+same honest error. Post-1.0 may reopen sensor decode only when a backend
+meets the isolated-worker bar.
 
 **Rejected:**
 
 - Enabling `libraw-rs` behind `--features raw` without fixtures, color, or
   orientation. That would turn a reserved feature into a false capability.
-- Decoding DNG as an ordinary TIFF page set and calling it camera RAW.
+- Decoding DNG or ARW as an ordinary TIFF page set and calling it camera RAW.
 
 ## Supporting crates (shipped)
 

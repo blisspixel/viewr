@@ -27,8 +27,9 @@ Two rules hold across every phase:
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
 Phase 6 has broad core-format coverage, isolated optional AVIF/HEIC decoding,
-honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW is
-explicitly deferred from 1.0.
+honest capability reporting, and bounded TIFF/ICO page navigation. Camera RAW
+sensor data is explicitly deferred from 1.0. A DNG or Sony ARW embedded
+baseline JPEG is a labelled preview.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
 but publisher-unsigned v0.7.8 archives. The v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
@@ -52,8 +53,9 @@ images through one bounded serialized Trash queue, and bundles English, Spanish,
 French, and German interface catalogs covering first-run, About, Trash, wait
 copy, rating failures, every top-chrome toast and navigation notice, and every
 dialog, panel, and control including accessible names, enforced by a
-pseudo-language render test. A DNG with an embedded baseline JPEG shows
-that preview, labelled with its pixel size; the sensor image stays unread.
+pseudo-language render test. A DNG or Sony ARW with an embedded baseline
+JPEG shows that preview, labelled with its pixel size; the sensor image
+stays unread.
 File > Save Path types a destination when the
 native Save As chooser returns no path. Appearance, default folder sort,
 and language are the only persistent UI preferences. Each stores one validated
@@ -653,7 +655,8 @@ makes the application feel unreliable even when the decoder technically succeede
 - [x] Decide camera RAW for 1.0: sensor decode stays explicitly deferred.
   Shipping it still requires the isolated-worker bar below. The `raw` feature
   stays reserved and continues to return the documented error for sensor data.
-  A DNG embedded baseline JPEG is a labelled preview, not that decode.
+  A DNG or Sony ARW embedded baseline JPEG is a labelled preview, not that
+  decode.
   Post-1.0 may reopen sensor decode if a backend meets that bar.
 - [ ] Ship camera RAW only through the path-free bounded worker, with orientation,
   color metadata, representative camera fixtures, fuzz seeds, and the same memory
@@ -1072,7 +1075,8 @@ of them just works.
 - [x] Add `viewr-decode` as a workspace member with feature-gated C deps (`avif` / `heic` / `raw`; default empty for CI).
 - [x] List AVIF/HEIC/RAW extensions in `fs` for browsing; decode routes through the worker.
 - [x] RAW sensor data returns a stable, documented unsupported error instead of
-  a false success claim. A DNG embedded baseline JPEG is a labelled preview.
+  a false success claim. A DNG or Sony ARW embedded baseline JPEG is a labelled
+  preview.
 - [x] Explicitly defer camera RAW from 1.0. Representative families remain a
   post-1.0 isolated-worker candidate, not a reserved silent feature.
 - [x] Add multi-page TIFF and ICO navigation instead of exposing only one decoded

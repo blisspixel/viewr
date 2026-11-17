@@ -1,9 +1,10 @@
-//! Largest embedded baseline JPEG inside a DNG, without reading the sensor image.
+//! Largest embedded baseline JPEG inside a DNG or Sony ARW.
 //!
 //! The walk accepts only classic TIFF (not `BigTIFF`). A preview IFD must be
 //! marked as a reduced-resolution image and use old or new JPEG compression.
-//! Lossless JPEG, the form DNG uses for sensor data, is ignored. The returned
-//! pixels are that preview after its own JPEG orientation is applied.
+//! An unreduced IFD is the sensor image and is ignored, including Sony sensor
+//! data stored with compression 7. The returned pixels are the preview after
+//! its own JPEG orientation is applied.
 
 use std::collections::HashSet;
 use std::io::Cursor;
@@ -472,10 +473,18 @@ mod tests {
             let file = preview_file(le, &small, &large);
             let decoded = decode_embedded_preview(&file).expect("preview");
             assert_eq!((decoded.width, decoded.height), (2, 2), "le={le}");
-            let Err(message) = super::super::decode_input("arw", &file) else {
-                panic!("ARW must stay deferred");
-            };
-            assert_eq!(FormatRefusal::parse(&message), Some(FormatRefusal::Raw));
+            let arw = super::super::decode_input("arw", &file).expect("arw preview");
+            assert_eq!((arw.width, arw.height), (2, 2), "le={le}");
+            for format in ["cr2", "nef", "rw2", "orf", "raf"] {
+                let Err(message) = super::super::decode_input(format, &file) else {
+                    panic!("{format} must stay deferred");
+                };
+                assert_eq!(
+                    FormatRefusal::parse(&message),
+                    Some(FormatRefusal::Raw),
+                    "{format}"
+                );
+            }
         }
     }
 
@@ -666,5 +675,100 @@ mod tests {
         let decoded =
             decode_embedded_preview(&preview_file(true, &small, &broken)).expect("smaller preview");
         assert_eq!((decoded.width, decoded.height), (1, 1));
+    }
+
+    #[test]
+    fn an_unreduced_sensor_image_does_not_hide_the_arw_preview() {
+        let preview = jpeg(2, 2);
+        let sensor = jpeg(4, 4);
+        let thumb = jpeg(1, 1);
+        let thumb_ifd = 8 + 2 + 12 * 5 + 4;
+        let sensor_ifd = thumb_ifd + 2 + 12 * 4 + 4;
+        let thumb_at = sensor_ifd + 2 + 12 * 4 + 4;
+        let preview_at = thumb_at + thumb.len();
+        let sensor_at = preview_at + preview.len();
+        let mut file = classic_header(true);
+        file.extend(ifd(
+            true,
+            &[
+                long_entry(true, 254, 1),
+                short_entry(true, 259, 6),
+                long_entry(true, 513, u32::try_from(preview_at).unwrap()),
+                long_entry(true, 514, u32::try_from(preview.len()).unwrap()),
+                long_entry(true, 330, u32::try_from(sensor_ifd).unwrap()),
+            ],
+            u32::try_from(thumb_ifd).unwrap(),
+        ));
+        file.extend(ifd(
+            true,
+            &interchange_entries(true, 1, 6, thumb_at, thumb.len()),
+            0,
+        ));
+        file.extend(ifd(
+            true,
+            &[
+                long_entry(true, 254, 0),
+                short_entry(true, 259, 32_767),
+                long_entry(true, 273, u32::try_from(sensor_at).unwrap()),
+                long_entry(true, 279, u32::try_from(sensor.len()).unwrap()),
+            ],
+            0,
+        ));
+        assert_eq!(file.len(), thumb_at);
+        file.extend(&thumb);
+        file.extend(&preview);
+        file.extend(&sensor);
+        let decoded = super::super::decode_input("arw", &file).expect("arw preview");
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        assert_eq!(
+            decoded.color_profile,
+            viewr_protocol::WorkerColorProfile::Unknown
+        );
+
+        // The a7R V shape: a reduced compression-7 preview is larger than the
+        // compression-6 preview, and the unreduced compression-7 sensor is not.
+        let large = jpeg(3, 2);
+        let medium = jpeg(2, 1);
+        let hidden = jpeg(8, 8);
+        let medium_ifd = 8 + 2 + 12 * 4 + 4;
+        let sensor2 = medium_ifd + 2 + 12 * 5 + 4;
+        let large_at = sensor2 + 2 + 12 * 4 + 4;
+        let medium_at = large_at + large.len();
+        let hidden_at = medium_at + medium.len();
+        let mut sony = classic_header(true);
+        sony.extend(ifd(
+            true,
+            &interchange_entries(true, 1, 7, large_at, large.len()),
+            u32::try_from(medium_ifd).unwrap(),
+        ));
+        sony.extend(ifd(
+            true,
+            &[
+                long_entry(true, 254, 1),
+                short_entry(true, 259, 6),
+                long_entry(true, 513, u32::try_from(medium_at).unwrap()),
+                long_entry(true, 514, u32::try_from(medium.len()).unwrap()),
+                long_entry(true, 330, u32::try_from(sensor2).unwrap()),
+            ],
+            0,
+        ));
+        sony.extend(ifd(
+            true,
+            &[
+                long_entry(true, 254, 0),
+                short_entry(true, 259, 7),
+                long_entry(true, 273, u32::try_from(hidden_at).unwrap()),
+                long_entry(true, 279, u32::try_from(hidden.len()).unwrap()),
+            ],
+            0,
+        ));
+        assert_eq!(sony.len(), large_at);
+        sony.extend(&large);
+        sony.extend(&medium);
+        sony.extend(&hidden);
+        let chosen = decode_embedded_preview(&sony).expect("larger reduced preview");
+        assert_eq!((chosen.width, chosen.height), (3, 2));
+        let routed = super::super::decode_input("arw", &sony).expect("routed arw");
+        assert_eq!((routed.width, routed.height), (3, 2));
     }
 }

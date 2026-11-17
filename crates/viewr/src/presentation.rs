@@ -385,7 +385,7 @@ pub(crate) const fn keep_folder_notice_over_open_failure(
     folder_notice_visible && matches!(cause, OpenFailureCause::RawDeferred)
 }
 
-/// A DNG replacement waited for its preview, and that same load found none.
+/// A DNG or ARW replacement waited for its preview, and that same load found none.
 ///
 /// The durable "cannot be shown" notice belongs to that load only. A later
 /// photo, including another deferred RAW file, keeps the ordinary RAW toast.

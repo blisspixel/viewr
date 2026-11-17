@@ -403,19 +403,19 @@ pub(crate) enum MissingSelectionNotice {
     Showable,
     /// The replacement is deferred RAW that this build does not preview.
     Unshowable,
-    /// A DNG may contain an embedded preview. Wait for that decode.
+    /// A DNG or ARW may contain an embedded preview. Wait for that decode.
     WaitForPreview,
 }
 
 /// Choose the notice for a missing-selection replacement.
 ///
-/// A DNG waits because the embedded preview is known only after decode. Saying
-/// that it cannot be shown, then displaying the preview, would be false.
+/// A DNG or ARW waits because the embedded preview is known only after decode.
+/// Saying that it cannot be shown, then displaying the preview, would be false.
 #[must_use]
 pub(crate) fn missing_selection_notice(path: &Path) -> MissingSelectionNotice {
     if !crate::fs::is_deferred_camera_raw(path) {
         MissingSelectionNotice::Showable
-    } else if crate::fs::is_dng_preview_candidate(path) {
+    } else if crate::fs::is_embedded_preview_candidate(path) {
         MissingSelectionNotice::WaitForPreview
     } else {
         MissingSelectionNotice::Unshowable
@@ -805,6 +805,10 @@ mod tests {
         );
         assert_eq!(
             missing_selection_notice(&PathBuf::from("frame.ARW")),
+            MissingSelectionNotice::WaitForPreview
+        );
+        assert_eq!(
+            missing_selection_notice(&PathBuf::from("frame.NEF")),
             MissingSelectionNotice::Unshowable
         );
         assert_eq!(

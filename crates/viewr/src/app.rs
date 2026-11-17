@@ -1274,7 +1274,7 @@ struct App {
     modifiers: ModifiersState,
     /// Outcome message shown in chrome when chrome is visible.
     toast: StatusToast,
-    /// Generation of the missing-selection DNG load whose preview is not known yet.
+    /// Generation of the missing-selection DNG or ARW load whose preview is not known yet.
     dng_recovery_generation: Option<u64>,
     /// Deadline requested by egui for delayed UI state such as tooltips.
     egui_repaint_at: Option<Instant>,
@@ -9388,7 +9388,7 @@ impl ApplicationHandler<UserEvent> for App {
                             .session
                             .presented_path
                             .as_deref()
-                            .is_some_and(crate::fs::is_dng_preview_candidate),
+                            .is_some_and(crate::fs::is_embedded_preview_candidate),
                     animation,
                     pages,
                     details,

@@ -12,7 +12,8 @@ and organized by user-visible concern.
   when the decoder does not record an output color profile. A recorded
   output profile still replaces that ICC. The embedded libheif 1.23 lane
   installs libaom and libdav1d development files, which Ubuntu 26.04 no
-  longer pulls in through `libheif-dev`.
+  longer pulls in through `libheif-dev`. `libaom-dev` imports
+  `/usr/bin/aomdec`, so that lane also installs `aom-tools`.
 - The window and controls use the current wgpu 30 and egui 0.37 lines.
   Page-step triangles stay drawn by the bundled icon font. Pictures stay
   on the historical sRGB surface.

@@ -347,7 +347,7 @@ class DocumentationTests(unittest.TestCase):
             workflow = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
             self.assertNotIn("ubuntu-24.04", workflow)
             self.assertEqual(workflow.count("runs-on: ubuntu-26.04"), 2)
-            self.assertIn("libaom-dev", workflow)
+            self.assertIn("libaom-dev aom-tools", workflow)
             self.assertIn("libdav1d-dev", workflow)
             self.assertIn("pkg-config --modversion x265", workflow)
             self.assertIn("VIEW_X265_VERSION=${version}", workflow)
@@ -378,6 +378,8 @@ class DocumentationTests(unittest.TestCase):
             architecture,
         )
         self.assertIn("includes the installed x265 version", architecture)
+        self.assertIn("`libaom-dev` imports\n`/usr/bin/aomdec`", architecture)
+        self.assertIn("installs `aom-tools`", architecture)
         self.assertIn("Ubuntu 26.04 GUI performance job", performance)
         self.assertIn("runs on Ubuntu 26.04", seccomp)
         self.assertIn("libheif 1.21", seccomp)

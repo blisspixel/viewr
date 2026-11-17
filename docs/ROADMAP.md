@@ -19,7 +19,7 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.8](https://github.com/blisspixel/viewr/releases/tag/v0.7.8), the missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.8`, the published missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch |
+| Workspace version | `0.7.8` until the v0.8.0 preparation change. The number matches the published tag. Behavior on main since that tag is [Unreleased](../CHANGELOG.md) and is not in the v0.7.8 archives |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
 | Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |

@@ -309,6 +309,36 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(stale_claim=stale_claim):
                 self.assertNotIn(stale_claim, combined)
 
+    def test_readme_keeps_published_preview_separate_from_main(self) -> None:
+        readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+        roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        publishing = (REPOSITORY_ROOT / "docs/PUBLISHING.md").read_text(
+            encoding="utf-8"
+        )
+        sandbox = (REPOSITORY_ROOT / "docs/SANDBOX_PLAN.md").read_text(encoding="utf-8")
+        index = (REPOSITORY_ROOT / "docs/README.md").read_text(encoding="utf-8")
+        self.assertIn("v0.7.8 is the preview described here", readme)
+        self.assertIn("The published v0.7.8 preview does not open camera RAW.", readme)
+        self.assertIn("https://github.com/blisspixel/viewr/issues/185", readme)
+        self.assertIn("not in the v0.7.8 archives", readme)
+        self.assertIn("under Unreleased in", readme)
+        for closed in ("issues/224", "issues/225", "issues/226"):
+            self.assertNotIn(closed, readme)
+        self.assertIn(
+            "Behavior on main since that tag is [Unreleased](../CHANGELOG.md)",
+            roadmap,
+        )
+        self.assertIn("Ordinary commits since that tag keep this", publishing)
+        self.assertIn("does not decode the sensor", sandbox)
+        self.assertIn("Unreleased is the", index)
+        self.assertIn("or a published preview", index)
+        install = (REPOSITORY_ROOT / "docs/INSTALL.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "A clone of the default branch includes behavior recorded as Unreleased",
+            install,
+        )
+        self.assertEqual(install.count("/releases/download/v0.7.8/install."), 6)
+
     def test_quality_commands_match_the_executable_ci_contract(self) -> None:
         core_commands = (
             "cargo fmt --all -- --check",

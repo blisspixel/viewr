@@ -57,12 +57,12 @@ use crate::edit_state::{
     CanvasTool, EditAction, canvas_tool, edit_transaction_failure_message, within_click_distance,
 };
 use crate::entry_state::{
-    CatalogSpelling, FolderScanDisposition, FolderScanSuccess, PathEntry,
+    CatalogSpelling, FolderScanDisposition, FolderScanSuccess, MissingSelectionNotice, PathEntry,
     catalog_path_set_contains, catalog_spelling, committed_scan_entry_is_admissible,
     folder_scan_blocks_interaction, folder_scan_disposition, folder_scan_failure_class,
-    folder_scan_user_message, missing_selection_recovery_message, path_entry, removal_names_path,
-    selected_file_index_by, selected_scan_is_current, sibling_scan_still_applies,
-    unmatched_sibling_scan_adopts_catalog,
+    folder_scan_user_message, missing_selection_notice, missing_selection_notice_text, path_entry,
+    removal_names_path, selected_file_index_by, selected_scan_is_current,
+    sibling_scan_still_applies, unmatched_sibling_scan_adopts_catalog,
 };
 use crate::error::Error;
 use crate::gpu::{FrameResult, ImagePreview, Renderer};
@@ -87,9 +87,10 @@ use crate::prefetch::{
 };
 use crate::presentation::{
     ImageReuseEligibility, NavigationImagePlan, PresentationKind, PresentedFrameTransition,
-    decode_failure_toast, durable_presentation_error, explain_open_failure,
-    external_edit_pending_after_frame_transition, failure_notice, image_open_in_progress,
-    keep_folder_notice_over_open_failure, navigation_image_plan, preview_job_matches,
+    decode_failure_toast, deferred_preview_failure_needs_unshowable_notice,
+    durable_presentation_error, explain_open_failure, external_edit_pending_after_frame_transition,
+    failure_notice, image_open_in_progress, keep_folder_notice_over_open_failure,
+    navigation_image_plan, preview_job_matches,
 };
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
@@ -294,6 +295,7 @@ fn run_internal(
         source_gone: false,
         modifiers: ModifiersState::default(),
         toast: StatusToast::default(),
+        dng_recovery_generation: None,
         egui_repaint_at: None,
         cursor_pos: (0.0, 0.0),
         last_click: None,
@@ -1272,6 +1274,8 @@ struct App {
     modifiers: ModifiersState,
     /// Outcome message shown in chrome when chrome is visible.
     toast: StatusToast,
+    /// Generation of the missing-selection DNG load whose preview is not known yet.
+    dng_recovery_generation: Option<u64>,
     /// Deadline requested by egui for delayed UI state such as tooltips.
     egui_repaint_at: Option<Instant>,
     /// Latest cursor position in physical pixels.
@@ -1535,6 +1539,7 @@ impl App {
     }
 
     fn begin_image_load(&mut self, path: PathBuf, preserve_missing_recovery: bool) {
+        self.dng_recovery_generation = None;
         self.cancel_open_with_check();
         self.stop_coherence_watch();
         self.pending_gone_notice = false;
@@ -2240,18 +2245,27 @@ impl App {
                     entries.iter().map(crate::fs::ScannedImage::path),
                 );
                 let selected = entries[index].path().to_owned();
+                let notice = missing_selection_notice(&selected);
                 if matches!(
                     disposition,
                     FolderScanDisposition::InstallScanFirstAfterSelectedMissing
-                ) {
-                    self.show_notice_until_navigation(self.language.localize(
-                        missing_selection_recovery_message(!crate::fs::is_deferred_camera_raw(
-                            &selected,
-                        )),
-                    ));
+                ) && let Some(text) = missing_selection_notice_text(notice)
+                {
+                    self.show_notice_until_navigation(self.language.localize(text));
                 }
                 self.replace_playlist_from_scan(entries, index);
                 self.begin_image_load(selected, false);
+                // Record the load that just started. A cached present leaves
+                // no receiver. A later load clears this before it can fail.
+                if matches!(
+                    disposition,
+                    FolderScanDisposition::InstallScanFirstAfterSelectedMissing
+                ) && notice == MissingSelectionNotice::WaitForPreview
+                    && self.session.receiver.is_some()
+                {
+                    self.dng_recovery_generation =
+                        Some(self.session.generation.load(Ordering::Acquire));
+                }
                 self.kick_prefetch();
             }
             (
@@ -2538,6 +2552,7 @@ impl App {
         );
         match kind {
             PresentationKind::Loaded => {
+                self.dng_recovery_generation = None;
                 self.unsaved_crop = false;
                 self.source_gone = false;
                 self.prefetch_schedule.allow(path);
@@ -3434,6 +3449,7 @@ impl App {
     }
 
     fn cancel_pending_image_load(&mut self) {
+        self.dng_recovery_generation = None;
         self.session.cancel_pending_load();
         self.preview_job = None;
         self.preview_load_retry_blocked = false;
@@ -7128,6 +7144,9 @@ impl App {
         refresh_scanned: bool,
         preserve_missing_recovery: bool,
     ) {
+        // This load is not the missing-selection wait. The scan handler
+        // records the generation only after the recovery load is queued.
+        self.dng_recovery_generation = None;
         let generation = self
             .session
             .generation
@@ -7205,6 +7224,7 @@ impl App {
             WorkerPoll::Ready(completion) => completion,
             WorkerPoll::Disconnected => {
                 self.session.receiver = None;
+                self.dng_recovery_generation = None;
                 let message = self
                     .language
                     .text(crate::session::FOREGROUND_EXECUTOR_LOSS_STATUS);
@@ -7220,6 +7240,7 @@ impl App {
 
         self.session.receiver = None;
         if self.session.selected_path.as_ref() != Some(&path) {
+            self.dng_recovery_generation = None;
             return;
         }
         match result {
@@ -7236,6 +7257,7 @@ impl App {
                 );
                 match disposition {
                     ForegroundLoadFailureDisposition::MissingSelection => {
+                        self.dng_recovery_generation = None;
                         log::info!("selected image disappeared before presentation");
                         self.handle_missing_selected_path(path);
                     }
@@ -7248,6 +7270,17 @@ impl App {
                             failure.detail.clone(),
                             failure.allows_retry(),
                         );
+                        let armed = self.dng_recovery_generation.take();
+                        let current = self.session.generation.load(Ordering::Acquire);
+                        if deferred_preview_failure_needs_unshowable_notice(
+                            armed,
+                            current,
+                            failure.cause,
+                        ) && let Some(text) =
+                            missing_selection_notice_text(MissingSelectionNotice::Unshowable)
+                        {
+                            self.show_notice_until_navigation(self.language.localize(text));
+                        }
                         let folder_notice =
                             self.toast.message().is_some() && self.toast.deadline().is_none();
                         if self.current_image.is_some()
@@ -9350,6 +9383,12 @@ impl ApplicationHandler<UserEvent> for App {
                     file_path: path_str,
                     selected_file_name,
                     img_size,
+                    embedded_preview: img_size.is_some()
+                        && self
+                            .session
+                            .presented_path
+                            .as_deref()
+                            .is_some_and(crate::fs::is_dng_preview_candidate),
                     animation,
                     pages,
                     details,

@@ -385,6 +385,24 @@ pub(crate) const fn keep_folder_notice_over_open_failure(
     folder_notice_visible && matches!(cause, OpenFailureCause::RawDeferred)
 }
 
+/// A DNG replacement waited for its preview, and that same load found none.
+///
+/// The durable "cannot be shown" notice belongs to that load only. A later
+/// photo, including another deferred RAW file, keeps the ordinary RAW toast.
+#[must_use]
+pub(crate) const fn deferred_preview_failure_needs_unshowable_notice(
+    armed_generation: Option<u64>,
+    current_generation: u64,
+    cause: OpenFailureCause,
+) -> bool {
+    match armed_generation {
+        Some(generation) => {
+            generation == current_generation && matches!(cause, OpenFailureCause::RawDeferred)
+        }
+        None => false,
+    }
+}
+
 pub(super) fn preview_job_matches(
     job_generation: u64,
     job_path: &Path,
@@ -403,7 +421,8 @@ pub(super) fn preview_job_matches(
 mod tests {
     use super::{
         ImageReuseEligibility, NavigationImagePlan, OpenFailureCause, PresentationKind,
-        PresentedFrameTransition, decode_failure_toast, durable_presentation_error,
+        PresentedFrameTransition, decode_failure_toast,
+        deferred_preview_failure_needs_unshowable_notice, durable_presentation_error,
         explain_open_failure, external_edit_pending_after_frame_transition, failure_notice,
         image_open_in_progress, keep_folder_notice_over_open_failure, navigation_image_plan,
         preview_job_matches, user_facing_decode_error,
@@ -567,6 +586,26 @@ mod tests {
         assert!(!keep_folder_notice_over_open_failure(
             OpenFailureCause::Unsupported,
             true
+        ));
+        assert!(deferred_preview_failure_needs_unshowable_notice(
+            Some(4),
+            4,
+            OpenFailureCause::RawDeferred
+        ));
+        assert!(!deferred_preview_failure_needs_unshowable_notice(
+            Some(4),
+            5,
+            OpenFailureCause::RawDeferred
+        ));
+        assert!(!deferred_preview_failure_needs_unshowable_notice(
+            None,
+            4,
+            OpenFailureCause::RawDeferred
+        ));
+        assert!(!deferred_preview_failure_needs_unshowable_notice(
+            Some(4),
+            4,
+            OpenFailureCause::Damaged
         ));
     }
 

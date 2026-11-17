@@ -3469,6 +3469,18 @@ const MESSAGES: &[Message] = &[
         german: "viewr öffnet Kamera-RAW-Dateien noch nicht.",
     },
     Message {
+        english: "Preview {width} × {height}",
+        spanish: "Vista previa {width} × {height}",
+        french: "Aperçu {width} × {height}",
+        german: "Vorschau {width} × {height}",
+    },
+    Message {
+        english: "Embedded preview, not the full camera RAW.",
+        spanish: "Vista previa incrustada, no el RAW completo de la cámara.",
+        french: "Aperçu intégré, pas le RAW complet de l’appareil.",
+        german: "Eingebettete Vorschau, nicht das vollständige Kamera-RAW.",
+    },
+    Message {
         english: "Right for the next photo.",
         spanish: "Derecha para la siguiente foto.",
         french: "Droite pour la photo suivante.",

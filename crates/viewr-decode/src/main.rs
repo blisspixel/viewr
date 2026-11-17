@@ -1,4 +1,8 @@
-//! Isolated decode worker for formats that need C-backed libraries.
+//! Isolated decode worker for formats that stay out of the interface process.
+//!
+//! AVIF and HEIC use optional C libraries. A DNG embedded baseline JPEG is
+//! read here with the pure-Rust JPEG decoder and returned as a preview. The
+//! sensor image is not decoded.
 //!
 //! Protocol (versioned framing over stdin and stdout):
 //! 1. Parent opens the selected file and writes a bounded encoded-image frame.
@@ -41,6 +45,7 @@ fn hand_run_exit(arguments: &[String], stdin_is_terminal: bool) -> Option<i32> {
 
 #[cfg(feature = "avif")]
 mod avif;
+mod dng_preview;
 #[cfg(feature = "heic")]
 mod heic;
 
@@ -231,7 +236,7 @@ fn decode_input(format: &str, encoded: &[u8]) -> Result<DecodedOutput, String> {
     match format {
         "avif" => decode_avif(encoded),
         "heic" | "heif" => decode_heic(encoded),
-        "cr2" | "nef" | "arw" | "dng" | "rw2" | "orf" | "raf" => decode_raw(encoded),
+        "cr2" | "nef" | "arw" | "dng" | "rw2" | "orf" | "raf" => decode_raw(format, encoded),
         _ => Err("unsupported worker format".into()),
     }
 }
@@ -259,19 +264,25 @@ fn decode_heic(_encoded: &[u8]) -> Result<DecodedOutput, String> {
     ))
 }
 
-/// Camera RAW is deferred from 1.0. `libraw-rs` is still pre-1.0, and the
-/// isolated-worker bar is not met. Callers get a stable, honest error. See
-/// `docs/STACK.md` Decision 9 and `docs/FORMATS.md`.
-#[cfg(feature = "raw")]
-fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err(viewr_protocol::FormatRefusal::Raw
-        .message("camera RAW is deferred from 1.0 (feature raw reserved; see docs/FORMATS.md)"))
+/// Camera RAW sensor data stays deferred from 1.0.
+///
+/// A DNG may still return its largest embedded baseline JPEG. That result is a
+/// preview, not a RAW develop. See `docs/STACK.md` Decision 9 and `docs/FORMATS.md`.
+fn decode_raw(format: &str, encoded: &[u8]) -> Result<DecodedOutput, String> {
+    if format == "dng"
+        && let Some(preview) = dng_preview::decode_embedded_preview(encoded)
+    {
+        return Ok(preview);
+    }
+    Err(viewr_protocol::FormatRefusal::Raw.message(raw_refusal_detail()))
 }
 
-#[cfg(not(feature = "raw"))]
-fn decode_raw(_encoded: &[u8]) -> Result<DecodedOutput, String> {
-    Err(viewr_protocol::FormatRefusal::Raw
-        .message("camera RAW is deferred from 1.0; see docs/FORMATS.md"))
+const fn raw_refusal_detail() -> &'static str {
+    if cfg!(feature = "raw") {
+        "camera RAW is deferred from 1.0 (feature raw reserved; see docs/FORMATS.md)"
+    } else {
+        "camera RAW is deferred from 1.0; see docs/FORMATS.md"
+    }
 }
 
 #[cfg(test)]

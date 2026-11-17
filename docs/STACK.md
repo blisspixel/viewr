@@ -231,20 +231,29 @@ startup, first-pixel, navigation, idle, cache, and large-folder performance gate
 ## Decision 9: Camera RAW is deferred from 1.0
 
 **Chosen: keep listing RAW extensions, keep the isolated-worker `raw` feature
-reserved, and return a documented error. Do not ship a decode in 1.0.**
+reserved, and return a documented error for sensor data. Do not ship a sensor
+decode in 1.0.**
 
 The v0.5 format-contract gate required a decision, not a half-working decoder.
 Shipping camera RAW through the same path-free worker as AVIF/HEIC would still
 require orientation, color metadata, representative camera fixtures, fuzz seeds,
 and the same memory and deadline contracts. `libraw-rs` is still a 0.0.x
 binding. Default CI cannot carry LibRaw. Redistributable, representative camera
-samples are not in the tree. A DNG-only TIFF walk would claim RAW without
-meeting that bar.
+samples are not in the tree. A DNG-only TIFF walk that presented itself
+as a camera RAW develop would claim RAW without meeting that bar.
+
+A DNG can also carry a baseline JPEG preview. viewr shows the largest
+decodable preview through the path-free worker and labels its pixel size as
+a preview. A larger frame that cannot be shown does not hide a smaller one.
+That path does not read the sensor image, does not enable `libraw-rs`, and
+does not call the preview a camera RAW develop.
 
 Folder navigation still steps onto `.cr2`, `.nef`, `.arw`, `.dng`, `.rw2`,
-`.orf`, and `.raf` so the failure is visible instead of a missing file. The
-`raw` feature continues to compile the same honest error. Post-1.0 may reopen
-this only when a backend meets the isolated-worker bar.
+`.orf`, and `.raf`. A DNG with an embedded preview shows that preview. The
+other names, and a DNG with no preview, show the failure instead of
+disappearing from the folder. The `raw` feature continues to compile the same
+honest error. Post-1.0 may reopen sensor decode only when a backend meets the
+isolated-worker bar.
 
 **Rejected:**
 

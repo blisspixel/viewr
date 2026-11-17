@@ -362,3 +362,81 @@ fn heic_latest_preserves_icc_under_the_passthrough_contract() {
         "bitstream passthrough must preserve an ICC that still describes the output pixels"
     );
 }
+
+#[test]
+fn dng_embedded_preview_decodes_under_the_production_worker_policy() {
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
+        .encode(&[9, 8, 7], 1, 1, image::ExtendedColorType::Rgb8)
+        .expect("encode preview");
+    let encoded = one_preview_dng(&jpeg);
+    let mut child = worker_command("dng")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn decode worker");
+    let mut stdin = child.stdin.take().expect("worker stdin");
+    let mut stdout = child.stdout.take().expect("worker stdout");
+    viewr_protocol::write_decode_request(&mut stdin, "dng", &encoded)
+        .and_then(|()| stdin.flush())
+        .expect("send DNG preview");
+    let response = viewr_protocol::read_worker_response(&mut stdout).unwrap_or_else(|error| {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("read worker response: {error}");
+    });
+    let viewr_protocol::WorkerResponse::PixelStream {
+        width,
+        height,
+        color_profile,
+    } = response
+    else {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("worker rejected a DNG preview: {response:?}");
+    };
+    assert_eq!((width, height), (1, 1));
+    assert_eq!(color_profile, viewr_protocol::WorkerColorProfile::Unknown);
+    let mut pixels = vec![0_u8; 4];
+    stdout.read_exact(&mut pixels).expect("read preview pixels");
+    assert!(pixels.iter().any(|channel| *channel != 0));
+    viewr_protocol::write_ack(&mut stdin)
+        .and_then(|()| stdin.flush())
+        .expect("acknowledge preview");
+    drop(stdin);
+    assert!(child.wait().expect("wait for decode worker").success());
+}
+
+fn one_preview_dng(jpeg: &[u8]) -> Vec<u8> {
+    let jpeg_at = 8u32 + 2 + 12 * 4 + 4;
+    let mut file = Vec::new();
+    file.extend_from_slice(b"II");
+    file.extend(42u16.to_le_bytes());
+    file.extend(8u32.to_le_bytes());
+    file.extend(4u16.to_le_bytes());
+    file.extend(long_entry(254, 1));
+    file.extend(short_entry(259, 7));
+    file.extend(long_entry(513, jpeg_at));
+    file.extend(long_entry(514, u32::try_from(jpeg.len()).unwrap()));
+    file.extend(0u32.to_le_bytes());
+    assert_eq!(u32::try_from(file.len()).unwrap(), jpeg_at);
+    file.extend(jpeg);
+    file
+}
+
+fn long_entry(tag: u16, value: u32) -> [u8; 12] {
+    let mut entry = [0u8; 12];
+    entry[0..2].copy_from_slice(&tag.to_le_bytes());
+    entry[2..4].copy_from_slice(&4u16.to_le_bytes());
+    entry[4..8].copy_from_slice(&1u32.to_le_bytes());
+    entry[8..12].copy_from_slice(&value.to_le_bytes());
+    entry
+}
+
+fn short_entry(tag: u16, value: u16) -> [u8; 12] {
+    let mut entry = long_entry(tag, 0);
+    entry[2..4].copy_from_slice(&3u16.to_le_bytes());
+    entry[8..10].copy_from_slice(&value.to_le_bytes());
+    entry
+}

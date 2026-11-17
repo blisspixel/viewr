@@ -69,7 +69,7 @@ Moving optional C decoders out of the UI process materially reduces blast radius
 | seccomp-bpf network deny (default-allow + EPERM list) | Done, fail-closed (`viewr-seccomp`, installed by `worker_limit`) |
 | Shared decode shape limit + hard 30-second send/receive deadline | Done and pipe-saturation tested (`viewr-protocol` + `sandbox`); bounded host reads occur before worker reservation, and both reads and blocked IPC stop on foreground-generation supersession |
 | Explicit directory-consent navigation | Done; file-only denial degrades to one image and Open Folder enables sibling scanning |
-| Feature-gated default-deny allowlist for C decoders | Done; shared policy semantics and release-mode AVIF/HEIC decodes run on Ubuntu 24.04 CI |
+| Feature-gated default-deny allowlist for C decoders | Done; shared policy semantics and release-mode AVIF/HEIC decodes run on Ubuntu 26.04 CI |
 | Filmstrip real thumbnails (async) | Done (`thumbs` + egui textures) |
 | Continuous fuzz CI | Done (`fuzz/` targets, deterministic seeds, change and weekly runs) |
 

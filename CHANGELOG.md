@@ -5,6 +5,10 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- The GUI performance job and the C-decoder job run on Ubuntu 26.04.
+  The quality matrix stays on `ubuntu-latest` so its required check name
+  does not change. The C-decoder wrapper stays on the libheif 1.17 API
+  floor.
 - The window and controls use the current wgpu 30 and egui 0.37 lines.
   Page-step triangles stay drawn by the bundled icon font. Pictures stay
   on the historical sRGB surface.

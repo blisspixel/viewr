@@ -133,7 +133,7 @@ A promise you can verify beats a promise you have to trust.
    application startup policy described above, and Linux worker spawn fails if its
    stricter network-denying seccomp filter cannot be installed. AVIF/HEIC Linux workers
    additionally install a default-deny syscall allowlist before reading IPC;
-   Ubuntu 24.04 CI decodes generated AVIF and HEIC inputs through the release-mode
+   Ubuntu 26.04 CI decodes generated AVIF and HEIC inputs through the release-mode
    worker and fails if that policy blocks required decoder behavior.
    File and folder access remains session-scoped. In a sandbox, **Open File** may
    grant only the selected item, while **Open Folder** is the explicit consent path

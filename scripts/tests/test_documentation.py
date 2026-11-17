@@ -339,6 +339,38 @@ class DocumentationTests(unittest.TestCase):
         )
         self.assertEqual(install.count("/releases/download/v0.7.8/install."), 6)
 
+    def test_specialized_linux_jobs_pin_ubuntu_26_04(self) -> None:
+        for relative in (
+            ".github/workflows/ci.yml",
+            ".github/workflows/dependabot-ci.yml",
+        ):
+            workflow = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+            self.assertNotIn("ubuntu-24.04", workflow)
+            self.assertEqual(workflow.count("runs-on: ubuntu-26.04"), 2)
+            self.assertIn(
+                "os: [ubuntu-latest, macos-latest, windows-latest]",
+                workflow,
+            )
+        architecture = (REPOSITORY_ROOT / "docs/ARCHITECTURE.md").read_text(
+            encoding="utf-8"
+        )
+        performance = (REPOSITORY_ROOT / "docs/PERFORMANCE.md").read_text(
+            encoding="utf-8"
+        )
+        seccomp = (REPOSITORY_ROOT / "packaging/linux/SECCOMP.md").read_text(
+            encoding="utf-8"
+        )
+        wrapper = (REPOSITORY_ROOT / "crates/viewr-decode/Cargo.toml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("The quality matrix keeps `ubuntu-latest`.", architecture)
+        self.assertIn("pinned to\n`ubuntu-26.04`.", architecture)
+        self.assertIn("Ubuntu 26.04 GUI performance job", performance)
+        self.assertIn("runs on Ubuntu 26.04", seccomp)
+        self.assertIn("libheif 1.21", seccomp)
+        self.assertIn("Ubuntu 26.04, the pinned Linux C-decoder", wrapper)
+        self.assertIn('features = ["v1_17"]', wrapper)
+
     def test_quality_commands_match_the_executable_ci_contract(self) -> None:
         core_commands = (
             "cargo fmt --all -- --check",

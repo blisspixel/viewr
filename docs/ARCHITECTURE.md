@@ -817,6 +817,17 @@ Declared floors and the original M1 baseline are in the
 [install guide](INSTALL.md). This lane does not change the plist, the Rust
 deployment target, the runner label, or the required check name.
 
+## Linux lane
+
+The quality matrix keeps `ubuntu-latest`. That label is the required check
+`fmt / clippy / test (ubuntu-latest)`. GitHub is moving the label from Ubuntu
+24.04 to 26.04 through 2026-11-19, so renaming the matrix would drop the
+required context. The GUI performance job and the C-decoder job are pinned to
+`ubuntu-26.04`. Their required names stay `GUI performance budgets` and
+`C decoders under default-deny seccomp`. The C-decoder wrapper stays on the
+libheif 1.17 API floor. Ubuntu 26.04 supplies libheif 1.21 for the system
+library those release-mode decodes link.
+
 ## Security boundaries
 
 ```

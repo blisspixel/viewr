@@ -173,7 +173,7 @@ jobs:
   performance:
     if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     name: GUI performance budgets
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - name: Require a full commit pin
@@ -224,7 +224,7 @@ jobs:
   c-decoder-policy:
     if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     name: C decoders under default-deny seccomp
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - name: Require a full commit pin

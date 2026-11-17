@@ -347,6 +347,8 @@ class DocumentationTests(unittest.TestCase):
             workflow = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
             self.assertNotIn("ubuntu-24.04", workflow)
             self.assertEqual(workflow.count("runs-on: ubuntu-26.04"), 2)
+            self.assertIn("libaom-dev", workflow)
+            self.assertIn("libdav1d-dev", workflow)
             self.assertIn(
                 "os: [ubuntu-latest, macos-latest, windows-latest]",
                 workflow,

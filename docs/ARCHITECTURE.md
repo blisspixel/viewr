@@ -827,7 +827,9 @@ required context. The GUI performance job and the C-decoder job are pinned to
 `ubuntu-26.04`. Their required names stay `GUI performance budgets` and
 `C decoders under default-deny seccomp`. The C-decoder wrapper stays on the
 libheif 1.17 API floor. Ubuntu 26.04 supplies libheif 1.21 for the system
-library those release-mode decodes link.
+library those release-mode decodes link. The embedded libheif 1.23 lane
+also installs `libaom-dev` and `libdav1d-dev`. Ubuntu 26.04's `libheif-dev`
+no longer pulls those development files in.
 
 ## Security boundaries
 

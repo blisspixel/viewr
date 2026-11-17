@@ -244,7 +244,7 @@ jobs:
       - name: Install native decoder build and runtime dependencies
         timeout-minutes: 15
         run: |
-          bash scripts/ci-install-packages.sh --no-install-recommends build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev libde265-dev libx265-dev libnuma-dev libheif-dev libheif-plugin-libde265 libheif-plugin-x265
+          bash scripts/ci-install-packages.sh --no-install-recommends build-essential cmake meson nasm ninja-build pkg-config zlib1g-dev libde265-dev libx265-dev libnuma-dev libaom-dev libdav1d-dev libheif-dev libheif-plugin-libde265 libheif-plugin-x265
       - name: Set up pinned Rust
         run: rustup show
 

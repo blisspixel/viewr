@@ -5,11 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
-- A DNG file shows its largest decodable embedded baseline JPEG and labels
-  that size as a preview. A larger frame that cannot be shown does not hide
-  a smaller one. The sensor image is not decoded. A DNG with no such preview,
-  and every other camera RAW type, still says that viewr does not open camera
-  RAW files yet.
+- A DNG or Sony ARW file shows its largest decodable embedded baseline
+  JPEG and labels that size as a preview. A larger frame that cannot be
+  shown does not hide a smaller one. The sensor image is not decoded. A
+  DNG or ARW with no such preview, and every other camera RAW type, still
+  says that viewr does not open camera RAW files yet.
 - Opening a folder starts on the first photo viewr can show. A camera RAW
   file stays in the folder. When no photo is on screen, moving onto a file
   that cannot be shown keeps the folder position and a short notice, without

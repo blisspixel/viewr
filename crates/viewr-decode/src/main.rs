@@ -1,8 +1,8 @@
 //! Isolated decode worker for formats that stay out of the interface process.
 //!
-//! AVIF and HEIC use optional C libraries. A DNG embedded baseline JPEG is
-//! read here with the pure-Rust JPEG decoder and returned as a preview. The
-//! sensor image is not decoded.
+//! AVIF and HEIC use optional C libraries. A DNG or Sony ARW embedded baseline
+//! JPEG is read here with the pure-Rust JPEG decoder and returned as a preview.
+//! The sensor image is not decoded.
 //!
 //! Protocol (versioned framing over stdin and stdout):
 //! 1. Parent opens the selected file and writes a bounded encoded-image frame.
@@ -266,10 +266,11 @@ fn decode_heic(_encoded: &[u8]) -> Result<DecodedOutput, String> {
 
 /// Camera RAW sensor data stays deferred from 1.0.
 ///
-/// A DNG may still return its largest embedded baseline JPEG. That result is a
-/// preview, not a RAW develop. See `docs/STACK.md` Decision 9 and `docs/FORMATS.md`.
+/// A DNG or Sony ARW may still return its largest embedded baseline JPEG.
+/// That result is a preview, not a RAW develop. See `docs/STACK.md` Decision 9
+/// and `docs/FORMATS.md`.
 fn decode_raw(format: &str, encoded: &[u8]) -> Result<DecodedOutput, String> {
-    if format == "dng"
+    if matches!(format, "dng" | "arw")
         && let Some(preview) = dng_preview::decode_embedded_preview(encoded)
     {
         return Ok(preview);

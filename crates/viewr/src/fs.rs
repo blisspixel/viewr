@@ -2018,8 +2018,8 @@ pub fn is_core_format(path: &Path) -> bool {
 /// Camera RAW extensions that stay in a folder.
 ///
 /// Opening a folder does not start on one when another photo is present. A
-/// `.dng` file may still show an embedded preview once it is opened. The other
-/// extensions do not.
+/// `.dng` or `.arw` file may still show an embedded preview once it is opened.
+/// The other extensions do not.
 const DEFERRED_RAW_EXTENSIONS: &[&str] = &["cr2", "nef", "arw", "dng", "rw2", "orf", "raf"];
 
 /// Return `true` when the file is a deferred camera RAW photo.
@@ -2032,13 +2032,13 @@ pub fn is_deferred_camera_raw(path: &Path) -> bool {
         .is_some_and(|extension| DEFERRED_RAW_EXTENSIONS.contains(&extension.as_str()))
 }
 
-/// Return `true` when opening this file may show an embedded DNG preview.
+/// Return `true` when opening this file may show an embedded baseline preview.
 ///
 /// The preview is still not a sensor decode. Folder start keeps treating the
-/// file as deferred because a DNG with no preview cannot be shown.
+/// file as deferred because a DNG or ARW with no preview cannot be shown.
 #[must_use]
-pub fn is_dng_preview_candidate(path: &Path) -> bool {
-    raw_extension(path).is_some_and(|extension| extension == "dng")
+pub fn is_embedded_preview_candidate(path: &Path) -> bool {
+    raw_extension(path).is_some_and(|extension| matches!(extension.as_str(), "dng" | "arw"))
 }
 
 fn raw_extension(path: &Path) -> Option<String> {
@@ -2496,9 +2496,9 @@ mod tests {
     use super::{
         CORE_EXTENSIONS, CORE_MIME_ASSOCIATIONS, FolderSort, canonical_file_path,
         catalog_paths_match, error_kind_is_definitely_missing, folder_entry_cmp, is_core_format,
-        is_deferred_camera_raw, is_dng_preview_candidate, is_supported_image, is_worker_format,
-        natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while, scan_images,
-        scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
+        is_deferred_camera_raw, is_embedded_preview_candidate, is_supported_image,
+        is_worker_format, natural_cmp, scan_image_entries_sorted_while, scan_image_entries_while,
+        scan_images, scan_images_while, scan_images_with_limit, sort_while, supported_extensions,
     };
     use crate::ephemeral::TempWorkspace;
     use std::cmp::Ordering;
@@ -2537,21 +2537,26 @@ mod tests {
             let upper = PathBuf::from(format!("shot.{}", extension.to_ascii_uppercase()));
             assert!(is_deferred_camera_raw(&upper), "{extension}");
             assert_eq!(
-                is_dng_preview_candidate(&path),
-                extension == "dng",
+                is_embedded_preview_candidate(&path),
+                matches!(extension, "dng" | "arw"),
                 "{extension}"
             );
             assert_eq!(
-                is_dng_preview_candidate(&upper),
-                extension == "dng",
+                is_embedded_preview_candidate(&upper),
+                matches!(extension, "dng" | "arw"),
                 "{extension}"
             );
         }
         assert!(!is_deferred_camera_raw(Path::new("shot.avif")));
         assert!(!is_deferred_camera_raw(Path::new("shot.jpg")));
         assert!(!is_deferred_camera_raw(Path::new("album/._shot.ARW")));
-        assert!(!is_dng_preview_candidate(Path::new("album/._shot.DNG")));
-        assert!(!is_dng_preview_candidate(Path::new("shot.arw")));
+        assert!(!is_embedded_preview_candidate(Path::new(
+            "album/._shot.DNG"
+        )));
+        assert!(!is_embedded_preview_candidate(Path::new(
+            "album/._shot.ARW"
+        )));
+        assert!(!is_embedded_preview_candidate(Path::new("shot.nef")));
     }
 
     #[test]

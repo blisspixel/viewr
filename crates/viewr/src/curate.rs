@@ -1295,6 +1295,14 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
+    macro_rules! stay_in_workspace {
+        ($path:expr, $root:expr) => {
+            if !$path.starts_with($root) {
+                panic!("fixture escaped its workspace");
+            }
+        };
+    }
+
     const RESTORE_STRESS_RECEIPTS: usize = 64;
 
     #[test]
@@ -2080,6 +2088,7 @@ mod tests {
     fn trash_and_restore_roundtrip() {
         let ws = TempWorkspace::new("curate_roundtrip").unwrap();
         let path = ws.path().join("photo.png");
+        stay_in_workspace!(path, ws.path());
         let img = image::RgbImage::from_pixel(4, 4, image::Rgb([1, 2, 3]));
         img.save(&path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
@@ -2096,6 +2105,7 @@ mod tests {
     fn trash_restore_keeps_a_jpeg_rating_across_repeated_deletes() {
         let ws = TempWorkspace::new("curate_rating_roundtrip").unwrap();
         let path = ws.path().join("photo.jpg");
+        stay_in_workspace!(path, ws.path());
         image::RgbImage::from_pixel(8, 8, image::Rgb([9, 8, 7]))
             .save(&path)
             .unwrap();
@@ -2129,6 +2139,8 @@ mod tests {
         let ws = TempWorkspace::new("curate_latest_receipt").unwrap();
         let first = ws.path().join("first.png");
         let second = ws.path().join("second.png");
+        stay_in_workspace!(first, ws.path());
+        stay_in_workspace!(second, ws.path());
         std::fs::write(&first, b"first").unwrap();
         std::fs::write(&second, b"second").unwrap();
 
@@ -2205,6 +2217,7 @@ mod tests {
     fn restore_destination_keeps_the_original_filename() {
         let ws = TempWorkspace::new("curate_restore_name").unwrap();
         let path = ws.path().join("photo.jpg");
+        stay_in_workspace!(path, ws.path());
         std::fs::write(&path, b"bytes").unwrap();
         let source = Arc::new(crate::fs::ImageSource::open(&path).unwrap());
         let receipt = TrashReceipt::for_test(path.clone(), source);
@@ -2269,6 +2282,8 @@ mod tests {
         let parent = ws.path().canonicalize().unwrap();
         let photo = parent.join("photo.jpg");
         let other = parent.join("photo.png");
+        stay_in_workspace!(photo, &parent);
+        stay_in_workspace!(other, &parent);
         std::fs::write(&photo, b"jpeg").unwrap();
         std::fs::write(&other, b"png").unwrap();
         let source = Arc::new(crate::fs::ImageSource::open(&photo).unwrap());

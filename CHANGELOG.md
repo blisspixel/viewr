@@ -5,6 +5,9 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Interface arrows stay drawable when the selected sans has no arrow glyphs.
+  The bundled Hack face supplies those symbols.
+- `url` 2.5.9 closes the nested `blob:` origin advisory.
 - Undo Trash on Windows restores a photo whose Recycle Bin listing hides the
   file extension. The photo returns with its original name, and a JPEG rating
   stays in the file. Undo still restores only the latest recoverable Trash

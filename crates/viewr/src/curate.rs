@@ -2078,10 +2078,8 @@ mod tests {
 
     #[test]
     fn trash_and_restore_roundtrip() {
-        let ws = TempWorkspace::new("curate_roundtrip").unwrap();
-        let root = ws.path().canonicalize().unwrap();
-        let path = root.join("photo.png");
-        assert!(path.starts_with(&root), "fixture escaped its workspace");
+        let ws = PackageFixture::new("curate_roundtrip");
+        let path = ws.file("photo.png");
         let img = image::RgbImage::from_pixel(4, 4, image::Rgb([1, 2, 3]));
         img.save(&path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
@@ -2096,10 +2094,8 @@ mod tests {
 
     #[test]
     fn trash_restore_keeps_a_jpeg_rating_across_repeated_deletes() {
-        let ws = TempWorkspace::new("curate_rating_roundtrip").unwrap();
-        let root = ws.path().canonicalize().unwrap();
-        let path = root.join("photo.jpg");
-        assert!(path.starts_with(&root), "fixture escaped its workspace");
+        let ws = PackageFixture::new("curate_rating_roundtrip");
+        let path = ws.file("photo.jpg");
         image::RgbImage::from_pixel(8, 8, image::Rgb([9, 8, 7]))
             .save(&path)
             .unwrap();
@@ -2130,12 +2126,9 @@ mod tests {
 
     #[test]
     fn restoring_the_latest_receipt_leaves_the_earlier_file_in_trash() {
-        let ws = TempWorkspace::new("curate_latest_receipt").unwrap();
-        let root = ws.path().canonicalize().unwrap();
-        let first = root.join("first.png");
-        let second = root.join("second.png");
-        assert!(first.starts_with(&root), "fixture escaped its workspace");
-        assert!(second.starts_with(&root), "fixture escaped its workspace");
+        let ws = PackageFixture::new("curate_latest_receipt");
+        let first = ws.file("first.png");
+        let second = ws.file("second.png");
         std::fs::write(&first, b"first").unwrap();
         std::fs::write(&second, b"second").unwrap();
 
@@ -2210,10 +2203,8 @@ mod tests {
     ))]
     #[test]
     fn restore_destination_keeps_the_original_filename() {
-        let ws = TempWorkspace::new("curate_restore_name").unwrap();
-        let root = ws.path().canonicalize().unwrap();
-        let path = root.join("photo.jpg");
-        assert!(path.starts_with(&root), "fixture escaped its workspace");
+        let ws = PackageFixture::new("curate_restore_name");
+        let path = ws.file("photo.jpg");
         std::fs::write(&path, b"bytes").unwrap();
         let source = Arc::new(crate::fs::ImageSource::open(&path).unwrap());
         let receipt = TrashReceipt::for_test(path.clone(), source);
@@ -2281,12 +2272,10 @@ mod tests {
     ))]
     #[test]
     fn hidden_extension_listing_binds_only_on_windows() {
-        let ws = TempWorkspace::new("curate_hidden_extension").unwrap();
-        let parent = ws.path().canonicalize().unwrap();
-        let photo = parent.join("photo.jpg");
-        let other = parent.join("photo.png");
-        assert!(photo.starts_with(&parent), "fixture escaped its workspace");
-        assert!(other.starts_with(&parent), "fixture escaped its workspace");
+        let ws = PackageFixture::new("curate_hidden_extension");
+        let parent = ws.path().to_path_buf();
+        let photo = ws.file("photo.jpg");
+        let other = ws.file("photo.png");
         std::fs::write(&photo, b"jpeg").unwrap();
         std::fs::write(&other, b"png").unwrap();
         let source = Arc::new(crate::fs::ImageSource::open(&photo).unwrap());
@@ -2318,6 +2307,94 @@ mod tests {
         } else {
             assert!(!hidden);
         }
+    }
+
+    /// A directory under `target/viewr-curate-fixtures` for Trash fixture files.
+    ///
+    /// The directory is created from that fixed relative path and then
+    /// canonicalized. Each file name is one component and must remain inside
+    /// the canonical directory.
+    struct PackageFixture {
+        path: PathBuf,
+    }
+
+    impl PackageFixture {
+        fn new(label: &str) -> Self {
+            let label = single_component(label);
+            let root = PathBuf::from("target/viewr-curate-fixtures");
+            std::fs::create_dir_all(&root).unwrap();
+            let root = root.canonicalize().unwrap();
+            let dir = root.join(format!(
+                "{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_nanos())
+            ));
+            std::fs::create_dir(&dir).unwrap();
+            let mut fixture = Self { path: dir };
+            let path = fixture.path.canonicalize().unwrap();
+            if path.starts_with(&root) {
+                fixture.path = path;
+                fixture
+            } else {
+                panic!("fixture escaped its directory");
+            }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn file(&self, name: &str) -> PathBuf {
+            let name = single_component(name);
+            let path = self.path.join(name);
+            if path.starts_with(&self.path) {
+                path
+            } else {
+                panic!("fixture file escaped its directory");
+            }
+        }
+    }
+
+    impl Drop for PackageFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn single_component(name: &str) -> &str {
+        if fixture_component(name) {
+            name
+        } else {
+            panic!("fixture name must be one path component");
+        }
+    }
+
+    #[test]
+    fn package_fixture_file_stays_in_its_directory() {
+        let fixture = PackageFixture::new("curate_fixture_containment");
+        let path = fixture.file("photo.png");
+        assert!(path.starts_with(fixture.path()));
+        assert_eq!(path.file_name(), Some(std::ffi::OsStr::new("photo.png")));
+        std::fs::write(&path, b"ok").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"ok");
+        assert!(fixture_component("photo.jpg"));
+        assert!(!fixture_component(".."));
+        assert!(!fixture_component("a/b"));
+        assert!(!fixture_component(r"a\b"));
+        assert!(!fixture_component(""));
+        assert!(!fixture_component("photo..jpg"));
+    }
+
+    fn fixture_component(name: &str) -> bool {
+        !name.is_empty()
+            && name != "."
+            && name != ".."
+            && !name.contains('/')
+            && !name.contains('\\')
+            && !name.contains('\0')
+            && !name.contains("..")
     }
 
     /// Trash succeeded, so Undo must be able to put this file back.

@@ -60,6 +60,9 @@ fn load_font(path: &Path) -> Option<FontData> {
 
 fn with_platform_fonts(sans: Option<FontData>, mono: Option<FontData>) -> FontDefinitions {
     let mut definitions = FontDefinitions::default();
+    // Ubuntu-Light and several UI faces omit arrows. Hack is already bundled
+    // for monospace and contains them, so proportional text can fall back to it.
+    insert_bundled_symbol_fallback(&mut definitions);
     for (name, family, data) in [
         ("viewr_system_sans", FontFamily::Proportional, sans),
         ("viewr_system_mono", FontFamily::Monospace, mono),
@@ -76,6 +79,20 @@ fn with_platform_fonts(sans: Option<FontData>, mono: Option<FontData>) -> FontDe
         }
     }
     definitions
+}
+
+fn insert_bundled_symbol_fallback(definitions: &mut FontDefinitions) {
+    let Some(family) = definitions.families.get_mut(&FontFamily::Proportional) else {
+        return;
+    };
+    if family.iter().any(|name| name == "Hack") || !definitions.font_data.contains_key("Hack") {
+        return;
+    }
+    let index = family
+        .iter()
+        .position(|name| name == "Ubuntu-Light")
+        .map_or(0, |index| index + 1);
+    family.insert(index, "Hack".to_owned());
 }
 
 fn platform_candidates() -> (Vec<PathBuf>, Vec<PathBuf>) {
@@ -173,7 +190,13 @@ mod tests {
         let definitions = with_platform_fonts(Some(bundled_sans()), None);
         let sans = &definitions.families[&FontFamily::Proportional];
         assert_eq!(sans[0], "viewr_system_sans");
-        assert_eq!(&sans[1..], defaults.families[&FontFamily::Proportional]);
+        let mut expected = defaults.families[&FontFamily::Proportional].clone();
+        let ubuntu = expected
+            .iter()
+            .position(|name| name == "Ubuntu-Light")
+            .expect("bundled proportional face");
+        expected.insert(ubuntu + 1, "Hack".to_owned());
+        assert_eq!(&sans[1..], expected.as_slice());
         assert_eq!(
             definitions.families[&FontFamily::Monospace],
             defaults.families[&FontFamily::Monospace]

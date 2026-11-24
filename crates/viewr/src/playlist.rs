@@ -992,6 +992,24 @@ mod tests {
     }
 
     #[test]
+    fn undo_after_navigation_restores_the_photo_and_its_rating() {
+        let mut playlist = Playlist::new((0..3).map(path).collect(), 1);
+        let deleted = path(1);
+        let rating = RatingState::Rated(Rating::new(4).unwrap());
+        assert!(playlist.set_rating(&deleted, rating));
+        let deleted_index = playlist.index;
+        playlist.remove_paths(std::slice::from_ref(&deleted), deleted_index);
+        assert!(playlist.select(0));
+        assert_eq!(playlist.files[playlist.index], path(0));
+
+        playlist.insert_path(deleted_index, deleted.clone(), rating, None);
+        assert_eq!(playlist.files, vec![path(0), path(1), path(2)]);
+        assert_eq!(playlist.rating_for_path(&deleted), rating);
+        assert!(playlist.select(deleted_index));
+        assert_eq!(playlist.files[playlist.index], deleted);
+    }
+
+    #[test]
     fn removal_successor_previews_the_post_commit_selection() {
         let playlist = Playlist::new((0..4).map(path).collect(), 0);
         assert_eq!(playlist.successor_after_removal(0), Some(1));

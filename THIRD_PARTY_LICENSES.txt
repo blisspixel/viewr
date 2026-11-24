@@ -4095,7 +4095,7 @@ used_by:
   fastrand 2.5.0
   fixedbitset 0.5.9
   flate2 1.1.11
-  form_urlencoded 1.2.2
+  form_urlencoded 1.2.3
   futures-lite 2.6.1
   gethostname 1.1.0
   hashbrown 0.15.5
@@ -4146,7 +4146,7 @@ used_by:
   unicode-properties 0.1.5
   unicode-segmentation 1.13.3
   unicode-width 0.2.2
-  url 2.5.8
+  url 2.5.9
   uuid 1.24.0
   wl-clipboard-rs 0.9.5
 text:

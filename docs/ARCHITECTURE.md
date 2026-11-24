@@ -415,12 +415,18 @@ Shipped:
   source-to-display coordinate mapping.
 - **`curate`**: move to the OS trash or recycle bin and restore for undo. On
   macOS, a native receipt retains the exact resulting trash URL so restoration
-  does not depend on an unsupported global trash listing. Windows and Linux take
-  an in-memory snapshot of existing Trash identifiers before moving, then accept
-  exactly one new same-origin identifier only when the Trash object's native file
-  identity matches the retained accepted-source handle. The receipt keeps that
-  handle open to prevent identity reuse, and restore repeats the identity check
-  before selecting the identifier. A Windows or Linux batch restore enumerates
+  does not depend on an unsupported global trash listing. Windows and Linux list
+  Trash once after the move, then accept exactly one same-origin identifier only
+  when the Trash object's native file identity matches the retained
+  accepted-source handle. On Windows, a listed name that omits the extension of
+  a known file type still matches when the parent and filename stem are the same
+  and that identity matches. A canonical local path keeps the `\\?\` prefix and
+  is still listed; only a UNC path or a drive whose type is remote skips that
+  list. Restore then moves the item back to the receipt's
+  original filename, using an ordinary shell path rather than the canonical
+  `\\?\` prefix, so the extension returns with the file. The receipt keeps
+  that handle open to prevent identity reuse, and restore repeats the identity
+  check before selecting the identifier. A Windows or Linux batch restore enumerates
   Trash once and consumes each exact identifier from that shared snapshot. It
   never falls back to pathname matching. After success, the restored pathname is
   reopened without following its final component and must match the retained
@@ -780,12 +786,14 @@ worker own current state, so delete and restore shortcuts wait with a specific
 reason instead of racing them. Windows embeds the Common Controls v6 activation
 manifest required by the native custom-button dialog and requests only the
 caller's current privilege. Windows and Linux receipt capture synchronously list
-Trash once before the move and once afterward. The moved item receives one fixed
+Trash once after the move. The moved item receives one fixed
 path-private capture result: bound, baseline
 listing failed, final listing failed, no new same-origin candidate, ambiguous
 identity-bound candidates, or retained-source identity mismatch. The matcher
 still accepts exactly one new same-origin item only after native identity matches;
-classification adds evidence, not a fallback.
+classification adds evidence, not a fallback. A Windows listing that hides the
+extension still counts as that origin only for the filename stem, and the restore
+destination is the receipt path rather than the shortened display name.
 
 With opt-in `viewr=info` logging, Undo reports submitted, restored, failure, and
 total native restore values. Fixed

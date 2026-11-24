@@ -9557,7 +9557,7 @@ mod tests {
 
     /// Render twice so a changed appearance has applied its fonts, then return
     /// the second frame's tree, the notice's painted galley, and the
-    /// filename's unelided width in that style.
+    /// filename width AccessKit reports for the unelided text run.
     fn strip_with_notice(
         frame: &UiFrameOwned,
         width: f32,
@@ -9580,16 +9580,24 @@ mod tests {
             ));
             let output = run_frame(&context, input, |ui| {
                 let _ = render(ui, frame);
-                name_width =
+                let galley =
                     egui::WidgetText::from(egui::RichText::new("current.png").size(13.5).strong())
                         .into_galley(
                             ui,
                             Some(egui::TextWrapMode::Extend),
                             f32::INFINITY,
                             egui::FontSelection::Default,
-                        )
-                        .size()
-                        .x;
+                        );
+                // The strip is right-aligned. AccessKit reports the text run's
+                // right edge, which is the last glyph's end rather than the
+                // sum of advances.
+                name_width = galley.rows.first().map_or(galley.size().x, |row| {
+                    row.glyphs
+                        .last()
+                        .map_or(row.rect_without_leading_space().width(), |glyph| {
+                            glyph.max_x()
+                        })
+                });
             });
             let message = &frame.toast.as_ref().expect("notice fixture").text;
             for shape in &output.shapes {

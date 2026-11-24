@@ -842,7 +842,7 @@ fn restore_from_trash_snapshot(
     )
 ))]
 fn restore_item_at_receipt(mut item: trash::TrashItem, receipt: &TrashReceipt) -> trash::TrashItem {
-    let original = receipt.original_path();
+    let original = restore_destination_path(receipt.original_path());
     if let (Some(parent), Some(name)) = (original.parent(), original.file_name())
         && !parent.as_os_str().is_empty()
         && !name.is_empty()
@@ -851,6 +851,60 @@ fn restore_item_at_receipt(mut item: trash::TrashItem, receipt: &TrashReceipt) -
         item.name = name.to_os_string();
     }
     item
+}
+
+/// The shell move accepts an ordinary path. `canonicalize` stores `\\?\C:\...`.
+#[cfg(target_os = "windows")]
+fn windows_shell_path(path: &Path) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    let mut components = path.components();
+    let mut out = std::ffi::OsString::new();
+    let mut needs_separator = false;
+    match components.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::VerbatimDisk(letter) => out.push(format!("{}:", char::from(letter))),
+            Prefix::VerbatimUNC(host, share) => {
+                out.push(r"\\");
+                out.push(host);
+                out.push(r"\");
+                out.push(share);
+            }
+            _ => out.push(prefix.as_os_str()),
+        },
+        Some(component) => {
+            out.push(component.as_os_str());
+            needs_separator = true;
+        }
+        None => {}
+    }
+    for component in components {
+        match component {
+            Component::RootDir => {
+                out.push(r"\");
+                needs_separator = false;
+            }
+            component => {
+                if needs_separator {
+                    out.push(r"\");
+                }
+                out.push(component.as_os_str());
+                needs_separator = true;
+            }
+        }
+    }
+    PathBuf::from(out)
+}
+
+fn restore_destination_path(path: &Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        windows_shell_path(path)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.to_path_buf()
+    }
 }
 
 #[cfg(all(
@@ -2154,6 +2208,41 @@ mod tests {
         let restored = super::restore_item_at_receipt(item, &receipt);
         assert_eq!(restored.id, std::ffi::OsString::from("recycle-id"));
         assert_eq!(restored.original_path(), path);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn restore_destination_drops_the_verbatim_prefix() {
+        let workspace = TempWorkspace::new("curate_shell_restore").unwrap();
+        let path = workspace.path().join("photo.jpg");
+        std::fs::write(&path, b"bytes").unwrap();
+        let source = Arc::new(crate::fs::ImageSource::open(&path).unwrap());
+        let canonical = crate::fs::canonical_file_path(&path).unwrap();
+        assert!(
+            canonical.as_os_str().to_string_lossy().starts_with(r"\\?\"),
+            "canonicalize should keep the verbatim prefix"
+        );
+        let receipt = TrashReceipt::for_test(canonical.clone(), source);
+        let item = trash::TrashItem {
+            id: std::ffi::OsString::from("recycle-id"),
+            name: std::ffi::OsString::from("photo"),
+            original_parent: workspace.path().to_path_buf(),
+            time_deleted: 0,
+        };
+        let restored = super::restore_item_at_receipt(item, &receipt);
+        let destination = restored.original_path();
+        assert_eq!(destination, super::windows_shell_path(&canonical));
+        assert!(
+            !destination
+                .as_os_str()
+                .to_string_lossy()
+                .starts_with(r"\\?\"),
+            "the shell destination must be an ordinary path"
+        );
+        assert_eq!(
+            destination.file_name(),
+            Some(std::ffi::OsStr::new("photo.jpg"))
+        );
     }
 
     #[cfg(any(

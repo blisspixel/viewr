@@ -454,9 +454,11 @@ and unsupported containers, remain visibly read-only.
   action. Windows and Linux identify each move by its
   sole new Trash item identifier only when that item's native identity matches the
   live accepted-source handle; macOS uses the exact resulting URL with the same
-  handle. Restore repeats the identity check and never falls back to an older item
-  with the same original pathname. Restore then makes a later platform move using
-  the checked identifier on Windows and Linux or checked Trash URL on macOS, so
+  handle. On Windows, a Recycle Bin name that hides the extension still identifies
+  that item, and Undo restores the original filename. Restore repeats the identity
+  check and never falls back to an older item with the same original pathname.
+  Restore then makes a later platform move using the checked identifier on
+  Windows and Linux or checked Trash URL on macOS, so
   this final boundary is narrow but is not a handle-bound transaction against a
   hostile concurrent swap.
 - File > Undo Trash does not expose filenames, paths, or history. Its label stays

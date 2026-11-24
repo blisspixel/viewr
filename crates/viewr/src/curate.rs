@@ -5,6 +5,8 @@
 //! confirmation in the UI.
 
 use std::collections::HashSet;
+#[cfg(any(test, target_os = "windows"))]
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -821,7 +823,34 @@ fn restore_from_trash_snapshot(
     if !trash_item_matches_source(&item, restore_source) {
         return Err(TrashRestoreError::InvalidReceipt);
     }
+    let item = restore_item_at_receipt(item, receipt);
     trash::os_limited::restore_all([item]).map_err(|error| trash_restore_error(&error))
+}
+
+/// Restore to the receipt path, not the name the platform listing reported.
+///
+/// Windows Recycle Bin listings use the shell display name. When extensions
+/// for known file types are hidden, `photo.jpg` is reported as `photo`, and
+/// `restore_all` would move the file back under that shortened name.
+#[cfg(any(
+    target_os = "windows",
+    all(
+        unix,
+        not(target_os = "macos"),
+        not(target_os = "ios"),
+        not(target_os = "android")
+    )
+))]
+fn restore_item_at_receipt(mut item: trash::TrashItem, receipt: &TrashReceipt) -> trash::TrashItem {
+    let original = receipt.original_path();
+    if let (Some(parent), Some(name)) = (original.parent(), original.file_name())
+        && !parent.as_os_str().is_empty()
+        && !name.is_empty()
+    {
+        item.original_parent = parent.to_path_buf();
+        item.name = name.to_os_string();
+    }
+    item
 }
 
 #[cfg(all(
@@ -998,7 +1027,7 @@ fn same_trash_origin(receipt_path: &Path, listed_path: &Path) -> bool {
     crate::fs::canonical_file_path(listed_path).is_ok_and(|path| {
         #[cfg(target_os = "windows")]
         {
-            windows_path_eq_ignore_case(receipt_path, &path)
+            trash_origins_name_the_same_file(receipt_path, &path)
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -1006,6 +1035,58 @@ fn same_trash_origin(receipt_path: &Path, listed_path: &Path) -> bool {
             path == receipt_path
         }
     })
+}
+
+/// Windows display names drop the extension of a known file type.
+///
+/// `photo.jpg` and `photo.png` can both be listed as `photo`. The stem match
+/// is only an origin hint: capture and restore still require the exact Trash
+/// identifier and the retained file identity.
+#[cfg(target_os = "windows")]
+fn trash_origins_name_the_same_file(receipt_path: &Path, listed_path: &Path) -> bool {
+    if windows_path_eq_ignore_case(receipt_path, listed_path) {
+        return true;
+    }
+    match (
+        receipt_path.parent(),
+        listed_path.parent(),
+        receipt_path.file_name(),
+        listed_path.file_name(),
+    ) {
+        (Some(receipt_parent), Some(listed_parent), Some(receipt_name), Some(listed_name)) => {
+            windows_path_eq_ignore_case(receipt_parent, listed_parent)
+                && listed_name_is_receipt_stem(receipt_name, listed_name)
+        }
+        _ => false,
+    }
+}
+
+/// `photo.jpg` listed as `photo`. A name with no extension does not match.
+#[cfg(any(test, target_os = "windows"))]
+fn listed_name_is_receipt_stem(receipt_name: &OsStr, listed_name: &OsStr) -> bool {
+    let Some(stem) = extended_file_stem(receipt_name) else {
+        return false;
+    };
+    #[cfg(target_os = "windows")]
+    {
+        windows_path_eq_ignore_case(Path::new(stem), Path::new(listed_name))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        stem == listed_name
+    }
+}
+
+#[cfg(any(test, target_os = "windows"))]
+fn extended_file_stem(name: &OsStr) -> Option<&OsStr> {
+    let path = Path::new(name);
+    let stem = path.file_stem()?;
+    let extension = path.extension()?;
+    if stem.is_empty() || extension.is_empty() {
+        None
+    } else {
+        Some(stem)
+    }
 }
 
 #[cfg(any(
@@ -1914,20 +1995,14 @@ mod tests {
             std::ffi::OsStr::new("MiXeDCase.JPG")
         );
         assert!(!actual.exists(), "file should leave the folder after trash");
-        if receipt.can_restore_in_app() {
-            restore_from_trash(&receipt).unwrap();
-            assert!(actual.is_file());
-        } else {
-            assert_ne!(
-                receipt.capture_status(),
-                TrashReceiptCaptureStatus::Bound,
-                "receipt capability and capture status must agree"
-            );
-            eprintln!(
-                "exact Trash receipt unavailable: category={}",
-                receipt.capture_status().category()
-            );
-        }
+        assert!(
+            receipt.can_restore_in_app(),
+            "a trashed file must stay undoable, category={}",
+            receipt.capture_status().category()
+        );
+        restore_from_trash(&receipt).unwrap();
+        assert!(actual.is_file());
+        assert_eq!(std::fs::read(&actual).unwrap(), b"case probe");
     }
 
     #[test]
@@ -1949,29 +2024,208 @@ mod tests {
         let path = ws.path().join("photo.png");
         let img = image::RgbImage::from_pixel(4, 4, image::Rgb([1, 2, 3]));
         img.save(&path).unwrap();
-        assert!(path.is_file());
+        let bytes = std::fs::read(&path).unwrap();
 
+        let Some(receipt) = trash_receipt_or_skip(&path) else {
+            return;
+        };
+        assert!(!path.is_file(), "file should leave the folder after trash");
+        restore_from_trash(&receipt).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn trash_restore_keeps_a_jpeg_rating_across_repeated_deletes() {
+        let ws = TempWorkspace::new("curate_rating_roundtrip").unwrap();
+        let path = ws.path().join("photo.jpg");
+        image::RgbImage::from_pixel(8, 8, image::Rgb([9, 8, 7]))
+            .save(&path)
+            .unwrap();
+        let rating = crate::ratings::Rating::new(4).unwrap();
+        let source = crate::fs::ImageSource::open(&path).unwrap();
+        let written = crate::ratings::write_rating(
+            &path,
+            &source,
+            crate::ratings::RatingAssignment::Set(rating),
+        )
+        .unwrap();
+        assert_eq!(written.state, crate::ratings::RatingState::Rated(rating));
+
+        for _ in 0..2 {
+            let Some(receipt) = trash_receipt_or_skip(&path) else {
+                return;
+            };
+            assert!(!path.exists());
+            restore_from_trash(&receipt).unwrap();
+            assert!(path.is_file());
+            let restored = crate::fs::ImageSource::open(&path).unwrap();
+            assert_eq!(
+                crate::ratings::observe_source(&restored, &path).state,
+                crate::ratings::RatingState::Rated(rating)
+            );
+        }
+    }
+
+    #[test]
+    fn restoring_the_latest_receipt_leaves_the_earlier_file_in_trash() {
+        let ws = TempWorkspace::new("curate_latest_receipt").unwrap();
+        let first = ws.path().join("first.png");
+        let second = ws.path().join("second.png");
+        std::fs::write(&first, b"first").unwrap();
+        std::fs::write(&second, b"second").unwrap();
+
+        let Some(first_receipt) = trash_receipt_or_skip(&first) else {
+            return;
+        };
+        let Some(second_receipt) = trash_receipt_or_skip(&second) else {
+            restore_from_trash(&first_receipt).unwrap();
+            return;
+        };
+        assert!(!first.exists());
+        assert!(!second.exists());
+
+        restore_from_trash(&second_receipt).unwrap();
+        assert!(!first.exists(), "an older delete stays in Trash");
+        assert_eq!(std::fs::read(&second).unwrap(), b"second");
+
+        restore_from_trash(&first_receipt).unwrap();
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+    }
+
+    #[test]
+    fn hidden_extension_matches_only_the_final_stem() {
+        fn name(value: &str) -> &std::ffi::OsStr {
+            std::ffi::OsStr::new(value)
+        }
+        assert!(super::listed_name_is_receipt_stem(
+            name("photo.jpg"),
+            name("photo")
+        ));
+        assert!(super::listed_name_is_receipt_stem(
+            name("photo.tar.gz"),
+            name("photo.tar")
+        ));
+        assert!(!super::listed_name_is_receipt_stem(
+            name("photo.jpg"),
+            name("photo.png")
+        ));
+        assert!(!super::listed_name_is_receipt_stem(
+            name("photo.jpg"),
+            name("photograph")
+        ));
+        assert!(!super::listed_name_is_receipt_stem(
+            name("photo"),
+            name("photo")
+        ));
+        assert!(!super::listed_name_is_receipt_stem(
+            name(".jpg"),
+            name("jpg")
+        ));
+        if cfg!(windows) {
+            assert!(super::listed_name_is_receipt_stem(
+                name("Photo.JPG"),
+                name("photo")
+            ));
+        } else {
+            assert!(!super::listed_name_is_receipt_stem(
+                name("Photo.JPG"),
+                name("photo")
+            ));
+        }
+    }
+
+    #[cfg(any(
+        target_os = "windows",
+        all(
+            unix,
+            not(target_os = "macos"),
+            not(target_os = "ios"),
+            not(target_os = "android")
+        )
+    ))]
+    #[test]
+    fn restore_destination_keeps_the_original_filename() {
+        let ws = TempWorkspace::new("curate_restore_name").unwrap();
+        let path = ws.path().join("photo.jpg");
+        std::fs::write(&path, b"bytes").unwrap();
         let source = Arc::new(crate::fs::ImageSource::open(&path).unwrap());
-        match move_source_to_trash(&path, &source) {
+        let receipt = TrashReceipt::for_test(path.clone(), source);
+        let item = trash::TrashItem {
+            id: std::ffi::OsString::from("recycle-id"),
+            name: std::ffi::OsString::from("photo"),
+            original_parent: path.parent().unwrap().to_path_buf(),
+            time_deleted: 0,
+        };
+        let restored = super::restore_item_at_receipt(item, &receipt);
+        assert_eq!(restored.id, std::ffi::OsString::from("recycle-id"));
+        assert_eq!(restored.original_path(), path);
+    }
+
+    #[cfg(any(
+        target_os = "windows",
+        all(
+            unix,
+            not(target_os = "macos"),
+            not(target_os = "ios"),
+            not(target_os = "android")
+        )
+    ))]
+    #[test]
+    fn hidden_extension_listing_binds_only_on_windows() {
+        let ws = TempWorkspace::new("curate_hidden_extension").unwrap();
+        let parent = ws.path().canonicalize().unwrap();
+        let photo = parent.join("photo.jpg");
+        let other = parent.join("photo.png");
+        std::fs::write(&photo, b"jpeg").unwrap();
+        std::fs::write(&other, b"png").unwrap();
+        let source = Arc::new(crate::fs::ImageSource::open(&photo).unwrap());
+        let receipt = TrashReceipt::for_test(photo.clone(), source);
+        let listed = |name: &str, id: &Path| trash::TrashItem {
+            id: id.as_os_str().to_os_string(),
+            name: std::ffi::OsString::from(name),
+            original_parent: parent.clone(),
+            time_deleted: 0,
+        };
+        let items = [listed("photo", &photo), listed("photo", &other)];
+        let bound = super::exact_trash_item_id_for_receipt(&items, &receipt);
+        if cfg!(windows) {
+            assert_eq!(bound.unwrap(), photo.as_os_str());
+        } else {
+            assert_eq!(bound.unwrap_err(), TrashReceiptCaptureStatus::NoCandidate);
+        }
+
+        let hidden = super::same_trash_origin(&photo, &parent.join("photo"));
+        let exact = super::same_trash_origin(&photo, &photo);
+        assert!(!super::same_trash_origin(&photo, &parent.join("photo.png")));
+        assert!(!super::same_trash_origin(
+            &photo,
+            &parent.join("photograph")
+        ));
+        assert!(exact);
+        if cfg!(windows) {
+            assert!(hidden);
+        } else {
+            assert!(!hidden);
+        }
+    }
+
+    /// Trash succeeded, so Undo must be able to put this file back.
+    ///
+    /// Returns `None` only when this environment cannot reach the system Trash.
+    fn trash_receipt_or_skip(path: &Path) -> Option<TrashReceipt> {
+        let source = Arc::new(crate::fs::ImageSource::open(path).unwrap());
+        match move_source_to_trash(path, &source) {
             Ok(receipt) => {
-                assert!(!path.is_file(), "file should leave the folder after trash");
-                if receipt.can_restore_in_app() {
-                    restore_from_trash(&receipt).unwrap();
-                    assert!(path.is_file(), "restore should put the file back");
-                } else {
-                    assert_ne!(
-                        receipt.capture_status(),
-                        TrashReceiptCaptureStatus::Bound,
-                        "receipt capability and capture status must agree"
-                    );
-                    eprintln!(
-                        "exact Trash receipt unavailable: category={}",
-                        receipt.capture_status().category()
-                    );
-                }
+                assert!(
+                    receipt.can_restore_in_app(),
+                    "a trashed file must stay undoable, category={}",
+                    receipt.capture_status().category()
+                );
+                Some(receipt)
             }
             Err(GuardedActionError::OperationFailed(_)) => {
                 eprintln!("source-bound Trash API unavailable in this environment");
+                None
             }
             Err(error) => panic!("current accepted source should pass preflight: {error:?}"),
         }

@@ -5,6 +5,10 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Undo Trash on Windows restores a photo whose Recycle Bin listing hides the
+  file extension. The photo returns with its original name, and a JPEG rating
+  stays in the file. Undo still restores only the latest recoverable Trash
+  action.
 - The GUI performance job and the C-decoder job run on Ubuntu 26.04.
   The quality matrix stays on `ubuntu-latest` so its required check name
   does not change. The C-decoder wrapper stays on the libheif 1.17 API

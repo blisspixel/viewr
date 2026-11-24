@@ -2225,7 +2225,14 @@ mod tests {
         };
         let restored = super::restore_item_at_receipt(item, &receipt);
         assert_eq!(restored.id, std::ffi::OsString::from("recycle-id"));
-        assert_eq!(restored.original_path(), path);
+        assert_eq!(
+            restored.original_path(),
+            super::restore_destination_path(&path)
+        );
+        assert_eq!(
+            restored.original_path().file_name(),
+            Some(std::ffi::OsStr::new("photo.jpg"))
+        );
     }
 
     #[cfg(target_os = "windows")]

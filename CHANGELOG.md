@@ -8,10 +8,11 @@ and organized by user-visible concern.
 - Interface arrows stay drawable when the selected sans has no arrow glyphs.
   The bundled Hack face supplies those symbols.
 - `url` 2.5.9 closes the nested `blob:` origin advisory.
-- Undo Trash on Windows restores a photo whose Recycle Bin listing hides the
-  file extension. The photo returns with its original name, and a JPEG rating
-  stays in the file. Undo still restores only the latest recoverable Trash
-  action.
+- Undo Trash on Windows restores a photo after Delete. A canonical local path
+  keeps the `\\?\` prefix and still receives a Recycle Bin receipt, including
+  when the listing hides the file extension. The photo returns with its
+  original name, and a JPEG rating stays in the file. Undo still restores only
+  the latest recoverable Trash action.
 - The GUI performance job and the C-decoder job run on Ubuntu 26.04.
   The quality matrix stays on `ubuntu-latest` so its required check name
   does not change. The C-decoder wrapper stays on the libheif 1.17 API

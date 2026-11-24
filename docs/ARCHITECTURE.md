@@ -418,9 +418,11 @@ Shipped:
   does not depend on an unsupported global trash listing. Windows and Linux list
   Trash once after the move, then accept exactly one same-origin identifier only
   when the Trash object's native file identity matches the retained
-  accepted-source handle. On Windows, a listed name that omits the extension of
+  accepted-source handle.   On Windows, a listed name that omits the extension of
   a known file type still matches when the parent and filename stem are the same
-  and that identity matches. Restore then moves the item back to the receipt's
+  and that identity matches. A canonical local path keeps the `\\?\` prefix and
+  is still listed; only a UNC path or a drive whose type is remote skips that
+  list. Restore then moves the item back to the receipt's
   original filename, so the extension returns with the file. The receipt keeps
   that handle open to prevent identity reuse, and restore repeats the identity
   check before selecting the identifier. A Windows or Linux batch restore enumerates

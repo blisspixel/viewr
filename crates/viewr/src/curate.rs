@@ -1151,30 +1151,25 @@ fn classify_trash_item_id(
 #[allow(unsafe_code)] // one audited read-only Win32 drive-type query
 fn is_remote_path(path: &Path) -> bool {
     const DRIVE_REMOTE: u32 = 4;
+    use std::path::Prefix;
     use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
 
-    let path_str = path.to_string_lossy();
-    if path_str.starts_with(r"\\") || path_str.starts_with("//") {
-        return true;
-    }
-
+    // `canonicalize` writes a local file as `\\?\C:\...`. That verbatim disk
+    // prefix is not a UNC share, so Trash capture still lists it.
     let mut components = path.components();
-    if let Some(std::path::Component::Prefix(prefix)) = components.next() {
-        use std::path::Prefix;
-        match prefix.kind() {
-            Prefix::UNC(..) | Prefix::VerbatimUNC(..) => return true,
-            Prefix::Disk(disk) | Prefix::VerbatimDisk(disk) => {
-                let root = [u16::from(disk), u16::from(b':'), u16::from(b'\\'), 0];
-                // SAFETY: `root` is a valid null-terminated UTF-16 wide string.
-                let drive_type = unsafe { GetDriveTypeW(root.as_ptr()) };
-                if drive_type == DRIVE_REMOTE {
-                    return true;
-                }
-            }
-            _ => {}
+    let Some(std::path::Component::Prefix(prefix)) = components.next() else {
+        return false;
+    };
+    match prefix.kind() {
+        Prefix::UNC(..) | Prefix::VerbatimUNC(..) => true,
+        Prefix::Disk(disk) | Prefix::VerbatimDisk(disk) => {
+            let root = [u16::from(disk), u16::from(b':'), u16::from(b'\\'), 0];
+            // SAFETY: `root` is a valid null-terminated UTF-16 wide string.
+            let drive_type = unsafe { GetDriveTypeW(root.as_ptr()) };
+            drive_type == DRIVE_REMOTE
         }
+        _ => false,
     }
-    false
 }
 
 #[cfg(target_os = "windows")]
@@ -2242,5 +2237,9 @@ mod tests {
             r"\\?\UNC\server\share\photo.jpg"
         )));
         assert!(!super::is_remote_path(Path::new(r"C:\Windows\System32")));
+        assert!(!super::is_remote_path(Path::new(
+            r"\\?\C:\Users\runner\photo.jpg"
+        )));
+        assert!(!super::is_remote_path(Path::new(r"\\?\D:\Temp\photo.png")));
     }
 }

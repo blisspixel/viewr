@@ -896,6 +896,15 @@ fn windows_shell_path(path: &Path) -> PathBuf {
     PathBuf::from(out)
 }
 
+#[cfg(any(
+    target_os = "windows",
+    all(
+        unix,
+        not(target_os = "macos"),
+        not(target_os = "ios"),
+        not(target_os = "android")
+    )
+))]
 fn restore_destination_path(path: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {

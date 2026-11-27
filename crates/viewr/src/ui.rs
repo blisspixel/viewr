@@ -2085,14 +2085,10 @@ fn exit_menu_item(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, language: Lang
     };
     let response = ui.add(egui::Button::new(language.text(label)).shortcut_text(&shortcut));
     // Some native accessibility backends omit keyboard_shortcut, so include
-    // the visible accelerator in the name as other menu commands do.
-    response.widget_info(|| {
-        WidgetInfo::labeled(
-            Role::Button,
-            true,
-            format!("{} {shortcut}", language.text(label)),
-        )
-    });
+    // the accelerator in the name. Each language owns that frame.
+    let accessible_name =
+        crate::chrome::name_before_shortcut(language, language.text(label), &shortcut);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, accessible_name.as_str()));
     response.ctx.accesskit_node_builder(response.id, |node| {
         node.set_keyboard_shortcut(shortcut.as_str());
     });
@@ -10426,19 +10422,27 @@ mod tests {
                 .platform_output
                 .accesskit_update
                 .expect("menu accessibility");
+            let shortcut = format!("{}+Q", super::PRIMARY_MODIFIER);
+            let accessible =
+                crate::chrome::name_before_shortcut(language, language.text(label), &shortcut);
+            if language != Language::English {
+                let english = if cfg!(target_os = "macos") {
+                    "Quit viewr"
+                } else {
+                    "Exit"
+                };
+                assert_ne!(
+                    accessible,
+                    crate::chrome::name_before_shortcut(Language::English, english, &shortcut)
+                );
+            }
             let exit = update
                 .nodes
                 .iter()
                 .map(|(_, node)| node)
-                .find(|node| {
-                    node.label()
-                        .is_some_and(|name| name.starts_with(language.text(label)))
-                })
+                .find(|node| node.label() == Some(accessible.as_str()))
                 .expect("localized Exit");
-            assert_eq!(
-                exit.keyboard_shortcut(),
-                Some(format!("{}+Q", super::PRIMARY_MODIFIER).as_str())
-            );
+            assert_eq!(exit.keyboard_shortcut(), Some(shortcut.as_str()));
             assert!(!exit.is_disabled());
             let bounds = exit.bounds().expect("Exit bounds");
             assert!(

@@ -64,6 +64,7 @@ const COPY_SPOT_HEAL: &str = "Spot Heal";
 const COPY_FINISH_SPOT_HEAL: &str = "Finish Spot Heal";
 const COPY_FINISHING_SPOT_HEAL: &str = "Finishing Spot Heal...";
 const COPY_NAME_WITH_SHORTCUT: &str = "{name} ({shortcut})";
+const COPY_NAME_BEFORE_SHORTCUT: &str = "{name} {shortcut}";
 const COPY_RATING_CHOICE_NAME: &str = "Rating {label}, shortcut {shortcut}";
 const COPY_FILTER_ALL: &str = "All images";
 const COPY_FILTER_UNRATED_STATUS: &str = "Rating Filter: Unrated";
@@ -140,6 +141,7 @@ const CHROME_COPY: &[&str] = &[
     COPY_FINISH_SPOT_HEAL,
     COPY_FINISHING_SPOT_HEAL,
     COPY_NAME_WITH_SHORTCUT,
+    COPY_NAME_BEFORE_SHORTCUT,
     COPY_RATING_CHOICE_NAME,
     COPY_FILTER_ALL,
     COPY_FILTER_UNRATED_STATUS,
@@ -648,6 +650,22 @@ pub(crate) fn name_with_shortcut(language: Language, name: &str, shortcut: &str)
     language
         .fill(
             COPY_NAME_WITH_SHORTCUT,
+            &[("name", name), ("shortcut", shortcut)],
+        )
+        .into_string()
+}
+
+/// Join an already translated command name to its accelerator.
+///
+/// Each language owns the frame. The accelerator is inserted once and is not
+/// translated again. The name stays first so a screen reader hears the command
+/// before the keys.
+#[must_use]
+pub(crate) fn name_before_shortcut(language: Language, name: &str, shortcut: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_NAME_BEFORE_SHORTCUT);
+    language
+        .fill(
+            COPY_NAME_BEFORE_SHORTCUT,
             &[("name", name), ("shortcut", shortcut)],
         )
         .into_string()
@@ -1298,6 +1316,7 @@ mod tests {
                 if source == super::COPY_PANEL_SIDE
                     || source == super::COPY_UNDO_TRASH_WITH_HELP
                     || source == super::COPY_NAME_WITH_SHORTCUT
+                    || source == super::COPY_NAME_BEFORE_SHORTCUT
                 {
                     continue;
                 }
@@ -1360,6 +1379,40 @@ mod tests {
             assert!(!composed.contains("{shortcut}"));
         }
         let pseudo = super::name_with_shortcut(Language::Pseudo, braced, "C");
+        assert!(pseudo.contains(braced));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+    }
+
+    #[test]
+    fn name_before_shortcut_follows_the_selected_language() {
+        let braced = "keep {brace}";
+        assert_eq!(
+            super::name_before_shortcut(EN, "Exit", "Ctrl+Q"),
+            "Exit Ctrl+Q"
+        );
+        assert_eq!(
+            super::name_before_shortcut(EN, "Quit viewr", "Cmd+Q"),
+            "Quit viewr Cmd+Q"
+        );
+        let preserved = super::name_before_shortcut(EN, braced, "Ctrl+Q");
+        assert!(preserved.contains(braced));
+        assert!(!preserved.contains("{name}"));
+        assert!(!preserved.contains("{shortcut}"));
+        for language in TRANSLATED {
+            let exit_name = language.text(crate::locale::tr!("Exit"));
+            let exit = super::name_before_shortcut(language, exit_name, "Ctrl+Q");
+            assert_ne!(exit, "Exit Ctrl+Q");
+            assert!(exit.starts_with(exit_name));
+            assert!(exit.contains("Ctrl+Q"));
+            assert!(!exit.contains("{name}"));
+            assert!(!exit.contains("{shortcut}"));
+            let quit_name = language.text(crate::locale::tr!("Quit viewr"));
+            let quit = super::name_before_shortcut(language, quit_name, "Cmd+Q");
+            assert_ne!(quit, "Quit viewr Cmd+Q");
+            assert!(quit.starts_with(quit_name));
+            assert!(quit.contains("Cmd+Q"));
+        }
+        let pseudo = super::name_before_shortcut(Language::Pseudo, braced, "Ctrl+Q");
         assert!(pseudo.contains(braced));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
     }

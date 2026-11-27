@@ -96,6 +96,11 @@ of by review:
   label, the context Open With label, and the page, icon, and frame step
   names follow the catalog. The accessible name of a step stays the control
   name.
+  `chrome::name_before_shortcut_follows_the_selected_language` proves the
+  frame that puts an already translated command name before its accelerator.
+  The accelerator is inserted once, and a name that contains braces stays
+  verbatim. `ui::file_menu_exit_is_localized_reachable_and_routes_safe_close`
+  proves File > Exit uses that frame.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

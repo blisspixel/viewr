@@ -13,6 +13,8 @@ and organized by user-visible concern.
   Open With label uses the same catalog entry as the File menu. Page and
   frame step hover joins a translated name to its shortcut. The shortcut
   stays the key name, and a step's accessible name stays the control name.
+- File > Exit, or Quit viewr on macOS, speaks its accelerator from a catalog
+  frame. The accelerator stays Ctrl+Q or Cmd+Q.
 
 ## 0.7.9 - 2026-11-27
 

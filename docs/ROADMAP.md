@@ -942,9 +942,10 @@ Make viewing excellent, not merely functional.
   and each language owns that joined sentence. Quick-tool context labels join
   a translated name to its shortcut with one catalog frame, and the context
   Open With label uses that catalog. Page and frame step hover uses the same
-  frame. The accessible name of a step stays the control name. The Exit
-  accelerator name and leftover app toasts are still migrated one seam at a
-  time, each with the coverage test in `docs/LOCALIZATION.md`.
+  frame. The accessible name of a step stays the control name. File > Exit
+  speaks its accelerator from a catalog frame. Leftover app toasts are still
+  migrated one seam at a time, each with the coverage test in
+  `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

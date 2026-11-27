@@ -3769,6 +3769,12 @@ const MESSAGES: &[Message] = &[
         german: "{name} ({shortcut})",
     },
     Message {
+        english: "{name} {shortcut}",
+        spanish: "{name} {shortcut}",
+        french: "{name} {shortcut}",
+        german: "{name} {shortcut}",
+    },
+    Message {
         english: "Open the latest official GitHub release. No background check.",
         spanish: "Abre la última versión oficial en GitHub. Sin comprobación en segundo plano.",
         french: "Ouvre la dernière version officielle sur GitHub. Aucune vérification en arrière-plan.",

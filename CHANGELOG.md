@@ -23,6 +23,9 @@ and organized by user-visible concern.
 - The rating menu joins each translated choice to its digit shortcut. Four
   spaces keep that shortcut in a column. The accessible name stays the
   existing rating sentence.
+- Image Information joins the megapixel count to the aspect ratio in the
+  selected language. The middle dot stays the separator, and MP stays the
+  unit abbreviation.
 
 ## 0.7.9 - 2026-11-27
 

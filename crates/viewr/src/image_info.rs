@@ -1218,6 +1218,24 @@ pub fn aspect_ratio(width: u32, height: u32) -> Option<String> {
     Some(format!("{}:{}", width / divisor, height / divisor))
 }
 
+const MEGAPIXEL_ASPECT: &str = "{megapixels} MP · {aspect}";
+
+/// Join a localized megapixel count to the reduced aspect ratio.
+///
+/// Each language owns the frame. `MP` stays the unit abbreviation. The aspect
+/// ratio is inserted once and is not translated.
+#[must_use]
+pub(crate) fn megapixel_aspect_label(language: Language, megapixels: f64, aspect: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(MEGAPIXEL_ASPECT);
+    let count = language.format_decimal(megapixels, 1);
+    language
+        .fill(
+            MEGAPIXEL_ASPECT,
+            &[("megapixels", count.as_str()), ("aspect", aspect)],
+        )
+        .into_string()
+}
+
 fn format_label(format: image::ImageFormat) -> String {
     match format {
         image::ImageFormat::Jpeg => "JPEG",
@@ -1485,6 +1503,44 @@ mod tests {
         assert_eq!(aspect_ratio(6000, 4000).as_deref(), Some("3:2"));
         assert_eq!(aspect_ratio(1920, 1080).as_deref(), Some("16:9"));
         assert_eq!(aspect_ratio(0, 1080), None);
+    }
+
+    #[test]
+    fn megapixel_aspect_label_follows_the_selected_language() {
+        assert_eq!(
+            megapixel_aspect_label(Language::English, 24.0, "3:2"),
+            "24.0 MP · 3:2"
+        );
+        assert_eq!(
+            megapixel_aspect_label(Language::English, 2.0736, "16:9"),
+            "2.1 MP · 16:9"
+        );
+        let photo = f64::from(6_000_u32) * f64::from(4_000_u32) / 1_000_000.0;
+        let photo_aspect = aspect_ratio(6_000, 4_000).expect("6000x4000 reduces");
+        assert_eq!(
+            megapixel_aspect_label(Language::English, photo, &photo_aspect),
+            "24.0 MP · 3:2"
+        );
+        let wide = f64::from(1_920_u32) * f64::from(1_080_u32) / 1_000_000.0;
+        let wide_aspect = aspect_ratio(1_920, 1_080).expect("1920x1080 reduces");
+        assert_eq!(
+            megapixel_aspect_label(Language::English, wide, &wide_aspect),
+            "2.1 MP · 16:9"
+        );
+        let braced = megapixel_aspect_label(Language::English, 24.0, "keep {brace}");
+        assert!(braced.contains("keep {brace}"));
+        assert!(!braced.contains("{megapixels}"));
+        assert!(!braced.contains("{aspect}"));
+        for language in [Language::Spanish, Language::French, Language::German] {
+            let composed = megapixel_aspect_label(language, 24.0, "3:2");
+            assert_eq!(composed, "24,0 MP · 3:2");
+            assert!(language.text(super::MEGAPIXEL_ASPECT).contains('·'));
+            assert!(!composed.contains("{megapixels}"));
+            assert!(!composed.contains("{aspect}"));
+        }
+        let pseudo = megapixel_aspect_label(Language::Pseudo, 24.0, "keep {brace}");
+        assert!(pseudo.contains("keep {brace}"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
     }
 
     #[test]

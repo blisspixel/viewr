@@ -4297,10 +4297,16 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
                     .color(colors.muted),
             );
         }
-        let megapixels = f64::from(width) * f64::from(height) / 1_000_000.0;
         if let Some(aspect) = crate::image_info::aspect_ratio(width, height) {
-            let mp_str = frame.language.format_decimal(megapixels, 1);
-            ui.label(RichText::new(format!("{mp_str} MP · {aspect}")).color(colors.muted));
+            let megapixels = f64::from(width) * f64::from(height) / 1_000_000.0;
+            ui.label(
+                RichText::new(crate::image_info::megapixel_aspect_label(
+                    frame.language,
+                    megapixels,
+                    &aspect,
+                ))
+                .color(colors.muted),
+            );
         }
     }
     if let Some(value) = frame

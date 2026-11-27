@@ -3535,6 +3535,12 @@ const MESSAGES: &[Message] = &[
         german: "Eingebettete Vorschau, nicht das vollständige Kamera-RAW.",
     },
     Message {
+        english: "{megapixels} MP · {aspect}",
+        spanish: "{megapixels} MP · {aspect}",
+        french: "{megapixels} MP · {aspect}",
+        german: "{megapixels} MP · {aspect}",
+    },
+    Message {
         english: "Right for the next photo.",
         spanish: "Derecha para la siguiente foto.",
         french: "Droite pour la photo suivante.",

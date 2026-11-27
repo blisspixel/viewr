@@ -114,6 +114,10 @@ of by review:
   Four spaces stay between them, the shortcut is inserted once, and a value
   that contains braces stays verbatim. The accessible name stays
   `Rating {label}, shortcut {shortcut}`.
+  `image_info::megapixel_aspect_label_follows_the_selected_language` proves
+  the frame that joins a megapixel count to its aspect ratio. The count uses
+  the language's decimal separator, the aspect ratio is inserted once, and a
+  value that contains braces stays verbatim.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

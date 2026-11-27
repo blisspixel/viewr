@@ -84,14 +84,14 @@ class DocumentationTests(unittest.TestCase):
                 "ID-signed or notarized",
             ),
             "docs/ROADMAP.md": (
-                "Published install target | Immutable [v0.7.8]",
+                "Published install target | Immutable [v0.7.9]",
                 "Public foundation, released",
                 "immutable checksummed archives",
                 "attestations",
                 "explicit unsigned-preview limits",
             ),
             "docs/PUBLISHING.md": (
-                "v0.7.8 is public, immutable, checksummed, and attested",
+                "v0.7.9 is public, immutable, checksummed, and attested",
                 "explicitly unsigned pre-1.0 preview",
             ),
             "docs/releases/v0.1.0.md": (
@@ -339,18 +339,22 @@ class DocumentationTests(unittest.TestCase):
             "Behavior on main since that tag is [Unreleased](../CHANGELOG.md)",
             roadmap,
         )
-        self.assertIn("[tag-ready]", roadmap)
-        self.assertIn("`0.7.9`, verified candidate and tag-ready", publishing)
         self.assertIn(
+            "Viewing and Linux-archive patch   [released, acceptance rows open]",
+            roadmap,
+        )
+        self.assertIn("`0.7.9`, the published viewing", publishing)
+        self.assertNotIn(
             "Those assets do not exist until the tag is published", publishing
         )
+        self.assertNotIn("`0.7.9`, verified candidate and tag-ready", publishing)
         self.assertNotIn("README and INSTALL stay on the published v0.7.8", publishing)
         self.assertIn("does not decode the sensor", sandbox)
         self.assertIn("Unreleased is the", index)
         self.assertIn("or a published preview", index)
         install = (REPOSITORY_ROOT / "docs/INSTALL.md").read_text(encoding="utf-8")
         self.assertIn(
-            "This tag-ready tree is the verified v0.7.9 candidate plus release-status text.",
+            "The v0.7.9 tag is the published preview.",
             install,
         )
         self.assertIn("still needs glibc 2.43", install)

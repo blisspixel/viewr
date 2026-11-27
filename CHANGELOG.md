@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
+## Unreleased
+
+- An external edit that needs F5 shows its badge and short status in the
+  selected language. When another status is also in the top bar, the
+  screen-reader sentence joins the F5 reminder to that status in the same
+  language.
+
 ## 0.7.9 - 2026-11-27
 
 - Malformed JPEG XL input whose adaptive low-frequency channels do not share

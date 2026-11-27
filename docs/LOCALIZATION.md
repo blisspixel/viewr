@@ -84,6 +84,10 @@ of by review:
   every message it can produce in all four languages, then requires each
   translated string to differ from its English source and to contain no
   leftover placeholder brace.
+  `file_coherence::external_edit_copy_follows_the_selected_language` proves
+  the external-edit badge, the short status, and the joined F5 sentence in
+  every language. The joined sentence inserts an already translated status
+  once, and a value that contains braces stays verbatim.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

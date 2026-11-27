@@ -936,10 +936,12 @@ Make viewing excellent, not merely functional.
   sort, Update, and Save As overwrite confirmation are now cataloged. One
   sentence has one owner across the empty-state card and the status line, an
   uncataloged interface literal fails the build, and a composed wait sentence is
-  one frame per language rather than English word order. Remaining
-  file-association guidance, some hover help, and leftover app toasts are still
-  migrated one seam at a time, each with the coverage test in
-  `docs/LOCALIZATION.md`.
+  one frame per language rather than English word order. File-association
+  guidance is cataloged. The external-edit badge, its short status, and the
+  sentence that joins the F5 reminder to another top-bar status are cataloged,
+  and each language owns that joined sentence. Some hover help and leftover
+  app toasts are still migrated one seam at a time, each with the coverage
+  test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

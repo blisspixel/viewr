@@ -105,13 +105,19 @@ impl DecodedPages {
     }
 
     fn load_file_with_cancellation<R>(
-        _path: &Path,
+        path: &Path,
         mut file: R,
         is_current: &impl Fn() -> bool,
     ) -> Result<Option<Self>, Error>
     where
         R: Read + Seek,
     {
+        // A DNG or ARW is a TIFF container, but its sensor IFDs are not pages.
+        // The embedded preview, when one exists, is the whole image on screen.
+        // Reading those IFDs fails and would replace that preview with an error.
+        if crate::fs::is_embedded_preview_candidate(path) {
+            return Ok(None);
+        }
         if !is_current() {
             return Ok(None);
         }
@@ -977,6 +983,26 @@ mod tests {
         assert!(cursor.step(1));
         assert!(!cursor.step(1));
         assert_eq!(cursor.index(), 1);
+    }
+
+    #[test]
+    fn embedded_preview_names_are_not_container_pages() {
+        let workspace = TempWorkspace::new("pages_raw_preview").unwrap();
+        let tiff_path = workspace.path().join("pages.tif");
+        write_rgb_tiff(&tiff_path, &[(2, 1, [255, 0, 0]), (3, 2, [0, 0, 255])]);
+        let bytes = std::fs::read(&tiff_path).unwrap();
+        let pages = DecodedPages::load_with_cancellation(&tiff_path, &|| true)
+            .unwrap()
+            .expect("a multi-page TIFF still exposes pages");
+        assert_eq!(pages.len(), 2);
+
+        for name in ["preview.dng", "preview.ARW", "preview.Dng"] {
+            let path = workspace.path().join(name);
+            std::fs::write(&path, &bytes).unwrap();
+            let loaded = DecodedPages::load_with_cancellation(&path, &|| true)
+                .expect("a DNG or ARW must not report a page-decode error");
+            assert!(loaded.is_none(), "{name} must not become container pages");
+        }
     }
 
     #[test]

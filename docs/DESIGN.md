@@ -135,7 +135,9 @@ disappears. This spec is the converged result of two rounds of design critique
   failure stays in the existing top-bar status. Opening a folder selects the
   first file that is not a deferred camera RAW photo. When every file is
   deferred, the folder stays on the first file. A DNG or ARW then shows its
-  embedded preview when one exists; otherwise it shows the notice. The startup
+  embedded preview when one exists; otherwise it shows the notice. Page
+  controls stay off for those files, because a sensor IFD is not a page.
+  The startup
   card's measured geometry is stable across unchanged frames, so no resting
   content drifts vertically.
 - Crop mode: GPU dims outside the live UV rect to 45 percent brightness. egui draws

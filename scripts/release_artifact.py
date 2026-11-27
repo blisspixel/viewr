@@ -110,6 +110,42 @@ class ReleaseError(ValueError):
     """A release artifact violated the repository's packaging contract."""
 
 
+LINUX_TARGET = "x86_64-unknown-linux-gnu"
+LINUX_GLIBC_FLOOR_MAXIMUM = (2, 39)
+_GLIBC_COMPONENT_LIMIT = 4
+
+
+def _glibc_component(text: str) -> int | None:
+    """Parse one ASCII glibc version component, rejecting padding and huge input."""
+
+    if not 1 <= len(text) <= _GLIBC_COMPONENT_LIMIT:
+        return None
+    if any(character < "0" or character > "9" for character in text):
+        return None
+    if len(text) > 1 and text.startswith("0"):
+        return None
+    return int(text)
+
+
+def parse_linux_glibc_floor(value: object) -> str:
+    """Return a Linux glibc floor at or below the supported maximum."""
+
+    if isinstance(value, str):
+        major_text, separator, minor_text = value.partition(".")
+        major = _glibc_component(major_text)
+        minor = _glibc_component(minor_text)
+        if (
+            separator == "."
+            and major is not None
+            and minor is not None
+            and (major, minor) <= LINUX_GLIBC_FLOOR_MAXIMUM
+        ):
+            return value
+    raise ReleaseError(
+        "linux_glibc_floor must be a major.minor version at or below 2.39"
+    )
+
+
 @dataclass(frozen=True)
 class ArchiveEntry:
     """One immutable payload entry and its Unix archive mode."""
@@ -727,7 +763,12 @@ def _validated_manifest(
         "target",
         "version",
     }
-    if set(manifest) != expected_keys:
+    keys = set(manifest)
+    floor_value = None
+    if "linux_glibc_floor" in keys:
+        floor_value = manifest["linux_glibc_floor"]
+        keys.remove("linux_glibc_floor")
+    if keys != expected_keys:
         raise ReleaseError("release manifest has an unexpected field set")
     if (
         manifest["schema_version"] != MANIFEST_SCHEMA_VERSION
@@ -744,6 +785,10 @@ def _validated_manifest(
         raise ReleaseError("release manifest has an invalid version")
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ReleaseError("release manifest has an unsupported target")
+    if floor_value is not None:
+        if target != LINUX_TARGET:
+            raise ReleaseError("linux_glibc_floor is only valid on the Linux archive")
+        parse_linux_glibc_floor(floor_value)
     if not isinstance(toolchain, str) or TOOLCHAIN_PATTERN.fullmatch(toolchain) is None:
         raise ReleaseError("release manifest has an unpinned toolchain")
     if (
@@ -920,6 +965,10 @@ def build_release_artifact(
         "target": target,
         "version": version,
     }
+    if target == LINUX_TARGET:
+        measured_floor = os.environ.get("VIEWR_LINUX_GLIBC_FLOOR")
+        if measured_floor:
+            manifest["linux_glibc_floor"] = parse_linux_glibc_floor(measured_floor)
     prefix = f"viewr-{version}-{target}"
     archive_name = f"{prefix}.zip"
     target_root = repository_root / "target"

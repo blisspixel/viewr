@@ -16,6 +16,66 @@ fail() {
     exit 1
 }
 
+system_glibc() {
+    raw=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+    case "$raw" in
+        "glibc "[0-9]*) printf '%s\n' "${raw#glibc }" ;;
+        *) printf '\n' ;;
+    esac
+}
+
+glibc_is_older() {
+    have=$1
+    need=$2
+    awk -v have="$have" -v need="$need" 'BEGIN {
+        split(have, a, ".")
+        split(need, b, ".")
+        ah = a[1] + 0
+        am = a[2] + 0
+        bh = b[1] + 0
+        bm = b[2] + 0
+        if (ah < bh || (ah == bh && am < bm)) exit 0
+        exit 1
+    }'
+}
+
+published_linux_glibc_floor() {
+    # v0.7.8 was linked on Ubuntu 26.04. Later release jobs refuse a floor
+    # above 2.39, which is what this script assumes for every other tag.
+    case "$1" in
+        v0.7.8) printf '%s\n' 2.43 ;;
+        *) printf '%s\n' 2.39 ;;
+    esac
+}
+
+explain_glibc_floor() {
+    version=$1
+    need=$2
+    have=$3
+    if [ "$need" = "2.43" ]; then
+        next="Install an earlier release with VIEWR_VERSION=0.7.7, or build from source (docs/INSTALL.md#build-from-source)."
+    else
+        next="Build from source (docs/INSTALL.md#build-from-source), or install a release this system can run."
+    fi
+    fail "viewr $version needs glibc $need or newer; this system has glibc $have.
+$next"
+}
+
+explain_staged_version_failure() {
+    version=$1
+    err_file=$2
+    glibc_line=$(sed -n 's/.*version `GLIBC_\([0-9][0-9]*\.[0-9][0-9]*\)'"'"' not found.*/\1/p' "$err_file" | head -n 1)
+    if [ -n "$glibc_line" ]; then
+        have=$(system_glibc || true)
+        explain_glibc_floor "$version" "$glibc_line" "${have:-unknown}"
+    fi
+    first=$(head -n 1 "$err_file" || true)
+    if [ -n "$first" ]; then
+        fail "staged binary did not report its version: $first"
+    fi
+    fail "staged binary did not report its version"
+}
+
 need() {
     command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
@@ -221,6 +281,15 @@ fi
 printf '%s\n' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$' ||
     fail "release tag is not a supported semantic version: $tag"
 version=${tag#v}
+if [ "$os" = "Linux" ] && [ -z "$local_release" ]; then
+    have=$(system_glibc || true)
+    if [ -n "$have" ]; then
+        need_floor=$(published_linux_glibc_floor "$tag")
+        if glibc_is_older "$have" "$need_floor"; then
+            explain_glibc_floor "$version" "$need_floor" "$have"
+        fi
+    fi
+fi
 archive="viewr-$version-$target.zip"
 download_base="$RELEASES_URL/download/$tag"
 
@@ -313,6 +382,15 @@ source_root="$extract_root/$prefix"
 manifest="$source_root/release-manifest.json"
 [ -f "$manifest" ] && [ ! -L "$manifest" ] ||
     fail "release archive is missing a regular release manifest"
+if [ "$os" = "Linux" ]; then
+    manifest_floor=$(sed -n 's/^  "linux_glibc_floor": "\([0-9][0-9]*\.[0-9][0-9]*\)",$/\1/p' "$manifest")
+    if [ -n "$manifest_floor" ]; then
+        have=$(system_glibc || true)
+        if [ -n "$have" ] && glibc_is_older "$have" "$manifest_floor"; then
+            explain_glibc_floor "$version" "$manifest_floor" "$have"
+        fi
+    fi
+fi
 
 manifest_records="$temporary/manifest-records.txt"
 awk '
@@ -467,8 +545,9 @@ install -m 0644 "$source_root/README.md" "$stage_dir/README.md"
 install -m 0644 "$source_root/THIRD_PARTY_LICENSES.txt" "$stage_dir/THIRD_PARTY_LICENSES.txt"
 install -m 0644 "$source_root/release-manifest.json" "$stage_dir/release-manifest.json"
 printf 'repository=%s\nversion=%s\ntarget=%s\n' "$REPOSITORY" "$version" "$target" > "$stage_dir/.viewr-install"
-staged_version=$("$stage_dir/viewr" --version) ||
-    fail "staged binary did not report its version"
+staged_err="$temporary/staged-version.err"
+staged_version=$("$stage_dir/viewr" --version 2>"$staged_err") ||
+    explain_staged_version_failure "$version" "$staged_err"
 [ "$staged_version" = "viewr $version" ] ||
     fail "staged binary version does not match the selected release"
 # Keep the report: doctor names the missing desktop library when a session

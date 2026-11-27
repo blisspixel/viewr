@@ -386,23 +386,27 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("Ubuntu 26.04, the pinned Linux C-decoder", wrapper)
         self.assertIn('features = ["v1_17"]', wrapper)
         self.assertIn(
-            "The Linux release archive is built on `ubuntu-26.04`.",
+            "The Linux release archive is built on `ubuntu-24.04`",
             architecture,
         )
         self.assertIn("can still select Ubuntu 24.04", architecture)
+        self.assertIn("refuses a higher", architecture)
 
-    def test_linux_release_archive_builds_on_ubuntu_26_04(self) -> None:
+    def test_linux_release_archive_builds_on_ubuntu_24_04(self) -> None:
         workflow = (REPOSITORY_ROOT / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn(
-            "- os: ubuntu-26.04\n            target: x86_64-unknown-linux-gnu",
+            "- os: ubuntu-24.04\n            target: x86_64-unknown-linux-gnu",
             workflow,
         )
+        self.assertNotIn("ubuntu-26.04", workflow)
         self.assertNotIn(
             "- os: ubuntu-latest\n            target: x86_64-unknown-linux-gnu",
             workflow,
         )
+        self.assertIn("scripts/linux_glibc_floor.py --maximum 2.39", workflow)
+        self.assertIn('echo "VIEWR_LINUX_GLIBC_FLOOR=$floor"', workflow)
         self.assertIn("key: release-${{ matrix.os }}-${{ matrix.target }}", workflow)
         self.assertNotIn("key: release-${{ matrix.target }}\n", workflow)
         self.assertIn("- os: windows-latest", workflow)

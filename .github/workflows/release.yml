@@ -41,9 +41,10 @@ jobs:
       matrix:
         include:
           # ubuntu-latest can still select Ubuntu 24.04 through 2026-11-19.
-          # The published v0.7.8 Linux archive was built on Ubuntu 26.04, so
-          # this target names that image.
-          - os: ubuntu-26.04
+          # Name 24.04 so the archive's GLIBC symbol versions stay at or
+          # below 2.39. The published v0.7.8 archive was linked on 26.04
+          # and needs glibc 2.43. The libheif 1.21 jobs stay on 26.04.
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -67,11 +68,20 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The label is part of the key. rust-cache records Linux and x64,
-          # not the Ubuntu image, so a 24.04 archive must not be restored here.
+          # not the Ubuntu image, so an archive linked on another image
+          # must not be restored here.
           key: release-${{ matrix.os }}-${{ matrix.target }}
 
       - name: Build locked release binaries
         run: cargo build --release --workspace --locked --target ${{ matrix.target }}
+
+      - name: Measure the Linux glibc floor
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          floor=$(python -B scripts/linux_glibc_floor.py --maximum 2.39 \
+            "target/${{ matrix.target }}/release/viewr" \
+            "target/${{ matrix.target }}/release/viewr-decode")
+          echo "VIEWR_LINUX_GLIBC_FLOOR=$floor" >> "$GITHUB_ENV"
 
       - name: Package and verify branch artifact
         if: github.ref_type != 'tag'

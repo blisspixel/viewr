@@ -33,9 +33,12 @@ and organized by user-visible concern.
   installs libaom and libdav1d development files, which Ubuntu 26.04 no
   longer pulls in through `libheif-dev`. `libaom-dev` imports
   `/usr/bin/aomdec`, so that lane also installs `aom-tools`.
-- The Linux release archive is built on Ubuntu 26.04. The published v0.7.8
-  archive used that image, and `ubuntu-latest` can still select Ubuntu 24.04
-  through 2026-11-19.
+- The Linux release archive is built on Ubuntu 24.04. Its GLIBC symbol
+  versions must be 2.39 or older, which Ubuntu 24.04 LTS and Debian 13
+  provide. The published v0.7.8 archive was linked on Ubuntu 26.04 and
+  needs glibc 2.43. The installer names that requirement before downloading
+  v0.7.8, and a staged binary that fails to start repeats the loader reason.
+  The GUI performance job and the C-decoder job stay on Ubuntu 26.04.
 - The window and controls use the current wgpu 30 and egui 0.37 lines.
   Page-step triangles stay drawn by the bundled icon font. Pictures stay
   on the historical sRGB surface.

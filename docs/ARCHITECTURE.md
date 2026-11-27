@@ -829,9 +829,10 @@ deployment target, the runner label, or the required check name.
 ## Linux lane
 
 The quality matrix keeps `ubuntu-latest`. That label is the required check
-`fmt / clippy / test (ubuntu-latest)`. GitHub is moving the label from Ubuntu
-24.04 to 26.04 through 2026-11-19, so renaming the matrix would drop the
-required context. The GUI performance job and the C-decoder job are pinned to
+`fmt / clippy / test (ubuntu-latest)`. GitHub finished moving that label from
+Ubuntu 24.04 to 26.04 on 2026-11-19. The main quality job on 2026-11-27 ran
+on the Ubuntu 26.04 image. Renaming the matrix would drop the required check
+name, so the label stays. The GUI performance job and the C-decoder job are pinned to
 `ubuntu-26.04`. Their required names stay `GUI performance budgets` and
 `C decoders under default-deny seccomp`. The C-decoder wrapper stays on the
 libheif 1.17 API floor. Ubuntu 26.04 supplies libheif 1.21 for the system
@@ -844,9 +845,10 @@ rust-cache otherwise treats Ubuntu 24.04 and 26.04 as the same Linux x64
 host, and an archive built against another libx265 is not restored.
 The Linux release archive is built on `ubuntu-24.04` so its GLIBC symbol
 versions stay at or below 2.39. The published v0.7.8 archive was linked
-on Ubuntu 26.04 and needs glibc 2.43.
-`ubuntu-latest` can still select Ubuntu 24.04 through 2026-11-19, so the
-release job names `ubuntu-24.04` directly.
+on Ubuntu 26.04 and needs glibc 2.43. The published v0.7.9 archive was
+linked on Ubuntu 24.04 and its measured floor is 2.39.
+`ubuntu-latest` now selects Ubuntu 26.04, so the release job names
+`ubuntu-24.04` directly.
 The release job measures `objdump -T` on both binaries and refuses a higher
 symbol version. The release rust-cache key includes the runner label
 because rust-cache does not record the image.

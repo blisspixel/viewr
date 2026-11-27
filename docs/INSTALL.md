@@ -75,7 +75,9 @@ files out of the release directory before retrying; the installer does not delet
 them.
 
 Supported release targets are macOS Intel, macOS Apple Silicon, and Linux x86-64
-glibc. Linux ARM64 and musl users must build from source for now.
+glibc. The published v0.7.8 Linux archive needs glibc 2.43. v0.7.7 needs
+glibc 2.39, which Ubuntu 24.04 LTS and Debian 13 provide. Linux ARM64 and musl
+users must build from source for now.
 
 To pin a release or override the user-local locations:
 

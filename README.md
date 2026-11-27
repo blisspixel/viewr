@@ -104,7 +104,9 @@ curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
-macOS plus x86-64 glibc Linux.
+macOS plus x86-64 glibc Linux. The published v0.7.8 Linux archive needs
+glibc 2.43, so Ubuntu 24.04 LTS (glibc 2.39) and Debian 13 (glibc 2.41)
+cannot run it. On those systems, install v0.7.7 with `VIEWR_VERSION=0.7.7`.
 
 The command downloads the immutable v0.7.8 installer script. That script
 installs the newest stable release unless you set a version, and it verifies

@@ -54,15 +54,20 @@ class UnixInstallerTests(unittest.TestCase):
         doctor_passes: bool = True,
         extra_member: bool = False,
         desktop_id: str = "io.github.blisspixel.viewr",
+        glibc_floor: str | None = None,
+        viewr_body: str | None = None,
     ) -> tuple[Path, Path]:
         prefix = f"viewr-{VERSION}-{TARGET}"
-        viewr = """#!/bin/sh
+        if viewr_body is None:
+            viewr = """#!/bin/sh
 case "${1:-}" in
     --version) printf 'viewr 1.2.3\\n' ;;
     doctor) exit DOCTOR_EXIT ;;
     *) exit 1 ;;
 esac
 """.replace("DOCTOR_EXIT", "0" if doctor_passes else "1")
+        else:
+            viewr = viewr_body
         payloads = {
             "LICENSE": b"test license\n",
             "NOTICE": b"test notice\n",
@@ -97,6 +102,8 @@ esac
             "target": TARGET,
             "version": VERSION,
         }
+        if glibc_floor is not None:
+            manifest["linux_glibc_floor"] = glibc_floor
         payloads["release-manifest.json"] = (
             json.dumps(manifest, indent=2, sort_keys=True) + "\n"
         ).encode()
@@ -239,6 +246,64 @@ exec /bin/mv "$@"
             env=environment,
             text=True,
         )
+
+    def write_getconf(self, version: str) -> None:
+        getconf = self.fake_bin / "getconf"
+        getconf.write_text(
+            f"#!/bin/sh\nprintf 'glibc {version}\\n'\n",
+            encoding="utf-8",
+        )
+        getconf.chmod(0o755)
+
+    def test_v078_glibc_floor_is_checked_before_download(self) -> None:
+        self.write_getconf("2.41")
+
+        result = self.run_installer(
+            check=False,
+            extra_env={"VIEWR_VERSION": "0.7.8"},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "viewr 0.7.8 needs glibc 2.43 or newer; this system has glibc 2.41.",
+            result.stderr,
+        )
+        self.assertIn("VIEWR_VERSION=0.7.7", result.stderr)
+        self.assertNotIn("Downloading", result.stdout)
+        self.assertFalse((self.install_root / "releases" / "v0.7.8").exists())
+
+    def test_manifest_glibc_floor_stops_before_the_binary_runs(self) -> None:
+        self.write_getconf("2.41")
+        archive, sidecar = self.make_release(glibc_floor="2.43")
+
+        result = self.run_installer(archive=archive, sidecar=sidecar, check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "viewr 1.2.3 needs glibc 2.43 or newer; this system has glibc 2.41.",
+            result.stderr,
+        )
+        self.assertFalse((self.install_root / "releases" / "v1.2.3").exists())
+
+    def test_staged_binary_glibc_failure_names_the_loader_reason(self) -> None:
+        self.write_getconf("2.41")
+        archive, sidecar = self.make_release(
+            viewr_body=(
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"viewr: /lib/x86_64-linux-gnu/libm.so.6: "
+                "version \\`GLIBC_2.43' not found\" >&2\n"
+                "exit 1\n"
+            )
+        )
+
+        result = self.run_installer(archive=archive, sidecar=sidecar, check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "viewr 1.2.3 needs glibc 2.43 or newer; this system has glibc 2.41.",
+            result.stderr,
+        )
+        self.assertIn("VIEWR_VERSION=0.7.7", result.stderr)
 
     def test_installs_and_replaces_only_a_verified_release(self) -> None:
         first = self.run_installer()

@@ -16,7 +16,9 @@ import subprocess
 import sys
 
 
-GLIBC_SYMBOL = re.compile(r"\bGLIBC_([0-9]+)\.([0-9]+)\b")
+# Glibc symbol versions are small major.minor pairs. A bounded pattern keeps
+# objdump text, which is external tool output, off an open-ended digit match.
+GLIBC_SYMBOL = re.compile(r"\bGLIBC_([0-9]{1,4})\.([0-9]{1,4})\b")
 MAXIMUM = (2, 39)
 
 

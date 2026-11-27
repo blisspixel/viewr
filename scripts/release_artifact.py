@@ -112,18 +112,34 @@ class ReleaseError(ValueError):
 
 LINUX_TARGET = "x86_64-unknown-linux-gnu"
 LINUX_GLIBC_FLOOR_MAXIMUM = (2, 39)
-LINUX_GLIBC_FLOOR_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+_GLIBC_COMPONENT_LIMIT = 4
+
+
+def _glibc_component(text: str) -> int | None:
+    """Parse one ASCII glibc version component, rejecting padding and huge input."""
+
+    if not 1 <= len(text) <= _GLIBC_COMPONENT_LIMIT:
+        return None
+    if any(character < "0" or character > "9" for character in text):
+        return None
+    if len(text) > 1 and text.startswith("0"):
+        return None
+    return int(text)
 
 
 def parse_linux_glibc_floor(value: object) -> str:
     """Return a Linux glibc floor at or below the supported maximum."""
 
-    if (
-        isinstance(value, str)
-        and LINUX_GLIBC_FLOOR_PATTERN.fullmatch(value) is not None
-    ):
-        major_text, minor_text = value.split(".")
-        if (int(major_text), int(minor_text)) <= LINUX_GLIBC_FLOOR_MAXIMUM:
+    if isinstance(value, str):
+        major_text, separator, minor_text = value.partition(".")
+        major = _glibc_component(major_text)
+        minor = _glibc_component(minor_text)
+        if (
+            separator == "."
+            and major is not None
+            and minor is not None
+            and (major, minor) <= LINUX_GLIBC_FLOOR_MAXIMUM
+        ):
             return value
     raise ReleaseError(
         "linux_glibc_floor must be a major.minor version at or below 2.39"

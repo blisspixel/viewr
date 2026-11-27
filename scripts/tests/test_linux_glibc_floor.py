@@ -31,6 +31,7 @@ class LinuxGlibcFloorTests(unittest.TestCase):
 
     def test_missing_symbols_are_not_a_floor(self) -> None:
         self.assertIsNone(highest_glibc_version("no dynamic symbols"))
+        self.assertIsNone(highest_glibc_version("GLIBC_" + ("1" * 80) + ".2 atan2f"))
 
     def test_parse_rejects_a_word(self) -> None:
         with self.assertRaises(ValueError):

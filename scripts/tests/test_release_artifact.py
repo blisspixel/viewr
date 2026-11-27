@@ -1019,6 +1019,24 @@ class ReleaseArtifactTests(unittest.TestCase):
         ):
             self.build("x86_64-unknown-linux-gnu")
 
+    def test_glibc_floor_parser_rejects_padded_and_hostile_text(self) -> None:
+        self.assertEqual(release_artifact.parse_linux_glibc_floor("2.39"), "2.39")
+        self.assertEqual(release_artifact.parse_linux_glibc_floor("0.0"), "0.0")
+        for value in (
+            "2",
+            "2.43",
+            "02.39",
+            "2.039",
+            "2.39.0",
+            "2.39 ",
+            "",
+            "1" * 80,
+            "1" * 80 + ".2",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(release_artifact.ReleaseError, "2.39"):
+                    release_artifact.parse_linux_glibc_floor(value)
+
     def test_windows_manifest_ignores_a_linux_glibc_floor(self) -> None:
         with mock.patch.dict(os.environ, {"VIEWR_LINUX_GLIBC_FLOOR": "2.39"}):
             archive = self.build()

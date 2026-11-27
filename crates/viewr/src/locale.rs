@@ -3523,6 +3523,12 @@ const MESSAGES: &[Message] = &[
         german: "viewr öffnet Kamera-RAW-Dateien noch nicht.",
     },
     Message {
+        english: "{width} × {height}",
+        spanish: "{width} × {height}",
+        french: "{width} × {height}",
+        german: "{width} × {height}",
+    },
+    Message {
         english: "Preview {width} × {height}",
         spanish: "Vista previa {width} × {height}",
         french: "Aperçu {width} × {height}",

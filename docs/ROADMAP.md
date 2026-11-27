@@ -949,9 +949,10 @@ Make viewing excellent, not merely functional.
   the match count to the folder total with one catalog frame. The rating
   menu joins each translated choice to its digit shortcut with one catalog
   frame, keeping four spaces before the shortcut. Image Information joins
-  the megapixel count to the aspect ratio with one catalog frame. Other
-  composed status lines are still migrated one seam at a time, each with
-  the coverage test in `docs/LOCALIZATION.md`.
+  the megapixel count to the aspect ratio with one catalog frame. Ordinary
+  pixel dimensions use one catalog frame, and preview dimensions keep their
+  existing sentence. Other composed status lines are still migrated one
+  seam at a time, each with the coverage test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

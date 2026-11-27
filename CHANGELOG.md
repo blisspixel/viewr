@@ -26,6 +26,9 @@ and organized by user-visible concern.
 - Image Information joins the megapixel count to the aspect ratio in the
   selected language. The middle dot stays the separator, and MP stays the
   unit abbreviation.
+- Pixel dimensions in the top bar, Image Information, and the image
+  description use one catalog frame. The multiplication sign stays between
+  the two counts. Preview dimensions keep their existing sentence.
 
 ## 0.7.9 - 2026-11-27
 

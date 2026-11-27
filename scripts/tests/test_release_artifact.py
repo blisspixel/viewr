@@ -735,9 +735,10 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertIn("/releases/download/v0.7.8/install.sh", public_commands)
         self.assertNotIn("/releases/download/v0.7.6/", public_commands)
         self.assertNotIn("/releases/download/v0.7.7/", public_commands)
-        self.assertIn("/releases/download/v0.7.8/install.ps1", compiled_commands)
-        self.assertIn("/releases/download/v0.7.8/install.sh", compiled_commands)
-        self.assertNotIn("/releases/download/v0.7.7/", compiled_commands)
+        self.assertNotIn("/releases/download/v0.7.9/", public_commands)
+        self.assertIn("/releases/download/v0.7.9/install.ps1", compiled_commands)
+        self.assertIn("/releases/download/v0.7.9/install.sh", compiled_commands)
+        self.assertNotIn("/releases/download/v0.7.8/", compiled_commands)
 
     def test_update_job_installs_the_workspace_candidate_over_published_v074(
         self,
@@ -751,33 +752,34 @@ class ReleaseArtifactTests(unittest.TestCase):
         windows = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4.ps1").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(workflow.count("--expected-tag v0.7.8"), 3)
+        self.assertEqual(workflow.count("--expected-tag v0.7.9"), 3)
         self.assertNotIn("--expected-tag v0.7.4", workflow)
         self.assertNotIn("--expected-tag v0.7.5", workflow)
         self.assertNotIn("--expected-tag v0.7.6", workflow)
         self.assertNotIn("--expected-tag v0.7.7", workflow)
+        self.assertNotIn("--expected-tag v0.7.8", workflow)
         self.assertEqual(workflow.count("Update from published v0.7.4"), 3)
         self.assertIn("aarch64-apple-darwin", workflow)
         self.assertIn("bash scripts/ci-update-from-v0.7.4-macos.sh", workflow)
 
         self.assertEqual(linux.count("gh release download v0.7.4"), 1)
         self.assertEqual(linux.count("viewr-0.7.4-x86_64-unknown-linux-gnu.zip"), 3)
-        self.assertEqual(linux.count("viewr-0.7.8-x86_64-unknown-linux-gnu.zip"), 1)
+        self.assertEqual(linux.count("viewr-0.7.9-x86_64-unknown-linux-gnu.zip"), 1)
         self.assertEqual(linux.count("VIEWR_VERSION=0.7.4"), 1)
-        self.assertEqual(linux.count("VIEWR_VERSION=0.7.8"), 1)
+        self.assertEqual(linux.count("VIEWR_VERSION=0.7.9"), 1)
         self.assertLess(
             linux.index("VIEWR_VERSION=0.7.4"),
-            linux.index("VIEWR_VERSION=0.7.8"),
+            linux.index("VIEWR_VERSION=0.7.9"),
         )
         self.assertEqual(linux.count("releases/v0.7.4/viewr"), 1)
-        self.assertEqual(linux.count("releases/v0.7.8/viewr"), 3)
+        self.assertEqual(linux.count("releases/v0.7.9/viewr"), 3)
         self.assertLess(
             linux.index("releases/v0.7.4/viewr"),
-            linux.index("releases/v0.7.8/viewr"),
+            linux.index("releases/v0.7.9/viewr"),
         )
         self.assertEqual(linux.count('"viewr 0.7.4"'), 2)
-        self.assertIn('"viewr 0.7.8"', linux)
-        self.assertLess(linux.index('"viewr 0.7.4"'), linux.index('"viewr 0.7.8"'))
+        self.assertIn('"viewr 0.7.9"', linux)
+        self.assertLess(linux.index('"viewr 0.7.4"'), linux.index('"viewr 0.7.9"'))
         self.assertEqual(linux.count("--source-ref refs/tags/v0.7.4"), 2)
 
         macos = (PROJECT_ROOT / "scripts" / "ci-update-from-v0.7.4-macos.sh").read_text(
@@ -785,21 +787,21 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(macos.count("gh release download v0.7.4"), 1)
         self.assertEqual(macos.count("viewr-0.7.4-aarch64-apple-darwin.zip"), 3)
-        self.assertEqual(macos.count("viewr-0.7.8-aarch64-apple-darwin.zip"), 1)
+        self.assertEqual(macos.count("viewr-0.7.9-aarch64-apple-darwin.zip"), 1)
         self.assertNotIn("x86_64-apple-darwin", macos)
         self.assertNotIn("xdg-mime", macos)
         self.assertNotIn("image/png", macos)
         self.assertEqual(macos.count("VIEWR_VERSION=0.7.4"), 1)
-        self.assertEqual(macos.count("VIEWR_VERSION=0.7.8"), 1)
+        self.assertEqual(macos.count("VIEWR_VERSION=0.7.9"), 1)
         self.assertLess(
             macos.index("VIEWR_VERSION=0.7.4"),
-            macos.index("VIEWR_VERSION=0.7.8"),
+            macos.index("VIEWR_VERSION=0.7.9"),
         )
         self.assertEqual(macos.count("releases/v0.7.4/viewr"), 1)
-        self.assertEqual(macos.count("releases/v0.7.8/viewr"), 1)
+        self.assertEqual(macos.count("releases/v0.7.9/viewr"), 1)
         self.assertEqual(macos.count('"viewr 0.7.4"'), 2)
-        self.assertIn('"viewr 0.7.8"', macos)
-        self.assertLess(macos.index('"viewr 0.7.4"'), macos.index('"viewr 0.7.8"'))
+        self.assertIn('"viewr 0.7.9"', macos)
+        self.assertLess(macos.index('"viewr 0.7.4"'), macos.index('"viewr 0.7.9"'))
         self.assertEqual(macos.count("--source-ref refs/tags/v0.7.4"), 2)
         self.assertIn("Application Support/viewr", macos)
         self.assertIn("this update check runs on Apple Silicon", macos)
@@ -810,12 +812,12 @@ class ReleaseArtifactTests(unittest.TestCase):
             3,
         )
         self.assertEqual(
-            windows.count("viewr-0.7.8-x86_64-pc-windows-msvc.zip"),
+            windows.count("viewr-0.7.9-x86_64-pc-windows-msvc.zip"),
             1,
         )
         self.assertEqual(windows.count("-Version 0.7.4"), 1)
-        self.assertEqual(windows.count("-Version 0.7.8"), 1)
-        self.assertIn('"viewr 0.7.8"', windows)
+        self.assertEqual(windows.count("-Version 0.7.9"), 1)
+        self.assertIn('"viewr 0.7.9"', windows)
         self.assertNotIn('"viewr 0.7.4"', windows)
         self.assertEqual(windows.count("--source-ref refs/tags/v0.7.4"), 2)
 
@@ -837,11 +839,11 @@ class ReleaseArtifactTests(unittest.TestCase):
         )
         self.assertLess(
             windows.index("published v0.7.4 installer did not finish"),
-            windows.index("-Version 0.7.8"),
+            windows.index("-Version 0.7.9"),
         )
         self.assertEqual(
             windows.count(
-                '& "$PSScriptRoot\\..\\install.ps1" -Version 0.7.8 '
+                '& "$PSScriptRoot\\..\\install.ps1" -Version 0.7.9 '
                 "-InstallDir $installDir -NoPath -NoShortcut -LocalRelease $candidateDir"
             ),
             1,
@@ -934,32 +936,44 @@ class ReleaseArtifactTests(unittest.TestCase):
         previous = release_artifact._archive_documentation_paths("0.7.5")
         prior = release_artifact._archive_documentation_paths("0.7.6")
         released = release_artifact._archive_documentation_paths("0.7.7")
-        candidate = release_artifact._archive_documentation_paths("0.7.8")
+        shipped = release_artifact._archive_documentation_paths("0.7.8")
+        candidate = release_artifact._archive_documentation_paths("0.7.9")
         self.assertIn("docs/releases/v0.7.4.md", published)
         self.assertNotIn("docs/releases/v0.7.5.md", published)
         self.assertNotIn("docs/releases/v0.7.6.md", published)
         self.assertNotIn("docs/releases/v0.7.7.md", published)
         self.assertNotIn("docs/releases/v0.7.8.md", published)
+        self.assertNotIn("docs/releases/v0.7.9.md", published)
         self.assertIn("docs/releases/v0.7.5.md", previous)
         self.assertNotIn("docs/releases/v0.7.6.md", previous)
         self.assertNotIn("docs/releases/v0.7.7.md", previous)
         self.assertNotIn("docs/releases/v0.7.8.md", previous)
+        self.assertNotIn("docs/releases/v0.7.9.md", previous)
         self.assertIn("docs/releases/v0.7.5.md", prior)
         self.assertIn("docs/releases/v0.7.6.md", prior)
         self.assertNotIn("docs/releases/v0.7.7.md", prior)
         self.assertNotIn("docs/releases/v0.7.8.md", prior)
+        self.assertNotIn("docs/releases/v0.7.9.md", prior)
         self.assertIn("docs/releases/v0.7.5.md", released)
         self.assertIn("docs/releases/v0.7.6.md", released)
         self.assertIn("docs/releases/v0.7.7.md", released)
         self.assertNotIn("docs/releases/v0.7.8.md", released)
+        self.assertNotIn("docs/releases/v0.7.9.md", released)
+        self.assertIn("docs/releases/v0.7.5.md", shipped)
+        self.assertIn("docs/releases/v0.7.6.md", shipped)
+        self.assertIn("docs/releases/v0.7.7.md", shipped)
+        self.assertIn("docs/releases/v0.7.8.md", shipped)
+        self.assertNotIn("docs/releases/v0.7.9.md", shipped)
         self.assertIn("docs/releases/v0.7.5.md", candidate)
         self.assertIn("docs/releases/v0.7.6.md", candidate)
         self.assertIn("docs/releases/v0.7.7.md", candidate)
         self.assertIn("docs/releases/v0.7.8.md", candidate)
+        self.assertIn("docs/releases/v0.7.9.md", candidate)
         self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.5.md").is_file())
         self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.6.md").is_file())
         self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.7.md").is_file())
         self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.8.md").is_file())
+        self.assertTrue((PROJECT_ROOT / "docs" / "releases" / "v0.7.9.md").is_file())
 
     def test_supply_chain_audit_denies_unreviewed_warnings(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(

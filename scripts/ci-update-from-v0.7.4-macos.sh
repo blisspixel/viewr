@@ -25,7 +25,7 @@ case "$arch" in
 esac
 
 candidate_dir="$repo/target/release-artifacts"
-candidate_archive="$candidate_dir/viewr-0.7.8-aarch64-apple-darwin.zip"
+candidate_archive="$candidate_dir/viewr-0.7.9-aarch64-apple-darwin.zip"
 candidate_binary="$repo/target/release/viewr"
 [ -f "$candidate_archive" ] || {
   echo "missing candidate archive: $candidate_archive" >&2
@@ -98,11 +98,11 @@ published_version=$("$published_release" --version)
 [ "$published_version" = "viewr 0.7.4" ]
 [ "$(readlink "$VIEWR_BIN_DIR/viewr")" = "$published_release" ]
 
-VIEWR_VERSION=0.7.8 VIEWR_LOCAL_RELEASE="$candidate_dir" sh "$repo/install.sh"
+VIEWR_VERSION=0.7.9 VIEWR_LOCAL_RELEASE="$candidate_dir" sh "$repo/install.sh"
 
-installed_release="$VIEWR_INSTALL_ROOT/releases/v0.7.8/viewr"
+installed_release="$VIEWR_INSTALL_ROOT/releases/v0.7.9/viewr"
 installed_version=$("$installed_release" --version)
-[ "$installed_version" = "viewr 0.7.8" ]
+[ "$installed_version" = "viewr 0.7.9" ]
 [ "$(readlink "$VIEWR_BIN_DIR/viewr")" = "$installed_release" ]
 retained_version=$("$published_release" --version)
 [ "$retained_version" = "viewr 0.7.4" ]

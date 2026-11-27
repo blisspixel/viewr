@@ -261,6 +261,13 @@ class DocumentationTests(unittest.TestCase):
                 "notarized",
                 "Representative-hardware",
             ),
+            "docs/releases/v0.7.9.md": (
+                "patch over",
+                "GitHub build-provenance attestations",
+                "not Authenticode-signed",
+                "notarized",
+                "Representative-hardware",
+            ),
             "CHANGELOG.md": (
                 "## 0.7.8 - 2026-11-16",
                 "## 0.7.7 - 2026-11-01",
@@ -328,7 +335,8 @@ class DocumentationTests(unittest.TestCase):
             "Behavior on main since that tag is [Unreleased](../CHANGELOG.md)",
             roadmap,
         )
-        self.assertIn("Ordinary commits since that tag keep this", publishing)
+        self.assertIn("`0.7.9`, preparing the viewing", publishing)
+        self.assertIn("README and INSTALL stay on the published v0.7.8", publishing)
         self.assertIn("does not decode the sensor", sandbox)
         self.assertIn("Unreleased is the", index)
         self.assertIn("or a published preview", index)

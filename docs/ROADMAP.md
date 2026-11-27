@@ -18,11 +18,11 @@ Two rules hold across every phase:
 
 | Item | State |
 | --- | --- |
-| Published install target | Immutable [v0.7.8](https://github.com/blisspixel/viewr/releases/tag/v0.7.8), the missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.9`, verified candidate and tag-ready viewing, collage, rating, embedded-preview, Linux-archive, and JPEG XL channel patch |
+| Published install target | Immutable [v0.7.9](https://github.com/blisspixel/viewr/releases/tag/v0.7.9), the viewing, collage, rating, embedded-preview, Linux-archive, and JPEG XL channel patch with its uncollected acceptance rows disclosed |
+| Workspace version | `0.7.9`, the published viewing, collage, rating, embedded-preview, Linux-archive, and JPEG XL channel patch |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
 | Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.7.9** after green exact-commit tag-ready CI and fuzz; its complete candidate gate passed; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
+| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -32,7 +32,7 @@ sensor data is explicitly deferred from 1.0. A DNG or Sony ARW embedded
 baseline JPEG is a labelled preview.
 Phase 8 has local install paths, accessibility automation, native AccessKit,
 performance budgets, hosted multi-OS CI, and the current checksummed and attested
-but publisher-unsigned v0.7.8 archives. The v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
+but publisher-unsigned v0.7.9 archives. The v0.7.8, v0.7.7, v0.7.6, v0.7.5, v0.7.4, v0.7.3, v0.7.2, v0.7.1, v0.7.0, v0.6.5, v0.6.4, v0.6.3, v0.6.2, v0.6.1, v0.6.0, v0.5.0, v0.4.0, v0.3.0,
 v0.2.0, and v0.1.x archives remain published history. Human assistive-technology evidence,
 platform signing and notarization, representative-hardware acceptance, and
 display fidelity remain open.
@@ -135,7 +135,7 @@ v0.7.7  Damaged-file and Save Path patch  [released, acceptance rows open]
 v0.7.8  Format and command patch          [released, acceptance rows open]
    |
    v
-v0.7.9  Viewing and Linux-archive patch   [tag-ready]
+v0.7.9  Viewing and Linux-archive patch   [released, acceptance rows open]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -254,19 +254,19 @@ or accessibility evidence gates.
 | Installer script scope | Shipped v0.7.8 | The install command downloads one immutable installer script. The script installs the newest stable release unless a version is set. |
 | Stable folder order | Shipped v0.7.8 | Digit runs of equal value keep the shorter run first, so `img2` stays before `img02` and `img10`. Names that differ only by case stay adjacent in byte order. A folder refresh does not follow directory read order. |
 | AppleDouble sidecars | Shipped v0.7.8 | Folder scans and `viewr benchmark` skip files whose names start with `._`. Opening that path explicitly still attempts to decode it. |
-| Windowed Fit | Implemented, unreleased | Windowed Fit fills the frame. View > Cap Fit at actual size restores the previous cap for this session and is not saved. Actual Size stays one source pixel per display pixel. Fullscreen Fit still fills. |
-| Collage density | Implemented, unreleased | Up steps from 4 to 9 to 12 photos around the selection. Down steps back one level and then opens the focused photo. Page Up and Page Down move by the current level. |
-| Advance after rating | Implemented, unreleased | View > Advance after rating is off at launch and lasts for the session. An accepted rating opens the next photo in the active filter and does not wrap. A failed write and the first-rating disclosure stay put. The choice is not saved. |
-| Unrated filter | Implemented, unreleased | Rating Filter > Unrated keeps rejected, conflicting, unsupported, unreadable, and still-loading photos out. The menu shows how many numeric ratings are already known. The choice is not saved. |
-| Embedded RAW preview | Implemented, unreleased | A DNG or Sony ARW file shows its largest decodable embedded baseline JPEG and labels that size as a preview. The sensor image is not decoded. Opening that preview does not say that container pages are unavailable. |
-| First showable photo | Implemented, unreleased | Opening a folder starts on the first photo viewr can show. A camera RAW file stays in the folder. |
-| JPEG rating time | Implemented, unreleased | Rating a JPEG puts that file's previous modification time back. Latest First keeps the photo in place. |
-| Shortcut list | Implemented, unreleased | Help > Keyboard Shortcuts, `?`, and F1 open the same shortcut list as About. |
-| Rating notice lifetime | Implemented, unreleased | A saved or cleared rating message leaves the top bar when the visible photo changes. |
-| Windows Trash undo | Implemented, unreleased | Undo Trash on Windows restores a photo after Delete, including when the listing hides the file extension. A JPEG rating stays in the file. |
-| Arrow glyphs | Implemented, unreleased | Interface arrows stay drawable when the selected sans has no arrow glyphs. The bundled Hack face supplies those symbols. |
-| Linux archive floor | Implemented, unreleased | The Linux release job links the archive on Ubuntu 24.04 and refuses a recorded GLIBC floor above 2.39. The published v0.7.8 archive still needs glibc 2.43. |
-| JPEG XL LF channel lengths | Implemented, unreleased | Adaptive low-frequency smoothing rejects channel buffers that do not share one grid instead of asserting. A release build no longer aborts on that malformed stream. |
+| Windowed Fit | Shipped v0.7.9 | Windowed Fit fills the frame. View > Cap Fit at actual size restores the previous cap for this session and is not saved. Actual Size stays one source pixel per display pixel. Fullscreen Fit still fills. |
+| Collage density | Shipped v0.7.9 | Up steps from 4 to 9 to 12 photos around the selection. Down steps back one level and then opens the focused photo. Page Up and Page Down move by the current level. |
+| Advance after rating | Shipped v0.7.9 | View > Advance after rating is off at launch and lasts for the session. An accepted rating opens the next photo in the active filter and does not wrap. A failed write and the first-rating disclosure stay put. The choice is not saved. |
+| Unrated filter | Shipped v0.7.9 | Rating Filter > Unrated keeps rejected, conflicting, unsupported, unreadable, and still-loading photos out. The menu shows how many numeric ratings are already known. The choice is not saved. |
+| Embedded RAW preview | Shipped v0.7.9 | A DNG or Sony ARW file shows its largest decodable embedded baseline JPEG and labels that size as a preview. The sensor image is not decoded. Opening that preview does not say that container pages are unavailable. |
+| First showable photo | Shipped v0.7.9 | Opening a folder starts on the first photo viewr can show. A camera RAW file stays in the folder. |
+| JPEG rating time | Shipped v0.7.9 | Rating a JPEG puts that file's previous modification time back. Latest First keeps the photo in place. |
+| Shortcut list | Shipped v0.7.9 | Help > Keyboard Shortcuts, `?`, and F1 open the same shortcut list as About. |
+| Rating notice lifetime | Shipped v0.7.9 | A saved or cleared rating message leaves the top bar when the visible photo changes. |
+| Windows Trash undo | Shipped v0.7.9 | Undo Trash on Windows restores a photo after Delete, including when the listing hides the file extension. A JPEG rating stays in the file. |
+| Arrow glyphs | Shipped v0.7.9 | Interface arrows stay drawable when the selected sans has no arrow glyphs. The bundled Hack face supplies those symbols. |
+| Linux archive floor | Shipped v0.7.9 | The v0.7.9 Linux archive was linked on Ubuntu 24.04. Its measured GLIBC floor is 2.39. The published v0.7.8 archive still needs glibc 2.43. |
+| JPEG XL LF channel lengths | Shipped v0.7.9 | Adaptive low-frequency smoothing rejects channel buffers that do not share one grid instead of asserting. A release build no longer aborts on that malformed stream. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
@@ -282,21 +282,21 @@ in v0.7.8. Windowed Fit, collage density, advance after rating, the Unrated
 filter, labelled DNG and Sony ARW previews, first-showable folder entry,
 JPEG rating times, the shortcut list, rating-notice lifetime, Windows Trash
 undo, arrow glyphs, the Linux archive floor, and rejection of unequal
-JPEG XL low-frequency channels are implemented and unreleased. The
+JPEG XL low-frequency channels shipped in v0.7.9. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points
 
 | State | Version shown by builds | Durable identity | What changes next |
 | --- | --- | --- | --- |
-| Public release | `0.7.8` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
+| Public release | `0.7.9` | Immutable tag and release assets | Never rewritten; a shipped correction uses a new patch tag |
 | Focused patch released | `0.7.3` | Candidate commit `4ecac81ba39a01ea905a2c2d30f21363df009cfe`, [candidate run 37109729410](https://github.com/blisspixel/viewr/actions/runs/37109729410), and tag commit `10002a0f8e13de160b41bf95978ab96df2e404a9` | [Release run 37112869774](https://github.com/blisspixel/viewr/actions/runs/37112869774) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; v0.8 remains open |
 | Linux entry patch released | `0.7.4` | Candidate commit `884f2d60f241455ca2c7d28d68bee0928b122a8a`, [candidate run 37149506754](https://github.com/blisspixel/viewr/actions/runs/37149506754), and tag commit `e9c12c336da0a8a6cb4284ae94c2739ddcf7cafc` | [Release run 37152808216](https://github.com/blisspixel/viewr/actions/runs/37152808216) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Copy and recovery patch released | `0.7.5` | Candidate commit `933e6aa44d961e961b53292306f54c54518d3530`, [candidate run 39552315440](https://github.com/blisspixel/viewr/actions/runs/39552315440), and tag commit `653b0a7f5606b1cafb02cf37ad93f1939a946688` | [Release run 39557759631](https://github.com/blisspixel/viewr/actions/runs/39557759631) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; installed Windows binaries match. v0.8 remains open |
 | Transparency patch released | `0.7.6` | Candidate commit `8a12def388f2a43399fa5bff9ede571ae907729f`, [candidate run 40076650027](https://github.com/blisspixel/viewr/actions/runs/40076650027), and tag commit `349440a1ffab1a6ff0c98d8206277b7798e0fa5c` | [Release run 40080077413](https://github.com/blisspixel/viewr/actions/runs/40080077413) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
 | Damaged-file patch released | `0.7.7` | Candidate commit `809bc555515488de62eb970a77f941873090f316`, [candidate run 41383540069](https://github.com/blisspixel/viewr/actions/runs/41383540069), and tag commit `b2aca9940b1c61a8399f254d85c848491f01c1ce` | [Release run 41389245578](https://github.com/blisspixel/viewr/actions/runs/41389245578) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
 | Format and command patch released | `0.7.8` | Candidate commit `3098ede5c398569c4ae6fe2dc3d086f0549e8d62`, [candidate run 43903900271](https://github.com/blisspixel/viewr/actions/runs/43903900271), and tag commit `d4e3f089f9e80d3a6fab9f15bdee6a196dcc304a` | [Release run 43917419083](https://github.com/blisspixel/viewr/actions/runs/43917419083) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Linux doctor passed. v0.8 remains open |
-| Viewing and Linux-archive patch | `0.7.9` | Candidate commit `c85a59458812648a3dc3a08fb4370e619f557454` and [candidate run 45931780878](https://github.com/blisspixel/viewr/actions/runs/45931780878) | Complete automated gate, all four archives, fixture, and Linux glibc floor 2.39 verified; public target remains v0.7.8 until publication. Hardware, screen-reader, original-M1, and file-association rows stay open. This is not v0.8.0 |
+| Viewing and Linux-archive patch released | `0.7.9` | Candidate commit `c85a59458812648a3dc3a08fb4370e619f557454`, [candidate run 45931780878](https://github.com/blisspixel/viewr/actions/runs/45931780878), and tag commit `a0bb2f1bb1217566a3765c62468aa5a9be749a98` | [Release run 45937983450](https://github.com/blisspixel/viewr/actions/runs/45937983450) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Linux doctor passed and the measured GLIBC floor is 2.39. Hardware, screen-reader, original-M1, and file-association rows stay open. This is not v0.8.0 |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 
@@ -332,7 +332,7 @@ but completed history does not override an open gate here.
 | Display correctness | Complete for tagged SDR | Released as [v0.3.0](https://github.com/blisspixel/viewr/releases/tag/v0.3.0) from [CI run 32281431906](https://github.com/blisspixel/viewr/actions/runs/32281431906), [fuzz run 32281431889](https://github.com/blisspixel/viewr/actions/runs/32281431889), and [release run 32282658062](https://github.com/blisspixel/viewr/actions/runs/32282658062) on commit `4cbcca1`. Tagged SDR output matches published reference conversions; unmanaged Windows-legacy and real X11 apply the admitted display ICC and refresh it when the window changes monitor; worker-decoded images keep an explicit color status; managed compositors stay tagged sRGB; wide-gamut and HDR remain off. |
 | File coherence | Complete for v0.4 | Released as [v0.4.0](https://github.com/blisspixel/viewr/releases/tag/v0.4.0) from [CI run 32310138360](https://github.com/blisspixel/viewr/actions/runs/32310138360), [fuzz run 32310138375](https://github.com/blisspixel/viewr/actions/runs/32310138375), and [release run 32310142370](https://github.com/blisspixel/viewr/actions/runs/32310142370) on commit `645edcd`. External replacement reloads when edits are safe, reminds with F5 when they are not, keeps a durable last-good-frame status when the path is gone, follows a rename by object identity, and rescans folder membership; Open With uses native user-mediated choosers on Windows, macOS, and Linux. |
 | Format contract | Complete for v0.5 | Released as [v0.5.0](https://github.com/blisspixel/viewr/releases/tag/v0.5.0) from [CI run 32333137825](https://github.com/blisspixel/viewr/actions/runs/32333137825), [fuzz run 32333137800](https://github.com/blisspixel/viewr/actions/runs/32333137800), and [release run 32333672485](https://github.com/blisspixel/viewr/actions/runs/32333672485) on commit `1a1eec1`. Multi-page TIFF and ICO expose bounded identifiable navigation without auto-play. The format table distinguishes decode, animation, page, metadata, and color. Camera RAW is explicitly deferred from 1.0. |
-| Integrated product quality | Shipped through v0.7.8; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
+| Integrated product quality | Shipped through v0.7.9; hardware matrix open | The representative-hardware acceptance evidence was not collected for the published tags. The matrix and candidate-artifact contract remain in [PRODUCT-QUALITY.md](PRODUCT-QUALITY.md). Three platform records, eight performance reports, and an accepted validator result are still needed to claim that evidence. This claim does not gate preview development. |
 | Human accessibility evidence | Automated coverage shipped; manual acceptance open | Automated semantics, contrast, and Windows UI Automation checks cover the preview. Narrator, VoiceOver, and Orca records need a new exact candidate before claiming native assistive-technology acceptance. Their absence does not gate preview publication. |
 | Release readiness | Open for v0.8 | Provenance verification runs before publication, and CI installs published v0.7.4 and updates it to the workspace candidate on Linux, Windows, and the portable Apple Silicon command. The Linux job checks launcher identity. The macOS job checks the portable command, preserved preferences, and the retained v0.7.4 tree. It does not accept a file association or an application bundle, and a macos-latest run is not an original-M1 receipt. Uninstall of an installer-owned tree is covered by the Unix installer tests and the Windows smoke check. Application-bundle install and full file-association acceptance remain open. Keep uncollected manual acceptance rows visible as separate claims. |
 | Native platform trust | Deferred to v0.9 | Authenticode, Developer ID + notarization, normal Linux package proof. |
@@ -377,7 +377,7 @@ hard links stay read-only.
 Why later: accessible implementation remains a baseline throughout development,
 but artifact-bound human evidence and publisher authentication should be gathered
 against a stable product candidate. The current unsigned attested preview is
-v0.7.8; v0.1.0 remains the first immutable preview. Reliability, fidelity,
+v0.7.9; v0.1.0 remains the first immutable preview. Reliability, fidelity,
 coherence, and formats are complete. Integrated product quality is released as
 code but still owes its representative-hardware evidence.
 
@@ -709,7 +709,7 @@ broad feature category. They prove and refine the accumulated viewer.
   identifiers and `scripts/product_quality_evidence.py` reject incomplete,
   placeholder, mixed-provenance, or failing gate records. The hardware rows and
   eight performance reports remain unrecorded and must use one fresh exact-head
-  candidate set from the current release line. v0.6.0 through v0.7.8 were
+  candidate set from the current release line. v0.6.0 through v0.7.9 were
   tagged and published before this box could be checked, so the
   shipped archives carry no representative-hardware evidence and the release
   notes say so.

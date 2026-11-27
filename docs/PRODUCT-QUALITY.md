@@ -1,16 +1,16 @@
 # Product quality
 
-**Status:** open, and still open after the v0.7.8 tag. This matrix is the
+**Status:** open, and still open after the v0.7.9 tag. This matrix is the
 executable contract for first-time, power-user, admin, failure-recovery, and
 visual-polish paths. It does not close v0.6.
 Representative Windows, macOS, and Linux hardware still have to pass the same rows
 using the checksummed archives and synthetic fixture artifact from one retained
 candidate workflow run.
 
-v0.6.0 through v0.7.8 were published before any of those rows were recorded. The
+v0.6.0 through v0.7.9 were published before any of those rows were recorded. The
 released archives therefore carry no representative-hardware evidence, the
 release notes state that limit, and this matrix is carried forward as open work
-that remains unverified after the v0.7.8 preview unless its candidate-bound
+that remains unverified after the v0.7.9 preview unless its candidate-bound
 records are completed. The missing rows are disclosed in release notes and do
 not halt the explicitly limited preview.
 
@@ -23,7 +23,12 @@ PNG icon decoding, localized Image Information values, aligned CLI help, and
 a typed Save Path shipped in v0.7.7. Named missing-format opens, damaged
 WebP, TIFF, and ICO reports, JPEG end-marker rejection, version-command help,
 benchmark path errors, stable folder order, AppleDouble skipping, and the
-installer-script explanation shipped in v0.7.8.
+installer-script explanation shipped in v0.7.8. Windowed Fit, collage
+density, advance after rating, the Unrated filter, labelled DNG and Sony ARW
+previews, first-showable folder entry, JPEG rating times, the shortcut list,
+rating-notice lifetime, Windows Trash undo, arrow glyphs, the Linux archive
+floor, and rejection of unequal JPEG XL low-frequency channels shipped in
+v0.7.9.
 
 ## Source of truth
 
@@ -370,5 +375,5 @@ bytes change, the record no longer closes the gate.
 Do not claim representative-hardware acceptance while any required platform row
 is unrecorded. A known critical or high-severity product-quality defect still
 blocks publication. v0.6.0 through v0.6.5 were tagged without these records,
-and the v0.7.8 preview discloses the same gap. Automated gates do not substitute
+and the v0.7.9 preview discloses the same gap. Automated gates do not substitute
 for the hardware records.

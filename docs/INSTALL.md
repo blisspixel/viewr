@@ -153,8 +153,8 @@ cd viewr
 cargo build --release --workspace --locked
 ```
 
-This tag-ready tree is the verified v0.7.9 candidate plus release-status text.
-Behavior added after the tag is Unreleased and is not in the v0.7.9 archives.
+The v0.7.9 tag is the published preview. Behavior added after that tag is
+Unreleased and is not in the v0.7.9 archives.
 
 The binaries are written to `target/release`. Keep the main executable and worker
 from the same build together. On Linux, the build also needs the normal Wayland/X11

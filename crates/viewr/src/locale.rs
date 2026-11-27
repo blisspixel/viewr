@@ -3655,6 +3655,30 @@ const MESSAGES: &[Message] = &[
         german: "Originalgröße",
     },
     Message {
+        english: "Cap Fit at actual size",
+        spanish: "Limitar el ajuste al tamaño real",
+        french: "Limiter l’ajustement à la taille réelle",
+        german: "Anpassung auf Originalgröße begrenzen",
+    },
+    Message {
+        english: "On for this session only. Fit then leaves a small photo at actual size instead of filling the window. This choice is not saved.",
+        spanish: "Solo durante esta sesión. El ajuste deja entonces una foto pequeña en su tamaño real en lugar de llenar la ventana. Esta opción no se guarda.",
+        french: "Uniquement pour cette session. L’ajustement laisse alors une petite photo à sa taille réelle au lieu de remplir la fenêtre. Ce choix n’est pas enregistré.",
+        german: "Nur für diese Sitzung. Die Anpassung lässt ein kleines Foto dann in Originalgröße, statt das Fenster zu füllen. Diese Auswahl wird nicht gespeichert.",
+    },
+    Message {
+        english: "Fit leaves a small photo at actual size (session only)",
+        spanish: "El ajuste deja una foto pequeña en su tamaño real (solo en esta sesión)",
+        french: "L’ajustement laisse une petite photo à sa taille réelle (cette session seulement)",
+        german: "Die Anpassung lässt ein kleines Foto in Originalgröße (nur diese Sitzung)",
+    },
+    Message {
+        english: "Fit fills the window (default)",
+        spanish: "El ajuste llena la ventana (predeterminado)",
+        french: "L’ajustement remplit la fenêtre (par défaut)",
+        german: "Die Anpassung füllt das Fenster (Standard)",
+    },
+    Message {
         english: "Zoom In",
         spanish: "Acercar",
         french: "Zoom avant",

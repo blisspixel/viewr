@@ -95,6 +95,27 @@ fn empty_jxl_blend_region_regression_decodes_without_panicking() {
 }
 
 #[test]
+fn mismatched_jxl_lf_channel_lengths_are_rejected_without_panicking() {
+    let bytes = std::fs::read(decoder_seed_directory().join("regression-jxl-lf-channel-lengths"))
+        .expect("read JXL regression seed");
+    let (&selector, payload) = bytes.split_first().expect("seed has selector");
+    let extension = CORE_EXTENSIONS[usize::from(selector) % CORE_EXTENSIONS.len()];
+    assert_eq!(extension, "jxl");
+
+    // Adaptive LF smoothing indexes three channel buffers as one grid.
+    // Upstream asserts when their lengths differ, and a release build aborts.
+    for result in [
+        DecodedImage::load_from_memory_with_extension(payload, extension),
+        DecodedImage::load_from_memory(payload),
+    ] {
+        assert!(
+            result.is_err(),
+            "malformed JXL input with unequal LF channels was accepted"
+        );
+    }
+}
+
+#[test]
 fn unused_jxl_lf_level_regression_is_rejected_without_panicking() {
     let bytes = std::fs::read(decoder_seed_directory().join("regression-jxl-unused-lf-level"))
         .expect("read JXL regression seed");

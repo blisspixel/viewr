@@ -29,10 +29,16 @@ The local deviations are deliberately narrow:
   borrowed a subgrid of the zero-width source grid, which asserts inside
   `jxl-grid`. Because the release profile aborts on panic, that turned one
   hostile JPEG XL file into a terminated viewer.
+- `src/vardct/generic/mod.rs` rejects adaptive low-frequency smoothing when the
+  three channel buffers do not share one grid, including when `width * height`
+  overflows. Upstream 0.12.4 asserts on that mismatch. A chroma-subsampled or
+  malformed stream can reach this routine with different channel lengths, and
+  a release build would abort the process.
 
 The hosted fuzz inputs that exposed these issues are retained as
-`fuzz/corpus/decode_memory/regression-jxl-unused-lf-level` and
-`fuzz/corpus/decode_memory/regression-jxl-empty-blend-region`, and both are
+`fuzz/corpus/decode_memory/regression-jxl-unused-lf-level`,
+`fuzz/corpus/decode_memory/regression-jxl-empty-blend-region`, and
+`fuzz/corpus/decode_memory/regression-jxl-lf-channel-lengths`, and all are
 replayed by normal integration tests as well as future fuzz runs.
 
 When updating `jxl-oxide`, replace this directory from the matching published

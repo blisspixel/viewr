@@ -24,9 +24,16 @@ pub fn adaptive_lf_smoothing_impl(
         return Ok(());
     }
 
-    assert_eq!(in_x.len(), in_y.len());
-    assert_eq!(in_y.len(), in_b.len());
-    assert_eq!(in_x.len(), width * height);
+    // A malformed or chroma-subsampled stream can hand this routine three
+    // channel buffers that do not share one grid. The kernel indexes them
+    // together. Upstream 0.12.4 asserts, and a release build aborts the
+    // process. Reject the frame instead.
+    let expected = width.checked_mul(height);
+    if expected != Some(in_x.len()) || in_y.len() != in_x.len() || in_b.len() != in_x.len() {
+        return Err(crate::Error::NotSupported(
+            "adaptive LF smoothing channels do not share one grid",
+        ));
+    }
 
     let mut udsum_x = AlignedGrid::with_alloc_tracker(width, height - 2, tracker)?;
     let mut udsum_y = AlignedGrid::with_alloc_tracker(width, height - 2, tracker)?;
@@ -97,4 +104,23 @@ pub fn adaptive_lf_smoothing_impl(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::adaptive_lf_smoothing_impl;
+
+    #[test]
+    fn mismatched_channel_lengths_are_rejected() {
+        let mut x = vec![0.0; 64];
+        let mut y = vec![0.0; 16];
+        let mut b = vec![0.0; 16];
+        let error =
+            adaptive_lf_smoothing_impl(8, 8, [&mut x, &mut y, &mut b], [1.0, 1.0, 1.0], None)
+                .expect_err("mismatched LF channels must not panic");
+        assert!(
+            error.to_string().contains("do not share one grid"),
+            "{error}"
+        );
+    }
 }

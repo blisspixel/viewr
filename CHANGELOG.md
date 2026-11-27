@@ -10,6 +10,11 @@ and organized by user-visible concern.
   Unrated, and it does not wrap at the last photo. A failed write and the
   first-rating disclosure stay on the current photo. The filter also shows how
   many numeric ratings are already known.
+- Full-image collage density steps with Up and Down. The first Up shows up
+  to 4 photos around the selection, the next up to 9, then up to 12. Down
+  steps back one level and then opens the focused photo. Page Up and Page
+  Down move by the current level. Tiles stay aspect-justified, and the
+  group still stays inside the existing memory budget.
 - Windowed Fit fills the frame. A small photo enlarges until one axis reaches
   the available viewport, keeping its aspect ratio and the letterbox. View >
   Cap Fit at actual size restores the previous cap for this session and is

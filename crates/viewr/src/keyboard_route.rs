@@ -202,9 +202,9 @@ pub(crate) fn route_consumed_keyboard_key_in_context(key: &Key, context: EscapeC
             | NamedKey::PageDown
             | NamedKey::F1
             | NamedKey::F5
-            | NamedKey::F11,
+            | NamedKey::F11
+            | NamedKey::ArrowUp,
         ) => true,
-        Key::Named(NamedKey::ArrowUp) => context.is_cropping || !context.is_mosaic,
         Key::Named(NamedKey::ArrowDown) => context.is_cropping || context.is_mosaic,
         Key::Named(NamedKey::Escape) => escape_action(context) != EscapeAction::None,
         key if is_trash_shortcut_key(key) => context.is_mosaic,
@@ -553,7 +553,7 @@ mod tests {
             &Key::Named(NamedKey::ArrowDown),
             collage,
         ));
-        assert!(!route_consumed_keyboard_key_in_context(
+        assert!(route_consumed_keyboard_key_in_context(
             &Key::Named(NamedKey::ArrowUp),
             collage,
         ));

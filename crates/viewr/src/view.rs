@@ -157,18 +157,41 @@ pub fn uv_transform(rotation_steps: i32, flip_h: bool, flip_v: bool) -> [f32; 4]
     matrix
 }
 
-/// The largest scale fit will apply, in physical display pixels per source pixel.
-///
-/// Windowed Fit leaves a small image at actual size. Fullscreen Fit can enlarge
-/// it to the available viewport; Actual Size still means one physical display
-/// pixel per source pixel in either mode.
+/// One display pixel per source pixel. [`FitLimit::ActualSize`] uses this ceiling.
 const MAX_FIT_SCALE: f32 = 1.0;
+
+/// How far Fit may scale one source pixel against one display pixel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FitLimit {
+    /// Shrink or enlarge until one axis fills the available viewport.
+    Fill,
+    /// Shrink to fit, and never enlarge past actual size.
+    ActualSize,
+}
+
+impl FitLimit {
+    /// Fullscreen always fills. A window fills unless this session caps Fit.
+    #[must_use]
+    pub(crate) const fn for_view(fullscreen: bool, cap_at_actual_size: bool) -> Self {
+        if fullscreen || !cap_at_actual_size {
+            Self::Fill
+        } else {
+            Self::ActualSize
+        }
+    }
+
+    const fn max_scale(self) -> f32 {
+        match self {
+            Self::Fill => f32::MAX,
+            Self::ActualSize => MAX_FIT_SCALE,
+        }
+    }
+}
 
 /// Scale the image to fit entirely within the viewport, preserving aspect ratio
 /// and centering it. The longer-relative axis touches the edges; the other is
-/// letterboxed, and a source smaller than the viewport rests at actual size
-/// rather than being enlarged. A zero viewport or image dimension yields a
-/// hidden placement rather than a division by zero.
+/// letterboxed. A small source enlarges to that edge. A zero viewport or image
+/// dimension yields a hidden placement rather than a division by zero.
 #[must_use]
 pub fn fit_to_window(viewport: (u32, u32), image: (u32, u32), rotated90: bool) -> Placement {
     fit_to_viewport(viewport, image, rotated90, ViewportInsets::default())
@@ -186,20 +209,19 @@ pub fn fit_to_viewport(
     rotated90: bool,
     insets: ViewportInsets,
 ) -> Placement {
-    fit_to_viewport_for_mode(viewport, image, rotated90, insets, false)
+    fit_to_viewport_for_mode(viewport, image, rotated90, insets, FitLimit::Fill)
 }
 
-/// Fullscreen fills its available viewport, including when the source is small.
+/// Fit with an explicit fill or actual-size cap.
 #[must_use]
 pub(crate) fn fit_to_viewport_for_mode(
     viewport: (u32, u32),
     image: (u32, u32),
     rotated90: bool,
     insets: ViewportInsets,
-    fullscreen: bool,
+    limit: FitLimit,
 ) -> Placement {
-    let limit = if fullscreen { f32::MAX } else { MAX_FIT_SCALE };
-    fit_to_viewport_with_limit(viewport, image, rotated90, insets, limit)
+    fit_to_viewport_with_limit(viewport, image, rotated90, insets, limit.max_scale())
 }
 
 fn fit_to_viewport_with_limit(
@@ -292,23 +314,23 @@ pub fn fit_pixel_scale(
     rotated90: bool,
     insets: ViewportInsets,
 ) -> f32 {
-    fit_pixel_scale_for_mode(viewport, image, rotated90, insets, false)
+    fit_pixel_scale_for_mode(viewport, image, rotated90, insets, FitLimit::Fill)
 }
 
-/// Physical pixel scale at Fit, including fullscreen enlargement.
+/// Physical pixel scale at Fit for an explicit fill or actual-size cap.
 #[must_use]
 pub(crate) fn fit_pixel_scale_for_mode(
     viewport: (u32, u32),
     image: (u32, u32),
     rotated90: bool,
     insets: ViewportInsets,
-    fullscreen: bool,
+    limit: FitLimit,
 ) -> f32 {
     let source_width = if rotated90 { image.1 } else { image.0 } as f32;
     if source_width <= 0.0 || viewport.0 == 0 {
         return 0.0;
     }
-    let placement = fit_to_viewport_for_mode(viewport, image, rotated90, insets, fullscreen);
+    let placement = fit_to_viewport_for_mode(viewport, image, rotated90, insets, limit);
     placement.scale[0] * viewport.0 as f32 / source_width
 }
 
@@ -393,9 +415,10 @@ pub fn cursor_to_ndc(cursor_px: (f64, f64), viewport: (u32, u32)) -> Option<[f32
 #[cfg(test)]
 mod tests {
     use super::{
-        PhysicalViewport, ViewportInsets, cursor_to_ndc, fit_pixel_scale, fit_to_physical_viewport,
-        fit_to_viewport, fit_to_window, pan_after_zoom_at_cursor, physical_rect_to_logical,
-        reachable_pan_offset, safe_viewport_rect, uv_transform,
+        FitLimit, PhysicalViewport, ViewportInsets, cursor_to_ndc, fit_pixel_scale,
+        fit_to_physical_viewport, fit_to_viewport, fit_to_viewport_for_mode, fit_to_window,
+        pan_after_zoom_at_cursor, physical_rect_to_logical, reachable_pan_offset,
+        safe_viewport_rect, uv_transform,
     };
 
     fn is_zero(v: [f32; 2]) -> bool {
@@ -431,13 +454,32 @@ mod tests {
     }
 
     #[test]
-    fn a_small_image_is_not_enlarged_to_fill_the_window() {
-        // This asserted the opposite until fit stopped enlarging: a 100 by 100
-        // source in a 1000 by 1000 viewport filled it at 1000 percent. It now
-        // rests at actual size, occupying a tenth of each axis.
-        let p = fit_to_window((1000, 1000), (100, 100), false);
-        assert!((p.scale[0] - 0.1).abs() < 1e-6);
-        assert!((p.scale[1] - 0.1).abs() < 1e-6);
+    fn a_small_image_fills_the_window_unless_fit_is_capped() {
+        // A 100 by 100 source in a 1000 by 1000 viewport fills both axes.
+        let filled = fit_to_window((1000, 1000), (100, 100), false);
+        assert!((filled.scale[0] - 1.0).abs() < 1e-6);
+        assert!((filled.scale[1] - 1.0).abs() < 1e-6);
+
+        // The session cap restores the historical actual-size rest.
+        let capped = fit_to_viewport_for_mode(
+            (1000, 1000),
+            (100, 100),
+            false,
+            ViewportInsets::default(),
+            FitLimit::ActualSize,
+        );
+        assert!((capped.scale[0] - 0.1).abs() < 1e-6);
+        assert!((capped.scale[1] - 0.1).abs() < 1e-6);
+        assert!(capped.offset[0].abs() < 1e-6);
+        assert!(capped.offset[1].abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_limit_fills_unless_a_window_asks_for_the_cap() {
+        assert_eq!(FitLimit::for_view(false, false), FitLimit::Fill);
+        assert_eq!(FitLimit::for_view(true, false), FitLimit::Fill);
+        assert_eq!(FitLimit::for_view(true, true), FitLimit::Fill);
+        assert_eq!(FitLimit::for_view(false, true), FitLimit::ActualSize);
     }
 
     #[test]
@@ -525,17 +567,27 @@ mod tests {
     }
 
     #[test]
-    fn a_source_smaller_than_the_viewport_rests_at_actual_size() {
-        // A 64 by 64 fixture in a 1000 by 560 viewport would otherwise be
-        // enlarged to 812 percent and read as a soft wall rather than a small
-        // image. It now occupies exactly its own pixels, centered.
+    fn a_small_source_fills_the_viewport_unless_fit_is_capped() {
+        // A 64 by 64 source in a 1000 by 560 viewport fills the shorter axis
+        // and stays centered. The session cap keeps it at its own pixels.
         let small = fit_to_viewport((1000, 560), (64, 64), false, ViewportInsets::default());
-        assert!((small.scale[0] - 64.0 / 1000.0).abs() < 1e-6);
-        assert!((small.scale[1] - 64.0 / 560.0).abs() < 1e-6);
+        assert!((small.scale[0] - 560.0 / 1000.0).abs() < 1e-6);
+        assert!((small.scale[1] - 1.0).abs() < 1e-6);
         assert!(small.offset[0].abs() < 1e-6);
         assert!(small.offset[1].abs() < 1e-6);
         assert!(
-            (fit_pixel_scale((1000, 560), (64, 64), false, ViewportInsets::default()) - 1.0).abs()
+            (fit_pixel_scale((1000, 560), (64, 64), false, ViewportInsets::default()) - 8.75).abs()
+                < 1e-6
+        );
+        assert!(
+            (super::fit_pixel_scale_for_mode(
+                (1000, 560),
+                (64, 64),
+                false,
+                ViewportInsets::default(),
+                FitLimit::ActualSize,
+            ) - 1.0)
+                .abs()
                 < 1e-6
         );
 
@@ -554,14 +606,14 @@ mod tests {
                 < 1e-6
         );
 
-        // Rotation swaps the source axes before the cap applies.
+        // Rotation swaps the source axes before the scale is derived. A square
+        // still fills the shorter axis.
         assert!(
-            (fit_pixel_scale((1000, 560), (64, 64), true, ViewportInsets::default()) - 1.0).abs()
+            (fit_pixel_scale((1000, 560), (64, 64), true, ViewportInsets::default()) - 8.75).abs()
                 < 1e-6
         );
 
-        // Chrome reduces the space, but a small source still rests at actual
-        // size inside what remains.
+        // Chrome reduces the space. A small source still fills what remains.
         let docked = fit_pixel_scale(
             (1000, 560),
             (64, 64),
@@ -573,7 +625,7 @@ mod tests {
                 bottom: 112.0,
             },
         );
-        assert!((docked - 1.0).abs() < 1e-6);
+        assert!((docked - 6.375).abs() < 1e-6);
     }
 
     #[test]
@@ -584,8 +636,13 @@ mod tests {
                     left: 300.0,
                     ..ViewportInsets::default()
                 };
-                let placed =
-                    super::fit_to_viewport_for_mode((1920, 1080), image, rotated, insets, true);
+                let placed = super::fit_to_viewport_for_mode(
+                    (1920, 1080),
+                    image,
+                    rotated,
+                    insets,
+                    FitLimit::Fill,
+                );
                 let width = placed.scale[0] * 1920.0;
                 let height = placed.scale[1] * 1080.0;
                 assert!(width <= 1620.01 && height <= 1080.01);
@@ -594,8 +651,13 @@ mod tests {
                     if rotated { (image.1, image.0) } else { image };
                 assert!((width / height - source_width as f32 / source_height as f32).abs() < 1e-5);
                 assert!((placed.offset[0] - 300.0 / 1920.0).abs() < 1e-6);
-                let fit_scale =
-                    super::fit_pixel_scale_for_mode((1920, 1080), image, rotated, insets, true);
+                let fit_scale = super::fit_pixel_scale_for_mode(
+                    (1920, 1080),
+                    image,
+                    rotated,
+                    insets,
+                    FitLimit::Fill,
+                );
                 assert!((width / fit_scale - source_width as f32).abs() < 0.01);
                 assert!((height / fit_scale - source_height as f32).abs() < 0.01);
             }
@@ -605,15 +667,23 @@ mod tests {
             (64, 64),
             false,
             ViewportInsets::default(),
-            false,
+            FitLimit::Fill,
         );
-        assert!((windowed_scale - 1.0).abs() < 1e-6);
+        assert!((windowed_scale - 1080.0 / 64.0).abs() < 1e-4);
+        let capped_scale = super::fit_pixel_scale_for_mode(
+            (1920, 1080),
+            (64, 64),
+            false,
+            ViewportInsets::default(),
+            FitLimit::ActualSize,
+        );
+        assert!((capped_scale - 1.0).abs() < 1e-6);
         let hidden = super::fit_to_viewport_for_mode(
             (0, 0),
             (64, 64),
             false,
             ViewportInsets::default(),
-            true,
+            FitLimit::Fill,
         );
         assert!(hidden.scale.iter().all(|value| value.abs() < f32::EPSILON));
     }

@@ -193,9 +193,10 @@ phosphor-green text and selection outlines.
 
 Image view uses a compact open-hand cursor and direct drag-to-pan, with a
 closed hand while dragging. The zoom percentage opens Fit, Actual Size, and
-zoom controls. Pan limits keep part of the photo reachable. Fullscreen starts
-at Fit and enlarges small images to the available screen area; Actual Size
-remains available for exact pixel inspection.
+zoom controls. Windowed Fit fills the frame. View can cap Fit at actual size
+for the session, and that choice is not saved. Pan limits keep part of the
+photo reachable. Fullscreen starts at Fit and enlarges small images to the
+available screen area; Actual Size remains available for exact pixel inspection.
 
 | Action | Control |
 | --- | --- |

@@ -717,13 +717,12 @@ broad feature category. They prove and refine the accumulated viewer.
 - [ ] Close remaining evidence-backed layout, spacing, copy, loading, empty, error,
   recovery, and diagnostic issues without adding decorative controls or unrelated
   features.
-- [x] Decide the resting zoom for a source smaller than the viewport. Settled
-  against real fixtures and an independent playtest: fit no longer enlarges, so
-  a source smaller than the viewport rests at actual size and the readout shows
-  100 percent instead of 812. The playtest verdict on the previous behavior was
-  that it is "honest as arithmetic and dishonest as looking", and that a
-  thumbnail should not become a mural unless the player asks for zoom. Explicit
-  zoom is unchanged, and `0` and `1` keep their meanings.
+- [x] Decide the resting zoom for a source smaller than the viewport. Windowed
+  Fit fills the frame, enlarging a small photo without cropping it. View can
+  cap that Fit at actual size for the current session, and the choice is not
+  saved. Actual Size stays one source pixel per display pixel. Fullscreen Fit
+  still fills. The v0.2.0 cap, which left a small source at 100 percent, remains
+  available through that session control.
 - [x] Keep high-frequency review feedback out of the photo. Folder scans default
   to newest-modified first with a saved natural-name option, 12-photo collage
   groups keep individual images useful, routine Trash outcomes use top chrome

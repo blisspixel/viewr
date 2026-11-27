@@ -233,6 +233,7 @@ fn run_internal(
         heal: HealTool::default(),
         tools_before_heal: None,
         is_fullscreen: false,
+        cap_fit_at_actual_size: false,
         mosaic: MosaicView::default(),
         last_trashed: Vec::new(),
         last_trashed_scope: None,
@@ -1168,6 +1169,8 @@ struct App {
     /// Tools visibility captured when Spot Heal opened the dock.
     tools_before_heal: Option<(bool, bool)>,
     is_fullscreen: bool,
+    /// Session-only cap that keeps windowed Fit from enlarging. Not saved.
+    cap_fit_at_actual_size: bool,
     /// Transient, memory-bounded full-image mosaic. Never persisted.
     mosaic: MosaicView,
     last_trashed: Vec<TrashedFile>,
@@ -4083,7 +4086,7 @@ impl App {
             image_size,
             rotated90,
             self.viewport_insets(),
-            self.is_fullscreen,
+            crate::view::FitLimit::for_view(self.is_fullscreen, self.cap_fit_at_actual_size),
         );
 
         p.scale[0] *= self.transform.zoom;
@@ -6272,7 +6275,7 @@ impl App {
             image_size,
             rotated90,
             self.viewport_insets(),
-            self.is_fullscreen,
+            crate::view::FitLimit::for_view(self.is_fullscreen, self.cap_fit_at_actual_size),
         );
         place.scale[0] *= self.transform.zoom;
         place.scale[1] *= self.transform.zoom;
@@ -6399,7 +6402,7 @@ impl App {
             image,
             self.transform.rotation_steps.rem_euclid(2) != 0,
             insets,
-            self.is_fullscreen,
+            crate::view::FitLimit::for_view(self.is_fullscreen, self.cap_fit_at_actual_size),
         );
         let mut placement = base;
         placement.scale = base.scale.map(|value| value * self.transform.zoom);
@@ -6436,14 +6439,14 @@ impl App {
             image_size,
             rotated90,
             self.viewport_insets(),
-            self.is_fullscreen,
+            crate::view::FitLimit::for_view(self.is_fullscreen, self.cap_fit_at_actual_size),
         );
         let fit_scale = crate::view::fit_pixel_scale_for_mode(
             (win.width, win.height),
             image_size,
             rotated90,
             self.viewport_insets(),
-            self.is_fullscreen,
+            crate::view::FitLimit::for_view(self.is_fullscreen, self.cap_fit_at_actual_size),
         );
         let new_zoom = crate::view::zoom_after_step(old, factor, fit_scale);
         let applied = new_zoom / old;
@@ -6640,7 +6643,7 @@ impl App {
             image,
             rotated90,
             self.viewport_insets(),
-            self.is_fullscreen,
+            crate::view::FitLimit::for_view(self.is_fullscreen, self.cap_fit_at_actual_size),
         );
         let actual_zoom = if fit_scale > 0.0 {
             1.0 / fit_scale
@@ -9324,7 +9327,10 @@ impl ApplicationHandler<UserEvent> for App {
                             image,
                             rotated90,
                             viewport_insets,
-                            self.is_fullscreen,
+                            crate::view::FitLimit::for_view(
+                                self.is_fullscreen,
+                                self.cap_fit_at_actual_size,
+                            ),
                         ) * zoom_t,
                     )
                 });
@@ -9357,7 +9363,10 @@ impl ApplicationHandler<UserEvent> for App {
                         size,
                         rotated90,
                         viewport_insets,
-                        self.is_fullscreen,
+                        crate::view::FitLimit::for_view(
+                            self.is_fullscreen,
+                            self.cap_fit_at_actual_size,
+                        ),
                     );
 
                     p.scale[0] *= zoom_t;
@@ -9386,6 +9395,7 @@ impl ApplicationHandler<UserEvent> for App {
                     save_path_error,
                     dock,
                     retain_exif,
+                    cap_fit_at_actual_size: self.cap_fit_at_actual_size,
                     background_override: bg_override,
                     has_transparency: self.presented_has_transparency,
                     theme_preference,
@@ -9763,6 +9773,17 @@ impl ApplicationHandler<UserEvent> for App {
                             } else {
                                 tr!("Saved copies will strip camera metadata (default)")
                             }));
+                        }
+                        crate::ui::UiAction::ToggleCapFitAtActualSize => {
+                            self.cap_fit_at_actual_size = !self.cap_fit_at_actual_size;
+                            self.fit_to_view();
+                            self.show_toast(self.language.localize(
+                                if self.cap_fit_at_actual_size {
+                                    tr!("Fit leaves a small photo at actual size (session only)")
+                                } else {
+                                    tr!("Fit fills the window (default)")
+                                },
+                            ));
                         }
                         crate::ui::UiAction::ToggleAnimationPlayback => {
                             self.toggle_animation_playback();

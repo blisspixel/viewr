@@ -10,6 +10,11 @@ and organized by user-visible concern.
   steps back one level and then opens the focused photo. Page Up and Page
   Down move by the current level. Tiles stay aspect-justified, and the
   group still stays inside the existing memory budget.
+- Windowed Fit fills the frame. A small photo enlarges until one axis reaches
+  the available viewport, keeping its aspect ratio and the letterbox. View >
+  Cap Fit at actual size restores the previous cap for this session and is
+  not saved. Actual Size stays one source pixel per display pixel. Fullscreen
+  Fit still fills.
 - Interface arrows stay drawable when the selected sans has no arrow glyphs.
   The bundled Hack face supplies those symbols.
 - `url` 2.5.9 closes the nested `blob:` origin advisory.

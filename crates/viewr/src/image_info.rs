@@ -1182,30 +1182,45 @@ pub(crate) fn rgba_has_transparency(rgba: &[u8]) -> bool {
     rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255)
 }
 
+const FILE_SIZE_BYTES: &str = "{count} B";
+const FILE_SIZE_KIB: &str = "{count} KiB";
+const FILE_SIZE_MIB: &str = "{count} MiB";
+const FILE_SIZE_GIB: &str = "{count} GiB";
+
 /// Format bytes using compact binary units and the active language's decimal separator.
+///
+/// Each language owns the frame. `B`, `KiB`, `MiB`, and `GiB` stay the unit
+/// abbreviations. The count is inserted once and is not translated again.
 #[must_use]
 pub(crate) fn format_file_size(bytes: u64, language: Language) -> String {
+    const _: () = crate::locale::assert_cataloged(FILE_SIZE_BYTES);
+    const _: () = crate::locale::assert_cataloged(FILE_SIZE_KIB);
+    const _: () = crate::locale::assert_cataloged(FILE_SIZE_MIB);
+    const _: () = crate::locale::assert_cataloged(FILE_SIZE_GIB);
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * 1024;
     const GIB: u64 = MIB * 1024;
-    if bytes >= GIB {
-        format!(
-            "{} GiB",
-            language.format_decimal(bytes as f64 / GIB as f64, 2)
+    let (template, count) = if bytes >= GIB {
+        (
+            FILE_SIZE_GIB,
+            language.format_decimal(bytes as f64 / GIB as f64, 2),
         )
     } else if bytes >= MIB {
-        format!(
-            "{} MiB",
-            language.format_decimal(bytes as f64 / MIB as f64, 1)
+        (
+            FILE_SIZE_MIB,
+            language.format_decimal(bytes as f64 / MIB as f64, 1),
         )
     } else if bytes >= KIB {
-        format!(
-            "{} KiB",
-            language.format_decimal(bytes as f64 / KIB as f64, 1)
+        (
+            FILE_SIZE_KIB,
+            language.format_decimal(bytes as f64 / KIB as f64, 1),
         )
     } else {
-        format!("{bytes} B")
-    }
+        (FILE_SIZE_BYTES, bytes.to_string())
+    };
+    language
+        .fill(template, &[("count", count.as_str())])
+        .into_string()
 }
 
 /// Reduced pixel aspect string, such as `3:2`.
@@ -1541,6 +1556,37 @@ mod tests {
         let pseudo = megapixel_aspect_label(Language::Pseudo, 24.0, "keep {brace}");
         assert!(pseudo.contains("keep {brace}"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+    }
+
+    #[test]
+    fn file_size_follows_the_selected_language() {
+        assert_eq!(format_file_size(999, Language::English), "999 B");
+        assert_eq!(format_file_size(1024, Language::English), "1.0 KiB");
+        assert_eq!(format_file_size(1536 * 1024, Language::English), "1.5 MiB");
+        assert_eq!(
+            format_file_size(1024 * 1024 * 1024, Language::English),
+            "1.00 GiB"
+        );
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_eq!(format_file_size(999, language), "999 B");
+            assert_eq!(format_file_size(1024, language), "1,0 KiB");
+            assert_eq!(format_file_size(1536 * 1024, language), "1,5 MiB");
+            assert_eq!(format_file_size(1024 * 1024 * 1024, language), "1,00 GiB");
+            for template in [
+                super::FILE_SIZE_BYTES,
+                super::FILE_SIZE_KIB,
+                super::FILE_SIZE_MIB,
+                super::FILE_SIZE_GIB,
+            ] {
+                assert!(language.text(template).contains("{count}"));
+                assert!(!language.text(template).contains("{count}{count}"));
+            }
+        }
+        let pseudo = format_file_size(1536 * 1024, Language::Pseudo);
+        assert!(pseudo.contains("1.5"));
+        assert!(pseudo.contains("MiB"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{count}"));
     }
 
     #[test]

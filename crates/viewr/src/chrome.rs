@@ -63,6 +63,7 @@ const COPY_CANCEL_CROP: &str = "Cancel Crop";
 const COPY_SPOT_HEAL: &str = "Spot Heal";
 const COPY_FINISH_SPOT_HEAL: &str = "Finish Spot Heal";
 const COPY_FINISHING_SPOT_HEAL: &str = "Finishing Spot Heal...";
+const COPY_NAME_WITH_SHORTCUT: &str = "{name} ({shortcut})";
 const COPY_RATING_CHOICE_NAME: &str = "Rating {label}, shortcut {shortcut}";
 const COPY_FILTER_ALL: &str = "All images";
 const COPY_FILTER_UNRATED_STATUS: &str = "Rating Filter: Unrated";
@@ -138,6 +139,7 @@ const CHROME_COPY: &[&str] = &[
     COPY_SPOT_HEAL,
     COPY_FINISH_SPOT_HEAL,
     COPY_FINISHING_SPOT_HEAL,
+    COPY_NAME_WITH_SHORTCUT,
     COPY_RATING_CHOICE_NAME,
     COPY_FILTER_ALL,
     COPY_FILTER_UNRATED_STATUS,
@@ -634,6 +636,21 @@ pub(crate) struct AppearanceChoiceView {
     pub description: String,
     pub selected: bool,
     pub accessibility_label: String,
+}
+
+/// Join an already translated control name to its shortcut.
+///
+/// Each language owns the frame. The shortcut is inserted once and is not
+/// translated again.
+#[must_use]
+pub(crate) fn name_with_shortcut(language: Language, name: &str, shortcut: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_NAME_WITH_SHORTCUT);
+    language
+        .fill(
+            COPY_NAME_WITH_SHORTCUT,
+            &[("name", name), ("shortcut", shortcut)],
+        )
+        .into_string()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1278,7 +1295,10 @@ mod tests {
                 // same in two languages, so it cannot prove a translation ran.
                 // It is named here rather than skipped by a pattern, and it is
                 // still required to be in the catalog above.
-                if source == super::COPY_PANEL_SIDE || source == super::COPY_UNDO_TRASH_WITH_HELP {
+                if source == super::COPY_PANEL_SIDE
+                    || source == super::COPY_UNDO_TRASH_WITH_HELP
+                    || source == super::COPY_NAME_WITH_SHORTCUT
+                {
                     continue;
                 }
                 assert_ne!(
@@ -1320,6 +1340,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn name_with_shortcut_follows_the_selected_language() {
+        let braced = "keep {brace}";
+        assert_eq!(super::name_with_shortcut(EN, "Crop", "C"), "Crop (C)");
+        let preserved = super::name_with_shortcut(EN, braced, "C");
+        assert!(preserved.contains(braced));
+        assert!(!preserved.contains("{name}"));
+        assert!(!preserved.contains("{shortcut}"));
+        for language in TRANSLATED {
+            let name = language.text(super::COPY_CROP);
+            let composed = super::name_with_shortcut(language, name, "C");
+            assert_ne!(composed, super::name_with_shortcut(EN, "Crop", "C"));
+            assert!(composed.contains(name));
+            assert!(composed.contains('C'));
+            assert!(!composed.contains("{name}"));
+            assert!(!composed.contains("{shortcut}"));
+        }
+        let pseudo = super::name_with_shortcut(Language::Pseudo, braced, "C");
+        assert!(pseudo.contains(braced));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
     }
 
     use super::{

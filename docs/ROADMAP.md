@@ -266,6 +266,7 @@ or accessibility evidence gates.
 | Windows Trash undo | Implemented, unreleased | Undo Trash on Windows restores a photo after Delete, including when the listing hides the file extension. A JPEG rating stays in the file. |
 | Arrow glyphs | Implemented, unreleased | Interface arrows stay drawable when the selected sans has no arrow glyphs. The bundled Hack face supplies those symbols. |
 | Linux archive floor | Implemented, unreleased | The Linux release job links the archive on Ubuntu 24.04 and refuses a recorded GLIBC floor above 2.39. The published v0.7.8 archive still needs glibc 2.43. |
+| JPEG XL LF channel lengths | Implemented, unreleased | Adaptive low-frequency smoothing rejects channel buffers that do not share one grid instead of asserting. A release build no longer aborts on that malformed stream. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
@@ -280,8 +281,8 @@ order, AppleDouble sidecars, and the installer-script explanation shipped
 in v0.7.8. Windowed Fit, collage density, advance after rating, the Unrated
 filter, labelled DNG and Sony ARW previews, first-showable folder entry,
 JPEG rating times, the shortcut list, rating-notice lifetime, Windows Trash
-undo, arrow glyphs, and the Linux archive floor are implemented and
-unreleased. The
+undo, arrow glyphs, the Linux archive floor, and rejection of unequal
+JPEG XL low-frequency channels are implemented and unreleased. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points

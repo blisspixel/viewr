@@ -5,6 +5,10 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Malformed JPEG XL input whose adaptive low-frequency channels do not share
+  one grid now returns a decode error instead of asserting. The exact hosted
+  fuzz discovery is retained in the permanent corpus and replayed by the
+  normal integration suite.
 - View > Advance after rating is off at launch and lasts for the session. After
   a rating is saved it opens the next photo in the active filter, including
   Unrated, and it does not wrap at the last photo. A failed write and the

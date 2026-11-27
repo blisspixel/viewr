@@ -1911,6 +1911,14 @@ try {
         [System.Windows.Automation.ControlType]::Text
     ) | Out-Null
     Send-ApplicationKey -VirtualKey 0x26
+    Wait-ForElement -Name "Full-image collage  4 photos" -Prefix | Out-Null
+    Wait-ForSelectionState `
+        -Name "Photo 1 of 13 in the active folder view" `
+        -Selected $true `
+        -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
+    Send-ApplicationKey -VirtualKey 0x26
+    Wait-ForElement -Name "Full-image collage  9 photos" -Prefix | Out-Null
+    Send-ApplicationKey -VirtualKey 0x26
     Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
     Wait-ForSelectionState `
         -Name "Photo 1 of 13 in the active folder view" `
@@ -1942,7 +1950,7 @@ try {
         -Selected $true `
         -ControlType ([System.Windows.Automation.ControlType]::ListItem) | Out-Null
     # Re-entry exposes the current photo before background neighbors are ready.
-    Wait-ForElement -Name "Full-image collage  12 photos" -Prefix | Out-Null
+    Wait-ForElement -Name "Full-image collage  4 photos" -Prefix | Out-Null
     Send-ApplicationKey -VirtualKey 0x27
     Wait-ForSelectionState `
         -Name "Photo 2 of 13 in the active folder view" `
@@ -2069,7 +2077,7 @@ try {
         "metadata state, disabled trash recovery, previews, navigation, rating disclosure, " +
         "numeric rating keys, threshold filtering, no-match recovery, restart persistence, " +
         "external file replacement with unsaved edits, last-good-frame after delete, " +
-        "twelve large-photo collage load, group paging, Escape, Enter, and Down navigation, " +
+        "stepped four, nine, and twelve large-photo collage load, group paging, Escape, Enter, and Down navigation, " +
         "direct-file navigation across 319 images, distinct Windows pan cursors, menu Exit and Ctrl+Q, " +
         "and Windows Shell Property System interoperability verified; GExiv2 $gexiv2Status"
     )

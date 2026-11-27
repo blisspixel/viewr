@@ -14,6 +14,75 @@ use crate::view::PhysicalViewport;
 
 /// Maximum number of complete photos admitted to one collage group.
 pub(crate) const MAX_IMAGES: usize = 12;
+/// Collage densities on Up, from the first group through the proven 12-photo page.
+pub(crate) const COLLAGE_LEVELS: [usize; 3] = [4, 9, MAX_IMAGES];
+/// Page size used when the collage opens from a single photo.
+pub(crate) const ENTRY_PAGE_SIZE: usize = COLLAGE_LEVELS[0];
+
+/// Next denser page size, if this level is not already the largest.
+#[must_use]
+pub(crate) fn denser_page_size(page_size: usize) -> Option<usize> {
+    COLLAGE_LEVELS.into_iter().find(|level| *level > page_size)
+}
+
+/// Next sparser page size. `None` means Down should open the focused photo.
+#[must_use]
+pub(crate) fn sparser_page_size(page_size: usize) -> Option<usize> {
+    COLLAGE_LEVELS
+        .into_iter()
+        .rev()
+        .find(|level| *level < page_size)
+}
+
+/// What Up or Down does to an open collage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CollageStep {
+    /// Replace the group with this page, keeping the focused photo visible.
+    Show(MosaicPage),
+    /// Down from the sparsest level opens the focused photo.
+    OpenFocused,
+    /// Up on the densest level stays put.
+    Stay,
+}
+
+/// Step one density level. The focused catalog index stays selected.
+#[must_use]
+pub(crate) fn step_density(projection: &[usize], page: &MosaicPage, denser: bool) -> CollageStep {
+    let Some(focused) = page.indices.get(page.focused).copied() else {
+        return CollageStep::Stay;
+    };
+    let next_size = if denser {
+        denser_page_size(page.page_size)
+    } else {
+        sparser_page_size(page.page_size)
+    };
+    match next_size {
+        Some(size) => MosaicPage::around(projection, focused, size)
+            .map_or(CollageStep::Stay, CollageStep::Show),
+        None if denser => CollageStep::Stay,
+        None => CollageStep::OpenFocused,
+    }
+}
+fn projection_position(projection: &[usize], current: usize) -> usize {
+    projection
+        .binary_search(&current)
+        .unwrap_or_else(|insertion| insertion.min(projection.len().saturating_sub(1)))
+}
+
+/// Aligned group start, or the last full window when that group is a short tail.
+fn filled_start(len: usize, position: usize, page_size: usize) -> usize {
+    if len <= page_size {
+        return 0;
+    }
+    let aligned = position / page_size * page_size;
+    let count = aligned.saturating_add(page_size).min(len) - aligned;
+    if count >= page_size {
+        aligned
+    } else {
+        len - page_size
+    }
+}
+
 /// Bound the current full decode and all transient collage display images.
 pub(crate) const MAX_CACHE_BYTES: usize = 640 * 1024 * 1024;
 /// A collage tile needs display detail, not a second full-resolution decode.
@@ -64,6 +133,8 @@ pub(crate) struct MosaicPage {
     pub(crate) indices: Vec<usize>,
     /// Focused slot within `indices`.
     pub(crate) focused: usize,
+    /// Group stride for this density. The last group may contain fewer photos.
+    pub(crate) page_size: usize,
 }
 
 impl MosaicPage {
@@ -78,11 +149,26 @@ impl MosaicPage {
         if projection.is_empty() || page_size == 0 {
             return None;
         }
-        let position = projection
-            .binary_search(&current)
-            .unwrap_or_else(|insertion| insertion.min(projection.len().saturating_sub(1)));
+        let position = projection_position(projection, current);
         let start = position / page_size * page_size;
         Self::at(projection, start, page_size, position)
+    }
+
+    /// Build a density page around `current`. A full aligned group stays put.
+    /// A short tail slides back so the level still fills when earlier photos
+    /// exist. Paging from an aligned group keeps the short final partition.
+    #[must_use]
+    pub(crate) fn around(projection: &[usize], current: usize, page_size: usize) -> Option<Self> {
+        if projection.is_empty() || page_size == 0 {
+            return None;
+        }
+        let position = projection_position(projection, current);
+        let start = filled_start(projection.len(), position, page_size);
+        let aligned = position / page_size * page_size;
+        if start == aligned {
+            return Self::containing(projection, current, page_size);
+        }
+        Self::window(projection, start, page_size, position)
     }
 
     /// Build a page at a projection offset and focus the closest requested
@@ -105,6 +191,32 @@ impl MosaicPage {
             start,
             indices: projection[start..end].to_vec(),
             focused: focused_position.saturating_sub(start),
+            page_size,
+        })
+    }
+
+    /// Build the requested window without snapping it back onto a partition.
+    #[must_use]
+    fn window(
+        projection: &[usize],
+        requested_start: usize,
+        page_size: usize,
+        requested_focus: usize,
+    ) -> Option<Self> {
+        if projection.is_empty() || page_size == 0 {
+            return None;
+        }
+        let max_start = projection
+            .len()
+            .saturating_sub(page_size.min(projection.len()));
+        let start = requested_start.min(max_start);
+        let end = start.saturating_add(page_size).min(projection.len());
+        let focused_position = requested_focus.clamp(start, end.saturating_sub(1));
+        Some(Self {
+            start,
+            indices: projection[start..end].to_vec(),
+            focused: focused_position.saturating_sub(start),
+            page_size,
         })
     }
 
@@ -112,14 +224,23 @@ impl MosaicPage {
     #[must_use]
     pub(crate) fn adjacent(&self, projection: &[usize], delta: isize) -> Option<Self> {
         let next_start = match delta.cmp(&0) {
-            std::cmp::Ordering::Less => self.start.saturating_sub(MAX_IMAGES),
-            std::cmp::Ordering::Greater => self.start.saturating_add(MAX_IMAGES),
+            std::cmp::Ordering::Less => self.start.saturating_sub(self.page_size),
+            std::cmp::Ordering::Greater => self.start.saturating_add(self.page_size),
             std::cmp::Ordering::Equal => self.start,
         };
         if next_start == self.start && delta != 0 {
             return None;
         }
-        let next = Self::at(projection, next_start, MAX_IMAGES, next_start)?;
+        let next = if self.start.is_multiple_of(self.page_size) {
+            Self::at(projection, next_start, self.page_size, next_start)?
+        } else {
+            let max_start = projection.len().saturating_sub(self.page_size);
+            let start = next_start.min(max_start);
+            if start == self.start {
+                return None;
+            }
+            Self::window(projection, start, self.page_size, start)?
+        };
         (next.start != self.start).then_some(next)
     }
 
@@ -532,6 +653,7 @@ mod tests {
             start: 0,
             indices: vec![0, 1],
             focused: 1,
+            page_size: ENTRY_PAGE_SIZE,
         };
         let focused = focused_catalog_path(&page, &files).unwrap();
         assert_eq!(focused, Path::new("b.png"));
@@ -585,6 +707,70 @@ mod tests {
         assert_eq!(last.focused, 0);
         last.move_focus(FocusDirection::Next);
         assert_eq!(last.focused, 1);
+    }
+
+    #[test]
+    fn density_steps_from_four_to_nine_to_twelve_and_back() {
+        let projection: Vec<usize> = (0..30).collect();
+        let four = MosaicPage::containing(&projection, 10, ENTRY_PAGE_SIZE).unwrap();
+        assert_eq!(four.page_size, 4);
+        assert_eq!(four.indices, [8, 9, 10, 11]);
+        assert_eq!(four.indices[four.focused], 10);
+        let next_group = four.adjacent(&projection, 1).unwrap();
+        assert_eq!(next_group.start, 12);
+        assert_eq!(next_group.page_size, 4);
+
+        let CollageStep::Show(nine) = step_density(&projection, &four, true) else {
+            panic!("second Up must show nine");
+        };
+        assert_eq!(nine.page_size, 9);
+        assert_eq!(nine.indices.len(), 9);
+        assert_eq!(nine.indices[nine.focused], 10);
+
+        let CollageStep::Show(twelve) = step_density(&projection, &nine, true) else {
+            panic!("third Up must show twelve");
+        };
+        assert_eq!(twelve.page_size, MAX_IMAGES);
+        assert_eq!(twelve.indices.len(), MAX_IMAGES);
+        assert_eq!(twelve.indices[twelve.focused], 10);
+        assert_eq!(step_density(&projection, &twelve, true), CollageStep::Stay);
+
+        let CollageStep::Show(back_to_nine) = step_density(&projection, &twelve, false) else {
+            panic!("Down must return to nine");
+        };
+        assert_eq!(back_to_nine.page_size, 9);
+        assert_eq!(back_to_nine.indices[back_to_nine.focused], 10);
+        let CollageStep::Show(back_to_four) = step_density(&projection, &back_to_nine, false)
+        else {
+            panic!("Down must return to four");
+        };
+        assert_eq!(back_to_four.page_size, 4);
+        assert_eq!(back_to_four.indices[back_to_four.focused], 10);
+        assert_eq!(
+            step_density(&projection, &back_to_four, false),
+            CollageStep::OpenFocused
+        );
+
+        // The last two photos of a 26-photo folder sit in a short 12-photo
+        // partition. Density still fills each level from the photos before them.
+        let tail: Vec<usize> = (0..26).collect();
+        let four = MosaicPage::around(&tail, 25, 4).unwrap();
+        assert_eq!(four.indices, [22, 23, 24, 25]);
+        assert_eq!(four.indices[four.focused], 25);
+        let CollageStep::Show(nine) = step_density(&tail, &four, true) else {
+            panic!("Up near the end must fill nine");
+        };
+        assert_eq!(nine.indices.len(), 9);
+        assert_eq!(nine.indices[nine.focused], 25);
+        let CollageStep::Show(twelve) = step_density(&tail, &nine, true) else {
+            panic!("Up near the end must fill twelve");
+        };
+        assert_eq!(twelve.indices.len(), MAX_IMAGES);
+        assert_eq!(twelve.indices[twelve.focused], 25);
+        assert!(twelve.adjacent(&tail, 1).is_none());
+        let previous = twelve.adjacent(&tail, -1).unwrap();
+        assert_eq!(previous.indices.len(), MAX_IMAGES);
+        assert_ne!(previous.start, twelve.start);
     }
 
     #[test]

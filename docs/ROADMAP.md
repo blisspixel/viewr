@@ -43,8 +43,8 @@ EXIF orientation, RGB ICC-to-sRGB normalization, trilinear GPU mips, GPU-limited
 previews with full-resolution export, last-good-frame navigation, async crop and
 Save As, image information, Reload (`F5`), Spot Heal, About, and System, Light,
 Dark, and Console appearances. The current product also includes a transient
-full-image collage, now capped at 12 aspect-aware tiles without a catalog or
-thumbnail substitution. Current development opens a folder on the first photo
+full-image collage. Up steps from 4 to 9 to 12 aspect-aware tiles without a
+catalog or thumbnail substitution. Current development opens a folder on the first photo
 it can show, newest-modified by default, retains a saved natural-name
 alternative, keeps routine Trash outcomes in top chrome,
 makes Spot Heal persistence explicit, provides an opt-in platform association

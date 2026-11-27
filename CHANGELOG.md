@@ -34,6 +34,9 @@ and organized by user-visible concern.
   shown does not hide a smaller one. The sensor image is not decoded. A
   DNG or ARW with no such preview, and every other camera RAW type, still
   says that viewr does not open camera RAW files yet.
+- Opening that DNG or ARW preview does not also say that container pages
+  are unavailable. Those files are TIFF containers, and their sensor IFDs
+  are not pages.
 - Opening a folder starts on the first photo viewr can show. A camera RAW
   file stays in the folder. When no photo is on screen, moving onto a file
   that cannot be shown keeps the folder position and a short notice, without

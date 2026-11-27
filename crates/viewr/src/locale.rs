@@ -2023,6 +2023,12 @@ const MESSAGES: &[Message] = &[
         german: "{index} / {total} unbewertet · {rated} von {folder} bewertet",
     },
     Message {
+        english: "{matching} matching · {total} total",
+        spanish: "{matching} coinciden · {total} en total",
+        french: "{matching} correspondantes · {total} au total",
+        german: "{matching} zutreffend · {total} insgesamt",
+    },
+    Message {
         english: "No images are unrated.",
         spanish: "No hay imágenes sin valorar.",
         french: "Aucune image n’est sans note.",

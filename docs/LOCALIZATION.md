@@ -101,6 +101,10 @@ of by review:
   The accelerator is inserted once, and a name that contains braces stays
   verbatim. `ui::file_menu_exit_is_localized_reachable_and_routes_safe_close`
   proves File > Exit uses that frame.
+  `save_state::save_success_copy_follows_the_selected_language` proves the
+  frame that joins an already translated save phrase to its metadata result.
+  Both phrases are inserted once, and a value that contains braces stays
+  verbatim.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

@@ -3301,6 +3301,12 @@ const MESSAGES: &[Message] = &[
         german: "Metadaten entfernt",
     },
     Message {
+        english: "{saved} · {detail}",
+        spanish: "{saved} · {detail}",
+        french: "{saved} · {detail}",
+        german: "{saved} · {detail}",
+    },
+    Message {
         english: "Saved copies will keep camera metadata (session only)",
         spanish: "Las copias guardadas conservarán los metadatos de la cámara (solo en esta sesión)",
         french: "Les copies enregistrées conserveront les métadonnées de l’appareil (session uniquement)",

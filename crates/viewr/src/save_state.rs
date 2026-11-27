@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::chrome::SAVE_RECOVERY_STATUS;
+use crate::edit::MetadataDisposition;
 use crate::locale::Language;
 use crate::playlist::ScanPurpose;
 
@@ -18,6 +19,12 @@ const WAIT_SPOT_HEAL: &str = "Wait for spot heal to finish before saving";
 const WAIT_CROP: &str = "Wait for the crop to finish before saving";
 const WAIT_CROP_SELECTION: &str = "Apply or cancel the crop before saving a copy";
 const SAVE_ALREADY: &str = "A copy is already being saved";
+const SAVED_COPY: &str = "Saved copy";
+const SAVED_EDITED_COPY: &str = "Saved edited copy";
+const EXIF_RETAINED: &str = "EXIF retained";
+const NO_EXIF_FOUND: &str = "no EXIF found";
+const METADATA_STRIPPED: &str = "metadata stripped";
+const SAVED_WITH_DETAIL: &str = "{saved} · {detail}";
 
 /// Default Save As name beside the open file.
 ///
@@ -44,6 +51,12 @@ const ALL_COPY: &[&str] = &[
     WAIT_CROP_SELECTION,
     SAVE_ALREADY,
     SAVE_RECOVERY_STATUS,
+    SAVED_COPY,
+    SAVED_EDITED_COPY,
+    EXIF_RETAINED,
+    NO_EXIF_FOUND,
+    METADATA_STRIPPED,
+    SAVED_WITH_DETAIL,
 ];
 
 /// Accepted file work still needs an observable terminal result when its
@@ -155,6 +168,29 @@ pub(crate) fn save_start_blocker_message(
     })
 }
 
+/// Join the already translated save phrase to its metadata result.
+///
+/// Each language owns the frame. Both phrases are inserted once.
+#[must_use]
+pub(crate) fn save_success_message(
+    language: Language,
+    metadata: MetadataDisposition,
+    includes_pixel_edits: bool,
+) -> crate::locale::Localized {
+    const _: () = crate::locale::assert_cataloged(SAVED_WITH_DETAIL);
+    let saved = language.text(if includes_pixel_edits {
+        SAVED_EDITED_COPY
+    } else {
+        SAVED_COPY
+    });
+    let detail = language.text(match metadata {
+        MetadataDisposition::Retained => EXIF_RETAINED,
+        MetadataDisposition::NotPresent => NO_EXIF_FOUND,
+        MetadataDisposition::Stripped => METADATA_STRIPPED,
+    });
+    language.fill(SAVED_WITH_DETAIL, &[("saved", saved), ("detail", detail)])
+}
+
 #[must_use]
 pub(crate) const fn folder_scan_blocks_save(purpose: Option<&ScanPurpose>) -> bool {
     matches!(purpose, Some(ScanPurpose::OpenFolder))
@@ -185,6 +221,62 @@ mod tests {
             .filter(|source| !is_cataloged(source))
             .collect();
         assert!(missing.is_empty(), "uncataloged save copy: {missing:?}");
+    }
+
+    #[test]
+    fn save_success_copy_follows_the_selected_language() {
+        use crate::edit::MetadataDisposition::{NotPresent, Retained, Stripped};
+        let english = [
+            (false, Retained, "Saved copy · EXIF retained"),
+            (false, NotPresent, "Saved copy · no EXIF found"),
+            (false, Stripped, "Saved copy · metadata stripped"),
+            (true, Retained, "Saved edited copy · EXIF retained"),
+            (true, NotPresent, "Saved edited copy · no EXIF found"),
+            (true, Stripped, "Saved edited copy · metadata stripped"),
+        ];
+        for (edited, metadata, expected) in english {
+            assert_eq!(
+                save_success_message(Language::English, metadata, edited).as_str(),
+                expected
+            );
+        }
+        let braced = Language::English.fill(
+            super::SAVED_WITH_DETAIL,
+            &[("saved", "keep {brace}"), ("detail", "EXIF retained")],
+        );
+        assert!(braced.as_str().contains("keep {brace}"));
+        assert!(!braced.as_str().contains("{saved}"));
+        assert!(!braced.as_str().contains("{detail}"));
+        for language in [Language::Spanish, Language::French, Language::German] {
+            for (edited, metadata, english_text) in english {
+                let composed = save_success_message(language, metadata, edited);
+                assert_ne!(composed.as_str(), english_text);
+                assert!(!composed.as_str().contains("{saved}"));
+                assert!(!composed.as_str().contains("{detail}"));
+                let saved = language.text(if edited {
+                    super::SAVED_EDITED_COPY
+                } else {
+                    super::SAVED_COPY
+                });
+                let detail = language.text(match metadata {
+                    Retained => super::EXIF_RETAINED,
+                    NotPresent => super::NO_EXIF_FOUND,
+                    Stripped => super::METADATA_STRIPPED,
+                });
+                assert!(composed.as_str().contains(saved), "{}", composed.as_str());
+                assert!(composed.as_str().contains(detail), "{}", composed.as_str());
+            }
+        }
+        assert_eq!(
+            save_success_message(Language::French, NotPresent, false).as_str(),
+            "Copie enregistrée · aucune donnée EXIF"
+        );
+        let pseudo = Language::Pseudo.fill(
+            super::SAVED_WITH_DETAIL,
+            &[("saved", "keep {brace}"), ("detail", "EXIF retained")],
+        );
+        assert!(pseudo.as_str().contains("keep {brace}"));
+        assert!(pseudo.as_str().contains(crate::locale::PSEUDO_MARKS.0));
     }
 
     #[test]

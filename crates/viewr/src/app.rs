@@ -914,29 +914,6 @@ fn heal_success_message(
     }
 }
 
-fn save_success_message(
-    language: Language,
-    metadata: crate::edit::MetadataDisposition,
-    includes_pixel_edits: bool,
-) -> Localized {
-    let copy = if includes_pixel_edits {
-        tr!("Saved edited copy")
-    } else {
-        tr!("Saved copy")
-    };
-    let metadata = match metadata {
-        crate::edit::MetadataDisposition::Retained => tr!("EXIF retained"),
-        crate::edit::MetadataDisposition::NotPresent => tr!("no EXIF found"),
-        crate::edit::MetadataDisposition::Stripped => tr!("metadata stripped"),
-    };
-    // The middle dot separates two complete phrases in every catalog language.
-    Localized::from_translated_seam(format!(
-        "{} · {}",
-        language.text(copy),
-        language.text(metadata)
-    ))
-}
-
 /// Append how many queued Trash moves were abandoned to an already localized
 /// failure, with singular and plural sentences owned by each language.
 fn queued_trash_abandoned_message(
@@ -7700,7 +7677,7 @@ impl App {
         let includes_pixel_edits = self.unsaved_crop || self.heal.history.can_undo();
         let terminal = match polled {
             JobPoll::Ready(Ok(metadata)) => {
-                self.show_toast(save_success_message(
+                self.show_toast(crate::save_state::save_success_message(
                     self.language,
                     metadata,
                     includes_pixel_edits,
@@ -10876,37 +10853,6 @@ mod test {
         assert_eq!(
             heal_success_message(Language::German, true, 2, 4).as_str(),
             "Reparaturquelle 3 von 4"
-        );
-    }
-
-    #[test]
-    fn save_success_copy_confirms_when_edited_pixels_were_exported() {
-        assert_eq!(
-            save_success_message(
-                Language::English,
-                crate::edit::MetadataDisposition::Stripped,
-                true
-            )
-            .as_str(),
-            "Saved edited copy · metadata stripped"
-        );
-        assert_eq!(
-            save_success_message(
-                Language::English,
-                crate::edit::MetadataDisposition::Retained,
-                false
-            )
-            .as_str(),
-            "Saved copy · EXIF retained"
-        );
-        assert_eq!(
-            save_success_message(
-                Language::French,
-                crate::edit::MetadataDisposition::NotPresent,
-                false
-            )
-            .as_str(),
-            "Copie enregistrée · aucune donnée EXIF"
         );
     }
 

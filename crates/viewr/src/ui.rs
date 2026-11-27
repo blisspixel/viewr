@@ -1870,15 +1870,17 @@ fn pixel_size_label(
     width: u32,
     height: u32,
 ) -> String {
-    if !preview {
-        return format!("{width} × {height}");
-    }
     let width = width.to_string();
     let height = height.to_string();
+    let template = if preview {
+        tr!("Preview {width} × {height}")
+    } else {
+        tr!("{width} × {height}")
+    };
     language
         .fill(
-            tr!("Preview {width} × {height}"),
-            &[("width", &width), ("height", &height)],
+            template,
+            &[("width", width.as_str()), ("height", height.as_str())],
         )
         .into_string()
 }
@@ -9454,6 +9456,44 @@ mod tests {
                 .expect("AccessKit update"),
             screen,
         )
+    }
+
+    #[test]
+    fn pixel_size_label_follows_the_selected_language() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            assert_eq!(
+                super::pixel_size_label(language, false, 1920, 1080),
+                "1920 × 1080"
+            );
+        }
+        assert_eq!(
+            super::pixel_size_label(Language::English, true, 1920, 1080),
+            "Preview 1920 × 1080"
+        );
+        assert_eq!(
+            super::pixel_size_label(Language::Spanish, true, 1920, 1080),
+            "Vista previa 1920 × 1080"
+        );
+        assert_eq!(
+            super::pixel_size_label(Language::French, true, 1920, 1080),
+            "Aperçu 1920 × 1080"
+        );
+        assert_eq!(
+            super::pixel_size_label(Language::German, true, 1920, 1080),
+            "Vorschau 1920 × 1080"
+        );
+        let pseudo = super::pixel_size_label(Language::Pseudo, false, 1920, 1080);
+        assert!(pseudo.contains("1920"));
+        assert!(pseudo.contains("1080"));
+        assert!(pseudo.contains('×'));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{width}"));
+        assert!(!pseudo.contains("{height}"));
     }
 
     #[test]

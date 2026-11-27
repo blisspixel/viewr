@@ -118,6 +118,10 @@ of by review:
   the frame that joins a megapixel count to its aspect ratio. The count uses
   the language's decimal separator, the aspect ratio is inserted once, and a
   value that contains braces stays verbatim.
+  `ui::pixel_size_label_follows_the_selected_language` proves the frame for
+  ordinary pixel dimensions. Both counts are inserted once, the multiplication
+  sign stays between them, and the preview sentence stays the existing catalog
+  entry.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

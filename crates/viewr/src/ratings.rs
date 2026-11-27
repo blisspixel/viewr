@@ -118,6 +118,7 @@ impl RatingState {
     pub const fn matches(self, filter: RatingFilter) -> bool {
         match filter {
             RatingFilter::All => true,
+            RatingFilter::Unrated => matches!(self, Self::Unrated),
             RatingFilter::AtLeast(minimum) => {
                 matches!(self, Self::Rated(rating) if rating.get() >= minimum.get())
             }
@@ -131,6 +132,9 @@ pub enum RatingFilter {
     /// Show the complete canonical folder catalog.
     #[default]
     All,
+    /// Show entries with no supported rating. Rejected, conflict, unsupported,
+    /// unreadable, and still-loading entries stay out.
+    Unrated,
     /// Show numeric ratings at or above the threshold.
     AtLeast(Rating),
 }
@@ -2486,6 +2490,17 @@ mod tests {
         assert_eq!(Rating::new(6), None);
         assert_eq!(Rating::new(4).unwrap().get(), 4);
         assert!(RatingState::Unrated.matches(RatingFilter::All));
+        assert!(RatingState::Unrated.matches(RatingFilter::Unrated));
+        for state in [
+            RatingState::Loading,
+            RatingState::Rated(Rating(1)),
+            RatingState::Rejected,
+            RatingState::Conflict,
+            RatingState::Unsupported,
+            RatingState::Unreadable,
+        ] {
+            assert!(!state.matches(RatingFilter::Unrated), "{state:?}");
+        }
         assert!(!RatingState::Rejected.matches(RatingFilter::AtLeast(Rating(1))));
         assert!(RatingState::Rated(Rating(4)).matches(RatingFilter::AtLeast(Rating(3))));
         assert!(!RatingState::Rated(Rating(3)).matches(RatingFilter::AtLeast(Rating(4))));

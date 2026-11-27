@@ -224,6 +224,8 @@ pub(crate) enum UiAction {
     ToggleRetainExif,
     /// Keep windowed Fit from enlarging for this session. Not saved.
     ToggleCapFitAtActualSize,
+    /// Move to the next photo after an accepted rating. Not saved.
+    ToggleAdvanceAfterRating,
     /// Pause or resume the current animated image.
     ToggleAnimationPlayback,
     /// Step the current animation frame or document page without wrapping.
@@ -326,6 +328,8 @@ pub(crate) struct UiFrameOwned {
     pub retain_exif: bool,
     /// Session-only cap that keeps windowed Fit from enlarging. Not saved.
     pub cap_fit_at_actual_size: bool,
+    /// Session-only cull step after an accepted rating. Not saved.
+    pub advance_after_rating: bool,
     /// Session-only image background. Theme default follows the resolved appearance.
     pub background_override: crate::theme::ImageBackground,
     /// Whether the decoded image has any alpha byte below 255.
@@ -532,6 +536,8 @@ pub struct RatingUiState {
     pub current_catalog_index: Option<usize>,
     /// Total images in the canonical folder catalog.
     pub folder_count: usize,
+    /// Numeric 1-to-5 ratings already read in the folder.
+    pub rated_count: usize,
     /// First-write assignment awaiting explicit disclosure confirmation.
     pub pending_disclosure: Option<crate::ratings::RatingAssignment>,
 }
@@ -550,6 +556,7 @@ impl Default for RatingUiState {
             match_count: 0,
             current_catalog_index: None,
             folder_count: 0,
+            rated_count: 0,
             pending_disclosure: None,
         }
     }
@@ -629,6 +636,7 @@ impl UiFrameOwned {
             rating_discovery_busy: self.rating.discovery_busy,
             rating_recovery_unsettled: self.rating.recovery_unsettled,
             rating_folder_count: self.rating.folder_count,
+            rating_rated_count: self.rating.rated_count,
         })
     }
 }
@@ -1601,11 +1609,17 @@ fn render_top_rating_position(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: C
     }
 }
 
-fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
-    let displayed_position = match frame.rating.filter {
+fn active_view_position(frame: &UiFrameOwned) -> Option<(usize, usize)> {
+    match frame.rating.filter {
         crate::ratings::RatingFilter::All => frame.playlist_pos,
-        crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
-    };
+        crate::ratings::RatingFilter::Unrated | crate::ratings::RatingFilter::AtLeast(_) => {
+            frame.rating.visible_position
+        }
+    }
+}
+
+fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
+    let displayed_position = active_view_position(frame);
     if let Some((index, total)) = displayed_position {
         Some(match frame.rating.filter {
             crate::ratings::RatingFilter::All => {
@@ -1615,11 +1629,31 @@ fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
                     format!("{index} / {total}")
                 }
             }
-            crate::ratings::RatingFilter::AtLeast(minimum) => format!(
-                "{index} / {total} rated {}+ · {} total",
-                minimum.get(),
-                frame.rating.folder_count
-            ),
+            crate::ratings::RatingFilter::AtLeast(minimum) => frame
+                .language
+                .fill(
+                    tr!("{index} / {total} rated {rating}+ · {rated} of {folder} rated"),
+                    &[
+                        ("index", &index.to_string()),
+                        ("total", &total.to_string()),
+                        ("rating", &minimum.get().to_string()),
+                        ("rated", &frame.rating.rated_count.to_string()),
+                        ("folder", &frame.rating.folder_count.to_string()),
+                    ],
+                )
+                .into_string(),
+            crate::ratings::RatingFilter::Unrated => frame
+                .language
+                .fill(
+                    tr!("{index} / {total} unrated · {rated} of {folder} rated"),
+                    &[
+                        ("index", &index.to_string()),
+                        ("total", &total.to_string()),
+                        ("rated", &frame.rating.rated_count.to_string()),
+                        ("folder", &frame.rating.folder_count.to_string()),
+                    ],
+                )
+                .into_string(),
         })
     } else if !matches!(frame.rating.filter, crate::ratings::RatingFilter::All)
         && frame.rating.match_count > 0
@@ -2445,6 +2479,21 @@ fn view_menu(
                 ui.close();
             }
             ui.separator();
+            let mut advance = frame.advance_after_rating;
+            if ui
+                .checkbox(
+                    &mut advance,
+                    frame.text(tr!("Advance after rating")),
+                )
+                .on_hover_text(frame.text(tr!(
+                    "On for this session only. After a rating is saved, the next photo opens. The last photo stays put. This choice is not saved."
+                )))
+                .changed()
+            {
+                actions.push(UiAction::ToggleAdvanceAfterRating);
+                ui.close();
+            }
+            ui.separator();
             let rating_filter_label = chrome.rating_filter_menu_label();
             ui.add_enabled_ui(chrome.is_enabled(ChromeControl::RatingFilterMenu), |ui| {
                 ui.menu_button(rating_filter_label, |ui| {
@@ -2664,6 +2713,17 @@ fn rating_filter_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Ch
             actions.push(UiAction::SetRatingFilter(choice.filter));
             ui.close();
         }
+    }
+    if let Some(progress) = chrome.rated_progress_text() {
+        ui.separator();
+        // Role::Label stores its text as the AccessKit value. The menu line
+        // also needs an accessible name so a screen reader announces the count.
+        ui.label(
+            RichText::new(progress.clone())
+                .size(12.0)
+                .color(chrome_colors(ui).muted),
+        )
+        .accessible_name(progress);
     }
 }
 
@@ -3625,8 +3685,18 @@ fn render_filtered_empty_state(
     actions: &mut Vec<UiAction>,
     frame: &UiFrameOwned,
 ) {
-    let crate::ratings::RatingFilter::AtLeast(minimum) = frame.rating.filter else {
-        return;
+    let heading = match frame.rating.filter {
+        crate::ratings::RatingFilter::All => return,
+        crate::ratings::RatingFilter::AtLeast(minimum) => frame
+            .language
+            .fill(
+                tr!("No images are rated {rating} or higher."),
+                &[("rating", &minimum.get().to_string())],
+            )
+            .into_string(),
+        crate::ratings::RatingFilter::Unrated => {
+            frame.text(tr!("No images are unrated.")).to_owned()
+        }
     };
     let colors = chrome_colors(ui);
     let screen = ui.ctx().content_rect();
@@ -3647,13 +3717,6 @@ fn render_filtered_empty_state(
                 .inner_margin(egui::Margin::symmetric(28, 24))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        let heading = frame
-                            .language
-                            .fill(
-                                tr!("No images are rated {rating} or higher."),
-                                &[("rating", &minimum.get().to_string())],
-                            )
-                            .into_string();
                         let heading_response =
                             ui.heading(RichText::new(&heading).size(20.0).color(colors.text));
                         heading_response
@@ -3722,11 +3785,7 @@ fn show_catalog_open_notice(frame: &UiFrameOwned) -> bool {
 
 /// Right reaches a later photo in the same position the top bar is showing.
 fn later_photo_in_active_view(frame: &UiFrameOwned) -> bool {
-    let position = match frame.rating.filter {
-        crate::ratings::RatingFilter::All => frame.playlist_pos,
-        crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
-    };
-    position.is_some_and(|(index, total)| index < total)
+    active_view_position(frame).is_some_and(|(index, total)| index < total)
 }
 
 /// Compact failure for one file inside an already open folder.
@@ -5247,12 +5306,7 @@ fn render_filmstrip(
                                     .color(colors.muted)
                                     .strong(),
                             );
-                            let position = match frame.rating.filter {
-                                crate::ratings::RatingFilter::All => frame.playlist_pos,
-                                crate::ratings::RatingFilter::AtLeast(_) => {
-                                    frame.rating.visible_position
-                                }
-                            };
+                            let position = active_view_position(frame);
                             if let Some((index, total)) = position {
                                 ui.label(
                                     RichText::new(position_of_total(frame.language, index, total))
@@ -5297,10 +5351,7 @@ fn render_filmstrip(
                     if dock_disclosure_button(ui, disclosure).clicked() {
                         actions.push(UiAction::ToggleFilmstripPanelExpansion);
                     }
-                    let position = match frame.rating.filter {
-                        crate::ratings::RatingFilter::All => frame.playlist_pos,
-                        crate::ratings::RatingFilter::AtLeast(_) => frame.rating.visible_position,
-                    };
+                    let position = active_view_position(frame);
                     ui.label(
                         RichText::new(filmstrip_heading(frame.language, position))
                             .size(12.0)
@@ -6122,6 +6173,7 @@ mod tests {
             match_count: 2,
             current_catalog_index: Some(0),
             folder_count: 2,
+            rated_count: 0,
             pending_disclosure: None,
         }
     }
@@ -6147,6 +6199,7 @@ mod tests {
             dock: accessibility_test_dock(),
             retain_exif: false,
             cap_fit_at_actual_size: false,
+            advance_after_rating: false,
             background_override: crate::theme::ImageBackground::ThemeDefault,
             has_transparency: false,
             theme_preference: crate::theme::Preference::System,
@@ -6710,13 +6763,12 @@ mod tests {
         );
     }
 
-    /// Labels in the accessibility tree after `key` is pressed and the next
-    /// frame is drawn.
-    fn labels_after_key(
+    /// Accessibility tree after `key` is pressed and the next frame is drawn.
+    fn accesskit_update_after_key(
         frame: &UiFrameOwned,
         key: egui::Key,
         modifiers: egui::Modifiers,
-    ) -> Vec<String> {
+    ) -> egui::accesskit::TreeUpdate {
         let context = egui::Context::default();
         context.enable_accesskit();
         let _ = run_frame(&context, accessibility_input(), |ui| {
@@ -6740,6 +6792,16 @@ mod tests {
             .platform_output
             .accesskit_update
             .expect("AccessKit update")
+    }
+
+    /// Labels in the accessibility tree after `key` is pressed and the next
+    /// frame is drawn.
+    fn labels_after_key(
+        frame: &UiFrameOwned,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    ) -> Vec<String> {
+        accesskit_update_after_key(frame, key, modifiers)
             .nodes
             .into_iter()
             .filter_map(|(_, node)| node.label().map(str::to_owned))
@@ -6770,6 +6832,11 @@ mod tests {
                     .any(|label| label.starts_with("Cap Fit at actual size")),
                 "Alt+V lists the session Fit cap"
             );
+            assert!(
+                view.iter()
+                    .any(|label| label.starts_with("Advance after rating")),
+                "Alt+V lists advance after rating"
+            );
             let help = labels_after_key(&frame, egui::Key::H, egui::Modifiers::ALT);
             assert!(
                 help.iter()
@@ -6791,6 +6858,32 @@ mod tests {
                 .any(|label| label.starts_with("Open File...")),
             "a modal keeps the menu bar closed"
         );
+    }
+
+    #[test]
+    fn advance_after_rating_checkbox_reports_both_session_states() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        for (enabled, toggled) in [
+            (false, egui::accesskit::Toggled::False),
+            (true, egui::accesskit::Toggled::True),
+        ] {
+            let mut frame = accessibility_test_frame();
+            frame.advance_after_rating = enabled;
+            let update = accesskit_update_after_key(&frame, egui::Key::V, egui::Modifiers::ALT);
+            let node = update
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| {
+                    node.label()
+                        .is_some_and(|label| label.starts_with("Advance after rating"))
+                })
+                .expect("Alt+V lists advance after rating");
+            assert_eq!(node.role(), egui::accesskit::Role::CheckBox);
+            assert_eq!(node.toggled(), Some(toggled));
+        }
     }
 
     /// Run one egui pass and discard its texture updates.
@@ -8045,6 +8138,8 @@ mod tests {
         frame.rating.filter = crate::ratings::RatingFilter::AtLeast(
             crate::ratings::Rating::new(3).expect("valid test rating"),
         );
+        frame.rating.folder_count = 12;
+        frame.rating.rated_count = 4;
         let output = run_frame(&context, accessibility_input(), |ui| {
             let mut actions = Vec::new();
             rating_filter_menu(ui, &mut actions, frame.chrome_view_model());
@@ -8059,9 +8154,13 @@ mod tests {
             .map(|(_, node)| node)
             .filter(|node| node.role() == egui::accesskit::Role::RadioButton)
             .collect::<Vec<_>>();
-        assert_eq!(radios.len(), 6);
+        assert_eq!(radios.len(), 7);
         assert!(radios.iter().any(|node| {
             node.label() == Some("All images")
+                && node.toggled() == Some(egui::accesskit::Toggled::False)
+        }));
+        assert!(radios.iter().any(|node| {
+            node.label() == Some("Rating filter: Unrated")
                 && node.toggled() == Some(egui::accesskit::Toggled::False)
         }));
         for minimum in 1..=5 {
@@ -8079,6 +8178,12 @@ mod tests {
                 })
             );
         }
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(_, node)| { node.label() == Some("4 of 12 rated") })
+        );
     }
 
     #[test]
@@ -10886,6 +10991,7 @@ mod tests {
         frame.rating.visible_position = Some((3, 3));
         frame.rating.match_count = 3;
         frame.rating.folder_count = 12;
+        frame.rating.rated_count = 4;
         let mut input = accessibility_input();
         input.screen_rect = Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -10903,7 +11009,7 @@ mod tests {
             .iter()
             .filter_map(|(_, node)| node.value())
             .collect::<Vec<_>>();
-        for expected in ["3 / 3 rated 4+ · 12 total", "Rating: 4 of 5"] {
+        for expected in ["3 / 3 rated 4+ · 4 of 12 rated", "Rating: 4 of 5"] {
             assert!(
                 values.contains(&expected),
                 "missing rating status: {expected}; values: {values:?}"

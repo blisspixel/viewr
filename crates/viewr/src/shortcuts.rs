@@ -550,7 +550,7 @@ mod tests {
             rows += 1;
             let needle = match action {
                 "Open typed path" => "Open file",
-                "Folder order" | "Interface language" => continue,
+                "Folder order" | "Interface language" | "Show unrated photos" => continue,
                 "Previous or next image" => "Previous / next image",
                 "Previous or next page or frame" => "Previous / next page or frame",
                 "Pan" => "Drag to pan",

@@ -95,10 +95,11 @@ use crate::presentation::{
 use crate::rating_state::{
     PresentedRatingTransition, RatingCloseDisposition, RatingDiscoveryTransition,
     RatingRecoveryTransition, RatingWriteTerminal, SettledWriteView, auxiliary_disconnect_message,
-    next_presented_rating, next_rating_recovery_state, rating_after_auxiliary_disconnect,
-    rating_close_disposition, rating_discovery_transition, rating_recovery_after_presentation,
-    rating_recovery_blocker, rating_write_failure_message, rating_write_target_is_current,
-    reconcile_rating_write, settled_write_view, show_settled_rating_outcome,
+    next_index_after_accepted_rating, next_presented_rating, next_rating_recovery_state,
+    rating_after_auxiliary_disconnect, rating_close_disposition, rating_discovery_transition,
+    rating_recovery_after_presentation, rating_recovery_blocker, rating_write_failure_message,
+    rating_write_target_is_current, reconcile_rating_write, settled_write_view,
+    show_settled_rating_outcome,
 };
 use crate::save_state::{
     CloseDisposition, SaveCloseDisposition, SaveStartBlocker, SaveTerminalState, WindowLossResult,
@@ -234,6 +235,7 @@ fn run_internal(
         tools_before_heal: None,
         is_fullscreen: false,
         cap_fit_at_actual_size: false,
+        advance_after_rating: false,
         mosaic: MosaicView::default(),
         last_trashed: Vec::new(),
         last_trashed_scope: None,
@@ -1171,6 +1173,8 @@ struct App {
     is_fullscreen: bool,
     /// Session-only cap that keeps windowed Fit from enlarging. Not saved.
     cap_fit_at_actual_size: bool,
+    /// Session-only cull step after an accepted rating. Not saved.
+    advance_after_rating: bool,
     /// Transient, memory-bounded full-image mosaic. Never persisted.
     mosaic: MosaicView,
     last_trashed: Vec<TrashedFile>,
@@ -3147,6 +3151,18 @@ impl App {
         }
     }
 
+    /// Next catalog index after an accepted rating, when the session asks for it.
+    fn next_rating_advance(&self, written: &std::path::Path) -> Option<usize> {
+        let playlist = self.playlist.as_ref()?;
+        next_index_after_accepted_rating(
+            self.advance_after_rating,
+            self.session.selected_path.as_deref() == Some(written),
+            self.mosaic.is_active(),
+            playlist.visible_projection(),
+            playlist.catalog_index(),
+        )
+    }
+
     fn poll_rating_write(&mut self, event_loop: &ActiveEventLoop) {
         let Some(worker) = self.rating_write_worker.as_ref() else {
             return;
@@ -3202,7 +3218,11 @@ impl App {
                     SettledWriteView::AdoptBehindIncoming => self.stop_coherence_watch(),
                     SettledWriteView::ReloadSelected | SettledWriteView::FolderOnly => {}
                 }
+                let advance_to = self.next_rating_advance(&worker.path);
                 self.announce_settled_rating(view, worker.assignment);
+                if let Some(next) = advance_to {
+                    self.go_to_index(next);
+                }
             }
             Err(error) => {
                 log::warn!("rating write failed: {error}");
@@ -9170,6 +9190,7 @@ impl ApplicationHandler<UserEvent> for App {
                         match_count: playlist.visible_len(),
                         current_catalog_index: playlist.catalog_index(),
                         folder_count: playlist.files.len(),
+                        rated_count: playlist.rated_count(),
                         pending_disclosure: self
                             .pending_rating_write
                             .as_ref()
@@ -9375,6 +9396,7 @@ impl ApplicationHandler<UserEvent> for App {
                     dock,
                     retain_exif,
                     cap_fit_at_actual_size: self.cap_fit_at_actual_size,
+                    advance_after_rating: self.advance_after_rating,
                     background_override: bg_override,
                     has_transparency: self.presented_has_transparency,
                     theme_preference,
@@ -9751,6 +9773,14 @@ impl ApplicationHandler<UserEvent> for App {
                                 tr!("Saved copies will keep camera metadata (session only)")
                             } else {
                                 tr!("Saved copies will strip camera metadata (default)")
+                            }));
+                        }
+                        crate::ui::UiAction::ToggleAdvanceAfterRating => {
+                            self.advance_after_rating = !self.advance_after_rating;
+                            self.show_toast(self.language.localize(if self.advance_after_rating {
+                                tr!("Advance after rating is on for this session")
+                            } else {
+                                tr!("Advance after rating is off")
                             }));
                         }
                         crate::ui::UiAction::ToggleCapFitAtActualSize => {

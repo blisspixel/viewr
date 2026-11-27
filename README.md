@@ -216,7 +216,8 @@ available screen area; Actual Size remains available for exact pixel inspection.
 | Zoom | `+`, `-`, wheel or trackpad; wheel zoom stays anchored under the pointer |
 | Browse with the mouse | Back/Forward side buttons |
 | Tools, folder previews, image information | `T`, `G`, `I` |
-| Rate or clear rating | `1` through `5`, `0` |
+| Rate or clear rating | `1` through `5`, `0`. View > Advance after rating, off at launch, opens the next photo after a saved rating and is not saved |
+| Show unrated photos | View > Rating Filter > Unrated. Rejected, conflicting, unsupported, unreadable, and still-loading photos stay out |
 | Crop or Spot Heal | `C`, `J` |
 | Reload after an external edit | `F5` |
 | Save As | `Ctrl/Cmd+Shift+S` |

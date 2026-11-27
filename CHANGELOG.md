@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- View > Advance after rating is off at launch and lasts for the session. After
+  a rating is saved it opens the next photo in the active filter, including
+  Unrated, and it does not wrap at the last photo. A failed write and the
+  first-rating disclosure stay on the current photo. The filter also shows how
+  many numeric ratings are already known.
 - Windowed Fit fills the frame. A small photo enlarges until one axis reaches
   the available viewport, keeping its aspect ratio and the letterbox. View >
   Cap Fit at actual size restores the previous cap for this session and is

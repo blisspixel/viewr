@@ -46,10 +46,12 @@ The minimum contract is:
   Enter opens, Page Up and Page Down change groups, and Escape returns. Loading
   and memory-constrained ready counts remain textual.
 - Edit > Rating exposes Unrated and ratings 1 through 5 as a selected radio group
-  with `0` through `5` shortcut text. View > Rating Filter exposes All images and
-  minimum ratings 1 through 5 as a separate selected radio group. Current rating,
-  active threshold, filtered position, no-match state, and write outcomes are
-  textual. The first-write modal focuses Cancel once and blocks background input.
+  with `0` through `5` shortcut text. View > Rating Filter exposes All images,
+  Unrated, and minimum ratings 1 through 5 as a separate selected radio group.
+  View > Advance after rating is a session checkbox, off at launch. Current rating,
+  active threshold, filtered position, rated count, no-match state, and write
+  outcomes are textual. The first-write modal focuses Cancel once and blocks
+  background input.
 - Every app-owned modal (About, Update viewr, Preferences, Default Image Viewer,
   the Save As overwrite confirmation, and the rating disclosure) is exposed as
   a modal dialog. It takes keyboard focus once when it opens, on Close or on

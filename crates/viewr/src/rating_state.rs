@@ -115,6 +115,49 @@ pub(crate) const fn settled_write_view(
     }
 }
 
+/// The next catalog index after an accepted rating, without wrapping.
+///
+/// A photo that remains in the projection steps to the following entry. A
+/// photo that just left the projection steps to the next entry that remains.
+/// The last photo, and a photo with nothing after it, stay put.
+#[must_use]
+pub(crate) fn catalog_index_after_accepted_rating(
+    projection: &[usize],
+    current: usize,
+) -> Option<usize> {
+    match projection.binary_search(&current) {
+        Ok(position) => projection.get(position.saturating_add(1)).copied(),
+        Err(insertion) => projection.get(insertion).copied(),
+    }
+}
+
+/// Advance only from an accepted write of the photo that is still selected.
+/// The first-rating disclosure never reaches this gate, and a collage keeps
+/// its own navigation.
+#[must_use]
+pub(crate) const fn should_advance_after_rating(
+    enabled: bool,
+    written_file_still_selected: bool,
+    collage_active: bool,
+) -> bool {
+    enabled && written_file_still_selected && !collage_active
+}
+
+/// Catalog index to open after an accepted write, or none when advance is off.
+#[must_use]
+pub(crate) fn next_index_after_accepted_rating(
+    enabled: bool,
+    written_file_still_selected: bool,
+    collage_active: bool,
+    projection: &[usize],
+    current: Option<usize>,
+) -> Option<usize> {
+    if !should_advance_after_rating(enabled, written_file_still_selected, collage_active) {
+        return None;
+    }
+    catalog_index_after_accepted_rating(projection, current?)
+}
+
 /// A successful rating sentence names the written file. Show it while that
 /// file is still on screen or is the file being reloaded. A view that has
 /// already moved on keeps the folder record and does not borrow the sentence.
@@ -434,6 +477,49 @@ mod tests {
                 );
             }
         }
+        assert_eq!(
+            rating_discovery_transition(RatingFilter::Unrated, false, true),
+            RatingDiscoveryTransition::Start
+        );
+    }
+
+    #[test]
+    fn accepted_rating_advances_inside_the_projection_and_does_not_wrap() {
+        let projection = [0, 2, 4];
+        assert_eq!(catalog_index_after_accepted_rating(&projection, 0), Some(2));
+        assert_eq!(catalog_index_after_accepted_rating(&projection, 2), Some(4));
+        assert_eq!(catalog_index_after_accepted_rating(&projection, 4), None);
+        assert_eq!(catalog_index_after_accepted_rating(&projection, 1), Some(2));
+        assert_eq!(catalog_index_after_accepted_rating(&projection, 5), None);
+        assert_eq!(catalog_index_after_accepted_rating(&[], 0), None);
+        assert!(should_advance_after_rating(true, true, false));
+        assert!(!should_advance_after_rating(false, true, false));
+        assert!(!should_advance_after_rating(true, false, false));
+        assert!(!should_advance_after_rating(true, true, true));
+        assert_eq!(
+            next_index_after_accepted_rating(true, true, false, &projection, Some(2)),
+            Some(4)
+        );
+        assert_eq!(
+            next_index_after_accepted_rating(true, true, false, &projection, Some(4)),
+            None
+        );
+        assert_eq!(
+            next_index_after_accepted_rating(false, true, false, &projection, Some(0)),
+            None
+        );
+        assert_eq!(
+            next_index_after_accepted_rating(true, false, false, &projection, Some(0)),
+            None
+        );
+        assert_eq!(
+            next_index_after_accepted_rating(true, true, true, &projection, Some(0)),
+            None
+        );
+        assert_eq!(
+            next_index_after_accepted_rating(true, true, false, &projection, None),
+            None
+        );
     }
 
     #[test]

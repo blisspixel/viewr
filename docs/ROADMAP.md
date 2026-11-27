@@ -764,11 +764,14 @@ broad feature category. They prove and refine the accumulated viewer.
   The macOS job does not accept a file association or an application bundle.
   Uninstall of an installer-owned tree is covered by the disposable Unix tests
   and Windows smoke check. The signed-candidate lines here remain open.
-- [ ] Evaluate launcher-provided neighboring-file order without inventing a
-  cross-platform promise. A future Windows packaged delivery may consume the
-  documented neighboring-files query. macOS and Linux may preserve an explicit
-  ordered file list only when their launcher supplies one. All other launches
-  retain the visible Latest First or Name fallback and the selected image.
+- [x] Evaluate launcher-provided neighboring-file order without inventing a
+  cross-platform promise. Current public builds do not consume a launcher
+  order. A file-manager launch supplies the selected file, and viewr keeps
+  its saved Latest First or Name order. [DESIGN.md](DESIGN.md) and
+  [INSTALL.md](INSTALL.md) record that boundary. A future Windows packaged
+  delivery may consume the documented neighboring-files query. macOS and
+  Linux may preserve an explicit ordered file list only when their launcher
+  supplies one.
 - [ ] Freeze scope for v0.9 and rerun the complete security, privacy, dependency,
   fuzz, coverage, performance, accessibility, packaging, documentation, and
   release-provenance gates against the exact candidate artifacts.

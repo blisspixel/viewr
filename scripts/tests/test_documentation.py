@@ -411,7 +411,8 @@ class DocumentationTests(unittest.TestCase):
             "The Linux release archive is built on `ubuntu-24.04`",
             architecture,
         )
-        self.assertIn("can still select Ubuntu 24.04", architecture)
+        self.assertIn("now selects Ubuntu 26.04", architecture)
+        self.assertNotIn("can still select Ubuntu 24.04", architecture)
         self.assertIn("refuses a higher", architecture)
 
     def test_linux_release_archive_builds_on_ubuntu_24_04(self) -> None:

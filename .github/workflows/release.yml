@@ -40,10 +40,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu-latest can still select Ubuntu 24.04 through 2026-11-19.
-          # Name 24.04 so the archive's GLIBC symbol versions stay at or
-          # below 2.39. The published v0.7.8 archive was linked on 26.04
-          # and needs glibc 2.43. The libheif 1.21 jobs stay on 26.04.
+          # ubuntu-latest now selects Ubuntu 26.04. Name 24.04 so the
+          # archive's GLIBC symbol versions stay at or below 2.39. The
+          # published v0.7.8 archive was linked on 26.04 and needs glibc
+          # 2.43. The published v0.7.9 archive kept this 24.04 pin.
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: windows-latest

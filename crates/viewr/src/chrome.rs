@@ -65,6 +65,7 @@ const COPY_FINISH_SPOT_HEAL: &str = "Finish Spot Heal";
 const COPY_FINISHING_SPOT_HEAL: &str = "Finishing Spot Heal...";
 const COPY_NAME_WITH_SHORTCUT: &str = "{name} ({shortcut})";
 const COPY_NAME_BEFORE_SHORTCUT: &str = "{name} {shortcut}";
+const COPY_LABEL_WITH_ALIGNED_SHORTCUT: &str = "{label}    {shortcut}";
 const COPY_RATING_CHOICE_NAME: &str = "Rating {label}, shortcut {shortcut}";
 const COPY_FILTER_ALL: &str = "All images";
 const COPY_FILTER_UNRATED_STATUS: &str = "Rating Filter: Unrated";
@@ -142,6 +143,7 @@ const CHROME_COPY: &[&str] = &[
     COPY_FINISHING_SPOT_HEAL,
     COPY_NAME_WITH_SHORTCUT,
     COPY_NAME_BEFORE_SHORTCUT,
+    COPY_LABEL_WITH_ALIGNED_SHORTCUT,
     COPY_RATING_CHOICE_NAME,
     COPY_FILTER_ALL,
     COPY_FILTER_UNRATED_STATUS,
@@ -611,6 +613,8 @@ pub(crate) struct RatingChoiceView {
     pub assignment: crate::ratings::RatingAssignment,
     pub label: String,
     pub shortcut: &'static str,
+    /// Visible radio text. The accessible name stays `accessibility_label`.
+    pub visible: String,
     pub enabled: bool,
     pub selected: bool,
     pub accessibility_label: String,
@@ -667,6 +671,25 @@ pub(crate) fn name_before_shortcut(language: Language, name: &str, shortcut: &st
         .fill(
             COPY_NAME_BEFORE_SHORTCUT,
             &[("name", name), ("shortcut", shortcut)],
+        )
+        .into_string()
+}
+
+/// Join an already translated rating label to its digit shortcut.
+///
+/// Each language owns the frame. Four spaces keep the shortcut in a column.
+/// The shortcut is inserted once and is not translated again.
+#[must_use]
+pub(crate) fn label_with_aligned_shortcut(
+    language: Language,
+    label: &str,
+    shortcut: &str,
+) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_LABEL_WITH_ALIGNED_SHORTCUT);
+    language
+        .fill(
+            COPY_LABEL_WITH_ALIGNED_SHORTCUT,
+            &[("label", label), ("shortcut", shortcut)],
         )
         .into_string()
 }
@@ -941,6 +964,7 @@ impl ChromeViewModel {
                 .text(COPY_RATING_CHOICE_NAME)
                 .replace(LABEL_PLACEHOLDER, &label)
                 .replace(SHORTCUT_PLACEHOLDER, shortcut),
+            visible: label_with_aligned_shortcut(language, &label, shortcut),
             label,
             shortcut,
             enabled,
@@ -1317,6 +1341,7 @@ mod tests {
                     || source == super::COPY_UNDO_TRASH_WITH_HELP
                     || source == super::COPY_NAME_WITH_SHORTCUT
                     || source == super::COPY_NAME_BEFORE_SHORTCUT
+                    || source == super::COPY_LABEL_WITH_ALIGNED_SHORTCUT
                 {
                     continue;
                 }
@@ -1414,6 +1439,53 @@ mod tests {
         }
         let pseudo = super::name_before_shortcut(Language::Pseudo, braced, "Ctrl+Q");
         assert!(pseudo.contains(braced));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+    }
+
+    #[test]
+    fn label_with_aligned_shortcut_follows_the_selected_language() {
+        let mut input = ready_input();
+        let english = ChromeViewModel::new(input).rating_choices();
+        let expected = [
+            ("Unrated    0", "Rating Unrated, shortcut 0"),
+            ("1 of 5    1", "Rating 1 of 5, shortcut 1"),
+            ("2 of 5    2", "Rating 2 of 5, shortcut 2"),
+            ("3 of 5    3", "Rating 3 of 5, shortcut 3"),
+            ("4 of 5    4", "Rating 4 of 5, shortcut 4"),
+            ("5 of 5    5", "Rating 5 of 5, shortcut 5"),
+        ];
+        assert_eq!(english.len(), expected.len());
+        for (choice, (visible, accessible)) in english.iter().zip(expected) {
+            assert_eq!(choice.visible, visible);
+            assert_eq!(choice.accessibility_label, accessible);
+        }
+        let braced = super::label_with_aligned_shortcut(EN, "keep {brace}", "0");
+        assert!(braced.contains("keep {brace}"));
+        assert!(!braced.contains("{label}"));
+        assert!(!braced.contains("{shortcut}"));
+        for language in TRANSLATED {
+            assert!(
+                language
+                    .text(super::COPY_LABEL_WITH_ALIGNED_SHORTCUT)
+                    .contains("    ")
+            );
+            input.language = language;
+            let translated = ChromeViewModel::new(input).rating_choices();
+            for (choice, english_choice) in translated.iter().zip(english.iter()) {
+                assert_ne!(choice.visible, english_choice.visible);
+                assert_ne!(
+                    choice.accessibility_label,
+                    english_choice.accessibility_label
+                );
+                assert_eq!(choice.shortcut, english_choice.shortcut);
+                assert!(choice.visible.contains(&choice.label));
+                assert!(choice.visible.contains(&format!("    {}", choice.shortcut)));
+                assert!(!choice.visible.contains("{label}"));
+                assert!(!choice.visible.contains("{shortcut}"));
+            }
+        }
+        let pseudo = super::label_with_aligned_shortcut(Language::Pseudo, "keep {brace}", "0");
+        assert!(pseudo.contains("keep {brace}"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
     }
 

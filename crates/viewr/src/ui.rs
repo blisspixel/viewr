@@ -2254,10 +2254,7 @@ fn rating_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeVie
     for choice in choices {
         let response = ui.add_enabled(
             choice.enabled,
-            egui::RadioButton::new(
-                choice.selected,
-                format!("{}    {}", choice.label, choice.shortcut),
-            ),
+            egui::RadioButton::new(choice.selected, choice.visible.as_str()),
         );
         response.widget_info(|| {
             WidgetInfo::selected(

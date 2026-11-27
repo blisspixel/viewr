@@ -109,6 +109,11 @@ of by review:
   proves the frame that joins a rating-filter match count to the folder
   total. Both counts are inserted once, and a value that contains braces
   stays verbatim.
+  `chrome::label_with_aligned_shortcut_follows_the_selected_language` proves
+  the rating menu joins an already translated choice to its digit shortcut.
+  Four spaces stay between them, the shortcut is inserted once, and a value
+  that contains braces stays verbatim. The accessible name stays
+  `Rating {label}, shortcut {shortcut}`.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

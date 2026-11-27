@@ -176,6 +176,16 @@ impl Playlist {
         self.visible_indices.len()
     }
 
+    /// Numeric 1-to-5 ratings already read. Loading, rejected, conflict, and
+    /// unrated entries are not counted.
+    #[must_use]
+    pub(crate) fn rated_count(&self) -> usize {
+        self.ratings
+            .iter()
+            .filter(|state| matches!(state, RatingState::Rated(_)))
+            .count()
+    }
+
     /// Canonical catalog indices in the active rating-filter projection.
     #[must_use]
     pub(crate) fn visible_projection(&self) -> &[usize] {
@@ -812,6 +822,11 @@ mod tests {
             assert_eq!(playlist.visible_indices, expected);
             assert!(!playlist.empty_filter_can_show_all());
         }
+        let mut playlist = rated_playlist(0);
+        assert_eq!(playlist.rated_count(), 4);
+        playlist.set_filter(RatingFilter::Unrated);
+        assert_eq!(playlist.visible_indices, [0]);
+        assert_eq!(playlist.rated_count(), 4);
         let mut none = rated_playlist(0);
         for index in 0..7 {
             none.set_rating(&path(index), RatingState::Unrated);

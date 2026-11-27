@@ -112,16 +112,21 @@ Sources reviewed 2026-07-29.
   with no rating reader or writer keeps `Rating: JPEG only` inside the rating
   menu instead of showing a persistent badge or an `Unrated` state it can never
   change. JPEG rating state, read failures, and conflicts remain in the strip.
-- View > Rating Filter exposes All images and At least 1 through At least 5. The
-  filter is session-only, resets to All on a folder change, and writes nothing.
+- View > Rating Filter exposes All images, Unrated, and At least 1 through
+  At least 5. Unrated shows only entries with no supported rating. Rejected,
+  conflict, unsupported, unreadable, and still-loading entries stay out.
+  While a filter is active, the position reads how many numeric ratings are
+  already known, for example `3 / 3 rated 4+ · 4 of 12 rated`. The filter is
+  session-only, resets to All on a folder change, and writes nothing.
 - The top status keeps filename, dimensions, zoom, rating, and folder position in
   distinct readable groups. When width is constrained it removes lower-priority
   detail instead of collapsing all values together.
 - An active filter is persistent and explicit, for example
-  `3 / 3 rated 4+ · 12 total`.
+  `3 / 3 rated 4+ · 4 of 12 rated`.
 - If no image matches, the loaded-folder surface says `No images are rated 4 or
-  higher.` and exposes `Show all images`. Escape, Left, and Right also show all
-  images. It never falls back to the first-run Open File card.
+  higher.` or, for Unrated, `No images are unrated.` It exposes `Show all images`.
+  Escape, Left, and Right also show all images. It never falls back to the
+  first-run Open File card.
 
 ## Navigation and state ownership
 
@@ -136,7 +141,11 @@ rating filter is a derived projection of indices, never a second mutable playlis
 - A rating write commits before filter membership changes. If the new value falls
   outside the active filter, the image stays visible with `Outside current filter`
   until the next navigation action. This avoids a successful keypress immediately
-  moving the target away.
+  moving the target away. View > Advance after rating is the session exception:
+  after the write is accepted it opens the next photo in the active filter and
+  does not wrap at the last photo. A failed write, a refused write, and the
+  first-rating disclosure do not advance. The toggle is off at launch and is
+  not saved.
 - Trash receipts and Undo use canonical folder positions, never filtered
   positions. Embedded ratings move and restore with the exact file.
 - Rating discovery is in-memory, bounded, cancellable, generation-tagged, and

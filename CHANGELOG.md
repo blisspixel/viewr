@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- View > Advance after rating is off at launch and lasts for the session. After
+  a rating is saved it opens the next photo in the active filter, including
+  Unrated, and it does not wrap at the last photo. A failed write and the
+  first-rating disclosure stay on the current photo. The filter also shows how
+  many numeric ratings are already known.
 - Full-image collage density steps with Up and Down. The first Up shows up
   to 4 photos around the selection, the next up to 9, then up to 12. Down
   steps back one level and then opens the focused photo. Page Up and Page

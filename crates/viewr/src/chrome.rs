@@ -65,7 +65,9 @@ const COPY_FINISH_SPOT_HEAL: &str = "Finish Spot Heal";
 const COPY_FINISHING_SPOT_HEAL: &str = "Finishing Spot Heal...";
 const COPY_RATING_CHOICE_NAME: &str = "Rating {label}, shortcut {shortcut}";
 const COPY_FILTER_ALL: &str = "All images";
+const COPY_FILTER_UNRATED_STATUS: &str = "Rating Filter: Unrated";
 const COPY_FILTER_AT_LEAST: &str = "At least {rating}";
+const COPY_RATED_PROGRESS: &str = "{rated} of {total} rated";
 const COPY_FILTER_CHOICE_NAME: &str = "Rating filter: {label}";
 const COPY_RATING_FILTER_READING: &str = "Rating Filter: Reading folder...";
 const COPY_RATING_FILTER_OPEN_FOLDER: &str = "Rating Filter: Open a folder";
@@ -138,7 +140,9 @@ const CHROME_COPY: &[&str] = &[
     COPY_FINISHING_SPOT_HEAL,
     COPY_RATING_CHOICE_NAME,
     COPY_FILTER_ALL,
+    COPY_FILTER_UNRATED_STATUS,
     COPY_FILTER_AT_LEAST,
+    COPY_RATED_PROGRESS,
     COPY_FILTER_CHOICE_NAME,
     COPY_RATING_FILTER_READING,
     COPY_RATING_FILTER_OPEN_FOLDER,
@@ -523,6 +527,8 @@ pub(crate) struct ChromeInput {
     pub rating_discovery_busy: bool,
     pub rating_recovery_unsettled: bool,
     pub rating_folder_count: usize,
+    /// Numeric 1-to-5 ratings already read in the folder.
+    pub rating_rated_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -834,6 +840,21 @@ impl ChromeViewModel {
         }
     }
 
+    /// Quiet rated-progress line while a filter is active.
+    #[must_use]
+    pub fn rated_progress_text(self) -> Option<String> {
+        if matches!(self.input.rating_filter, crate::ratings::RatingFilter::All)
+            || self.input.rating_folder_count == 0
+        {
+            return None;
+        }
+        Some(rated_progress_label(
+            self.input.language,
+            self.input.rating_rated_count,
+            self.input.rating_folder_count,
+        ))
+    }
+
     #[must_use]
     pub fn rating_unavailable_text(self) -> &'static str {
         self.input.language.text(self.rating_unavailable_source())
@@ -900,9 +921,18 @@ impl ChromeViewModel {
     pub fn rating_filter_choices(self) -> Vec<RatingFilterChoiceView> {
         let language = self.input.language;
         let all = language.text(COPY_FILTER_ALL).to_owned();
+        let unrated = language.text(COPY_UNRATED).to_owned();
+        let unrated_name = language
+            .text(COPY_FILTER_CHOICE_NAME)
+            .replace(LABEL_PLACEHOLDER, &unrated);
         // "All images" already reads as a complete name, so it keeps the
         // unprefixed accessible name it has always had.
         std::iter::once((crate::ratings::RatingFilter::All, all.clone(), all))
+            .chain(std::iter::once((
+                crate::ratings::RatingFilter::Unrated,
+                unrated,
+                unrated_name,
+            )))
             .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
                 let label = language
                     .text(COPY_FILTER_AT_LEAST)
@@ -1096,10 +1126,22 @@ pub(crate) fn rating_filter_label(
 ) -> String {
     match filter {
         crate::ratings::RatingFilter::All => language.text(COPY_FILTER_ALL_STATUS).to_owned(),
+        crate::ratings::RatingFilter::Unrated => {
+            language.text(COPY_FILTER_UNRATED_STATUS).to_owned()
+        }
         crate::ratings::RatingFilter::AtLeast(rating) => language
             .text(COPY_FILTER_AT_LEAST_STATUS)
             .replace(RATING_PLACEHOLDER, &rating.get().to_string()),
     }
+}
+
+pub(crate) fn rated_progress_label(language: Language, rated: usize, total: usize) -> String {
+    language
+        .fill(
+            COPY_RATED_PROGRESS,
+            &[("rated", &rated.to_string()), ("total", &total.to_string())],
+        )
+        .into_string()
 }
 
 pub(crate) fn appearance_menu_label(
@@ -1333,6 +1375,7 @@ mod tests {
             rating_discovery_busy: false,
             rating_recovery_unsettled: false,
             rating_folder_count: 2,
+            rating_rated_count: 0,
         }
     }
 
@@ -1911,10 +1954,13 @@ mod tests {
             "Rating Filter: At least 3"
         );
         let choices = model.rating_filter_choices();
-        assert_eq!(choices.len(), 6);
+        assert_eq!(choices.len(), 7);
         assert_eq!(choices.iter().filter(|choice| choice.selected).count(), 1);
         assert!(model.is_enabled(ChromeControl::RatingFilterMenu));
-        assert_eq!(choices[3].accessibility_label, "Rating filter: At least 3");
+        assert_eq!(choices[1].label, "Unrated");
+        assert_eq!(choices[1].accessibility_label, "Rating filter: Unrated");
+        assert_eq!(choices[4].accessibility_label, "Rating filter: At least 3");
+        assert_eq!(super::rated_progress_label(EN, 4, 12), "4 of 12 rated");
 
         input.rating_folder_count = 0;
         let model = ChromeViewModel::new(input);

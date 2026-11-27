@@ -1999,6 +1999,36 @@ const MESSAGES: &[Message] = &[
         german: "Bewertungsfilter: mindestens {rating}",
     },
     Message {
+        english: "Rating Filter: Unrated",
+        spanish: "Filtro de valoración: sin valorar",
+        french: "Filtre de notes : non notées",
+        german: "Bewertungsfilter: nicht bewertet",
+    },
+    Message {
+        english: "{rated} of {total} rated",
+        spanish: "{rated} de {total} valoradas",
+        french: "{rated} sur {total} notées",
+        german: "{rated} von {total} bewertet",
+    },
+    Message {
+        english: "{index} / {total} rated {rating}+ · {rated} of {folder} rated",
+        spanish: "{index} / {total} valoradas {rating}+ · {rated} de {folder} valoradas",
+        french: "{index} / {total} notées {rating}+ · {rated} sur {folder} notées",
+        german: "{index} / {total} mit {rating}+ · {rated} von {folder} bewertet",
+    },
+    Message {
+        english: "{index} / {total} unrated · {rated} of {folder} rated",
+        spanish: "{index} / {total} sin valorar · {rated} de {folder} valoradas",
+        french: "{index} / {total} sans note · {rated} sur {folder} notées",
+        german: "{index} / {total} unbewertet · {rated} von {folder} bewertet",
+    },
+    Message {
+        english: "No images are unrated.",
+        spanish: "No hay imágenes sin valorar.",
+        french: "Aucune image n’est sans note.",
+        german: "Keine Bilder sind unbewertet.",
+    },
+    Message {
         english: "Rating Filter: Reading folder...",
         spanish: "Filtro de valoración: leyendo la carpeta...",
         french: "Filtre de notes : lecture du dossier...",
@@ -3659,6 +3689,30 @@ const MESSAGES: &[Message] = &[
         spanish: "Limitar el ajuste al tamaño real",
         french: "Limiter l’ajustement à la taille réelle",
         german: "Anpassung auf Originalgröße begrenzen",
+    },
+    Message {
+        english: "Advance after rating",
+        spanish: "Avanzar después de valorar",
+        french: "Passer à la suivante après la note",
+        german: "Nach der Bewertung weiter",
+    },
+    Message {
+        english: "On for this session only. After a rating is saved, the next photo opens. The last photo stays put. This choice is not saved.",
+        spanish: "Solo durante esta sesión. Cuando se guarda una valoración, se abre la foto siguiente. La última foto permanece. Esta opción no se guarda.",
+        french: "Uniquement pour cette session. Lorsqu’une note est enregistrée, la photo suivante s’ouvre. La dernière photo reste affichée. Ce choix n’est pas enregistré.",
+        german: "Nur für diese Sitzung. Nach dem Speichern einer Bewertung öffnet sich das nächste Foto. Das letzte Foto bleibt. Diese Auswahl wird nicht gespeichert.",
+    },
+    Message {
+        english: "Advance after rating is on for this session",
+        spanish: "Avanzar después de valorar está activo en esta sesión",
+        french: "Passer à la suivante après la note est activé pour cette session",
+        german: "Nach der Bewertung weiter ist für diese Sitzung aktiv",
+    },
+    Message {
+        english: "Advance after rating is off",
+        spanish: "Avanzar después de valorar está desactivado",
+        french: "Passer à la suivante après la note est désactivé",
+        german: "Nach der Bewertung weiter ist aus",
     },
     Message {
         english: "On for this session only. Fit then leaves a small photo at actual size instead of filling the window. This choice is not saved.",

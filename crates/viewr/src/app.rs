@@ -1964,11 +1964,16 @@ impl App {
     }
 
     fn refresh_mosaic_after_membership_change(&mut self) {
+        let page_size = self
+            .mosaic
+            .page
+            .as_ref()
+            .map_or(crate::mosaic::ENTRY_PAGE_SIZE, |page| page.page_size);
         let page = self.playlist.as_ref().and_then(|playlist| {
-            crate::mosaic::MosaicPage::containing(
+            crate::mosaic::MosaicPage::around(
                 playlist.visible_projection(),
                 playlist.catalog_index()?,
-                crate::mosaic::MAX_IMAGES,
+                page_size,
             )
         });
         match page {
@@ -4204,10 +4209,10 @@ impl App {
             );
             return;
         };
-        let Some(page) = crate::mosaic::MosaicPage::containing(
+        let Some(page) = crate::mosaic::MosaicPage::around(
             playlist.visible_projection(),
             current_index,
-            crate::mosaic::MAX_IMAGES,
+            crate::mosaic::ENTRY_PAGE_SIZE,
         ) else {
             return;
         };
@@ -4227,8 +4232,7 @@ impl App {
         self.prefetch_schedule.reset();
         self.prefetch.clear();
         self.prefetch_sources.clear();
-        self.prefetch
-            .set_limits(crate::mosaic::MAX_IMAGES, neighbor_budget);
+        self.prefetch.set_limits(page.page_size, neighbor_budget);
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.set_mosaic_slot_count(page.indices.len());
         }
@@ -4418,6 +4422,7 @@ impl App {
             start: 0,
             indices: loaded_slots.clone(),
             focused,
+            page_size: loaded_slots.len().max(1),
         };
         navigation.move_focus(direction);
         page.focused = loaded_slots[navigation.focused];
@@ -4435,6 +4440,20 @@ impl App {
             return;
         };
         self.install_mosaic_page(next);
+    }
+
+    fn step_mosaic_density(&mut self, denser: bool) {
+        let Some(page) = self.mosaic.page.clone() else {
+            return;
+        };
+        let Some(playlist) = self.playlist.as_ref() else {
+            return;
+        };
+        match crate::mosaic::step_density(playlist.visible_projection(), &page, denser) {
+            crate::mosaic::CollageStep::Show(next) => self.install_mosaic_page(next),
+            crate::mosaic::CollageStep::OpenFocused => self.open_focused_mosaic_photo(),
+            crate::mosaic::CollageStep::Stay => {}
+        }
     }
 
     fn open_focused_mosaic_photo(&mut self) {
@@ -8969,9 +8988,11 @@ impl ApplicationHandler<UserEvent> for App {
                         {
                             self.undo_trash();
                         }
-                        Key::Named(NamedKey::Enter | NamedKey::ArrowDown) => {
+                        Key::Named(NamedKey::Enter) => {
                             self.open_focused_mosaic_photo();
                         }
+                        Key::Named(NamedKey::ArrowDown) => self.step_mosaic_density(false),
+                        Key::Named(NamedKey::ArrowUp) => self.step_mosaic_density(true),
                         Key::Named(NamedKey::ArrowRight) => {
                             self.move_mosaic_focus(crate::mosaic::FocusDirection::Next);
                         }

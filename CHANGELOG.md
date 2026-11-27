@@ -5,6 +5,11 @@ and organized by user-visible concern.
 
 ## Unreleased
 
+- Full-image collage density steps with Up and Down. The first Up shows up
+  to 4 photos around the selection, the next up to 9, then up to 12. Down
+  steps back one level and then opens the focused photo. Page Up and Page
+  Down move by the current level. Tiles stay aspect-justified, and the
+  group still stays inside the existing memory budget.
 - Interface arrows stay drawable when the selected sans has no arrow glyphs.
   The bundled Hack face supplies those symbols.
 - `url` 2.5.9 closes the nested `blob:` origin advisory.

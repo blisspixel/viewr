@@ -211,7 +211,7 @@ remains available for exact pixel inspection.
 | Pan | Drag the image; hold Space for temporary pan in Crop or Spot Heal |
 | Fit or actual size | Space tap fits; double-click toggles Fit/100%; `Ctrl/Cmd+0` / `Ctrl/Cmd+1` |
 | Fullscreen | `F` or `F11`; Escape leaves after crop and Spot Heal |
-| Full-image collage | Up or `Shift+G` enters; Left/Right selects; Down, Enter, or click opens; Page Up/Page Down changes groups; Delete stays in the group; Escape returns |
+| Full-image collage | Up or `Shift+G` enters at 4 photos; Up steps to 9, then 12; Down steps back, then opens; Left/Right selects; Enter or click opens; Page Up/Page Down moves by the current level; Delete stays in the group; `Shift+G` or Escape leaves |
 | Zoom | `+`, `-`, wheel or trackpad; wheel zoom stays anchored under the pointer |
 | Browse with the mouse | Back/Forward side buttons |
 | Tools, folder previews, image information | `T`, `G`, `I` |

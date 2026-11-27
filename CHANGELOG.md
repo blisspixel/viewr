@@ -20,6 +20,9 @@ and organized by user-visible concern.
 - When the current photo is outside the active rating filter, the top status
   joins the match count to the folder total in the selected language. The
   middle dot stays the separator.
+- The rating menu joins each translated choice to its digit shortcut. Four
+  spaces keep that shortcut in a column. The accessible name stays the
+  existing rating sentence.
 
 ## 0.7.9 - 2026-11-27
 

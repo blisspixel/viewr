@@ -37,6 +37,9 @@ Start with the document that matches the task.
 
 - [Roadmap](ROADMAP.md): the current release dashboard, version update points,
   ordered next steps, completed phases, and explicit non-goals.
+- [v0.7.9 candidate notes](releases/v0.7.9.md): the prepared viewing,
+  collage, rating, embedded-preview, and Linux-archive patch, pending the
+  complete release gate.
 - [v0.7.8 release notes](releases/v0.7.8.md): the missing-format,
   damaged WebP, TIFF, and ICO, JPEG end-marker, version-command, benchmark,
   stable folder order, AppleDouble sidecar, and installer-script patch and

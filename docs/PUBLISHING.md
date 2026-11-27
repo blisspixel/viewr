@@ -120,11 +120,11 @@ Four version states must not be conflated:
    currently v0.7.8. README and INSTALL use its fixed immutable URLs.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.8`, the same number as the published missing-format, damaged WebP,
-   TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble,
-   and installer-script patch. Ordinary commits since that tag keep this
-   number. Their behavior is Unreleased in the changelog and is not part of
-   the published archives.
+   `0.7.9`, preparing the viewing, collage, rating, embedded-preview, and
+   Linux-archive patch. README and INSTALL stay on the published v0.7.8
+   installers. Ordinary commits after this preparation keep this number until
+   the tag-ready change. The changelog stays under Unreleased and is not part
+   of the published v0.7.8 archives.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -195,6 +195,20 @@ close hardware, native assistive-technology, the repeated 50,000-file rating
 probe, macOS update, full file-association acceptance, or the rest of the v0.8
 acceptance work.
 
+The v0.7.9 preparation uses the same narrow exception for windowed Fit,
+full-image collage density, session advance after rating, the Unrated
+filter, labelled DNG and Sony ARW embedded previews, folder entry on the
+first showable photo, JPEG rating times, the shortcut list, rating-notice
+lifetime, Windows Trash undo, arrow glyphs, and the Linux archive glibc
+contract already reviewed on main. It includes the reviewed wgpu 30 and
+egui 0.37 lines and the url 2.5.9 advisory fix. The Linux release job links
+on Ubuntu 24.04 and refuses a recorded floor above 2.39. The published
+v0.7.8 archive still needs glibc 2.43. It requires the complete automated
+gate and one exact candidate. It does not close hardware, native
+assistive-technology, the repeated 50,000-file rating probe, macOS update,
+an original-M1 receipt, full file-association acceptance, or the rest of
+the v0.8 acceptance work. This patch is not v0.8.0.
+
 Application source, dependencies, workflows, packaging, or user-facing behavior
 instructions changed after a candidate run invalidate that candidate and all
 evidence affected by it. Evidence records, actual release dates, public
@@ -230,7 +244,7 @@ production environment.
    validator when the required platform records are available:
 
    ```text
-   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.8
+   python -B scripts/product_quality_evidence.py gate docs/release-evidence/product-quality/v0.7.9
    ```
 
 2. On a feature branch, make the single version transition described in

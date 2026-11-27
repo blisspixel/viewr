@@ -7,7 +7,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $repo
 
 $candidateDir = Join-Path $repo "target\release-artifacts"
-$candidateArchive = Join-Path $candidateDir "viewr-0.7.8-x86_64-pc-windows-msvc.zip"
+$candidateArchive = Join-Path $candidateDir "viewr-0.7.9-x86_64-pc-windows-msvc.zip"
 $candidateBinary = Join-Path $repo "target\release\viewr.exe"
 if (-not (Test-Path -LiteralPath $candidateArchive -PathType Leaf)) {
     throw "missing candidate archive: $candidateArchive"
@@ -98,7 +98,7 @@ foreach ($attempt in 1..3) {
 if (-not $publishedInstalled) {
     throw "published v0.7.4 installer did not finish"
 }
-& "$PSScriptRoot\..\install.ps1" -Version 0.7.8 -InstallDir $installDir -NoPath -NoShortcut -LocalRelease $candidateDir
+& "$PSScriptRoot\..\install.ps1" -Version 0.7.9 -InstallDir $installDir -NoPath -NoShortcut -LocalRelease $candidateDir
 
 $installed = Join-Path $installDir "viewr.exe"
 # viewr is a Windows GUI binary. The call operator does not capture its
@@ -120,7 +120,7 @@ if (-not $process.WaitForExit(15000)) { throw "version probe timed out for $inst
 $stderr = $stderrTask.GetAwaiter().GetResult()
 $reported = $stdoutTask.GetAwaiter().GetResult().Trim()
 if ($process.ExitCode -ne 0) { throw "version probe failed ($($process.ExitCode)): $stderr" }
-if ($reported -cne "viewr 0.7.8") {
+if ($reported -cne "viewr 0.7.9") {
     throw "installed version was '$reported'"
 }
 $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash

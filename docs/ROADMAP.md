@@ -19,10 +19,10 @@ Two rules hold across every phase:
 | Item | State |
 | --- | --- |
 | Published install target | Immutable [v0.7.8](https://github.com/blisspixel/viewr/releases/tag/v0.7.8), the missing-format, damaged WebP, TIFF, and ICO, JPEG end-marker, command, stable folder order, AppleDouble, and installer-script patch with its uncollected acceptance rows disclosed |
-| Workspace version | `0.7.8` until the v0.8.0 preparation change. The number matches the published tag. Behavior on main since that tag is [Unreleased](../CHANGELOG.md) and is not in the v0.7.8 archives |
+| Workspace version | `0.7.9`, preparing the viewing, collage, rating, embedded-preview, and Linux-archive patch. README and INSTALL stay on the published v0.7.8 installers. Behavior on main since that tag is [Unreleased](../CHANGELOG.md) until the tag-ready change and is not in the v0.7.8 archives |
 | Active milestone | **v0.8.0** release readiness: repeatable install, update, rollback, association, and provenance checks on an exact candidate |
-| Next version update | Advance to v0.8.0 only in a reviewed release-preparation change after its scope and gates are ready |
-| Next tag allowed | **v0.8.0** after its release-readiness work and complete automated gate. Uncollected hardware or screen-reader rows stay open |
+| Next version update | This preparation advances the workspace to v0.7.9. Advance to v0.8.0 only after its scope and gates are ready |
+| Next tag allowed | **v0.7.9** after the complete automated patch-release gate; v0.8.0 still requires its release-readiness work. Uncollected hardware or screen-reader rows stay open |
 | Later tags | Blocked until every earlier minor gate is closed |
 
 Phases 0 through 5 and Phase 7 are complete for their local repository scope.
@@ -133,6 +133,9 @@ v0.7.7  Damaged-file and Save Path patch  [released, acceptance rows open]
    |
    v
 v0.7.8  Format and command patch          [released, acceptance rows open]
+   |
+   v
+v0.7.9  Viewing and Linux-archive patch   [candidate]
    |
    v
 v0.8.0  Release-readiness beta            [next]
@@ -251,6 +254,18 @@ or accessibility evidence gates.
 | Installer script scope | Shipped v0.7.8 | The install command downloads one immutable installer script. The script installs the newest stable release unless a version is set. |
 | Stable folder order | Shipped v0.7.8 | Digit runs of equal value keep the shorter run first, so `img2` stays before `img02` and `img10`. Names that differ only by case stay adjacent in byte order. A folder refresh does not follow directory read order. |
 | AppleDouble sidecars | Shipped v0.7.8 | Folder scans and `viewr benchmark` skip files whose names start with `._`. Opening that path explicitly still attempts to decode it. |
+| Windowed Fit | Implemented, unreleased | Windowed Fit fills the frame. View > Cap Fit at actual size restores the previous cap for this session and is not saved. Actual Size stays one source pixel per display pixel. Fullscreen Fit still fills. |
+| Collage density | Implemented, unreleased | Up steps from 4 to 9 to 12 photos around the selection. Down steps back one level and then opens the focused photo. Page Up and Page Down move by the current level. |
+| Advance after rating | Implemented, unreleased | View > Advance after rating is off at launch and lasts for the session. An accepted rating opens the next photo in the active filter and does not wrap. A failed write and the first-rating disclosure stay put. The choice is not saved. |
+| Unrated filter | Implemented, unreleased | Rating Filter > Unrated keeps rejected, conflicting, unsupported, unreadable, and still-loading photos out. The menu shows how many numeric ratings are already known. The choice is not saved. |
+| Embedded RAW preview | Implemented, unreleased | A DNG or Sony ARW file shows its largest decodable embedded baseline JPEG and labels that size as a preview. The sensor image is not decoded. Opening that preview does not say that container pages are unavailable. |
+| First showable photo | Implemented, unreleased | Opening a folder starts on the first photo viewr can show. A camera RAW file stays in the folder. |
+| JPEG rating time | Implemented, unreleased | Rating a JPEG puts that file's previous modification time back. Latest First keeps the photo in place. |
+| Shortcut list | Implemented, unreleased | Help > Keyboard Shortcuts, `?`, and F1 open the same shortcut list as About. |
+| Rating notice lifetime | Implemented, unreleased | A saved or cleared rating message leaves the top bar when the visible photo changes. |
+| Windows Trash undo | Implemented, unreleased | Undo Trash on Windows restores a photo after Delete, including when the listing hides the file extension. A JPEG rating stays in the file. |
+| Arrow glyphs | Implemented, unreleased | Interface arrows stay drawable when the selected sans has no arrow glyphs. The bundled Hack face supplies those symbols. |
+| Linux archive floor | Implemented, unreleased | The Linux release job links the archive on Ubuntu 24.04 and refuses a recorded GLIBC floor above 2.39. The published v0.7.8 archive still needs glibc 2.43. |
 
 Clipboard image open, touch gestures, and slideshow remain separately tracked
 candidates. Copying the on-screen image, the doctor report, plain-language
@@ -262,7 +277,11 @@ RGB PNG icon entries, localized Image Information values, aligned CLI help,
 and typed Save Path shipped in v0.7.7. Named missing-format opens, damaged
 WebP, TIFF, and ICO files, the version command, benchmark path errors, stable folder
 order, AppleDouble sidecars, and the installer-script explanation shipped
-in v0.7.8. The
+in v0.7.8. Windowed Fit, collage density, advance after rating, the Unrated
+filter, labelled DNG and Sony ARW previews, first-showable folder entry,
+JPEG rating times, the shortcut list, rating-notice lifetime, Windows Trash
+undo, arrow glyphs, and the Linux archive floor are implemented and
+unreleased. The
 viewing-control changes add no preference, catalog, or activity history.
 
 ### Version state and update points
@@ -276,6 +295,7 @@ viewing-control changes add no preference, catalog, or activity history.
 | Transparency patch released | `0.7.6` | Candidate commit `8a12def388f2a43399fa5bff9ede571ae907729f`, [candidate run 40076650027](https://github.com/blisspixel/viewr/actions/runs/40076650027), and tag commit `349440a1ffab1a6ff0c98d8206277b7798e0fa5c` | [Release run 40080077413](https://github.com/blisspixel/viewr/actions/runs/40080077413) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
 | Damaged-file patch released | `0.7.7` | Candidate commit `809bc555515488de62eb970a77f941873090f316`, [candidate run 41383540069](https://github.com/blisspixel/viewr/actions/runs/41383540069), and tag commit `b2aca9940b1c61a8399f254d85c848491f01c1ce` | [Release run 41389245578](https://github.com/blisspixel/viewr/actions/runs/41389245578) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Windows doctor passed. v0.8 remains open |
 | Format and command patch released | `0.7.8` | Candidate commit `3098ede5c398569c4ae6fe2dc3d086f0549e8d62`, [candidate run 43903900271](https://github.com/blisspixel/viewr/actions/runs/43903900271), and tag commit `d4e3f089f9e80d3a6fab9f15bdee6a196dcc304a` | [Release run 43917419083](https://github.com/blisspixel/viewr/actions/runs/43917419083) passed and published twelve immutable assets. Public archives, checksums, manifests, and provenance verified; extracted Linux doctor passed. v0.8 remains open |
+| Viewing and Linux-archive patch | `0.7.9` | Workspace preparation. The changelog stays under Unreleased | README and INSTALL stay on published v0.7.8 until the tag-ready change. Hardware, screen-reader, original-M1, and file-association rows stay open. This is not v0.8.0 |
 | Carried acceptance work | `0.8.0` after its version update | Full commit SHA plus one non-publishing candidate run | Collect open hardware and assistive-technology rows on a new candidate; never backfill a published tag |
 | v0.8 release line | `0.8.0` | Reviewed version update and exact candidate run | Begins after the v0.8 scope and gates are ready |
 

@@ -1307,10 +1307,19 @@ fn rational_value(value: &uR64) -> Option<f64> {
     (value.denominator != 0).then(|| f64::from(value.clone()))
 }
 
+const APERTURE_VALUE: &str = "f/{value}";
+
 /// Format aperture value, such as `f/2.8` or `f/2,8`.
+///
+/// Each language owns the frame. `f/` stays the aperture notation. The value
+/// is inserted once and is not translated again.
 #[must_use]
 pub(crate) fn format_aperture(value: f64, language: Language) -> String {
-    format!("f/{}", language.format_decimal(value, 1))
+    const _: () = crate::locale::assert_cataloged(APERTURE_VALUE);
+    let stop = language.format_decimal(value, 1);
+    language
+        .fill(APERTURE_VALUE, &[("value", stop.as_str())])
+        .into_string()
 }
 
 /// Format focal length value, such as `50.0 mm` or `50,0 mm`.
@@ -1587,6 +1596,20 @@ mod tests {
         assert!(pseudo.contains("MiB"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{count}"));
+    }
+
+    #[test]
+    fn aperture_follows_the_selected_language() {
+        assert_eq!(format_aperture(2.8, Language::English), "f/2.8");
+        assert_eq!(format_aperture(2.0, Language::English), "f/2.0");
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_eq!(format_aperture(2.8, language), "f/2,8");
+            assert!(language.text(super::APERTURE_VALUE).contains("f/{value}"));
+        }
+        let pseudo = format_aperture(2.8, Language::Pseudo);
+        assert!(pseudo.contains("f/2.8"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{value}"));
     }
 
     #[test]

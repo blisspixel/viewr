@@ -32,6 +32,8 @@ and organized by user-visible concern.
 - Image Information formats a file size with one catalog frame per binary
   unit. B, KiB, MiB, and GiB stay the unit abbreviations, and the count uses
   the language's decimal separator.
+- Image Information formats an aperture with one catalog frame. The f/
+  notation stays, and the stop uses the language's decimal separator.
 
 ## 0.7.9 - 2026-11-27
 

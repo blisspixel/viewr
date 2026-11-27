@@ -38,11 +38,12 @@ disappears. This spec is the converged result of two rounds of design critique
   in memory for this session and is never persisted.
 
 - The image is scaled to fit the window (aspect preserved) and centered. The
-  letterbox area is the solid theme background. Windowed Fit shrinks a large
-  image and leaves a small one at actual size. Fullscreen Fit enlarges a small
-  image to the available viewport while preserving its complete aspect ratio.
-  Actual Size remains one source pixel per physical display pixel in either
-  mode.
+  letterbox area is the solid theme background. Windowed Fit fills the available
+  viewport, enlarging a small image without cropping it. View can cap that Fit
+  at actual size for the current session, and the choice is not saved.
+  Fullscreen Fit always enlarges a small image to the available viewport while
+  preserving its complete aspect ratio. Actual Size remains one source pixel
+  per physical display pixel in either mode.
 - Loading an image never changes the application-window dimensions. The initial
   1000px by 720px logical window, or the dimensions the user chooses by resizing,
   remains stable while image fit and zoom resolve inside its viewport.
@@ -106,8 +107,9 @@ disappears. This spec is the converged result of two rounds of design critique
   single-photo selection unless a removal already selected a surviving photo.
   Complete
   photos reflow as they become ready. Tile-local scaling may enlarge a complete
-  small source to its aspect-ratio tile; windowed single-photo Fit remains
-  capped at 100 percent. Opening a selected photo loads its full-resolution source. The
+  small source to its aspect-ratio tile. Windowed single-photo Fit also fills
+  the frame unless the session cap is on. Opening a selected photo loads its
+  full-resolution source. The
   current full decode and collage display images share a 640 MiB transient cache
   budget. If admission still fails, the status says how many fit safely.
 - Image Information: an optional 304px panel contains file facts and the explicit

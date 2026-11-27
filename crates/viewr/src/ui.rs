@@ -222,6 +222,8 @@ pub(crate) enum UiAction {
     SetImageInfoSide(DockSide),
     /// Toggle whether Save As retains EXIF (default off = strip).
     ToggleRetainExif,
+    /// Keep windowed Fit from enlarging for this session. Not saved.
+    ToggleCapFitAtActualSize,
     /// Pause or resume the current animated image.
     ToggleAnimationPlayback,
     /// Step the current animation frame or document page without wrapping.
@@ -322,6 +324,8 @@ pub(crate) struct UiFrameOwned {
     pub(crate) dock: DockInput,
     /// Whether Save As will retain EXIF (default false = strip).
     pub retain_exif: bool,
+    /// Session-only cap that keeps windowed Fit from enlarging. Not saved.
+    pub cap_fit_at_actual_size: bool,
     /// Session-only image background. Theme default follows the resolved appearance.
     pub background_override: crate::theme::ImageBackground,
     /// Whether the decoded image has any alpha byte below 255.
@@ -1879,7 +1883,7 @@ fn render_image_zoom(
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.menu_button(RichText::new(value).size(12.5).color(colors.muted), |ui| {
-                view_zoom_menu(ui, actions, chrome);
+                view_zoom_menu(ui, actions, chrome, frame.cap_fit_at_actual_size);
             })
             .response
         })
@@ -2426,7 +2430,7 @@ fn view_menu(
             .color(colors.text),
         |ui| {
             ui.set_min_width(228.0);
-            view_zoom_menu(ui, actions, chrome);
+            view_zoom_menu(ui, actions, chrome, frame.cap_fit_at_actual_size);
             view_sequence_menu(ui, actions, frame);
             ui.separator();
             if ui
@@ -2521,7 +2525,12 @@ fn folder_sort_radios(
     }
 }
 
-fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: ChromeViewModel) {
+fn view_zoom_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<UiAction>,
+    chrome: ChromeViewModel,
+    cap_fit_at_actual_size: bool,
+) {
     let enabled = chrome.is_enabled(ChromeControl::ViewImage);
     if ui
         .add_enabled(
@@ -2563,6 +2572,21 @@ fn view_zoom_menu(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, chrome: Chrome
         .clicked()
     {
         actions.push(UiAction::ZoomOut);
+        ui.close();
+    }
+    ui.separator();
+    let mut cap_fit = cap_fit_at_actual_size;
+    if ui
+        .checkbox(
+            &mut cap_fit,
+            chrome.language().text(tr!("Cap Fit at actual size")),
+        )
+        .on_hover_text(chrome.language().text(tr!(
+            "On for this session only. Fit then leaves a small photo at actual size instead of filling the window. This choice is not saved."
+        )))
+        .changed()
+    {
+        actions.push(UiAction::ToggleCapFitAtActualSize);
         ui.close();
     }
 }
@@ -6122,6 +6146,7 @@ mod tests {
         UiFrameOwned {
             dock: accessibility_test_dock(),
             retain_exif: false,
+            cap_fit_at_actual_size: false,
             background_override: crate::theme::ImageBackground::ThemeDefault,
             has_transparency: false,
             theme_preference: crate::theme::Preference::System,
@@ -6739,6 +6764,11 @@ mod tests {
                 view.iter()
                     .any(|label| label.starts_with("Fit Image to View")),
                 "Alt+V opens View"
+            );
+            assert!(
+                view.iter()
+                    .any(|label| label.starts_with("Cap Fit at actual size")),
+                "Alt+V lists the session Fit cap"
             );
             let help = labels_after_key(&frame, egui::Key::H, egui::Modifiers::ALT);
             assert!(
@@ -10082,6 +10112,20 @@ mod tests {
                 "selection closes zoom menu"
             );
         }
+    }
+
+    #[test]
+    fn image_zoom_popup_routes_the_session_fit_cap() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = accessibility_test_frame();
+        assert!(click_zoom_test_control(&context, &frame, "Image zoom: 100%").is_empty());
+        let actions = click_zoom_test_control(&context, &frame, "Cap Fit at actual size");
+        assert!(
+            matches!(actions.as_slice(), [UiAction::ToggleCapFitAtActualSize]),
+            "the session Fit cap must be its own action"
+        );
+        assert!(!egui::Popup::is_any_open(&context));
     }
 
     #[test]

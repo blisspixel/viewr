@@ -988,20 +988,28 @@ mod tests {
     #[test]
     fn embedded_preview_names_are_not_container_pages() {
         let workspace = TempWorkspace::new("pages_raw_preview").unwrap();
+        let frames = [(2, 1, [255, 0, 0]), (3, 2, [0, 0, 255])];
         let tiff_path = workspace.path().join("pages.tif");
-        write_rgb_tiff(&tiff_path, &[(2, 1, [255, 0, 0]), (3, 2, [0, 0, 255])]);
-        let bytes = std::fs::read(&tiff_path).unwrap();
+        write_rgb_tiff(&tiff_path, &frames);
         let pages = DecodedPages::load_with_cancellation(&tiff_path, &|| true)
             .unwrap()
             .expect("a multi-page TIFF still exposes pages");
         assert_eq!(pages.len(), 2);
 
-        for name in ["preview.dng", "preview.ARW", "preview.Dng"] {
-            let path = workspace.path().join(name);
-            std::fs::write(&path, &bytes).unwrap();
-            let loaded = DecodedPages::load_with_cancellation(&path, &|| true)
+        let dng_path = workspace.path().join("preview.dng");
+        let arw_path = workspace.path().join("preview.ARW");
+        let mixed_path = workspace.path().join("preview.Dng");
+        write_rgb_tiff(&dng_path, &frames);
+        write_rgb_tiff(&arw_path, &frames);
+        write_rgb_tiff(&mixed_path, &frames);
+        for path in [&dng_path, &arw_path, &mixed_path] {
+            let loaded = DecodedPages::load_with_cancellation(path, &|| true)
                 .expect("a DNG or ARW must not report a page-decode error");
-            assert!(loaded.is_none(), "{name} must not become container pages");
+            assert!(
+                loaded.is_none(),
+                "{} must not become container pages",
+                path.display()
+            );
         }
     }
 

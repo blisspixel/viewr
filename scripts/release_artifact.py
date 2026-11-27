@@ -110,6 +110,26 @@ class ReleaseError(ValueError):
     """A release artifact violated the repository's packaging contract."""
 
 
+LINUX_TARGET = "x86_64-unknown-linux-gnu"
+LINUX_GLIBC_FLOOR_MAXIMUM = (2, 39)
+LINUX_GLIBC_FLOOR_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+
+
+def parse_linux_glibc_floor(value: object) -> str:
+    """Return a Linux glibc floor at or below the supported maximum."""
+
+    if (
+        isinstance(value, str)
+        and LINUX_GLIBC_FLOOR_PATTERN.fullmatch(value) is not None
+    ):
+        major_text, minor_text = value.split(".")
+        if (int(major_text), int(minor_text)) <= LINUX_GLIBC_FLOOR_MAXIMUM:
+            return value
+    raise ReleaseError(
+        "linux_glibc_floor must be a major.minor version at or below 2.39"
+    )
+
+
 @dataclass(frozen=True)
 class ArchiveEntry:
     """One immutable payload entry and its Unix archive mode."""
@@ -727,7 +747,12 @@ def _validated_manifest(
         "target",
         "version",
     }
-    if set(manifest) != expected_keys:
+    keys = set(manifest)
+    floor_value = None
+    if "linux_glibc_floor" in keys:
+        floor_value = manifest["linux_glibc_floor"]
+        keys.remove("linux_glibc_floor")
+    if keys != expected_keys:
         raise ReleaseError("release manifest has an unexpected field set")
     if (
         manifest["schema_version"] != MANIFEST_SCHEMA_VERSION
@@ -744,6 +769,10 @@ def _validated_manifest(
         raise ReleaseError("release manifest has an invalid version")
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:
         raise ReleaseError("release manifest has an unsupported target")
+    if floor_value is not None:
+        if target != LINUX_TARGET:
+            raise ReleaseError("linux_glibc_floor is only valid on the Linux archive")
+        parse_linux_glibc_floor(floor_value)
     if not isinstance(toolchain, str) or TOOLCHAIN_PATTERN.fullmatch(toolchain) is None:
         raise ReleaseError("release manifest has an unpinned toolchain")
     if (
@@ -920,6 +949,10 @@ def build_release_artifact(
         "target": target,
         "version": version,
     }
+    if target == LINUX_TARGET:
+        measured_floor = os.environ.get("VIEWR_LINUX_GLIBC_FLOOR")
+        if measured_floor:
+            manifest["linux_glibc_floor"] = parse_linux_glibc_floor(measured_floor)
     prefix = f"viewr-{version}-{target}"
     archive_name = f"{prefix}.zip"
     target_root = repository_root / "target"

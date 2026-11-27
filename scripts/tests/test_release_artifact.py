@@ -999,6 +999,40 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
         run.assert_called_once()
 
+    def test_linux_manifest_records_a_measured_glibc_floor(self) -> None:
+        with mock.patch.dict(os.environ, {"VIEWR_LINUX_GLIBC_FLOOR": "2.39"}):
+            archive = self.build("x86_64-unknown-linux-gnu")
+
+        with zipfile.ZipFile(archive) as archive_file:
+            manifest = json.loads(
+                archive_file.read(
+                    "viewr-1.2.3-x86_64-unknown-linux-gnu/release-manifest.json"
+                )
+            )
+
+        self.assertEqual(manifest["linux_glibc_floor"], "2.39")
+
+    def test_linux_manifest_rejects_a_glibc_floor_above_2_39(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"VIEWR_LINUX_GLIBC_FLOOR": "2.43"}),
+            self.assertRaisesRegex(release_artifact.ReleaseError, "2.39"),
+        ):
+            self.build("x86_64-unknown-linux-gnu")
+
+    def test_windows_manifest_ignores_a_linux_glibc_floor(self) -> None:
+        with mock.patch.dict(os.environ, {"VIEWR_LINUX_GLIBC_FLOOR": "2.39"}):
+            archive = self.build()
+
+        with zipfile.ZipFile(archive) as archive_file:
+            name = next(
+                item
+                for item in archive_file.namelist()
+                if item.endswith("release-manifest.json")
+            )
+            manifest = json.loads(archive_file.read(name))
+
+        self.assertNotIn("linux_glibc_floor", manifest)
+
     def test_build_rejects_unpinned_identity_and_invalid_epoch(self) -> None:
         binary_directory = self.write_binaries("x86_64-unknown-linux-gnu")
         (self.repository / "rust-toolchain.toml").write_text(

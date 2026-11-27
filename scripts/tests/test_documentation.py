@@ -67,16 +67,16 @@ class DocumentationTests(unittest.TestCase):
 
     def test_public_release_state_is_consistent(self) -> None:
         requirements = {
-            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.7.8 or commit SHA",),
+            ".github/ISSUE_TEMPLATE/bug_report.yml": ("0.7.9 or commit SHA",),
             "README.md": (
-                "v0.7.8 is the preview described here",
+                "v0.7.9 is the preview described here",
                 "checksummed and",
                 "attested",
                 "not Authenticode-signed",
                 "notarized",
             ),
             "docs/INSTALL.md": (
-                "v0.7.8 is the preview described here",
+                "v0.7.9 is the preview described here",
                 "checksummed",
                 "manifest-verified",
                 "attested",
@@ -269,6 +269,7 @@ class DocumentationTests(unittest.TestCase):
                 "Representative-hardware",
             ),
             "CHANGELOG.md": (
+                "## 0.7.9 - 2026-11-27",
                 "## 0.7.8 - 2026-11-16",
                 "## 0.7.7 - 2026-11-01",
                 "## 0.7.6 - 2026-10-24",
@@ -324,28 +325,37 @@ class DocumentationTests(unittest.TestCase):
         )
         sandbox = (REPOSITORY_ROOT / "docs/SANDBOX_PLAN.md").read_text(encoding="utf-8")
         index = (REPOSITORY_ROOT / "docs/README.md").read_text(encoding="utf-8")
-        self.assertIn("v0.7.8 is the preview described here", readme)
+        self.assertIn("v0.7.9 is the preview described here", readme)
         self.assertIn("The published v0.7.8 preview does not open camera RAW.", readme)
         self.assertIn("https://github.com/blisspixel/viewr/issues/185", readme)
-        self.assertIn("not in the v0.7.8 archives", readme)
-        self.assertIn("under Unreleased in", readme)
+        self.assertIn("measured GLIBC floor is 2.39", readme)
+        self.assertIn("still needs glibc 2.43", readme)
+        self.assertNotIn("not in the v0.7.8 archives", readme)
+        self.assertNotIn("under Unreleased in", readme)
+        self.assertNotIn("/releases/download/v0.7.8/", readme)
         for closed in ("issues/224", "issues/225", "issues/226"):
             self.assertNotIn(closed, readme)
-        self.assertIn(
+        self.assertNotIn(
             "Behavior on main since that tag is [Unreleased](../CHANGELOG.md)",
             roadmap,
         )
-        self.assertIn("`0.7.9`, preparing the viewing", publishing)
-        self.assertIn("README and INSTALL stay on the published v0.7.8", publishing)
+        self.assertIn("[tag-ready]", roadmap)
+        self.assertIn("`0.7.9`, verified candidate and tag-ready", publishing)
+        self.assertIn(
+            "Those assets do not exist until the tag is published", publishing
+        )
+        self.assertNotIn("README and INSTALL stay on the published v0.7.8", publishing)
         self.assertIn("does not decode the sensor", sandbox)
         self.assertIn("Unreleased is the", index)
         self.assertIn("or a published preview", index)
         install = (REPOSITORY_ROOT / "docs/INSTALL.md").read_text(encoding="utf-8")
         self.assertIn(
-            "A clone of the default branch includes behavior recorded as Unreleased",
+            "This tag-ready tree is the verified v0.7.9 candidate plus release-status text.",
             install,
         )
-        self.assertEqual(install.count("/releases/download/v0.7.8/install."), 6)
+        self.assertIn("still needs glibc 2.43", install)
+        self.assertEqual(install.count("/releases/download/v0.7.9/install."), 6)
+        self.assertNotIn("/releases/download/v0.7.8/", install)
 
     def test_specialized_linux_jobs_pin_ubuntu_26_04(self) -> None:
         for relative in (

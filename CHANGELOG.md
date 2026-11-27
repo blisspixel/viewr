@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format is human-written
 and organized by user-visible concern.
 
-## Unreleased
+## 0.7.9 - 2026-11-27
 
 - Malformed JPEG XL input whose adaptive low-frequency channels do not share
   one grid now returns a decode error instead of asserting. The exact hosted

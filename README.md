@@ -11,12 +11,12 @@ standard XMP so other apps can read them, and send the rest to Trash with Undo.
 It is native Rust, with no account, no telemetry, and no application network
 client.
 
-The published v0.7.8 preview does not open camera RAW. On main, a DNG
-or Sony ARW file shows its largest decodable embedded baseline JPEG
-and labels that size as a preview. The sensor image stays unread.
-A DNG or ARW with no such preview, and every other camera RAW type,
-still says that viewr does not open camera RAW files yet. Full sensor
-RAW remains
+The published v0.7.8 preview does not open camera RAW. This v0.7.9
+preview shows a DNG or Sony ARW file as its largest decodable embedded
+baseline JPEG and labels that size as a preview. The sensor image stays
+unread. A DNG or ARW with no such preview, and every other camera RAW
+type, still says that viewr does not open camera RAW files yet. Full
+sensor RAW remains
 [#185](https://github.com/blisspixel/viewr/issues/185).
 
 ## View, edit, cull
@@ -80,17 +80,17 @@ Appearance and panel behavior are detailed in the
 
 ## Install
 
-v0.7.8 is the preview described here. Its portable archives are checksummed and
+v0.7.9 is the preview described here. Its portable archives are checksummed and
 attested, but they are not Authenticode-signed on Windows or notarized on macOS.
 Normal operating-system trust warnings may appear. Do not disable platform
 security controls to force a launch. The representative-hardware product-quality
 matrix was not completed for this tag; the
-[v0.7.8 notes](docs/releases/v0.7.8.md) record that gap exactly.
+[v0.7.9 notes](docs/releases/v0.7.9.md) record that gap exactly.
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.ps1 | iex
 ```
 
 viewr installs for the current user under `%LOCALAPPDATA%\Programs\viewr`, adds
@@ -100,33 +100,31 @@ or updater service is required.
 ### macOS or Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.sh | sh
 ```
 
 viewr installs under `~/.local`. The preview supports Intel and Apple Silicon
-macOS plus x86-64 glibc Linux. The published v0.7.8 Linux archive needs
-glibc 2.43, so Ubuntu 24.04 LTS (glibc 2.39) and Debian 13 (glibc 2.41)
-cannot run it. On those systems, install v0.7.7 with `VIEWR_VERSION=0.7.7`.
+macOS plus x86-64 glibc Linux. This preview's Linux archive was linked on
+Ubuntu 24.04 and its measured GLIBC floor is 2.39. The already published
+v0.7.8 archive still needs glibc 2.43.
 
-The command downloads the immutable v0.7.8 installer script. That script
+The command downloads the immutable v0.7.9 installer script. That script
 installs the newest stable release unless you set a version, and it verifies
 the archive SHA-256 sidecar and internal manifest before installation. It does
 not give the application network access. Run the same command again to install
-the newest stable release. To install v0.7.8 itself, set `VIEWR_VERSION=0.7.8`
+the newest stable release. To install v0.7.9 itself, set `VIEWR_VERSION=0.7.9`
 before `sh` on macOS or Linux, or save the PowerShell script and run it with
-`-Version 0.7.8`. For review-first installation,
+`-Version 0.7.9`. For review-first installation,
 manual archive verification, uninstall steps, platform prerequisites, or a source
 build, see [Installing viewr](docs/INSTALL.md).
 
-The v0.7.8 archive uses the `io.github.blisspixel.viewr` desktop ID.
+The v0.7.9 archive uses the `io.github.blisspixel.viewr` desktop ID.
 Existing source installs should follow the launcher's
 [identity migration steps](docs/INSTALL.md#linux-identity-migration).
 
 ## What it does
 
-The published v0.7.8 preview does the following. Behavior on main since
-that tag is named in Project status and the changelog. It is not in the
-archives above.
+The v0.7.9 preview does the following.
 
 - Opens JPEG, PNG, GIF, WebP, TIFF, SVG, JPEG XL, OpenEXR, and common bitmap
   formats, including bounded animation and multi-page image navigation.
@@ -252,27 +250,24 @@ has room; image zoom does not change.
 
 ## Project status
 
-v0.7.8 adds named missing-format opens, damaged WebP, TIFF, and ICO reports,
-JPEG end-marker rejection, version-command help, benchmark path errors, stable
-folder order, AppleDouble skipping, and the installer-script explanation to the
-focused viewer. The representative-hardware and screen-reader acceptance rows
-remain open; this patch does not complete the v0.8 release-readiness milestone.
-Behavior on main since that tag is under Unreleased in
-[CHANGELOG.md](CHANGELOG.md). It includes the labelled DNG and Sony ARW
-embedded preview, opening a folder on the first photo that can be shown,
-JPEG ratings that put the previous modification time back, the shortcut
-list from Help, `?`, and F1, and a rating message that leaves when the
-visible photo changes. The window and controls use wgpu 30 and egui 0.37.
-Pictures stay on the historical sRGB surface. Those changes are in this
-source tree. They are not in the v0.7.8 archives, and the install
-commands above stay on that tag.
+v0.7.9 adds windowed Fit, collage steps of 4, 9, and 12, a session
+advance after an accepted rating, an Unrated filter, labelled DNG and
+Sony ARW embedded previews, folder entry on the first showable photo,
+restored JPEG rating times, the shortcut list, rating notices that leave
+with the photo, Windows Trash undo, arrow glyphs from bundled Hack, a
+Linux archive linked on Ubuntu 24.04 with a measured GLIBC floor of
+2.39, and a decode error when JPEG XL low-frequency channels do not
+share one grid. The representative-hardware and screen-reader acceptance
+rows remain open; this patch does not complete the v0.8
+release-readiness milestone. The window and controls use wgpu 30 and
+egui 0.37. Pictures stay on the historical sRGB surface.
 
 The first preview v0.1.0, the v0.1.1 through v0.1.5 patches, v0.2.0, v0.3.0,
-v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.7 remain
+v0.4.0, v0.5.0, v0.6.0 through v0.6.5, and v0.7.0 through v0.7.8 remain
 published. `main` continues the logical order in the
 [roadmap](docs/ROADMAP.md#order-of-operations-to-10): **v0.8.0** release
 readiness through v0.9 publisher authentication, then v1.0.
-The [current release notes](docs/releases/v0.7.8.md) state the exact published
+The [current release notes](docs/releases/v0.7.9.md) state the exact
 limits, including that the representative-hardware product-quality matrix was
 not completed for this tag and that its rows remain open work.
 Unpublished candidates are identified by exact commit and workflow run. The

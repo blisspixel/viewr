@@ -117,14 +117,14 @@ workflow results, and release assets remain the source of truth:
 Four version states must not be conflated:
 
 1. **Public version:** the newest immutable published tag and its assets. It is
-   currently v0.7.8. README and INSTALL use its fixed immutable URLs.
+   currently v0.7.8. The tag-ready README and INSTALL name the intended v0.7.9
+   installers. Those assets do not exist until the tag is published.
 2. **Workspace version:** the semantic version compiled into `viewr`, used in
    archive names, and recorded in `Cargo.toml` and `Cargo.lock`. It is currently
-   `0.7.9`, preparing the viewing, collage, rating, embedded-preview, and
-   Linux-archive patch. README and INSTALL stay on the published v0.7.8
-   installers. Ordinary commits after this preparation keep this number until
-   the tag-ready change. The changelog stays under Unreleased and is not part
-   of the published v0.7.8 archives.
+   `0.7.9`, verified candidate and tag-ready viewing, collage, rating,
+   embedded-preview, Linux-archive, and JPEG XL channel patch. The changelog
+   records that work under 0.7.9. It is not part of the published v0.7.8
+   archives.
 3. **Candidate identity:** the full commit SHA plus one non-publishing
    `Release artifacts` workflow run. A candidate is not a public release, even
    when its workspace version matches the public version. Never identify it by
@@ -835,6 +835,39 @@ The extracted published Linux archive reports `viewr 0.7.8`, and its doctor
 report passed every critical check without opening a window. The decode worker
 beside the executable passed its in-memory probe. The archive was not installed.
 Representative-hardware and native screen-reader acceptance remain uncollected.
+
+For v0.7.9, [main CI run 45930602138](https://github.com/blisspixel/viewr/actions/runs/45930602138),
+[fuzz run 45930602168](https://github.com/blisspixel/viewr/actions/runs/45930602168),
+and [CodeQL run 45930601545](https://github.com/blisspixel/viewr/actions/runs/45930601545)
+passed on candidate commit `c85a59458812648a3dc3a08fb4370e619f557454`.
+The push started Fuzz because the commit includes the decoder fix and the corpus.
+One non-publishing [candidate run 45931780878](https://github.com/blisspixel/viewr/actions/runs/45931780878)
+repeated the complete quality and fuzz gates and built all four archives.
+Publication stayed skipped. All four downloads passed their sidecars and the
+official 57-file manifest verifier. Each archive includes the v0.7.9 notes and
+the RUSTSEC-2026-0486 wording. The Linux manifest records GLIBC floor 2.39, and
+that floor was measured again on the extracted `viewr` and `viewr-decode`
+binaries. The complete fixture set verified against checksum-manifest SHA-256
+`0ca94fd40b372c94fcdf45d7c530829cb2345b597725db7bbbfacc1b07fc12a2`.
+The fixture set is unchanged from v0.7.8.
+
+| Candidate target | Archive SHA-256 |
+| --- | --- |
+| Windows x64 | `f459e4e19717706737820e5a920bf911af979d776965f5e6eeb96c43188e6e80` |
+| macOS Intel | `252ad917dd60d9bcbc2bef1a96dc71e973f906921dacaa56e245cd584a181ae1` |
+| macOS Apple Silicon | `a02617940f9d30e95567db709d40ecf36af6658dfa9bfc765adf8a1fc823bd50` |
+| Linux x64 | `dfb087cafc8e6d71b038ae2c25475a3301cf657b4d02c40cae142129de663837` |
+
+The extracted Linux candidate reports `viewr 0.7.9`, and its doctor report
+passed every critical check without opening a window. The decode worker beside
+the executable passed its in-memory probe. The archive was not installed.
+The tag-ready follow-up changes release status, immutable links, and version
+assertions only. Application source, dependencies, workflows, and packaging
+remain identical to the verified candidate. Representative-hardware and native
+screen-reader acceptance remain uncollected. The original-M1 runtime receipt,
+full file-association acceptance, and the 50,000-file rating probe remain
+uncollected. Unsigned archives remain unsigned. This candidate is not a public
+release. This patch is not v0.8.0.
 
 ## Required before a broadly recommended 1.0
 

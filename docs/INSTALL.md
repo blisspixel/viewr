@@ -1,24 +1,23 @@
 # Installing viewr
 
-viewr is pre-1.0. v0.7.8 is the preview described here, a missing-format,
-damaged WebP, TIFF, and ICO, JPEG end-marker, version-command, benchmark,
-stable folder order, AppleDouble, and installer-script patch. Its portable
-archives are checksummed, manifest-verified, and attested, but the Windows
-artifacts are not Authenticode-signed and the macOS artifacts are not Developer
-ID-signed or notarized. Normal operating-system trust warnings may appear. Installation is
-per user and never requires elevation. The representative-hardware
-product-quality matrix was not completed for this tag; the
-[v0.7.8 notes](releases/v0.7.8.md) record that gap exactly.
+viewr is pre-1.0. v0.7.9 is the preview described here, a viewing, collage,
+rating, embedded-preview, Linux-archive, and JPEG XL channel patch. Its
+portable archives are checksummed, manifest-verified, and attested, but the
+Windows artifacts are not Authenticode-signed and the macOS artifacts are not
+Developer ID-signed or notarized. Normal operating-system trust warnings may
+appear. Installation is per user and never requires elevation. The
+representative-hardware product-quality matrix was not completed for this tag;
+the [v0.7.9 notes](releases/v0.7.9.md) record that gap exactly.
 
 ## One-command install and update
 
 ### Windows 10 or 11, x64
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.ps1 | iex
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.ps1 | iex
 ```
 
-The URL is the immutable v0.7.8 installer script, not a moving branch. The
+The URL is the immutable v0.7.9 installer script, not a moving branch. The
 script installs the newest stable release unless `-Version` is set.
 
 The installer:
@@ -38,7 +37,7 @@ background.
 To install a specific version from a reviewed local copy of the script:
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.ps1 `
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.ps1 `
   -OutFile $env:TEMP\viewr-install.ps1
 & $env:TEMP\viewr-install.ps1 -Version 0.6.2
 ```
@@ -50,10 +49,10 @@ shortcut. `-InstallDir` is accepted only inside the current user's
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.sh | sh
+curl -fsSL https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.sh | sh
 ```
 
-The URL is the immutable v0.7.8 installer script, not a moving branch. The
+The URL is the immutable v0.7.9 installer script, not a moving branch. The
 script installs the newest stable release unless `VIEWR_VERSION` is set.
 
 The shell installer:
@@ -75,9 +74,10 @@ files out of the release directory before retrying; the installer does not delet
 them.
 
 Supported release targets are macOS Intel, macOS Apple Silicon, and Linux x86-64
-glibc. The published v0.7.8 Linux archive needs glibc 2.43. v0.7.7 needs
-glibc 2.39, which Ubuntu 24.04 LTS and Debian 13 provide. Linux ARM64 and musl
-users must build from source for now.
+glibc. This preview's Linux archive was linked on Ubuntu 24.04 and its measured
+GLIBC floor is 2.39. The already published v0.7.8 archive still needs glibc 2.43.
+v0.7.7 needs glibc 2.39. Linux ARM64 and musl users must build from source
+for now.
 
 To pin a release or override the user-local locations:
 
@@ -94,13 +94,13 @@ configuration. The installer reports this without editing profile files.
 ## Review before running
 
 Pipe-to-shell commands are convenient but execute installer code. The commands
-above download the immutable `v0.7.8` installer script rather than a moving
+above download the immutable `v0.7.9` installer script rather than a moving
 branch. The script installs the newest stable release unless `VIEWR_VERSION`
 or `-Version` selects one.
 To review it first:
 
 ```sh
-curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.sh
 less install.sh
 sh install.sh
 ```
@@ -137,7 +137,7 @@ Extract the archive and keep `bin/viewr` and `bin/viewr-decode` side by side. Th
 archive also contains the project license, notice, third-party license inventory,
 security policy, canonical documentation, and a per-file release manifest.
 
-GitHub checksums and attestations improve integrity and provenance. The v0.7.8
+GitHub checksums and attestations improve integrity and provenance. The v0.7.9
 portable archives are not Authenticode-signed or Apple-notarized, so
 operating-system trust dialogs may still apply. Do not disable platform security
 controls to force a launch.
@@ -153,9 +153,8 @@ cd viewr
 cargo build --release --workspace --locked
 ```
 
-A clone of the default branch includes behavior recorded as Unreleased in
-the changelog. That behavior is not in the v0.7.8 archives above. The
-workspace version stays 0.7.8 until release preparation.
+This tag-ready tree is the verified v0.7.9 candidate plus release-status text.
+Behavior added after the tag is Unreleased and is not in the v0.7.9 archives.
 
 The binaries are written to `target/release`. Keep the main executable and worker
 from the same build together. On Linux, the build also needs the normal Wayland/X11
@@ -295,7 +294,7 @@ not running. viewr uses the X server named by `DISPLAY` in that case rather than
 failing, and says so in the doctor report.
 
 The published v0.7.4 installer registers `com.github.blisspixel.viewr.desktop`.
-The v0.7.8 archive uses `io.github.blisspixel.viewr.desktop`. Neither
+The v0.7.9 archive uses `io.github.blisspixel.viewr.desktop`. Neither
 installation changes a default. File > Default
 Image Viewer offers commands matching its build. For current source builds,
 opt in explicitly:
@@ -381,18 +380,18 @@ be selected as a Finder default.
 Close viewr and change any file-type defaults first. Uninstalling viewr never
 changes file associations or deletes photos.
 
-The v0.7.8 installer removes an installer-owned directory, the command or PATH
+The v0.7.9 installer removes an installer-owned directory, the command or PATH
 entry that points at it, and the Linux launcher and icon or the Windows Start
 menu shortcut that opens it. A directory with any other file stays in place.
 Review the fixed-version script, then run:
 
 ```sh
-curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.sh
+curl -fsSLO https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.sh
 sh install.sh uninstall
 ```
 
 ```powershell
-irm https://github.com/blisspixel/viewr/releases/download/v0.7.8/install.ps1 `
+irm https://github.com/blisspixel/viewr/releases/download/v0.7.9/install.ps1 `
   -OutFile $env:TEMP\viewr-install.ps1
 & $env:TEMP\viewr-install.ps1 -Uninstall
 ```

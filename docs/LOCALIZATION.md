@@ -105,6 +105,10 @@ of by review:
   frame that joins an already translated save phrase to its metadata result.
   Both phrases are inserted once, and a value that contains braces stays
   verbatim.
+  `ui::top_rating_position_outside_filter_follows_the_selected_language`
+  proves the frame that joins a rating-filter match count to the folder
+  total. Both counts are inserted once, and a value that contains braces
+  stays verbatim.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

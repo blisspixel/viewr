@@ -1672,10 +1672,18 @@ fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
     } else if !matches!(frame.rating.filter, crate::ratings::RatingFilter::All)
         && frame.rating.match_count > 0
     {
-        Some(format!(
-            "{} matching · {} total",
-            frame.rating.match_count, frame.rating.folder_count
-        ))
+        Some(
+            frame
+                .language
+                .fill(
+                    tr!("{matching} matching · {total} total"),
+                    &[
+                        ("matching", &frame.rating.match_count.to_string()),
+                        ("total", &frame.rating.folder_count.to_string()),
+                    ],
+                )
+                .into_string(),
+        )
     } else {
         None
     }
@@ -11275,6 +11283,64 @@ mod tests {
                     .any(|(_, node)| node.label() == Some(language.text(tr!("File"))))
             );
         }
+    }
+
+    #[test]
+    fn top_rating_position_outside_filter_follows_the_selected_language() {
+        use crate::ratings::{Rating, RatingFilter};
+
+        let mut frame = accessibility_test_frame();
+        frame.rating.visible_position = None;
+        frame.rating.match_count = 3;
+        frame.rating.folder_count = 12;
+        frame.rating.filter = RatingFilter::AtLeast(Rating::new(4).expect("valid test rating"));
+        assert_eq!(
+            super::top_rating_position_label(&frame).as_deref(),
+            Some("3 matching · 12 total")
+        );
+        frame.rating.filter = RatingFilter::Unrated;
+        assert_eq!(
+            super::top_rating_position_label(&frame).as_deref(),
+            Some("3 matching · 12 total")
+        );
+        frame.rating.filter = RatingFilter::All;
+        assert_eq!(
+            super::top_rating_position_label(&frame).as_deref(),
+            Some("1 / 2")
+        );
+        frame.playlist_pos = None;
+        assert_eq!(super::top_rating_position_label(&frame), None);
+        frame.rating.filter = RatingFilter::Unrated;
+        frame.rating.match_count = 0;
+        assert_eq!(super::top_rating_position_label(&frame), None);
+
+        let braced = Language::English.fill(
+            tr!("{matching} matching · {total} total"),
+            &[("matching", "keep {brace}"), ("total", "12")],
+        );
+        assert!(braced.as_str().contains("keep {brace}"));
+        assert!(!braced.as_str().contains("{matching}"));
+        assert!(!braced.as_str().contains("{total}"));
+
+        frame.rating.match_count = 3;
+        for language in [Language::Spanish, Language::French, Language::German] {
+            frame.language = language;
+            let composed = super::top_rating_position_label(&frame).expect("filtered count");
+            let expected = language.fill(
+                tr!("{matching} matching · {total} total"),
+                &[("matching", "3"), ("total", "12")],
+            );
+            assert_eq!(composed, expected.as_str());
+            assert_ne!(composed, "3 matching · 12 total");
+            assert!(!composed.contains("{matching}"));
+            assert!(!composed.contains("{total}"));
+        }
+        let pseudo = Language::Pseudo.fill(
+            tr!("{matching} matching · {total} total"),
+            &[("matching", "keep {brace}"), ("total", "12")],
+        );
+        assert!(pseudo.as_str().contains("keep {brace}"));
+        assert!(pseudo.as_str().contains(crate::locale::PSEUDO_MARKS.0));
     }
 
     #[test]

@@ -17,6 +17,9 @@ and organized by user-visible concern.
   frame. The accelerator stays Ctrl+Q or Cmd+Q.
 - A successful Save As joins the saved-copy phrase to its metadata result in
   the selected language. The middle dot stays the separator.
+- When the current photo is outside the active rating filter, the top status
+  joins the match count to the folder total in the selected language. The
+  middle dot stays the separator.
 
 ## 0.7.9 - 2026-11-27
 

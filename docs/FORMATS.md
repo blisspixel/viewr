@@ -169,8 +169,8 @@ is and exits, because there is no protocol frame on a terminal to answer.
 |--------|------------|----------------------|-------------|
 | AVIF | `.avif` | This build can't open AVIF photos. | `--features avif` (+ system libavif) |
 | HEIC / HEIF | `.heic`, `.heif` | This build can't open HEIC photos. | `--features heic` (+ system libheif) |
-| DNG preview | `.dng` | Largest decodable embedded baseline JPEG, labelled Preview with its pixel size. A larger frame that cannot be shown does not hide a smaller one. A DNG with no such preview uses the camera RAW sentence. | Preview only. The sensor image is not decoded. |
-| ARW preview | `.arw` | Same reduced-resolution baseline JPEG rules as DNG. An ARW with no such preview uses the camera RAW sentence. | Preview only. The sensor image is not decoded. An unreduced sensor IFD stays unread, including Sony compression 7 and compression 32767. |
+| DNG preview | `.dng` | Largest decodable embedded baseline JPEG, labelled Preview with its pixel size. A larger frame that cannot be shown does not hide a smaller one. A DNG with no such preview uses the camera RAW sentence. Page navigation does not run. | Preview only. The sensor image is not decoded. A sensor IFD is not a page. |
+| ARW preview | `.arw` | Same reduced-resolution baseline JPEG rules as DNG. An ARW with no such preview uses the camera RAW sentence. Page navigation does not run. | Preview only. The sensor image is not decoded. An unreduced sensor IFD stays unread, including Sony compression 7 and compression 32767. |
 | Camera RAW | `.cr2`, `.nef`, `.rw2`, `.orf`, `.raf` | viewr does not open camera RAW files yet. Deferred from 1.0. | Feature `raw` reserved; no sensor decode, orientation, or color implementation ships in 1.0 |
 
 Those RAW names stay in a folder. Opening the folder selects the first photo

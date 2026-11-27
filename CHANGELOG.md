@@ -9,6 +9,10 @@ and organized by user-visible concern.
   selected language. When another status is also in the top bar, the
   screen-reader sentence joins the F5 reminder to that status in the same
   language.
+- Quick Tools joins each translated control name to its shortcut, and its
+  Open With label uses the same catalog entry as the File menu. Page and
+  frame step hover joins a translated name to its shortcut. The shortcut
+  stays the key name, and a step's accessible name stays the control name.
 
 ## 0.7.9 - 2026-11-27
 

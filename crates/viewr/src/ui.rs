@@ -1134,12 +1134,12 @@ fn render_context_menu(
             ui.set_max_width(320.0);
             ui.horizontal(|ui| {
                 let heal = chrome.heal_control();
-                if context_tool_button(ui, heal).clicked() {
+                if context_tool_button(ui, frame.language, heal).clicked() {
                     actions.push(UiAction::ToggleHeal);
                     close = true;
                 }
                 let crop = chrome.crop_control();
-                if context_tool_button(ui, crop).clicked() {
+                if context_tool_button(ui, frame.language, crop).clicked() {
                     actions.push(UiAction::ToggleCrop);
                     close = true;
                 }
@@ -1196,13 +1196,7 @@ fn render_context_menu(
                 actions.push(UiAction::CopyImage);
                 close = true;
             }
-            let enabled = chrome.is_enabled(ChromeControl::OpenWith);
-            let open_with = ui.add_enabled(enabled, egui::Button::new("Open With..."));
-            open_with.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, "Open With..."));
-            if open_with
-                .on_hover_text(frame.text(OPEN_WITH_HELP))
-                .clicked()
-            {
+            if context_open_with_button(ui, frame, chrome) {
                 actions.push(UiAction::OpenWith);
                 close = true;
             }
@@ -1216,6 +1210,18 @@ fn render_context_menu(
     if close || (ui.ctx().input(|i| i.pointer.any_pressed()) && !ui.ctx().is_pointer_over_egui()) {
         actions.push(UiAction::CloseContextMenu);
     }
+}
+
+fn context_open_with_button(
+    ui: &mut egui::Ui,
+    frame: &UiFrameOwned,
+    chrome: ChromeViewModel,
+) -> bool {
+    let enabled = chrome.is_enabled(ChromeControl::OpenWith);
+    let label = frame.text(tr!("Open With..."));
+    let response = ui.add_enabled(enabled, egui::Button::new(label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, label));
+    response.on_hover_text(frame.text(OPEN_WITH_HELP)).clicked()
 }
 
 fn context_copy_button(ui: &mut egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewModel) -> bool {
@@ -1248,8 +1254,12 @@ fn menu_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Response 
     response
 }
 
-fn context_tool_button(ui: &mut egui::Ui, view: ToolControlView) -> egui::Response {
-    let label = format!("{} ({})", view.label, view.shortcut);
+fn context_tool_button(
+    ui: &mut egui::Ui,
+    language: Language,
+    view: ToolControlView,
+) -> egui::Response {
+    let label = crate::chrome::name_with_shortcut(language, view.label, view.shortcut);
     let enabled = ui.is_enabled() && view.enabled;
     let response = ui.add_enabled(
         view.enabled,
@@ -1682,7 +1692,11 @@ fn render_top_page_position(
     let Some(pages) = frame.pages.as_ref().filter(|_| frame.dock.has_image) else {
         return;
     };
-    let (previous_name, next_name) = sequence_step_names(pages);
+    let (previous_source, next_source) = sequence_step_names(pages);
+    let previous_name = frame.text(previous_source);
+    let next_name = frame.text(next_source);
+    let previous_hover = crate::chrome::name_with_shortcut(frame.language, previous_name, "[");
+    let next_hover = crate::chrome::name_with_shortcut(frame.language, next_name, "]");
     Frame::new()
         .fill(colors.raised)
         .corner_radius(CornerRadius::same(6))
@@ -1707,8 +1721,11 @@ fn render_top_page_position(
                         ui,
                         actions,
                         strip_step_button(TOP_PAGE_PREVIOUS_GLYPH, step_width, colors),
-                        frame.text(previous_name),
-                        "[",
+                        SequenceStep {
+                            accessible_name: previous_name,
+                            hover: &previous_hover,
+                            shortcut: "[",
+                        },
                         pages.can_previous,
                         -1,
                     );
@@ -1722,8 +1739,11 @@ fn render_top_page_position(
                         ui,
                         actions,
                         strip_step_button(TOP_PAGE_NEXT_GLYPH, step_width, colors),
-                        frame.text(next_name),
-                        "]",
+                        SequenceStep {
+                            accessible_name: next_name,
+                            hover: &next_hover,
+                            shortcut: "]",
+                        },
                         pages.can_next,
                         1,
                     );
@@ -4349,12 +4369,19 @@ fn render_animation_controls(
         {
             actions.push(UiAction::ToggleAnimationPlayback);
         }
+        let previous_name = frame.text(tr!("Previous frame"));
+        let next_name = frame.text(tr!("Next frame"));
+        let previous_hover = crate::chrome::name_with_shortcut(frame.language, previous_name, "[");
+        let next_hover = crate::chrome::name_with_shortcut(frame.language, next_name, "]");
         render_sequence_step_button(
             ui,
             actions,
             panel_step_button(frame.text(tr!("Previous"))),
-            frame.text(tr!("Previous frame")),
-            "[",
+            SequenceStep {
+                accessible_name: previous_name,
+                hover: &previous_hover,
+                shortcut: "[",
+            },
             animation.can_previous,
             -1,
         );
@@ -4362,8 +4389,11 @@ fn render_animation_controls(
             ui,
             actions,
             panel_step_button(frame.text(tr!("Next"))),
-            frame.text(tr!("Next frame")),
-            "]",
+            SequenceStep {
+                accessible_name: next_name,
+                hover: &next_hover,
+                shortcut: "]",
+            },
             animation.can_next,
             1,
         );
@@ -4394,13 +4424,20 @@ fn render_page_controls(
     };
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let (previous_name, next_name) = sequence_step_names(pages);
+        let (previous_source, next_source) = sequence_step_names(pages);
+        let previous_name = frame.text(previous_source);
+        let next_name = frame.text(next_source);
+        let previous_hover = crate::chrome::name_with_shortcut(frame.language, previous_name, "[");
+        let next_hover = crate::chrome::name_with_shortcut(frame.language, next_name, "]");
         render_sequence_step_button(
             ui,
             actions,
             panel_step_button(frame.text(tr!("Previous"))),
-            frame.text(previous_name),
-            "[",
+            SequenceStep {
+                accessible_name: previous_name,
+                hover: &previous_hover,
+                shortcut: "[",
+            },
             pages.can_previous,
             -1,
         );
@@ -4408,8 +4445,11 @@ fn render_page_controls(
             ui,
             actions,
             panel_step_button(frame.text(tr!("Next"))),
-            frame.text(next_name),
-            "]",
+            SequenceStep {
+                accessible_name: next_name,
+                hover: &next_hover,
+                shortcut: "]",
+            },
             pages.can_next,
             1,
         );
@@ -4432,21 +4472,25 @@ fn panel_step_button(label: &str) -> egui::Button<'_> {
     egui::Button::new(label).min_size(Vec2::new(72.0, 36.0))
 }
 
+#[derive(Clone, Copy)]
+struct SequenceStep<'a> {
+    accessible_name: &'a str,
+    hover: &'a str,
+    shortcut: &'a str,
+}
+
 fn render_sequence_step_button(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
     button: egui::Button<'_>,
-    accessible_name: &str,
-    shortcut: &str,
+    step: SequenceStep<'_>,
     enabled: bool,
     delta: isize,
 ) {
-    let response = ui
-        .add_enabled(enabled, button)
-        .on_hover_text(format!("{accessible_name} ({shortcut})"));
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, accessible_name));
+    let response = ui.add_enabled(enabled, button).on_hover_text(step.hover);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, step.accessible_name));
     response.ctx.accesskit_node_builder(response.id, |node| {
-        node.set_keyboard_shortcut(shortcut);
+        node.set_keyboard_shortcut(step.shortcut);
     });
     if response.clicked() {
         actions.push(UiAction::StepSequence(delta));
@@ -8866,6 +8910,144 @@ mod tests {
     }
 
     #[test]
+    fn context_tool_labels_follow_the_selected_language() {
+        for language in [Language::Spanish, Language::French, Language::German] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut frame = accessibility_test_frame();
+            frame.language = language;
+            frame.context_menu_pos = Some([100.0, 100.0]);
+            frame.heal_busy = true;
+            let output = run_frame(&context, accessibility_input(), |ui| {
+                let _ = render(ui, &frame);
+            });
+            let update = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update");
+            let heal = crate::chrome::name_with_shortcut(
+                language,
+                language.text(tr!("Finishing Spot Heal...")),
+                "J",
+            );
+            let crop = crate::chrome::name_with_shortcut(language, language.text(tr!("Crop")), "C");
+            let open_with = language.text(tr!("Open With..."));
+            assert_ne!(heal, "Finishing Spot Heal... (J)");
+            assert_ne!(crop, "Crop (C)");
+            assert_ne!(open_with, "Open With...");
+            let labels = update
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| node.label())
+                .collect::<Vec<_>>();
+            assert!(
+                labels.contains(&heal.as_str()),
+                "missing translated Spot Heal context label: {heal}; labels: {labels:?}"
+            );
+            assert!(
+                labels.contains(&crop.as_str()),
+                "missing translated Crop context label: {crop}; labels: {labels:?}"
+            );
+            assert!(
+                labels.contains(&open_with),
+                "missing translated Open With label: {open_with}; labels: {labels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sequence_step_names_follow_the_selected_language() {
+        for (language, noun, previous_source, next_source) in [
+            (
+                Language::Spanish,
+                "Page",
+                tr!("Previous page"),
+                tr!("Next page"),
+            ),
+            (
+                Language::French,
+                "Page",
+                tr!("Previous page"),
+                tr!("Next page"),
+            ),
+            (
+                Language::German,
+                "Page",
+                tr!("Previous page"),
+                tr!("Next page"),
+            ),
+            (
+                Language::Spanish,
+                "Icon",
+                tr!("Previous Icon"),
+                tr!("Next Icon"),
+            ),
+        ] {
+            let mut frame = accessibility_test_frame();
+            frame.language = language;
+            frame.pages = Some(PageUiInfo {
+                index: 1,
+                count: 3,
+                noun,
+                can_previous: true,
+                can_next: true,
+                accessibility_label: "2 of 3".into(),
+                visible_label: "2 / 3".into(),
+            });
+            frame.animation = Some(super::AnimationUiInfo {
+                frame_index: 1,
+                frame_count: 3,
+                is_playing: false,
+                can_previous: true,
+                can_next: true,
+            });
+            let nodes = accesskit_nodes(&frame);
+            for (source, shortcut) in [
+                (previous_source, "["),
+                (next_source, "]"),
+                (tr!("Previous frame"), "["),
+                (tr!("Next frame"), "]"),
+            ] {
+                assert_sequence_step(&nodes, language, source, shortcut);
+            }
+        }
+    }
+
+    fn assert_sequence_step(
+        nodes: &[egui::accesskit::Node],
+        language: Language,
+        english: &'static str,
+        shortcut: &str,
+    ) {
+        let name = language.text(english);
+        let buttons: Vec<_> = nodes
+            .iter()
+            .filter(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(name)
+            })
+            .collect();
+        assert!(!buttons.is_empty(), "missing accessible step {name}");
+        assert!(
+            buttons
+                .iter()
+                .all(|node| node.keyboard_shortcut() == Some(shortcut)),
+            "{name} must keep shortcut {shortcut}"
+        );
+        assert!(
+            nodes.iter().all(|node| node.label() != Some(english)),
+            "step name stayed English: {english}"
+        );
+        let hover = crate::chrome::name_with_shortcut(language, name, shortcut);
+        assert_ne!(hover, name);
+        assert!(
+            nodes
+                .iter()
+                .all(|node| node.label() != Some(hover.as_str())),
+            "step hover must not replace the accessible name: {hover}"
+        );
+    }
+
+    #[test]
     fn active_tools_publish_selected_state_across_shared_adapters() {
         let adapter_context = egui::Context::default();
         adapter_context.enable_accesskit();
@@ -8877,7 +9059,7 @@ mod tests {
         heal_frame.heal_busy = true;
         let heal = heal_frame.chrome_view_model().heal_control();
         let adapter_output = run_frame(&adapter_context, accessibility_input(), |ui| {
-            let _ = context_tool_button(ui, crop);
+            let _ = context_tool_button(ui, Language::English, crop);
             let _ = menu_tool_button(ui, heal);
         });
         let adapter_update = adapter_output
@@ -10526,6 +10708,22 @@ mod tests {
                 variant(|frame| frame.load_error = Some("truncated".to_owned())),
             ),
             ("folder open failure", variant(pseudo_folder_open_failure)),
+            (
+                "quick tools",
+                variant(|frame| frame.context_menu_pos = Some([80.0, 80.0])),
+            ),
+            (
+                "animation",
+                variant(|frame| {
+                    frame.animation = Some(super::AnimationUiInfo {
+                        frame_index: 1,
+                        frame_count: 3,
+                        is_playing: false,
+                        can_previous: true,
+                        can_next: true,
+                    });
+                }),
+            ),
             (
                 "external edit reminder",
                 variant(|frame| frame.external_edit_pending = true),

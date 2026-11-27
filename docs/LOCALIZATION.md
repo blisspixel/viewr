@@ -88,6 +88,14 @@ of by review:
   the external-edit badge, the short status, and the joined F5 sentence in
   every language. The joined sentence inserts an already translated status
   once, and a value that contains braces stays verbatim.
+  `chrome::name_with_shortcut_follows_the_selected_language` proves the frame
+  that joins an already translated control name to its shortcut. The shortcut
+  is inserted once, and a name that contains braces stays verbatim.
+  `ui::context_tool_labels_follow_the_selected_language` and
+  `ui::sequence_step_names_follow_the_selected_language` prove the Quick Tools
+  label, the context Open With label, and the page, icon, and frame step
+  names follow the catalog. The accessible name of a step stays the control
+  name.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

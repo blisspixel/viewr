@@ -124,9 +124,6 @@ const LOCAL_PRIVACY_SUMMARY: &str = "Local only. No cloud or viewr activity log.
 const APPEARANCE_SCOPE_HELP: &str = tr!(
     "Changes app chrome and its default canvas. Image pixels stay unchanged; Image Background overrides the canvas separately."
 );
-const EXTERNAL_EDIT_BADGE: &str = "External F5";
-const EXTERNAL_EDIT_STANDALONE_STATUS: &str = "Source may have changed";
-const EXTERNAL_EDIT_ACCESSIBLE_STATUS: &str = crate::file_coherence::RELOAD_REMINDER;
 pub(crate) use crate::crop_state::{CROP_RECOVERY_STATUS, PREVIEW_RECOVERY_STATUS};
 // Anchor the naturally sized startup card from a stable top-left point on its first sizing pass.
 const EMPTY_STATE_EXPECTED_HEIGHT: f32 = 308.0;
@@ -1448,7 +1445,7 @@ fn render_top_operation_status(
     metadata_reserve: f32,
 ) {
     let add_status = |ui: &mut egui::Ui, status: &str| {
-        add_top_status_with_external_edit(ui, status, frame.external_edit_pending, colors);
+        add_top_status_with_external_edit(ui, frame, Some(status), colors);
     };
     let add_toast = |ui: &mut egui::Ui, text: &str, announcement: ToastAnnouncement| {
         add_top_toast(ui, text, announcement, colors, metadata_reserve);
@@ -1526,7 +1523,7 @@ fn render_top_operation_status(
     } else if frame.source_gone {
         add_top_status(ui, frame.text(crate::file_coherence::CURRENT_GONE), colors);
     } else if frame.external_edit_pending {
-        add_top_status_with_external_edit(ui, EXTERNAL_EDIT_STANDALONE_STATUS, true, colors);
+        add_top_status_with_external_edit(ui, frame, None, colors);
     } else if frame.rating.outside_filter {
         add_top_status(
             ui,
@@ -1551,37 +1548,44 @@ fn render_top_operation_status(
 
 fn add_top_status_with_external_edit(
     ui: &mut egui::Ui,
-    status: &str,
-    external_edit_pending: bool,
+    frame: &UiFrameOwned,
+    detail: Option<&str>,
     colors: ChromeColors,
 ) -> Option<(egui::Response, egui::Response)> {
-    if !external_edit_pending {
-        add_top_status(ui, status, colors);
+    let language = frame.language;
+    let visible = if let Some(status) = detail {
+        status
+    } else if frame.external_edit_pending {
+        crate::file_coherence::external_edit_short_status(language)
+    } else {
+        return None;
+    };
+    if !frame.external_edit_pending {
+        add_top_status(ui, visible, colors);
         return None;
     }
-    let accessible_status = if status == EXTERNAL_EDIT_STANDALONE_STATUS {
-        EXTERNAL_EDIT_ACCESSIBLE_STATUS.to_owned()
-    } else {
-        format!("{EXTERNAL_EDIT_ACCESSIBLE_STATUS} {status}")
-    };
+    let accessible_status =
+        crate::file_coherence::external_edit_accessible_status(language, detail);
+    let badge = crate::file_coherence::external_edit_badge(language);
+    let reminder = crate::file_coherence::reload_reminder_copy(language);
     let max_width = top_status_max_width(ui);
     let responses = ui.scope(|ui| {
         ui.set_max_width(max_width);
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.horizontal(|ui| {
-            let badge = ui
+            let badge_response = ui
                 .add(egui::Label::new(
-                    RichText::new(EXTERNAL_EDIT_BADGE)
-                        .size(11.5)
-                        .color(colors.accent),
+                    RichText::new(badge).size(11.5).color(colors.accent),
                 ))
-                .on_hover_text(EXTERNAL_EDIT_ACCESSIBLE_STATUS);
-            badge.ctx.accesskit_node_builder(badge.id, |node| {
-                node.set_hidden();
-            });
+                .on_hover_text(reminder);
+            badge_response
+                .ctx
+                .accesskit_node_builder(badge_response.id, |node| {
+                    node.set_hidden();
+                });
             let response = ui
                 .add(
-                    egui::Label::new(RichText::new(status).size(12.5).color(colors.muted))
+                    egui::Label::new(RichText::new(visible).size(12.5).color(colors.muted))
                         .truncate(),
                 )
                 .on_hover_text(&accessible_status);
@@ -1589,7 +1593,7 @@ fn add_top_status_with_external_edit(
                 node.set_value(accessible_status);
                 node.set_live(egui::accesskit::Live::Polite);
             });
-            (badge, response)
+            (badge_response, response)
         })
         .inner
     });
@@ -6115,9 +6119,8 @@ mod tests {
     use super::Language;
     use super::{
         APPEARANCE_SCOPE_HELP, COPY_IMAGE_HELP, CROP_RECOVERY_STATUS, ChromeControl, DockInput,
-        DockSide, EXTERNAL_EDIT_ACCESSIBLE_STATUS, EXTERNAL_EDIT_BADGE, FilmstripItem,
-        LOCAL_PRIVACY_SUMMARY, MosaicCell, MosaicLoadState, MosaicUiState, OPEN_WITH_HELP,
-        PREVIEW_RECOVERY_STATUS, PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
+        DockSide, FilmstripItem, LOCAL_PRIVACY_SUMMARY, MosaicCell, MosaicLoadState, MosaicUiState,
+        OPEN_WITH_HELP, PREVIEW_RECOVERY_STATUS, PageUiInfo, SAVE_RECOVERY_STATUS, TOP_BAR_HEIGHT,
         TOP_STATUS_COMPACT_MAX_WIDTH, TOP_STATUS_MAX_WIDTH, UiAction, UiFrameOwned,
         actions_owned_by_modal, add_top_status_with_external_edit, appearance_menu,
         chrome_colors_for, context_tool_button, crop_pixel_bounds, folder_sort_menu,
@@ -8945,11 +8948,86 @@ mod tests {
             .platform_output
             .accesskit_update
             .expect("AccessKit update should be generated");
+        let expected = crate::file_coherence::external_edit_accessible_status(frame.language, None);
         assert!(update.nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Label
-                && node.value() == Some(EXTERNAL_EDIT_ACCESSIBLE_STATUS)
+                && node.value() == Some(expected.as_str())
                 && node.live() == Some(egui::accesskit::Live::Polite)
         }));
+    }
+
+    #[test]
+    fn external_edit_status_follows_the_selected_language() {
+        for language in [Language::Spanish, Language::French, Language::German] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut reminder = accessibility_test_frame();
+            reminder.language = language;
+            reminder.external_edit_pending = true;
+            let reminder_output = run_frame(&context, accessibility_input(), |ui| {
+                let _ = render(ui, &reminder);
+            });
+            let reminder_update = reminder_output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update");
+            let reminder_text =
+                crate::file_coherence::external_edit_accessible_status(language, None);
+            assert_ne!(
+                reminder_text,
+                crate::file_coherence::RELOAD_REMINDER,
+                "standalone external-edit speech stayed English"
+            );
+            assert!(reminder_update.nodes.iter().any(|(_, node)| {
+                node.value() == Some(reminder_text.as_str())
+                    && node.live() == Some(egui::accesskit::Live::Polite)
+            }));
+
+            let mut failed = accessibility_test_frame();
+            failed.language = language;
+            failed.external_edit_pending = true;
+            failed.selected_file_name = Some("target.png".to_owned());
+            failed.load_error = Some("Could not decode this image".to_owned());
+            let failed_output = run_frame(&context, accessibility_input(), |ui| {
+                let _ = render(ui, &failed);
+            });
+            let failed_update = failed_output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit update");
+            let detail = image_open_status(language, false, true, Some("target.png"))
+                .expect("named open failure");
+            let combined = crate::file_coherence::external_edit_accessible_status(
+                language,
+                Some(detail.as_str()),
+            );
+            assert!(combined.contains(detail.as_str()));
+            assert!(combined.contains(reminder_text.as_str()));
+            assert_ne!(
+                combined,
+                format!(
+                    "{} {}",
+                    crate::file_coherence::RELOAD_REMINDER,
+                    "Could not open target.png"
+                )
+            );
+            assert!(
+                failed_update.nodes.iter().any(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Label
+                        && node.value() == Some(combined.as_str())
+                        && node.live() == Some(egui::accesskit::Live::Polite)
+                }),
+                "missing translated external-edit status: {combined}"
+            );
+            let badge = language.text(tr!("External F5"));
+            assert!(
+                !failed_update
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(badge)),
+                "the visual badge must not duplicate speech"
+            );
+        }
     }
 
     #[test]
@@ -8967,11 +9045,12 @@ mod tests {
         ));
         let mut badge_text_width = 0.0;
         let mut primary_token_width = 0.0;
+        let badge_label = frame.language.text(tr!("External F5")).to_owned();
         let output = run_frame(&context, input, |ui| {
             badge_text_width = ui
                 .painter()
                 .layout_no_wrap(
-                    EXTERNAL_EDIT_BADGE.to_owned(),
+                    badge_label.clone(),
                     egui::FontId::proportional(11.5),
                     egui::Color32::WHITE,
                 )
@@ -8996,8 +9075,16 @@ mod tests {
             !update
                 .nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some(EXTERNAL_EDIT_BADGE)),
+                .any(|(_, node)| node.label() == Some(badge_label.as_str())),
             "the visual badge must not duplicate speech"
+        );
+        let expected = crate::file_coherence::external_edit_accessible_status(
+            frame.language,
+            Some("Could not open target.png"),
+        );
+        assert_eq!(
+            expected,
+            "Source may have changed. Press F5 when it is safe to reload. Could not open target.png"
         );
         let status = update
             .nodes
@@ -9005,10 +9092,7 @@ mod tests {
             .map(|(_, node)| node)
             .find(|node| {
                 node.role() == egui::accesskit::Role::Label
-                    && node.value()
-                        == Some(
-                            "Source may have changed. Press F5 when it is safe to reload. Could not open target.png",
-                        )
+                    && node.value() == Some(expected.as_str())
                     && node.live() == Some(egui::accesskit::Live::Polite)
             })
             .expect("combined external-edit and failed-reload status");
@@ -9026,10 +9110,12 @@ mod tests {
         ));
         let mut responses = None;
         let _ = run_frame(&layout_context, layout_input, |ui| {
+            let mut layout_frame = accessibility_test_frame();
+            layout_frame.external_edit_pending = true;
             responses = add_top_status_with_external_edit(
                 ui,
-                "Could not open target.png",
-                true,
+                &layout_frame,
+                Some("Could not open target.png"),
                 chrome_colors_for(crate::theme::Mode::Dark),
             );
         });
@@ -10440,6 +10526,18 @@ mod tests {
                 variant(|frame| frame.load_error = Some("truncated".to_owned())),
             ),
             ("folder open failure", variant(pseudo_folder_open_failure)),
+            (
+                "external edit reminder",
+                variant(|frame| frame.external_edit_pending = true),
+            ),
+            (
+                "external edit during failed open",
+                variant(|frame| {
+                    frame.external_edit_pending = true;
+                    frame.selected_file_name = Some("target.png".to_owned());
+                    frame.load_error = Some("truncated".to_owned());
+                }),
+            ),
         ]
     }
 

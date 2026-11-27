@@ -199,6 +199,13 @@ const RELOAD_WAIT_IMAGE_PREPARATION: &str = "An image is already loading";
 /// Status copy when a silent reload would destroy in-memory edits.
 pub(crate) const RELOAD_REMINDER: &str =
     "Source may have changed. Press F5 when it is safe to reload.";
+/// Compact top-bar mark for an external edit that still needs F5.
+pub(crate) const EXTERNAL_EDIT_BADGE: &str = "External F5";
+/// Short top-bar status when that reminder is the only status.
+pub(crate) const EXTERNAL_EDIT_SHORT_STATUS: &str = "Source may have changed";
+/// Frame that joins the F5 reminder to another already translated status.
+const EXTERNAL_EDIT_WITH_DETAIL: &str = "{reminder} {detail}";
+const _: () = crate::locale::assert_cataloged(EXTERNAL_EDIT_WITH_DETAIL);
 /// Status copy when the selected path no longer names the presented file.
 pub(crate) const CURRENT_GONE: &str =
     "This file is no longer at its selected path. The last good image remains visible.";
@@ -214,6 +221,9 @@ const ALL_COPY: &[&str] = &[
     RELOAD_WAIT_RATING_DISCOVERY,
     RELOAD_WAIT_IMAGE_PREPARATION,
     RELOAD_REMINDER,
+    EXTERNAL_EDIT_BADGE,
+    EXTERNAL_EDIT_SHORT_STATUS,
+    EXTERNAL_EDIT_WITH_DETAIL,
     CURRENT_GONE,
     RENAMED,
 ];
@@ -430,6 +440,37 @@ pub(crate) fn renamed_copy(language: Language) -> &'static str {
     language.text(RENAMED)
 }
 
+/// Compact badge for an external edit that still needs F5.
+#[must_use]
+pub(crate) fn external_edit_badge(language: Language) -> &'static str {
+    language.text(EXTERNAL_EDIT_BADGE)
+}
+
+/// Short visible status when the F5 reminder is the only top-bar status.
+#[must_use]
+pub(crate) fn external_edit_short_status(language: Language) -> &'static str {
+    language.text(EXTERNAL_EDIT_SHORT_STATUS)
+}
+
+/// Accessible sentence for an external edit.
+///
+/// `detail` is an already translated primary status. `None` is the F5
+/// reminder alone. Each language owns the joined frame, and `detail` is
+/// inserted once without being translated again.
+#[must_use]
+pub(crate) fn external_edit_accessible_status(language: Language, detail: Option<&str>) -> String {
+    let reminder = language.text(RELOAD_REMINDER);
+    let Some(detail) = detail else {
+        return reminder.to_owned();
+    };
+    language
+        .fill(
+            EXTERNAL_EDIT_WITH_DETAIL,
+            &[("reminder", reminder), ("detail", detail)],
+        )
+        .into_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,6 +503,42 @@ mod tests {
                 reload_start_blocker_message(EN, ReloadStartBlocker::Crop)
             );
         }
+    }
+
+    #[test]
+    fn external_edit_copy_follows_the_selected_language() {
+        let detail = "Could not open target.png";
+        let braced = "keep {brace}";
+        assert_eq!(external_edit_accessible_status(EN, None), RELOAD_REMINDER);
+        assert_eq!(
+            external_edit_accessible_status(EN, Some(detail)),
+            format!("{RELOAD_REMINDER} {detail}")
+        );
+        let preserved = external_edit_accessible_status(EN, Some(braced));
+        assert!(preserved.contains(braced));
+        assert!(!preserved.contains("{reminder}"));
+        assert!(!preserved.contains("{detail}"));
+        for language in TRANSLATED {
+            assert_ne!(external_edit_badge(language), external_edit_badge(EN));
+            assert!(external_edit_badge(language).contains("F5"));
+            assert_ne!(
+                external_edit_short_status(language),
+                external_edit_short_status(EN)
+            );
+            assert_eq!(
+                external_edit_accessible_status(language, None),
+                reload_reminder_copy(language)
+            );
+            let composed = external_edit_accessible_status(language, Some(detail));
+            assert_ne!(composed, external_edit_accessible_status(EN, Some(detail)));
+            assert!(composed.contains(reload_reminder_copy(language)));
+            assert!(composed.contains(detail));
+            assert!(!composed.contains('{'));
+        }
+        let pseudo = external_edit_accessible_status(Language::Pseudo, Some(braced));
+        assert!(pseudo.contains(braced));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(external_edit_badge(Language::Pseudo).contains(crate::locale::PSEUDO_MARKS.0));
     }
 
     fn idle() -> SessionBusy {

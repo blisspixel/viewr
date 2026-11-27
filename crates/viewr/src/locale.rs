@@ -2203,6 +2203,12 @@ const MESSAGES: &[Message] = &[
         german: "Die Quelle hat sich möglicherweise geändert. Drücken Sie F5, wenn ein Neuladen sicher ist.",
     },
     Message {
+        english: "{reminder} {detail}",
+        spanish: "{reminder} {detail}",
+        french: "{reminder} {detail}",
+        german: "{reminder} {detail}",
+    },
+    Message {
         english: "This file is no longer at its selected path. The last good image remains visible.",
         spanish: "Este archivo ya no está en la ruta seleccionada. La última imagen válida permanece visible.",
         french: "Ce fichier n’est plus à l’emplacement sélectionné. La dernière image valide reste visible.",
@@ -2375,6 +2381,12 @@ const MESSAGES: &[Message] = &[
         spanish: "El origen puede haber cambiado",
         french: "La source a peut-être changé",
         german: "Die Quelle hat sich möglicherweise geändert",
+    },
+    Message {
+        english: "External F5",
+        spanish: "F5 externo",
+        french: "F5 externe",
+        german: "F5 extern",
     },
     Message {
         english: "Close panel (I)",

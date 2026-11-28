@@ -93,6 +93,9 @@ and organized by user-visible concern.
   keeps the space before the colon.
 - A rating value fills its phrase once. The rating is inserted once. A brace
   inside the rating stays literal. English stays 5 of 5.
+- An edit failure fills its sentence once. The action is inserted once. A
+  brace inside the action stays literal. English stays Undo could not be
+  applied. The image and edit history are unchanged.
 
 ## 0.7.9 - 2026-11-27
 

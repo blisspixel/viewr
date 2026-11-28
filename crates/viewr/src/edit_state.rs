@@ -58,7 +58,6 @@ impl EditAction {
 const ACTION_UNDO: &str = "Undo";
 const ACTION_REDO: &str = "Redo";
 const ACTION_SPOT_HEAL: &str = "Spot heal";
-const ACTION_PLACEHOLDER: &str = "{action}";
 const APPLY_FAILED: &str =
     "{action} could not be applied. The image and edit history are unchanged.";
 const PRESENTATION_FAILED: &str =
@@ -79,6 +78,11 @@ const ALL_COPY: &[&str] = &[
     ROLLBACK_REOPEN,
 ];
 
+/// Fill one edit-failure sentence once. A brace inside the action stays literal.
+fn failure_with_action(language: Language, template: &'static str, action: &str) -> String {
+    language.fill(template, &[("action", action)]).into_string()
+}
+
 /// Fixed, path-free guidance after an edit presentation transaction fails.
 #[must_use]
 pub(crate) fn edit_transaction_failure_message<E>(
@@ -87,15 +91,17 @@ pub(crate) fn edit_transaction_failure_message<E>(
     error: &PatchPresentationError<E>,
     reloading_source: bool,
 ) -> String {
+    const _: () = crate::locale::assert_cataloged(APPLY_FAILED);
+    const _: () = crate::locale::assert_cataloged(PRESENTATION_FAILED);
+    const _: () = crate::locale::assert_cataloged(ROLLBACK_RELOADING);
+    const _: () = crate::locale::assert_cataloged(ROLLBACK_REOPEN);
     let template = match error {
         PatchPresentationError::Edit(_) => APPLY_FAILED,
         PatchPresentationError::Presentation(_) => PRESENTATION_FAILED,
         PatchPresentationError::Rollback { .. } if reloading_source => ROLLBACK_RELOADING,
         PatchPresentationError::Rollback { .. } => ROLLBACK_REOPEN,
     };
-    language
-        .text(template)
-        .replace(ACTION_PLACEHOLDER, language.text(action.source()))
+    failure_with_action(language, template, language.text(action.source()))
 }
 
 #[cfg(test)]
@@ -182,5 +188,34 @@ mod tests {
         assert!(!message.contains("private"));
         assert!(!message.contains('\n'));
         assert!(!message.contains('\u{202e}'));
+    }
+
+    #[test]
+    fn edit_transaction_failure_fills_the_action_once() {
+        let error = PatchPresentationError::<&str>::Edit(HealError::InvalidImageBuffer);
+        assert_eq!(
+            edit_transaction_failure_message(EN, EditAction::Undo, &error, false),
+            "Undo could not be applied. The image and edit history are unchanged."
+        );
+        assert_eq!(
+            edit_transaction_failure_message(Language::Spanish, EditAction::Undo, &error, false),
+            "No se pudo aplicar Deshacer. La imagen y el historial de edición no cambiaron."
+        );
+        assert_eq!(
+            edit_transaction_failure_message(Language::French, EditAction::Redo, &error, false),
+            "Rétablir n\u{2019}a pas pu être appliqué. L\u{2019}image et l\u{2019}historique d\u{2019}édition sont inchangés."
+        );
+        assert_eq!(
+            edit_transaction_failure_message(Language::German, EditAction::SpotHeal, &error, false),
+            "Bereichsreparatur konnte nicht angewendet werden. Das Bild und der Bearbeitungsverlauf sind unverändert."
+        );
+        assert_eq!(
+            failure_with_action(EN, APPLY_FAILED, "keep {action}"),
+            "keep {action} could not be applied. The image and edit history are unchanged."
+        );
+        let pseudo = failure_with_action(Language::Pseudo, APPLY_FAILED, "Undo");
+        assert!(pseudo.contains("Undo"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{action}"));
     }
 }

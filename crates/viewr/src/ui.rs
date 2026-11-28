@@ -4380,6 +4380,17 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     render_page_controls(ui, actions, frame, colors);
 }
 
+fn animation_frame_label(language: Language, index: usize, count: usize) -> String {
+    let current = index.saturating_add(1).to_string();
+    let total = count.to_string();
+    language
+        .fill(
+            tr!("Frame {current} of {total}"),
+            &[("current", current.as_str()), ("total", total.as_str())],
+        )
+        .into_string()
+}
+
 fn render_animation_controls(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
@@ -4432,16 +4443,11 @@ fn render_animation_controls(
             1,
         );
         ui.label(
-            RichText::new(
-                frame
-                    .language
-                    .text(tr!("Frame {current} of {total}"))
-                    .replace(
-                        "{current}",
-                        &animation.frame_index.saturating_add(1).to_string(),
-                    )
-                    .replace("{total}", &animation.frame_count.to_string()),
-            )
+            RichText::new(animation_frame_label(
+                frame.language,
+                animation.frame_index,
+                animation.frame_count,
+            ))
             .color(colors.muted),
         );
     });
@@ -8801,6 +8807,39 @@ mod tests {
                     || node.value() == Some("Page 2 of 3, 800 by 600")),
             "missing identifiable page position"
         );
+    }
+
+    #[test]
+    fn animation_frame_label_follows_the_selected_language() {
+        assert_eq!(
+            super::animation_frame_label(Language::English, 1, 3),
+            "Frame 2 of 3"
+        );
+        assert_eq!(
+            super::animation_frame_label(Language::Spanish, 1, 3),
+            "Fotograma 2 de 3"
+        );
+        assert_eq!(
+            super::animation_frame_label(Language::French, 1, 3),
+            "Image 2 sur 3"
+        );
+        assert_eq!(
+            super::animation_frame_label(Language::German, 1, 3),
+            "Bild 2 von 3"
+        );
+        let pseudo = super::animation_frame_label(Language::Pseudo, 1, 3);
+        assert!(pseudo.contains("Frame 2 of 3"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{current}"));
+        assert!(!pseudo.contains("{total}"));
+        let braced = Language::English.fill(
+            tr!("Frame {current} of {total}"),
+            &[("current", "keep {brace}"), ("total", "3")],
+        );
+        assert!(braced.as_str().contains("keep {brace}"));
+        assert!(braced.as_str().contains(" of 3"));
+        assert!(!braced.as_str().contains("{current}"));
+        assert!(!braced.as_str().contains("{total}"));
     }
 
     #[test]

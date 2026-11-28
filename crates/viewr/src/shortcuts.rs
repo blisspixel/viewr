@@ -97,8 +97,6 @@ const OPENING_HEADING: &str = "Opening {subject}";
 const FAILED_HEADING: &str = "Could not open {subject}";
 /// Heading with nothing selected.
 const EMPTY_HEADING: &str = "Open an image";
-/// Placeholder replaced with the selected file name after translation.
-const SUBJECT_PLACEHOLDER: &str = "{subject}";
 /// Heading while opening a file whose name is not known.
 const OPENING_UNNAMED_HEADING: &str = "Opening the image";
 /// Heading after a failed open of a file whose name is not known.
@@ -352,16 +350,26 @@ pub(crate) fn retry_label(language: Language, selected_file_name: Option<&str>) 
     )
 }
 
+/// Fill one open-status heading once. A brace inside the file name stays literal.
+fn heading_with_subject(language: Language, template: &'static str, subject: &str) -> String {
+    language
+        .fill(template, &[("subject", subject)])
+        .into_string()
+}
+
 fn heading_for(
     language: Language,
     named: &'static str,
     unnamed: &'static str,
     selected_file_name: Option<&str>,
 ) -> String {
+    const _: () = crate::locale::assert_cataloged(OPENING_HEADING);
+    const _: () = crate::locale::assert_cataloged(FAILED_HEADING);
+    const _: () = crate::locale::assert_cataloged(RETRY_HEADING);
     let Some(name) = selected_file_name else {
         return language.text(unnamed).to_owned();
     };
-    language.text(named).replace(SUBJECT_PLACEHOLDER, name)
+    heading_with_subject(language, named, name)
 }
 
 /// Keep decoder and I/O errors from overflowing the empty-state card.
@@ -570,6 +578,34 @@ mod tests {
             );
         }
         assert!(rows >= 20, "README shortcut table parsed {rows} rows");
+    }
+
+    #[test]
+    fn open_heading_fills_the_subject_once() {
+        assert_eq!(
+            open_status(Language::English, true, false, Some("night.png")).as_deref(),
+            Some("Opening night.png")
+        );
+        assert_eq!(
+            open_status(Language::Spanish, true, false, Some("night.png")).as_deref(),
+            Some("Abriendo night.png")
+        );
+        assert_eq!(
+            open_status(Language::French, false, true, Some("night.png")).as_deref(),
+            Some("Impossible d\u{2019}ouvrir night.png")
+        );
+        assert_eq!(
+            retry_label(Language::German, Some("night.png")),
+            "night.png erneut \u{00F6}ffnen"
+        );
+        assert_eq!(
+            heading_with_subject(Language::English, OPENING_HEADING, "keep {subject}"),
+            "Opening keep {subject}"
+        );
+        let pseudo = heading_with_subject(Language::Pseudo, FAILED_HEADING, "night.png");
+        assert!(pseudo.contains("night.png"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{subject}"));
     }
 
     #[test]

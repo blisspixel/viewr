@@ -122,6 +122,10 @@ of by review:
   ordinary pixel dimensions. Both counts are inserted once, the multiplication
   sign stays between them, and the preview sentence stays the existing catalog
   entry.
+  `image_info::file_size_follows_the_selected_language` proves the frames for
+  a file size in bytes, kibibytes, mebibytes, and gibibytes. The unit
+  abbreviation stays, the count is inserted once, and the decimal separator
+  follows the selected language.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

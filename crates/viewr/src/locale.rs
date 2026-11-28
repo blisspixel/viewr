@@ -3547,6 +3547,30 @@ const MESSAGES: &[Message] = &[
         german: "{megapixels} MP · {aspect}",
     },
     Message {
+        english: "{count} B",
+        spanish: "{count} B",
+        french: "{count} B",
+        german: "{count} B",
+    },
+    Message {
+        english: "{count} KiB",
+        spanish: "{count} KiB",
+        french: "{count} KiB",
+        german: "{count} KiB",
+    },
+    Message {
+        english: "{count} MiB",
+        spanish: "{count} MiB",
+        french: "{count} MiB",
+        german: "{count} MiB",
+    },
+    Message {
+        english: "{count} GiB",
+        spanish: "{count} GiB",
+        french: "{count} GiB",
+        german: "{count} GiB",
+    },
+    Message {
         english: "Right for the next photo.",
         spanish: "Derecha para la siguiente foto.",
         french: "Droite pour la photo suivante.",

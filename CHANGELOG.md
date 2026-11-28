@@ -29,6 +29,9 @@ and organized by user-visible concern.
 - Pixel dimensions in the top bar, Image Information, and the image
   description use one catalog frame. The multiplication sign stays between
   the two counts. Preview dimensions keep their existing sentence.
+- Image Information formats a file size with one catalog frame per binary
+  unit. B, KiB, MiB, and GiB stay the unit abbreviations, and the count uses
+  the language's decimal separator.
 
 ## 0.7.9 - 2026-11-27
 

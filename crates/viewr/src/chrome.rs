@@ -90,8 +90,6 @@ const COPY_RATING_UNSUPPORTED: &str = "This image has unsupported rating metadat
 const RATING_PLACEHOLDER: &str = "{rating}";
 /// Placeholder for a control label.
 const LABEL_PLACEHOLDER: &str = "{label}";
-/// Placeholder for help text appended to an accessible name.
-const HELP_PLACEHOLDER: &str = "{help}";
 /// Placeholder for a keyboard shortcut.
 const SHORTCUT_PLACEHOLDER: &str = "{shortcut}";
 
@@ -166,6 +164,17 @@ fn panel_side_label(language: Language, panel: &str, side: &'static str) -> Stri
         .fill(
             COPY_PANEL_SIDE,
             &[("panel", panel), ("side", language.text(side))],
+        )
+        .into_string()
+}
+
+/// Fill the Undo Trash accessible name once. A brace inside either half stays literal.
+fn undo_trash_accessible_name(language: Language, label: &str, help: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_UNDO_TRASH_WITH_HELP);
+    language
+        .fill(
+            COPY_UNDO_TRASH_WITH_HELP,
+            &[("label", label), ("help", help)],
         )
         .into_string()
 }
@@ -831,10 +840,7 @@ impl ChromeViewModel {
         let accessibility_label = if !self.input.has_undo_trash && !unsettled {
             label.to_owned()
         } else {
-            language
-                .text(COPY_UNDO_TRASH_WITH_HELP)
-                .replace(LABEL_PLACEHOLDER, label)
-                .replace(HELP_PLACEHOLDER, help)
+            undo_trash_accessible_name(language, label, help)
         };
         UndoTrashView {
             enabled: self.is_enabled(ChromeControl::UndoTrash),
@@ -1980,6 +1986,48 @@ mod tests {
         assert!(!unsettled.enabled);
         assert!(unsettled.help.contains("not settled"));
         assert!(unsettled.accessibility_label.contains("not settled"));
+    }
+
+    #[test]
+    fn undo_trash_accessible_name_fills_each_half_once() {
+        let mut input = ready_input();
+        assert_eq!(
+            ChromeViewModel::new(input).undo_trash().accessibility_label,
+            "Undo Trash. Restores the latest safely recoverable Trash action. It may belong to another folder."
+        );
+        input.language = Language::Spanish;
+        assert_eq!(
+            ChromeViewModel::new(input).undo_trash().accessibility_label,
+            "Deshacer envío a la papelera. Restaura la acción de papelera más reciente que se puede recuperar de forma segura. Puede pertenecer a otra carpeta."
+        );
+        input.language = Language::French;
+        assert_eq!(
+            ChromeViewModel::new(input).undo_trash().accessibility_label,
+            "Annuler la mise à la corbeille. Restaure la dernière action de corbeille récupérable en toute sécurité. Elle peut appartenir à un autre dossier."
+        );
+        input.language = Language::German;
+        assert_eq!(
+            ChromeViewModel::new(input).undo_trash().accessibility_label,
+            "Verschieben in den Papierkorb rückgängig machen. Stellt die letzte sicher wiederherstellbare Papierkorb-Aktion wieder her. Sie kann zu einem anderen Ordner gehören."
+        );
+        assert_eq!(
+            super::undo_trash_accessible_name(EN, "keep {help}", "before browsing"),
+            "keep {help}. before browsing"
+        );
+        assert_eq!(
+            super::undo_trash_accessible_name(EN, "Undo Trash", "keep {label}"),
+            "Undo Trash. keep {label}"
+        );
+        let pseudo = super::undo_trash_accessible_name(
+            Language::Pseudo,
+            "Undo Trash",
+            "It may belong to another folder.",
+        );
+        assert!(pseudo.contains("Undo Trash"));
+        assert!(pseudo.contains("It may belong to another folder."));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{label}"));
+        assert!(!pseudo.contains("{help}"));
     }
 
     #[test]

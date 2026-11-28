@@ -187,6 +187,10 @@ of by review:
   The panel name and the side are inserted once. A brace inside the panel name
   stays literal. English stays Tools: Left. French keeps the space before the
   colon and the apostrophe in Image Information.
+  `chrome::undo_trash_accessible_name_fills_each_half_once` proves the Undo
+  Trash accessible name. The label and the help sentence are inserted once.
+  A brace inside either half stays literal. English stays Undo Trash followed
+  by the recoverable-action help.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

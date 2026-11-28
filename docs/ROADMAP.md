@@ -964,8 +964,9 @@ Make viewing excellent, not merely functional.
   display-status line each fill their existing catalog frame once. A supported
   EXIF count fills its singular or plural catalog frame once. A present
   privacy category fills its catalog frame once. The View menu fills its
-  folder-sort label once. Other composed status lines are still migrated one
-  seam at a time, each with the coverage test in `docs/LOCALIZATION.md`.
+  folder-sort label once. The update dialog fills its current-version line
+  once. Other composed status lines are still migrated one seam at a time,
+  each with the coverage test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

@@ -149,6 +149,10 @@ of by review:
   `image_info::iso_follows_the_selected_language` proves the frame for an ISO
   sensitivity. The count is inserted once, the ISO abbreviation stays, and
   English stays ISO 400.
+  `ui::folder_position_follows_the_selected_language` proves the frames for a
+  known folder position and for a scan whose total is still unknown. Both
+  counts are inserted once, the slash stays, and English stays 1 / 2 and
+  1 / .... The same label is what the top strip reserves.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

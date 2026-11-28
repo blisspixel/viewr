@@ -960,9 +960,10 @@ Make viewing excellent, not merely functional.
   frame. A folder position uses one catalog frame, and an in-progress scan
   whose total is still unknown uses another. Image Information joins a format
   name to its file size with one catalog frame. The animation position fills
-  its existing catalog frame once. Other composed status lines are still
-  migrated one seam at a time, each with the coverage test in
-  `docs/LOCALIZATION.md`.
+  its existing catalog frame once. The color-profile line and the
+  display-status line each fill their existing catalog frame once. Other
+  composed status lines are still migrated one seam at a time, each with the
+  coverage test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

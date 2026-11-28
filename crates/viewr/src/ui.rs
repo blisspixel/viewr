@@ -4348,22 +4348,18 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     }
     if let Some(color_profile) = frame.color_profile {
         ui.label(
-            RichText::new(
-                frame
-                    .language
-                    .text(tr!("Color · {profile}"))
-                    .replace("{profile}", frame.text(color_profile.label())),
-            )
+            RichText::new(color_profile_line(
+                frame.language,
+                frame.text(color_profile.label()),
+            ))
             .color(colors.muted),
         );
     }
     ui.label(
-        RichText::new(
-            frame
-                .language
-                .text(tr!("Display · {status}"))
-                .replace("{status}", frame.text(frame.display_output.label())),
-        )
+        RichText::new(display_status_line(
+            frame.language,
+            frame.text(frame.display_output.label()),
+        ))
         .color(colors.muted),
     );
     if let Some(detail) = frame.decoder_detail.as_deref() {
@@ -4378,6 +4374,18 @@ fn render_file_info(ui: &mut egui::Ui, actions: &mut Vec<UiAction>, frame: &UiFr
     }
     render_animation_controls(ui, actions, frame, colors);
     render_page_controls(ui, actions, frame, colors);
+}
+
+fn color_profile_line(language: Language, profile: &str) -> String {
+    language
+        .fill(tr!("Color · {profile}"), &[("profile", profile)])
+        .into_string()
+}
+
+fn display_status_line(language: Language, status: &str) -> String {
+    language
+        .fill(tr!("Display · {status}"), &[("status", status)])
+        .into_string()
 }
 
 fn animation_frame_label(language: Language, index: usize, count: usize) -> String {
@@ -7606,6 +7614,59 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing panel menu item: {label}"));
             assert_eq!(node.keyboard_shortcut(), Some(shortcut));
         }
+    }
+
+    #[test]
+    fn color_and_display_lines_follow_the_selected_language() {
+        assert_eq!(
+            super::color_profile_line(Language::English, "sRGB"),
+            "Color · sRGB"
+        );
+        assert_eq!(
+            super::color_profile_line(Language::Spanish, "sRGB"),
+            "Color · sRGB"
+        );
+        assert_eq!(
+            super::color_profile_line(Language::French, "sRGB"),
+            "Couleur · sRGB"
+        );
+        assert_eq!(
+            super::color_profile_line(Language::German, "sRGB"),
+            "Farbe · sRGB"
+        );
+        for (language, fallback, line) in [
+            (
+                Language::English,
+                "sRGB fallback",
+                "Display · sRGB fallback",
+            ),
+            (Language::Spanish, "Reserva sRGB", "Pantalla · Reserva sRGB"),
+            (Language::French, "Repli sRGB", "Affichage · Repli sRGB"),
+            (Language::German, "sRGB-Rückfall", "Anzeige · sRGB-Rückfall"),
+        ] {
+            let status = language.text(tr!("sRGB fallback"));
+            assert_eq!(status, fallback);
+            assert_eq!(super::display_status_line(language, status), line);
+        }
+        let managed = Language::French.text(tr!("sRGB, operating-system managed"));
+        assert!(managed.contains('\u{2019}'));
+        assert_eq!(
+            super::display_status_line(Language::French, managed),
+            format!("Affichage · {managed}")
+        );
+        let applied = Language::French.text(tr!("sRGB, display profile applied"));
+        assert_eq!(
+            super::display_status_line(Language::French, applied),
+            format!("Affichage · {applied}")
+        );
+        let braced = super::color_profile_line(Language::English, "keep {brace}");
+        assert!(braced.contains("keep {brace}"));
+        assert!(!braced.contains("{profile}"));
+        let pseudo_status = Language::Pseudo.text(tr!("sRGB fallback"));
+        let pseudo = super::display_status_line(Language::Pseudo, pseudo_status);
+        assert!(pseudo.contains("sRGB fallback"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{status}"));
     }
 
     #[test]

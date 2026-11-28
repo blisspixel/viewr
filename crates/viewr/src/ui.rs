@@ -1830,7 +1830,7 @@ fn top_metadata_reserve(ui: &egui::Ui, frame: &UiFrameOwned, chrome: ChromeViewM
     if let Some(label) = chrome.rating_strip_label() {
         reserve += chip(&label);
     }
-    reserve += measure(&format!("{:.0}%", frame.pixel_scale * 100.0), 12.5)
+    reserve += measure(&zoom_percent_label(frame.language, frame.pixel_scale), 12.5)
         + 2.0 * ui.spacing().button_padding.x
         + TOP_METADATA_SPACING;
     if is_compact_width(ui.ctx().content_rect().width()) {
@@ -1936,6 +1936,13 @@ fn render_top_image_facts(
     }
 }
 
+fn zoom_percent_label(language: Language, pixel_scale: f32) -> String {
+    let percent = format!("{:.0}", pixel_scale * 100.0);
+    language
+        .fill(tr!("{percent}%"), &[("percent", percent.as_str())])
+        .into_string()
+}
+
 fn render_image_zoom(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
@@ -1943,7 +1950,7 @@ fn render_image_zoom(
     chrome: ChromeViewModel,
     colors: ChromeColors,
 ) -> egui::Response {
-    let value = format!("{:.0}%", frame.pixel_scale * 100.0);
+    let value = zoom_percent_label(frame.language, frame.pixel_scale);
     let label = frame
         .language
         .fill(tr!("Image zoom: {value}"), &[("value", &value)]);
@@ -10327,6 +10334,23 @@ mod tests {
                 .any(|action| matches!(action, UiAction::StepSequence(1))),
             "clicking the strip step must request the next page"
         );
+    }
+
+    #[test]
+    fn zoom_percent_label_follows_the_selected_language() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            assert_eq!(super::zoom_percent_label(language, 1.0), "100%");
+            assert_eq!(super::zoom_percent_label(language, 64.0), "6400%");
+        }
+        let pseudo = super::zoom_percent_label(Language::Pseudo, 1.0);
+        assert!(pseudo.contains("100%"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{percent}"));
     }
 
     #[test]

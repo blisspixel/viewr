@@ -3769,6 +3769,12 @@ const MESSAGES: &[Message] = &[
         german: "Bildzoom: {value}",
     },
     Message {
+        english: "{percent}%",
+        spanish: "{percent}%",
+        french: "{percent}%",
+        german: "{percent}%",
+    },
+    Message {
         english: "Actual Size",
         spanish: "Tamaño real",
         french: "Taille réelle",

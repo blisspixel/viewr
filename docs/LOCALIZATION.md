@@ -226,6 +226,9 @@ of by review:
   confirmation and its success sentence. The privacy-safe file name is
   inserted once. A brace inside that name stays literal. English stays
   Permanently deleted "bad???gpj". This cannot be undone.
+  `shortcuts::open_heading_fills_the_subject_once` proves an open-status
+  heading. The file name is inserted once. A brace inside that name stays
+  literal. English stays Opening night.png. German puts the file name first.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

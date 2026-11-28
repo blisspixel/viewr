@@ -103,6 +103,9 @@ and organized by user-visible concern.
 - A permanent-delete confirmation and its success sentence each fill the
   privacy-safe file name once. A brace inside that name stays literal.
   English stays Permanently deleted "bad???gpj". This cannot be undone.
+- An open-status heading fills its file name once. A brace inside that name
+  stays literal. English stays Opening night.png. German puts the file name
+  first.
 
 ## 0.7.9 - 2026-11-27
 

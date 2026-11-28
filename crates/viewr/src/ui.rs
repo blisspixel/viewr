@@ -2503,6 +2503,12 @@ fn add_empty_retry_button(
     }
 }
 
+fn folder_sort_menu_label(language: Language, sort: &str) -> String {
+    language
+        .fill(tr!("Folder Sort: {sort}"), &[("sort", sort)])
+        .into_string()
+}
+
 fn view_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<UiAction>,
@@ -2553,10 +2559,10 @@ fn view_menu(
                 });
             });
             ui.menu_button(
-                frame
-                    .language
-                    .text(tr!("Folder Sort: {sort}"))
-                    .replace("{sort}", frame.text(frame.folder_sort.label())),
+                folder_sort_menu_label(
+                    frame.language,
+                    frame.text(frame.folder_sort.label()),
+                ),
                 |ui| folder_sort_menu(ui, actions, frame),
             );
             ui.separator();
@@ -8747,6 +8753,44 @@ mod tests {
                 value.contains("does not receive the file manager's current sort")
             })
         }));
+    }
+
+    #[test]
+    fn folder_sort_menu_label_follows_the_selected_language() {
+        assert_eq!(
+            super::folder_sort_menu_label(Language::English, "Latest First"),
+            "Folder Sort: Latest First"
+        );
+        assert_eq!(
+            super::folder_sort_menu_label(Language::English, "Name"),
+            "Folder Sort: Name"
+        );
+        let spanish = Language::Spanish.text(tr!("Latest First"));
+        assert_eq!(spanish, "Más recientes primero");
+        assert_eq!(
+            super::folder_sort_menu_label(Language::Spanish, spanish),
+            "Orden de carpeta: Más recientes primero"
+        );
+        let french = Language::French.text(tr!("Latest First"));
+        assert!(french.contains('\u{2019}'));
+        assert_eq!(
+            super::folder_sort_menu_label(Language::French, french),
+            format!("Tri du dossier : {french}")
+        );
+        let german = Language::German.text(tr!("Latest First"));
+        assert_eq!(german, "Neueste zuerst");
+        assert_eq!(
+            super::folder_sort_menu_label(Language::German, german),
+            "Ordnersortierung: Neueste zuerst"
+        );
+        let braced = super::folder_sort_menu_label(Language::English, "keep {brace}");
+        assert!(braced.contains("keep {brace}"));
+        assert!(!braced.contains("{sort}"));
+        let pseudo_sort = Language::Pseudo.text(tr!("Name"));
+        let pseudo = super::folder_sort_menu_label(Language::Pseudo, pseudo_sort);
+        assert!(pseudo.contains("Name"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{sort}"));
     }
 
     #[test]

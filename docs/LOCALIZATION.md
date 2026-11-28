@@ -172,6 +172,10 @@ of by review:
   privacy category. The already translated category is inserted once. English
   stays Present: location-related data. The French owner sentence keeps its
   apostrophe.
+  `ui::folder_sort_menu_label_follows_the_selected_language` proves the View
+  menu's folder-sort label. The already translated sort name is inserted once.
+  English stays Folder Sort: Latest First. The French sort name keeps its
+  apostrophe.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

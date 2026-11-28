@@ -152,9 +152,6 @@ mod key {
     ];
 }
 
-/// Placeholder for a privacy-safe file name.
-const NAME_PLACEHOLDER: &str = "{name}";
-
 const RECOVERY_PRIORITY: [CurationKind; 3] = [
     CurationKind::PermanentDelete,
     CurationKind::Trash,
@@ -396,13 +393,19 @@ pub(crate) fn permanent_delete_action(language: Language) -> &'static str {
     language.text(key::DELETE_PERMANENTLY)
 }
 
+/// Fill one permanent-delete sentence once. A brace inside the file name stays literal.
+fn sentence_with_name(language: Language, template: &'static str, safe_name: &str) -> String {
+    language
+        .fill(template, &[("name", safe_name)])
+        .into_string()
+}
+
 /// Path-free permanent-delete confirmation body. `safe_name` must already be
 /// privacy-safe and quote-sanitized by the caller.
 #[must_use]
 pub(crate) fn permanent_delete_description(language: Language, safe_name: &str) -> String {
-    language
-        .text(key::DELETE_CONFIRMATION)
-        .replace(NAME_PLACEHOLDER, safe_name)
+    const _: () = crate::locale::assert_cataloged(key::DELETE_CONFIRMATION);
+    sentence_with_name(language, key::DELETE_CONFIRMATION, safe_name)
 }
 
 /// True only when the user chose the explicit permanent-delete action label.
@@ -453,12 +456,14 @@ pub(crate) fn permanent_delete_success_message(
     safe_name: &str,
     previous_trash_undo: bool,
 ) -> String {
+    const _: () = crate::locale::assert_cataloged(key::DELETED_PRIOR_UNDO_KEPT);
+    const _: () = crate::locale::assert_cataloged(key::DELETED);
     let source = if previous_trash_undo {
         key::DELETED_PRIOR_UNDO_KEPT
     } else {
         key::DELETED
     };
-    language.text(source).replace(NAME_PLACEHOLDER, safe_name)
+    sentence_with_name(language, source, safe_name)
 }
 
 /// Path-free single-file restore failure copy.
@@ -1112,6 +1117,34 @@ mod tests {
             single_trash_result_message(EN, false, false),
             "Moved to Trash, but U is unavailable for this move. Use the system Trash for recovery."
         );
+    }
+
+    #[test]
+    fn permanent_delete_name_fills_once() {
+        assert_eq!(
+            permanent_delete_description(EN, "bad???gpj"),
+            "Delete \"bad???gpj\" forever?\n\nThis skips the system Trash and cannot be undone from viewr."
+        );
+        assert_eq!(
+            permanent_delete_description(Language::Spanish, "bad???gpj"),
+            "\u{00BF}Eliminar \"bad???gpj\" para siempre?\n\nEsto omite la papelera del sistema y no se puede deshacer desde viewr."
+        );
+        assert_eq!(
+            permanent_delete_success_message(Language::French, "bad???gpj", true),
+            "\"bad???gpj\" a \u{00E9}t\u{00E9} supprim\u{00E9} d\u{00E9}finitivement. Cette action est irr\u{00E9}versible ; U restaure encore l\u{2019}action pr\u{00E9}c\u{00E9}dente de la corbeille."
+        );
+        assert_eq!(
+            permanent_delete_success_message(Language::German, "bad???gpj", false),
+            "\"bad???gpj\" wurde endg\u{00FC}ltig gel\u{00F6}scht. Dies kann nicht r\u{00FC}ckg\u{00E4}ngig gemacht werden."
+        );
+        assert_eq!(
+            permanent_delete_description(EN, "keep {name}"),
+            "Delete \"keep {name}\" forever?\n\nThis skips the system Trash and cannot be undone from viewr."
+        );
+        let pseudo = sentence_with_name(Language::Pseudo, key::DELETED, "bad???gpj");
+        assert!(pseudo.contains("bad???gpj"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{name}"));
     }
 
     #[test]

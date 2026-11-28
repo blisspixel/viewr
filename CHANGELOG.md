@@ -100,6 +100,9 @@ and organized by user-visible concern.
   inserted once. A brace inside that text stays literal. English stays Trash
   failed: access denied. Nothing was moved. French keeps the space before the
   colon.
+- A permanent-delete confirmation and its success sentence each fill the
+  privacy-safe file name once. A brace inside that name stays literal.
+  English stays Permanently deleted "bad???gpj". This cannot be undone.
 
 ## 0.7.9 - 2026-11-27
 

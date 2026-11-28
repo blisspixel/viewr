@@ -222,6 +222,10 @@ of by review:
   Trash or delete failure. The platform text is inserted once. A brace inside
   that text stays literal. English stays Trash failed: access denied. Nothing
   was moved. French keeps the space before the colon.
+  `curation_state::permanent_delete_name_fills_once` proves a permanent-delete
+  confirmation and its success sentence. The privacy-safe file name is
+  inserted once. A brace inside that name stays literal. English stays
+  Permanently deleted "bad???gpj". This cannot be undone.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

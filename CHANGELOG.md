@@ -96,6 +96,10 @@ and organized by user-visible concern.
 - An edit failure fills its sentence once. The action is inserted once. A
   brace inside the action stays literal. English stays Undo could not be
   applied. The image and edit history are unchanged.
+- A Trash or delete failure fills its sentence once. The platform text is
+  inserted once. A brace inside that text stays literal. English stays Trash
+  failed: access denied. Nothing was moved. French keeps the space before the
+  colon.
 
 ## 0.7.9 - 2026-11-27
 

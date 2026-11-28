@@ -972,8 +972,9 @@ Make viewing excellent, not merely functional.
   once. A rating filter choice fills its accessible name once. The rating
   filter menu fills its current-threshold status once. The rated status fills
   its sentence once. A rating value fills its phrase once. An edit failure
-  fills its sentence once. Other composed status lines are still migrated one
-  seam at a time, each with the coverage test in `docs/LOCALIZATION.md`.
+  fills its sentence once. A Trash or delete failure fills its sentence once.
+  Other composed status lines are still migrated one seam at a time, each with
+  the coverage test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

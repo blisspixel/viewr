@@ -214,6 +214,10 @@ of by review:
   `chrome::rating_of_five_follows_the_selected_language` proves a rating
   value. The rating is inserted once. A brace inside the rating stays
   literal. English stays 5 of 5.
+  `edit_state::edit_transaction_failure_fills_the_action_once` proves an edit
+  failure. The action is inserted once. A brace inside the action stays
+  literal. English stays Undo could not be applied. The image and edit
+  history are unchanged.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

@@ -163,6 +163,11 @@ of by review:
   profile line and the display status line. Each inserted fact is substituted
   once, English stays Color · sRGB and Display · sRGB fallback, and the
   existing translations of those facts stay.
+  `ui::exif_count_line_follows_the_selected_language` proves the supported-EXIF
+  count. The count is inserted once. One tag uses the singular sentence and
+  any other count uses the plural sentence. English for one tag and for seven
+  tags stays those existing sentences. Zero stays the separate none-detected
+  sentence.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

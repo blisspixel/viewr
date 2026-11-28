@@ -146,6 +146,9 @@ of by review:
   `ui::dock_side_headings_follow_the_selected_language` proves the section
   headings in the panel position menu. English stays TOOLS and IMAGE
   INFORMATION.
+  `image_info::iso_follows_the_selected_language` proves the frame for an ISO
+  sensitivity. The count is inserted once, the ISO abbreviation stays, and
+  English stays ISO 400.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

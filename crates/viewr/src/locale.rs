@@ -3613,6 +3613,12 @@ const MESSAGES: &[Message] = &[
         german: "{seconds} s",
     },
     Message {
+        english: "ISO {value}",
+        spanish: "ISO {value}",
+        french: "ISO {value}",
+        german: "ISO {value}",
+    },
+    Message {
         english: "Right for the next photo.",
         spanish: "Derecha para la siguiente foto.",
         french: "Droite pour la photo suivante.",

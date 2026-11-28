@@ -45,6 +45,8 @@ and organized by user-visible concern.
   sign stays attached to the rounded count, so English stays 100% and 6400%.
 - The panel position menu translates its section headings. English stays
   TOOLS and IMAGE INFORMATION.
+- Image Information formats an ISO sensitivity with one catalog frame.
+  English stays ISO 400.
 
 ## 0.7.9 - 2026-11-27
 

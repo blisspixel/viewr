@@ -4573,11 +4573,12 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     );
     let localized_exposure = details.localized_exposure(frame.language);
     let localized_aperture = details.localized_aperture(frame.language);
+    let localized_iso = details.localized_iso(frame.language);
     let localized_focal_length = details.localized_focal_length(frame.language);
     let settings = [
         localized_exposure.as_deref(),
         localized_aperture.as_deref(),
-        details.iso.as_deref(),
+        localized_iso.as_deref(),
         localized_focal_length.as_deref(),
     ]
     .into_iter()

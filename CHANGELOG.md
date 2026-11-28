@@ -81,6 +81,10 @@ and organized by user-visible concern.
 - A curation count fills its singular or plural phrase once, and the status
   sentence inserts that phrase once. A brace inside the phrase stays literal.
   English stays Moving 1 file to Trash... and Moving 2 files to Trash...
+- A rating filter choice fills its accessible name once. The threshold label
+  is inserted once. A brace inside that label stays literal. English stays
+  Rating filter: At least 3 and Rating filter: Unrated. French keeps the
+  space before the colon.
 
 ## 0.7.9 - 2026-11-27
 

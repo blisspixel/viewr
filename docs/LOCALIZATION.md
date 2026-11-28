@@ -199,6 +199,10 @@ of by review:
   status sentence inserts that phrase once. A brace inside the phrase stays
   literal. English stays Moving 1 file to Trash... and Moving 2 files to
   Trash...
+  `chrome::rating_filter_choice_fills_each_half_once` proves a rating filter
+  choice. The threshold label is inserted once. A brace inside that label
+  stays literal. English stays Rating filter: At least 3 and Rating filter:
+  Unrated. French keeps the space before the colon.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

@@ -90,8 +90,6 @@ const COPY_RATING_UNSUPPORTED: &str = "This image has unsupported rating metadat
 const RATING_PLACEHOLDER: &str = "{rating}";
 /// Placeholder for a control label.
 const LABEL_PLACEHOLDER: &str = "{label}";
-/// Placeholder for a keyboard shortcut.
-const SHORTCUT_PLACEHOLDER: &str = "{shortcut}";
 
 /// Complete copy surface owned by this projection, for the coverage test.
 #[cfg(test)]
@@ -965,10 +963,7 @@ impl ChromeViewModel {
         }))
         .map(|(assignment, label, shortcut, selected)| RatingChoiceView {
             assignment,
-            accessibility_label: language
-                .text(COPY_RATING_CHOICE_NAME)
-                .replace(LABEL_PLACEHOLDER, &label)
-                .replace(SHORTCUT_PLACEHOLDER, shortcut),
+            accessibility_label: rating_choice_accessible_name(language, &label, shortcut),
             visible: label_with_aligned_shortcut(language, &label, shortcut),
             label,
             shortcut,
@@ -1171,6 +1166,17 @@ fn rating_value_label(language: Language, rating: crate::ratings::Rating) -> Str
     language
         .text(COPY_RATING_VALUE)
         .replace(RATING_PLACEHOLDER, &rating.get().to_string())
+}
+
+/// Fill a rating choice name once. A brace inside either half stays literal.
+fn rating_choice_accessible_name(language: Language, label: &str, shortcut: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_RATING_CHOICE_NAME);
+    language
+        .fill(
+            COPY_RATING_CHOICE_NAME,
+            &[("label", label), ("shortcut", shortcut)],
+        )
+        .into_string()
 }
 
 const fn rating_value_shortcut(rating: crate::ratings::Rating) -> &'static str {
@@ -1492,6 +1498,42 @@ mod tests {
         let pseudo = super::label_with_aligned_shortcut(Language::Pseudo, "keep {brace}", "0");
         assert!(pseudo.contains("keep {brace}"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+    }
+
+    #[test]
+    fn rating_choice_accessible_name_fills_each_half_once() {
+        let mut input = ready_input();
+        let english = ChromeViewModel::new(input).rating_choices();
+        assert_eq!(english[0].accessibility_label, "Rating Unrated, shortcut 0");
+        assert_eq!(english[5].accessibility_label, "Rating 5 of 5, shortcut 5");
+        input.language = Language::Spanish;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_choices()[5].accessibility_label,
+            "Valoración 5 de 5, atajo 5"
+        );
+        input.language = Language::French;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_choices()[5].accessibility_label,
+            "Note 5 sur 5, raccourci 5"
+        );
+        input.language = Language::German;
+        assert_eq!(
+            ChromeViewModel::new(input).rating_choices()[5].accessibility_label,
+            "Bewertung 5 von 5, Tastenkürzel 5"
+        );
+        assert_eq!(
+            super::rating_choice_accessible_name(EN, "keep {shortcut}", "5"),
+            "Rating keep {shortcut}, shortcut 5"
+        );
+        assert_eq!(
+            super::rating_choice_accessible_name(EN, "5 of 5", "keep {label}"),
+            "Rating 5 of 5, shortcut keep {label}"
+        );
+        let pseudo = super::rating_choice_accessible_name(Language::Pseudo, "5 of 5", "5");
+        assert!(pseudo.contains("5 of 5"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{label}"));
+        assert!(!pseudo.contains("{shortcut}"));
     }
 
     use super::{

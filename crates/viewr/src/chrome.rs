@@ -86,9 +86,6 @@ const COPY_RATING_UNREADABLE: &str =
     "Rating could not be read. Close and reopen viewr before changing it.";
 const COPY_RATING_UNSUPPORTED: &str = "This image has unsupported rating metadata.";
 
-/// Placeholder for a rating value.
-const RATING_PLACEHOLDER: &str = "{rating}";
-
 /// Complete copy surface owned by this projection, for the coverage test.
 #[cfg(test)]
 const CHROME_COPY: &[&str] = &[
@@ -1177,9 +1174,15 @@ fn filter_choice_accessible_name(language: Language, label: &str) -> String {
 }
 
 fn rating_value_label(language: Language, rating: crate::ratings::Rating) -> String {
+    rating_of_five(language, &rating.get().to_string())
+}
+
+/// Fill the rating value once. A brace inside the rating stays literal.
+fn rating_of_five(language: Language, rating: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_RATING_VALUE);
     language
-        .text(COPY_RATING_VALUE)
-        .replace(RATING_PLACEHOLDER, &rating.get().to_string())
+        .fill(COPY_RATING_VALUE, &[("rating", rating)])
+        .into_string()
 }
 
 /// Fill a rating choice name once. A brace inside either half stays literal.
@@ -2349,6 +2352,32 @@ mod tests {
         );
         let pseudo = super::rated_status_label(Language::Pseudo, "4");
         assert!(pseudo.contains('4'));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{rating}"));
+    }
+
+    #[test]
+    fn rating_of_five_follows_the_selected_language() {
+        let rating = crate::ratings::Rating::new(5).expect("valid rating");
+        assert_eq!(super::rating_value_label(EN, rating), "5 of 5");
+        assert_eq!(
+            super::rating_value_label(Language::Spanish, rating),
+            "5 de 5"
+        );
+        assert_eq!(
+            super::rating_value_label(Language::French, rating),
+            "5 sur 5"
+        );
+        assert_eq!(
+            super::rating_value_label(Language::German, rating),
+            "5 von 5"
+        );
+        assert_eq!(
+            super::rating_of_five(EN, "keep {rating}"),
+            "keep {rating} of 5"
+        );
+        let pseudo = super::rating_of_five(Language::Pseudo, "5");
+        assert!(pseudo.contains('5'));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{rating}"));
     }

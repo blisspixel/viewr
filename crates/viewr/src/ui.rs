@@ -4554,10 +4554,17 @@ fn format_and_size(
     language: crate::locale::Language,
 ) -> Option<String> {
     match (&details.format, details.file_bytes) {
-        (Some(format), Some(bytes)) => Some(format!(
-            "{format} · {}",
-            crate::image_info::format_file_size(bytes, language)
-        )),
+        (Some(format), Some(bytes)) => {
+            let size = crate::image_info::format_file_size(bytes, language);
+            Some(
+                language
+                    .fill(
+                        tr!("{format} · {size}"),
+                        &[("format", format.as_str()), ("size", size.as_str())],
+                    )
+                    .into_string(),
+            )
+        }
         (Some(format), None) => Some(format.clone()),
         (None, Some(bytes)) => Some(crate::image_info::format_file_size(bytes, language)),
         (None, None) => None,
@@ -11523,6 +11530,68 @@ mod tests {
         assert_eq!(
             super::top_rating_position_label(&frame).as_deref(),
             Some("1 / 4")
+        );
+    }
+
+    #[test]
+    fn format_and_size_follows_the_selected_language() {
+        let both = crate::image_info::ImageDetails {
+            format: Some("JPEG".to_owned()),
+            file_bytes: Some(1024),
+            ..crate::image_info::ImageDetails::default()
+        };
+        assert_eq!(
+            super::format_and_size(&both, Language::English).as_deref(),
+            Some("JPEG · 1.0 KiB")
+        );
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_eq!(
+                super::format_and_size(&both, language).as_deref(),
+                Some("JPEG · 1,0 KiB")
+            );
+        }
+        let pseudo = super::format_and_size(&both, Language::Pseudo).expect("format and size");
+        let (open, close) = crate::locale::PSEUDO_MARKS;
+        // The file size is already one catalog frame, so its marks stay inside
+        // the joined sentence instead of being flattened.
+        assert!(pseudo.contains("JPEG"));
+        assert!(pseudo.contains(&format!("{open}1.0 KiB{close}")));
+        assert!(pseudo.contains(open));
+        assert!(!pseudo.contains("{format}"));
+        assert!(!pseudo.contains("{size}"));
+
+        let braced = crate::image_info::ImageDetails {
+            format: Some("keep {brace}".to_owned()),
+            file_bytes: Some(1024),
+            ..crate::image_info::ImageDetails::default()
+        };
+        let shown = super::format_and_size(&braced, Language::English).expect("braced format");
+        assert!(shown.contains("keep {brace}"));
+        assert!(!shown.contains("{format}"));
+        assert!(shown.contains("1.0 KiB"));
+
+        let format_only = crate::image_info::ImageDetails {
+            format: Some("PNG".to_owned()),
+            ..crate::image_info::ImageDetails::default()
+        };
+        assert_eq!(
+            super::format_and_size(&format_only, Language::English).as_deref(),
+            Some("PNG")
+        );
+        let size_only = crate::image_info::ImageDetails {
+            file_bytes: Some(999),
+            ..crate::image_info::ImageDetails::default()
+        };
+        assert_eq!(
+            super::format_and_size(&size_only, Language::Spanish).as_deref(),
+            Some("999 B")
+        );
+        assert_eq!(
+            super::format_and_size(
+                &crate::image_info::ImageDetails::default(),
+                Language::English
+            ),
+            None
         );
     }
 

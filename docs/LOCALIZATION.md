@@ -191,6 +191,9 @@ of by review:
   Trash accessible name. The label and the help sentence are inserted once.
   A brace inside either half stays literal. English stays Undo Trash followed
   by the recoverable-action help.
+  `chrome::rating_choice_accessible_name_fills_each_half_once` proves a rating
+  choice name. The value label and the shortcut are inserted once. A brace
+  inside either half stays literal. English stays Rating 5 of 5, shortcut 5.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

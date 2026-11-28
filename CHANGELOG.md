@@ -75,6 +75,9 @@ and organized by user-visible concern.
 - Undo Trash fills its accessible name once. The label and the help sentence
   are inserted once. A brace inside either half stays literal. English stays
   Undo Trash followed by the recoverable-action help.
+- A rating choice fills its accessible name once. The value label and the
+  shortcut are inserted once. A brace inside either half stays literal.
+  English stays Rating 5 of 5, shortcut 5.
 
 ## 0.7.9 - 2026-11-27
 

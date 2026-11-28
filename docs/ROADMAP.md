@@ -965,8 +965,9 @@ Make viewing excellent, not merely functional.
   EXIF count fills its singular or plural catalog frame once. A present
   privacy category fills its catalog frame once. The View menu fills its
   folder-sort label once. The update dialog fills its current-version line
-  once. A blocked action fills its wait sentence once. Other composed status
-  lines are still migrated one seam at a time, each with the coverage test in
+  once. A blocked action fills its wait sentence once. A dock side choice
+  fills its accessible name once. Other composed status lines are still
+  migrated one seam at a time, each with the coverage test in
   `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image

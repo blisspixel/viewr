@@ -88,10 +88,6 @@ const COPY_RATING_UNSUPPORTED: &str = "This image has unsupported rating metadat
 
 /// Placeholder for a rating value.
 const RATING_PLACEHOLDER: &str = "{rating}";
-/// Placeholder for a panel name.
-const PANEL_PLACEHOLDER: &str = "{panel}";
-/// Placeholder for a dock side.
-const SIDE_PLACEHOLDER: &str = "{side}";
 /// Placeholder for a control label.
 const LABEL_PLACEHOLDER: &str = "{label}";
 /// Placeholder for help text appended to an accessible name.
@@ -165,10 +161,13 @@ const CHROME_COPY: &[&str] = &[
 ];
 
 fn panel_side_label(language: Language, panel: &str, side: &'static str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_PANEL_SIDE);
     language
-        .text(COPY_PANEL_SIDE)
-        .replace(PANEL_PLACEHOLDER, panel)
-        .replace(SIDE_PLACEHOLDER, language.text(side))
+        .fill(
+            COPY_PANEL_SIDE,
+            &[("panel", panel), ("side", language.text(side))],
+        )
+        .into_string()
 }
 
 /// Horizontal edge used by a docked side panel.
@@ -2259,6 +2258,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn panel_side_label_fills_each_half_once() {
+        let english = dock_side_choices(EN, PositionedPanel::Tools, DockSide::Left);
+        assert_eq!(english[0].accessibility_label, "Tools: Left");
+        assert_eq!(english[1].accessibility_label, "Tools: Right");
+        let info = dock_side_choices(EN, PositionedPanel::ImageInfo, DockSide::Right);
+        assert_eq!(info[0].accessibility_label, "Image Information: Left");
+        assert_eq!(info[1].accessibility_label, "Image Information: Right");
+        let spanish = dock_side_choices(Language::Spanish, PositionedPanel::Tools, DockSide::Left);
+        assert_eq!(spanish[0].accessibility_label, "Herramientas: Izquierda");
+        let french =
+            dock_side_choices(Language::French, PositionedPanel::ImageInfo, DockSide::Left);
+        assert_eq!(
+            french[0].accessibility_label,
+            "Informations sur l\u{2019}image : Gauche"
+        );
+        let german = dock_side_choices(Language::German, PositionedPanel::Tools, DockSide::Right);
+        assert_eq!(german[1].accessibility_label, "Werkzeuge: Rechts");
+        assert_eq!(
+            super::panel_side_label(EN, "keep {side}", super::COPY_LEFT),
+            "keep {side}: Left"
+        );
+        assert_eq!(
+            super::panel_side_label(EN, "Tools", super::COPY_RIGHT),
+            "Tools: Right"
+        );
+        let pseudo = super::panel_side_label(Language::Pseudo, "Tools", super::COPY_LEFT);
+        assert!(pseudo.contains("Tools"));
+        assert!(pseudo.contains("Left"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{panel}"));
+        assert!(!pseudo.contains("{side}"));
     }
 
     #[test]

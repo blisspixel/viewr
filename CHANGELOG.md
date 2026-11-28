@@ -36,6 +36,9 @@ and organized by user-visible concern.
   notation stays, and the stop uses the language's decimal separator.
 - Image Information formats a focal length with one catalog frame. The mm
   abbreviation stays, and the length uses the language's decimal separator.
+- Image Information formats an exposure with one catalog frame for a
+  fraction of a second and one for a longer time. The fraction stays
+  `1/125 s`. A longer time uses the language's decimal separator.
 
 ## 0.7.9 - 2026-11-27
 

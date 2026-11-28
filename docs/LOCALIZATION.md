@@ -132,6 +132,10 @@ of by review:
   `image_info::focal_length_follows_the_selected_language` proves the frame for
   a focal length. The mm abbreviation stays, the length is inserted once, and
   the decimal separator follows the selected language.
+  `image_info::exposure_follows_the_selected_language` proves the frames for a
+  fractional exposure and a longer exposure. The fraction is inserted once, a
+  longer time uses the language's decimal separator, and a zero or missing
+  rational stays hidden.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

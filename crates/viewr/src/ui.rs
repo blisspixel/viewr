@@ -2806,7 +2806,7 @@ fn panel_position_menu(
         language,
         ui,
         actions,
-        "TOOLS",
+        language.text(tr!("TOOLS")),
         PositionedPanel::Tools,
         chrome.dock.tools.side,
         UiAction::SetToolsPanelSide,
@@ -2816,7 +2816,7 @@ fn panel_position_menu(
         language,
         ui,
         actions,
-        "IMAGE INFORMATION",
+        language.text(tr!("IMAGE INFORMATION")),
         PositionedPanel::ImageInfo,
         chrome.dock.image_info_side,
         UiAction::SetImageInfoSide,
@@ -10334,6 +10334,39 @@ mod tests {
                 .any(|action| matches!(action, UiAction::StepSequence(1))),
             "clicking the strip step must request the next page"
         );
+    }
+
+    #[test]
+    fn dock_side_headings_follow_the_selected_language() {
+        assert_eq!(Language::English.text(crate::locale::tr!("TOOLS")), "TOOLS");
+        assert_eq!(
+            Language::English.text(crate::locale::tr!("IMAGE INFORMATION")),
+            "IMAGE INFORMATION"
+        );
+        assert_eq!(
+            Language::Spanish.text(crate::locale::tr!("TOOLS")),
+            "HERRAMIENTAS"
+        );
+        assert_eq!(
+            Language::Spanish.text(crate::locale::tr!("IMAGE INFORMATION")),
+            "INFORMACIÓN DE LA IMAGEN"
+        );
+        assert_eq!(Language::French.text(crate::locale::tr!("TOOLS")), "OUTILS");
+        assert_eq!(
+            Language::French.text(crate::locale::tr!("IMAGE INFORMATION")),
+            "INFORMATIONS SUR L’IMAGE"
+        );
+        assert_eq!(
+            Language::German.text(crate::locale::tr!("TOOLS")),
+            "WERKZEUGE"
+        );
+        assert_eq!(
+            Language::German.text(crate::locale::tr!("IMAGE INFORMATION")),
+            "BILDINFORMATIONEN"
+        );
+        let pseudo = Language::Pseudo.text(crate::locale::tr!("IMAGE INFORMATION"));
+        assert!(pseudo.contains("IMAGE INFORMATION"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
     }
 
     #[test]

@@ -564,6 +564,12 @@ const MESSAGES: &[Message] = &[
         german: "Werkzeuge",
     },
     Message {
+        english: "TOOLS",
+        spanish: "HERRAMIENTAS",
+        french: "OUTILS",
+        german: "WERKZEUGE",
+    },
+    Message {
         english: "View",
         spanish: "Ver",
         french: "Affichage",
@@ -978,6 +984,12 @@ const MESSAGES: &[Message] = &[
         spanish: "Información de la imagen",
         french: "Informations sur l’image",
         german: "Bildinformationen",
+    },
+    Message {
+        english: "IMAGE INFORMATION",
+        spanish: "INFORMACIÓN DE LA IMAGEN",
+        french: "INFORMATIONS SUR L’IMAGE",
+        german: "BILDINFORMATIONEN",
     },
     Message {
         english: "Folder Previews",

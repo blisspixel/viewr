@@ -143,6 +143,9 @@ of by review:
   `ui::zoom_percent_label_follows_the_selected_language` proves the frame for
   the zoom percent. The rounded count is inserted once, the percent sign stays
   attached, and the accessible zoom sentence stays the existing catalog entry.
+  `ui::dock_side_headings_follow_the_selected_language` proves the section
+  headings in the panel position menu. English stays TOOLS and IMAGE
+  INFORMATION.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

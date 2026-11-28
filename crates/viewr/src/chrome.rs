@@ -1142,9 +1142,7 @@ pub(crate) fn rating_status_label(
         crate::ratings::RatingState::Loading => COPY_RATING_READING,
         crate::ratings::RatingState::Unrated => COPY_RATING_UNRATED,
         crate::ratings::RatingState::Rated(rating) => {
-            return language
-                .text(COPY_RATING_VALUE_STATUS)
-                .replace(RATING_PLACEHOLDER, &rating.get().to_string());
+            return rated_status_label(language, &rating.get().to_string());
         }
         crate::ratings::RatingState::Rejected => COPY_RATING_REJECTED,
         crate::ratings::RatingState::Conflict => COPY_RATING_CONFLICT,
@@ -1152,6 +1150,14 @@ pub(crate) fn rating_status_label(
         crate::ratings::RatingState::Unreadable => COPY_RATING_UNREADABLE_STATUS,
     };
     language.text(source).to_owned()
+}
+
+/// Fill the rated status once. A brace inside the rating stays literal.
+fn rated_status_label(language: Language, rating: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_RATING_VALUE_STATUS);
+    language
+        .fill(COPY_RATING_VALUE_STATUS, &[("rating", rating)])
+        .into_string()
 }
 
 /// Fill the "at least" filter label once. A brace inside the rating stays literal.
@@ -2315,6 +2321,34 @@ mod tests {
         );
         let pseudo = super::at_least_filter_status(Language::Pseudo, "3");
         assert!(pseudo.contains('3'));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{rating}"));
+    }
+
+    #[test]
+    fn rated_status_label_follows_the_selected_language() {
+        let state = crate::ratings::RatingState::Rated(
+            crate::ratings::Rating::new(4).expect("valid rating"),
+        );
+        assert_eq!(super::rating_status_label(EN, state), "Rating: 4 of 5");
+        assert_eq!(
+            super::rating_status_label(Language::Spanish, state),
+            "Valoración: 4 de 5"
+        );
+        assert_eq!(
+            super::rating_status_label(Language::French, state),
+            "Note : 4 sur 5"
+        );
+        assert_eq!(
+            super::rating_status_label(Language::German, state),
+            "Bewertung: 4 von 5"
+        );
+        assert_eq!(
+            super::rated_status_label(EN, "keep {rating}"),
+            "Rating: keep {rating} of 5"
+        );
+        let pseudo = super::rated_status_label(Language::Pseudo, "4");
+        assert!(pseudo.contains('4'));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{rating}"));
     }

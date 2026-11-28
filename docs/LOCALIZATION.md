@@ -176,6 +176,9 @@ of by review:
   menu's folder-sort label. The already translated sort name is inserted once.
   English stays Folder Sort: Latest First. The French sort name keeps its
   apostrophe.
+  `ui::current_version_line_follows_the_selected_language` proves the update
+  dialog's version line. The package version is inserted once. English stays
+  Current version: followed by that version.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

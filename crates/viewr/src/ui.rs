@@ -3192,6 +3192,12 @@ fn render_about_shortcut_groups(ui: &mut egui::Ui, colors: ChromeColors, frame: 
         });
 }
 
+fn current_version_line(language: Language, version: &str) -> String {
+    language
+        .fill(tr!("Current version: {version}"), &[("version", version)])
+        .into_string()
+}
+
 fn render_update_body(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeColors) -> bool {
     ui.heading(
         RichText::new(frame.text(tr!("Update viewr")))
@@ -3199,12 +3205,10 @@ fn render_update_body(ui: &mut egui::Ui, frame: &UiFrameOwned, colors: ChromeCol
             .color(colors.text),
     );
     ui.label(
-        RichText::new(
-            frame
-                .language
-                .text(tr!("Current version: {version}"))
-                .replace("{version}", env!("CARGO_PKG_VERSION")),
-        )
+        RichText::new(current_version_line(
+            frame.language,
+            env!("CARGO_PKG_VERSION"),
+        ))
         .size(13.0)
         .color(colors.muted),
     );
@@ -12119,6 +12123,34 @@ mod tests {
                 .all(|value| *value != long_error && !value.contains('\n')),
             "empty-state published an overflowing decoder error: {values:?}"
         );
+    }
+
+    #[test]
+    fn current_version_line_follows_the_selected_language() {
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(
+            super::current_version_line(Language::English, version),
+            concat!("Current version: ", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            super::current_version_line(Language::Spanish, version),
+            format!("Versión actual: {version}")
+        );
+        assert_eq!(
+            super::current_version_line(Language::French, version),
+            format!("Version actuelle : {version}")
+        );
+        assert_eq!(
+            super::current_version_line(Language::German, version),
+            format!("Aktuelle Version: {version}")
+        );
+        let braced = super::current_version_line(Language::English, "keep {brace}");
+        assert!(braced.contains("keep {brace}"));
+        assert!(!braced.contains("{version}"));
+        let pseudo = super::current_version_line(Language::Pseudo, version);
+        assert!(pseudo.contains(version));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{version}"));
     }
 
     #[test]

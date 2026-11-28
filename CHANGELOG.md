@@ -63,6 +63,8 @@ and organized by user-visible concern.
   category is inserted once. English stays Present: location-related data.
 - The View menu fills the folder-sort label once. The already translated sort
   name is inserted once. English stays Folder Sort: Latest First.
+- The update dialog fills the current-version line once. The package version
+  is inserted once. English stays Current version: followed by that version.
 
 ## 0.7.9 - 2026-11-27
 

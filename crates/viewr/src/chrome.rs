@@ -88,8 +88,6 @@ const COPY_RATING_UNSUPPORTED: &str = "This image has unsupported rating metadat
 
 /// Placeholder for a rating value.
 const RATING_PLACEHOLDER: &str = "{rating}";
-/// Placeholder for a control label.
-const LABEL_PLACEHOLDER: &str = "{label}";
 
 /// Complete copy surface owned by this projection, for the coverage test.
 #[cfg(test)]
@@ -981,9 +979,7 @@ impl ChromeViewModel {
         let language = self.input.language;
         let all = language.text(COPY_FILTER_ALL).to_owned();
         let unrated = language.text(COPY_UNRATED).to_owned();
-        let unrated_name = language
-            .text(COPY_FILTER_CHOICE_NAME)
-            .replace(LABEL_PLACEHOLDER, &unrated);
+        let unrated_name = filter_choice_accessible_name(language, &unrated);
         // "All images" already reads as a complete name, so it keeps the
         // unprefixed accessible name it has always had.
         std::iter::once((crate::ratings::RatingFilter::All, all.clone(), all))
@@ -993,15 +989,11 @@ impl ChromeViewModel {
                 unrated_name,
             )))
             .chain(crate::ratings::Rating::ALL.into_iter().map(|rating| {
-                let label = language
-                    .text(COPY_FILTER_AT_LEAST)
-                    .replace(RATING_PLACEHOLDER, &rating.get().to_string());
+                let label = at_least_filter_label(language, &rating.get().to_string());
                 (
                     crate::ratings::RatingFilter::AtLeast(rating),
                     label.clone(),
-                    language
-                        .text(COPY_FILTER_CHOICE_NAME)
-                        .replace(LABEL_PLACEHOLDER, &label),
+                    filter_choice_accessible_name(language, &label),
                 )
             }))
             .map(
@@ -1160,6 +1152,22 @@ pub(crate) fn rating_status_label(
         crate::ratings::RatingState::Unreadable => COPY_RATING_UNREADABLE_STATUS,
     };
     language.text(source).to_owned()
+}
+
+/// Fill the "at least" filter label once. A brace inside the rating stays literal.
+fn at_least_filter_label(language: Language, rating: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_FILTER_AT_LEAST);
+    language
+        .fill(COPY_FILTER_AT_LEAST, &[("rating", rating)])
+        .into_string()
+}
+
+/// Fill a rating-filter choice name once. A brace inside the label stays literal.
+fn filter_choice_accessible_name(language: Language, label: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_FILTER_CHOICE_NAME);
+    language
+        .fill(COPY_FILTER_CHOICE_NAME, &[("label", label)])
+        .into_string()
 }
 
 fn rating_value_label(language: Language, rating: crate::ratings::Rating) -> String {
@@ -2230,6 +2238,46 @@ mod tests {
             ChromeViewModel::new(input).rating_filter_menu_label(),
             "Rating Filter: Reading folder..."
         );
+    }
+
+    #[test]
+    fn rating_filter_choice_fills_each_half_once() {
+        let mut input = ready_input();
+        let english = ChromeViewModel::new(input).rating_filter_choices();
+        assert_eq!(english[1].accessibility_label, "Rating filter: Unrated");
+        assert_eq!(english[4].label, "At least 3");
+        assert_eq!(english[4].accessibility_label, "Rating filter: At least 3");
+        input.language = Language::Spanish;
+        let spanish = ChromeViewModel::new(input).rating_filter_choices();
+        assert_eq!(
+            spanish[4].accessibility_label,
+            "Filtro de valoración: Al menos 3"
+        );
+        input.language = Language::French;
+        let french = ChromeViewModel::new(input).rating_filter_choices();
+        assert_eq!(
+            french[4].accessibility_label,
+            "Filtre de notes : Au moins 3"
+        );
+        input.language = Language::German;
+        let german = ChromeViewModel::new(input).rating_filter_choices();
+        assert_eq!(
+            german[4].accessibility_label,
+            "Bewertungsfilter: Mindestens 3"
+        );
+        assert_eq!(
+            super::at_least_filter_label(EN, "keep {label}"),
+            "At least keep {label}"
+        );
+        assert_eq!(
+            super::filter_choice_accessible_name(EN, "At least keep {label}"),
+            "Rating filter: At least keep {label}"
+        );
+        let pseudo = super::filter_choice_accessible_name(Language::Pseudo, "At least 3");
+        assert!(pseudo.contains("At least 3"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{label}"));
+        assert!(!pseudo.contains("{rating}"));
     }
 
     #[test]

@@ -159,6 +159,10 @@ of by review:
   `ui::animation_frame_label_follows_the_selected_language` proves the
   animation position. Both counts are inserted once, English stays Frame 2 of
   3, and the existing Spanish, French, and German sentences stay.
+  `ui::color_and_display_lines_follow_the_selected_language` proves the color
+  profile line and the display status line. Each inserted fact is substituted
+  once, English stays Color · sRGB and Display · sRGB fallback, and the
+  existing translations of those facts stay.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

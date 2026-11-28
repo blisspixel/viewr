@@ -53,6 +53,9 @@ and organized by user-visible concern.
   frame. English stays JPEG · 1.0 KiB. The format name stays untranslated.
 - The animation position fills its existing catalog frame once. English stays
   Frame 2 of 3. Spanish, French, and German keep their existing sentences.
+- Image Information fills the color-profile line and the display-status line
+  once. English stays Color · sRGB and Display · sRGB fallback. The profile
+  and status text are inserted once.
 
 ## 0.7.9 - 2026-11-27
 

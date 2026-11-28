@@ -5880,6 +5880,17 @@ struct CropMoveOverlay {
     pan_override: bool,
 }
 
+fn crop_dimension_label(language: Language, width: u32, height: u32) -> String {
+    let width = width.to_string();
+    let height = height.to_string();
+    language
+        .fill(
+            tr!("{width} × {height} px"),
+            &[("width", width.as_str()), ("height", height.as_str())],
+        )
+        .into_string()
+}
+
 fn render_crop_dimensions_and_move(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
@@ -5902,7 +5913,7 @@ fn render_crop_dimensions_and_move(
     else {
         return;
     };
-    let label = format!("{pixel_width} × {pixel_height} px");
+    let label = crop_dimension_label(language, pixel_width, pixel_height);
     let galley = painter.layout_no_wrap(label, egui::FontId::proportional(12.0), colors.text);
     let label_size = galley.size() + Vec2::new(12.0, 8.0);
     let below = rect.center_bottom() + Vec2::new(0.0, 20.0);
@@ -12107,6 +12118,26 @@ mod tests {
                 .iter()
                 .any(|(_, node)| node.label() == Some(expected.as_str()))
         );
+    }
+
+    #[test]
+    fn crop_dimension_label_follows_the_selected_language() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            assert_eq!(
+                super::crop_dimension_label(language, 1_152, 649),
+                "1152 × 649 px"
+            );
+        }
+        let pseudo = super::crop_dimension_label(Language::Pseudo, 1_152, 649);
+        assert!(pseudo.contains("1152 × 649 px"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{width}"));
+        assert!(!pseudo.contains("{height}"));
     }
 
     #[test]

@@ -3529,6 +3529,12 @@ const MESSAGES: &[Message] = &[
         german: "{width} × {height}",
     },
     Message {
+        english: "{width} × {height} px",
+        spanish: "{width} × {height} px",
+        french: "{width} × {height} px",
+        german: "{width} × {height} px",
+    },
+    Message {
         english: "Preview {width} × {height}",
         spanish: "Vista previa {width} × {height}",
         french: "Aperçu {width} × {height}",

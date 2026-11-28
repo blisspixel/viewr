@@ -207,6 +207,10 @@ of by review:
   rating filter menu status. The rating is inserted once. A brace inside the
   rating stays literal. English stays Rating Filter: At least 3. French keeps
   the space before the colon.
+  `chrome::rated_status_label_follows_the_selected_language` proves the rated
+  status. The rating is inserted once. A brace inside the rating stays
+  literal. English stays Rating: 4 of 5. French keeps the space before the
+  colon.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

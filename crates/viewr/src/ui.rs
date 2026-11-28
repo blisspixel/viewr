@@ -4631,6 +4631,18 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     );
 }
 
+fn exif_count_line(language: Language, count: usize) -> String {
+    let shown = count.to_string();
+    let template = if count == 1 {
+        tr!("{count} supported EXIF tag detected.")
+    } else {
+        tr!("{count} supported EXIF tags detected.")
+    };
+    language
+        .fill(template, &[("count", shown.as_str())])
+        .into_string()
+}
+
 fn render_source_privacy(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     let Some(details) = frame.details.as_ref() else {
         return;
@@ -4647,19 +4659,9 @@ fn render_source_privacy(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     if details.exif_tag_count == 0 {
         ui.label(RichText::new(frame.text(tr!("No supported EXIF detected."))).color(colors.muted));
     } else {
-        let template = if details.exif_tag_count == 1 {
-            tr!("{count} supported EXIF tag detected.")
-        } else {
-            tr!("{count} supported EXIF tags detected.")
-        };
         ui.label(
-            RichText::new(
-                frame
-                    .language
-                    .text(template)
-                    .replace("{count}", &details.exif_tag_count.to_string()),
-            )
-            .color(colors.muted),
+            RichText::new(exif_count_line(frame.language, details.exif_tag_count))
+                .color(colors.muted),
         );
         let categories = source_privacy_categories(details);
         if categories.is_empty() {
@@ -8744,6 +8746,52 @@ mod tests {
                 value.contains("does not receive the file manager's current sort")
             })
         }));
+    }
+
+    #[test]
+    fn exif_count_line_follows_the_selected_language() {
+        assert_eq!(
+            super::exif_count_line(Language::English, 1),
+            "1 supported EXIF tag detected."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::English, 7),
+            "7 supported EXIF tags detected."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::Spanish, 1),
+            "1 etiqueta EXIF compatible detectada."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::Spanish, 7),
+            "7 etiquetas EXIF compatibles detectadas."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::French, 1),
+            "1 balise EXIF prise en charge détectée."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::French, 7),
+            "7 balises EXIF prises en charge détectées."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::German, 1),
+            "1 unterstütztes EXIF-Tag erkannt."
+        );
+        assert_eq!(
+            super::exif_count_line(Language::German, 7),
+            "7 unterstützte EXIF-Tags erkannt."
+        );
+        let pseudo = super::exif_count_line(Language::Pseudo, 7);
+        assert!(pseudo.contains("7 supported EXIF tags detected."));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{count}"));
+        let braced = Language::English.fill(
+            tr!("{count} supported EXIF tags detected."),
+            &[("count", "keep {brace}")],
+        );
+        assert!(braced.as_str().contains("keep {brace}"));
+        assert!(!braced.as_str().contains("{count}"));
     }
 
     #[test]

@@ -56,6 +56,9 @@ and organized by user-visible concern.
 - Image Information fills the color-profile line and the display-status line
   once. English stays Color · sRGB and Display · sRGB fallback. The profile
   and status text are inserted once.
+- Source Privacy fills the supported-EXIF count once. One tag keeps the
+  singular sentence and any other count keeps the plural sentence. English
+  for one tag and for seven tags stays those existing sentences.
 
 ## 0.7.9 - 2026-11-27
 

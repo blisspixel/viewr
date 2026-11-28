@@ -961,9 +961,10 @@ Make viewing excellent, not merely functional.
   whose total is still unknown uses another. Image Information joins a format
   name to its file size with one catalog frame. The animation position fills
   its existing catalog frame once. The color-profile line and the
-  display-status line each fill their existing catalog frame once. Other
-  composed status lines are still migrated one seam at a time, each with the
-  coverage test in `docs/LOCALIZATION.md`.
+  display-status line each fill their existing catalog frame once. A supported
+  EXIF count fills its singular or plural catalog frame once. Other composed
+  status lines are still migrated one seam at a time, each with the coverage
+  test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

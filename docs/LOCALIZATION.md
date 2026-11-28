@@ -179,6 +179,10 @@ of by review:
   `ui::current_version_line_follows_the_selected_language` proves the update
   dialog's version line. The package version is inserted once. English stays
   Current version: followed by that version.
+  `current_work::wait_sentence_fills_each_half_once` proves a blocked action's
+  wait sentence. The running work and the attempted action are inserted once.
+  A brace inside either half stays literal. English stays Wait for the folder
+  scan to finish before moving this file to Trash. French keeps its apostrophe.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

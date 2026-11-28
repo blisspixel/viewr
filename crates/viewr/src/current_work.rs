@@ -9,10 +9,6 @@ use crate::locale::Language;
 
 /// Wait sentence. `{work}` is the running work, `{action}` the attempted one.
 const WAIT_TEMPLATE: &str = "Wait for {work} to finish {action}";
-/// Placeholder for the running work.
-const WORK_PLACEHOLDER: &str = "{work}";
-/// Placeholder for the attempted action clause.
-const ACTION_PLACEHOLDER: &str = "{action}";
 /// Spot Heal needs a settled source, not a last good frame.
 const WAIT_FOR_OPEN_BEFORE_HEAL: &str =
     "Wait for the image to finish opening before using Spot Heal";
@@ -253,10 +249,19 @@ pub(crate) fn blocked_action_message(
     action: BlockedAction,
     blocker: CurrentWork,
 ) -> String {
+    wait_sentence(
+        language,
+        language.text(work_source(blocker)),
+        language.text(action.source()),
+    )
+}
+
+/// Fill the wait sentence once. A brace inside either half stays literal.
+fn wait_sentence(language: Language, work: &str, action: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(WAIT_TEMPLATE);
     language
-        .text(WAIT_TEMPLATE)
-        .replace(WORK_PLACEHOLDER, language.text(work_source(blocker)))
-        .replace(ACTION_PLACEHOLDER, language.text(action.source()))
+        .fill(WAIT_TEMPLATE, &[("work", work), ("action", action)])
+        .into_string()
 }
 
 const fn work_source(blocker: CurrentWork) -> &'static str {
@@ -471,6 +476,60 @@ mod tests {
             blocked_action_message(EN, BlockedAction::SaveCopy, CurrentWork::SourceVerification),
             "Wait for source verification to finish before saving a copy"
         );
+    }
+
+    #[test]
+    fn wait_sentence_fills_each_half_once() {
+        assert_eq!(
+            super::blocked_action_message(
+                Language::English,
+                BlockedAction::Trash,
+                CurrentWork::FolderScan
+            ),
+            "Wait for the folder scan to finish before moving this file to Trash"
+        );
+        assert_eq!(
+            super::blocked_action_message(
+                Language::Spanish,
+                BlockedAction::Trash,
+                CurrentWork::FolderScan
+            ),
+            "Espere a que el escaneo de la carpeta termine antes de mover este archivo a la papelera"
+        );
+        assert_eq!(
+            super::blocked_action_message(
+                Language::French,
+                BlockedAction::Trash,
+                CurrentWork::FolderScan
+            ),
+            "Attendez la fin de l\u{2019}analyse du dossier avant de mettre ce fichier à la corbeille"
+        );
+        assert_eq!(
+            super::blocked_action_message(
+                Language::German,
+                BlockedAction::Trash,
+                CurrentWork::FolderScan
+            ),
+            "Warten Sie, bis die Ordnerprüfung abgeschlossen ist, bevor Sie diese Datei in den Papierkorb verschieben"
+        );
+        assert_eq!(
+            super::wait_sentence(Language::English, "keep {action}", "before browsing"),
+            "Wait for keep {action} to finish before browsing"
+        );
+        assert_eq!(
+            super::wait_sentence(Language::English, "the folder scan", "keep {work}"),
+            "Wait for the folder scan to finish keep {work}"
+        );
+        let pseudo = super::wait_sentence(
+            Language::Pseudo,
+            "the folder scan",
+            "before moving this file to Trash",
+        );
+        assert!(pseudo.contains("the folder scan"));
+        assert!(pseudo.contains("before moving this file to Trash"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{work}"));
+        assert!(!pseudo.contains("{action}"));
     }
 
     #[test]

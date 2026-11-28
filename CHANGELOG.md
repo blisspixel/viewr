@@ -65,6 +65,10 @@ and organized by user-visible concern.
   name is inserted once. English stays Folder Sort: Latest First.
 - The update dialog fills the current-version line once. The package version
   is inserted once. English stays Current version: followed by that version.
+- A blocked action fills its wait sentence once. The running work and the
+  attempted action are inserted once. A brace inside either half stays literal.
+  English stays Wait for the folder scan to finish before moving this file to
+  Trash.
 
 ## 0.7.9 - 2026-11-27
 

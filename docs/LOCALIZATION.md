@@ -136,6 +136,10 @@ of by review:
   fractional exposure and a longer exposure. The fraction is inserted once, a
   longer time uses the language's decimal separator, and a zero or missing
   rational stays hidden.
+  `ui::crop_dimension_label_follows_the_selected_language` proves the frame for
+  the crop overlay's pixel size. Both counts are inserted once, and the
+  multiplication sign and px abbreviation stay. The accessible crop sentence
+  stays the existing catalog entry.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

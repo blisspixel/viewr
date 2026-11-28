@@ -39,6 +39,8 @@ and organized by user-visible concern.
 - Image Information formats an exposure with one catalog frame for a
   fraction of a second and one for a longer time. The fraction stays
   `1/125 s`. A longer time uses the language's decimal separator.
+- The crop overlay formats its pixel size with one catalog frame. The
+  multiplication sign and the px abbreviation stay between the two counts.
 
 ## 0.7.9 - 2026-11-27
 

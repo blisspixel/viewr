@@ -954,8 +954,9 @@ Make viewing excellent, not merely functional.
   existing sentence. A file size uses one catalog frame per binary unit.
   An aperture uses one catalog frame. A focal length uses one catalog frame.
   An exposure uses one catalog frame for a fraction of a second and one for a
-  longer time. Other composed status lines are still migrated one seam at a
-  time, each with the coverage test in `docs/LOCALIZATION.md`.
+  longer time. The crop overlay uses one catalog frame for its pixel size.
+  Other composed status lines are still migrated one seam at a time, each
+  with the coverage test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

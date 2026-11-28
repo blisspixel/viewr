@@ -3583,6 +3583,18 @@ const MESSAGES: &[Message] = &[
         german: "{length} mm",
     },
     Message {
+        english: "1/{fraction} s",
+        spanish: "1/{fraction} s",
+        french: "1/{fraction} s",
+        german: "1/{fraction} s",
+    },
+    Message {
+        english: "{seconds} s",
+        spanish: "{seconds} s",
+        french: "{seconds} s",
+        german: "{seconds} s",
+    },
+    Message {
         english: "Right for the next photo.",
         spanish: "Derecha para la siguiente foto.",
         french: "Droite pour la photo suivante.",

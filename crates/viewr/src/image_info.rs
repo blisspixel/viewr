@@ -1337,17 +1337,35 @@ pub(crate) fn format_focal_length(value: f64, language: Language) -> String {
         .into_string()
 }
 
+const EXPOSURE_FRACTION: &str = "1/{fraction} s";
+const EXPOSURE_SECONDS: &str = "{seconds} s";
+
 /// Format shutter speed / exposure time.
+///
+/// Each language owns the frame. The fraction and the seconds are inserted
+/// once and are not translated again.
 #[must_use]
 pub(crate) fn format_exposure(value: &uR64, language: Language) -> Option<String> {
+    const _: () = crate::locale::assert_cataloged(EXPOSURE_FRACTION);
+    const _: () = crate::locale::assert_cataloged(EXPOSURE_SECONDS);
     let seconds = rational_value(value)?;
     if seconds <= 0.0 {
         return None;
     }
     if seconds < 1.0 {
-        Some(format!("1/{:.0} s", 1.0 / seconds))
+        let fraction = format!("{:.0}", 1.0 / seconds);
+        Some(
+            language
+                .fill(EXPOSURE_FRACTION, &[("fraction", fraction.as_str())])
+                .into_string(),
+        )
     } else {
-        Some(format!("{} s", language.format_decimal(seconds, 1)))
+        let shown = language.format_decimal(seconds, 1);
+        Some(
+            language
+                .fill(EXPOSURE_SECONDS, &[("seconds", shown.as_str())])
+                .into_string(),
+        )
     }
 }
 
@@ -1633,6 +1651,48 @@ mod tests {
         assert!(pseudo.contains("50.0 mm"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{length}"));
+    }
+
+    #[test]
+    fn exposure_follows_the_selected_language() {
+        let fast = uR64 {
+            nominator: 1,
+            denominator: 125,
+        };
+        let slow = uR64 {
+            nominator: 3,
+            denominator: 2,
+        };
+        let zero = uR64 {
+            nominator: 0,
+            denominator: 1,
+        };
+        let missing = uR64 {
+            nominator: 1,
+            denominator: 0,
+        };
+        assert_eq!(
+            format_exposure(&fast, Language::English).as_deref(),
+            Some("1/125 s")
+        );
+        assert_eq!(
+            format_exposure(&slow, Language::English).as_deref(),
+            Some("1.5 s")
+        );
+        assert_eq!(format_exposure(&zero, Language::English), None);
+        assert_eq!(format_exposure(&missing, Language::English), None);
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_eq!(format_exposure(&fast, language).as_deref(), Some("1/125 s"));
+            assert_eq!(format_exposure(&slow, language).as_deref(), Some("1,5 s"));
+        }
+        let pseudo = format_exposure(&fast, Language::Pseudo).expect("fast exposure");
+        assert!(pseudo.contains("1/125 s"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{fraction}"));
+        let slow_pseudo = format_exposure(&slow, Language::Pseudo).expect("slow exposure");
+        assert!(slow_pseudo.contains("1.5 s"));
+        assert!(slow_pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!slow_pseudo.contains("{seconds}"));
     }
 
     #[test]

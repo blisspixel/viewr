@@ -69,6 +69,9 @@ and organized by user-visible concern.
   attempted action are inserted once. A brace inside either half stays literal.
   English stays Wait for the folder scan to finish before moving this file to
   Trash.
+- A dock side choice fills its accessible name once. The panel name and the
+  side are inserted once. A brace inside the panel name stays literal. English
+  stays Tools: Left. French keeps the space before the colon.
 
 ## 0.7.9 - 2026-11-27
 

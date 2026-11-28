@@ -183,6 +183,10 @@ of by review:
   wait sentence. The running work and the attempted action are inserted once.
   A brace inside either half stays literal. English stays Wait for the folder
   scan to finish before moving this file to Trash. French keeps its apostrophe.
+  `chrome::panel_side_label_fills_each_half_once` proves a dock side choice.
+  The panel name and the side are inserted once. A brace inside the panel name
+  stays literal. English stays Tools: Left. French keeps the space before the
+  colon and the apostrophe in Image Information.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

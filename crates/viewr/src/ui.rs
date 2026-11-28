@@ -1632,15 +1632,33 @@ fn active_view_position(frame: &UiFrameOwned) -> Option<(usize, usize)> {
     }
 }
 
+fn known_folder_position(language: Language, index: usize, total: usize) -> String {
+    let index = index.to_string();
+    let total = total.to_string();
+    language
+        .fill(
+            tr!("{index} / {total}"),
+            &[("index", index.as_str()), ("total", total.as_str())],
+        )
+        .into_string()
+}
+
+fn scanning_folder_position(language: Language, index: usize) -> String {
+    let index = index.to_string();
+    language
+        .fill(tr!("{index} / ..."), &[("index", index.as_str())])
+        .into_string()
+}
+
 fn top_rating_position_label(frame: &UiFrameOwned) -> Option<String> {
     let displayed_position = active_view_position(frame);
     if let Some((index, total)) = displayed_position {
         Some(match frame.rating.filter {
             crate::ratings::RatingFilter::All => {
                 if frame.folder_scan_busy && total == 1 {
-                    format!("{index} / ...")
+                    scanning_folder_position(frame.language, index)
                 } else {
-                    format!("{index} / {total}")
+                    known_folder_position(frame.language, index, total)
                 }
             }
             crate::ratings::RatingFilter::AtLeast(minimum) => frame
@@ -11453,6 +11471,59 @@ mod tests {
         );
         assert!(pseudo.as_str().contains("keep {brace}"));
         assert!(pseudo.as_str().contains(crate::locale::PSEUDO_MARKS.0));
+    }
+
+    #[test]
+    fn folder_position_follows_the_selected_language() {
+        for language in [
+            Language::English,
+            Language::Spanish,
+            Language::French,
+            Language::German,
+        ] {
+            assert_eq!(super::known_folder_position(language, 1, 2), "1 / 2");
+            assert_eq!(super::scanning_folder_position(language, 1), "1 / ...");
+        }
+        let pseudo = super::known_folder_position(Language::Pseudo, 1, 2);
+        assert!(pseudo.contains("1 / 2"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{index}"));
+        assert!(!pseudo.contains("{total}"));
+        let scanning = super::scanning_folder_position(Language::Pseudo, 1);
+        assert!(scanning.contains("1 / ..."));
+        assert!(scanning.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!scanning.contains("{index}"));
+
+        let braced = Language::English.fill(
+            tr!("{index} / {total}"),
+            &[("index", "keep {brace}"), ("total", "2")],
+        );
+        assert!(braced.as_str().contains("keep {brace}"));
+        assert!(!braced.as_str().contains("{index}"));
+        assert!(!braced.as_str().contains("{total}"));
+
+        let mut frame = accessibility_test_frame();
+        frame.rating.filter = crate::ratings::RatingFilter::All;
+        assert_eq!(
+            super::top_rating_position_label(&frame).as_deref(),
+            Some("1 / 2")
+        );
+        frame.language = Language::Pseudo;
+        let marked = super::top_rating_position_label(&frame).expect("folder position");
+        assert!(marked.contains("1 / 2"));
+        assert!(marked.contains(crate::locale::PSEUDO_MARKS.0));
+        frame.language = Language::English;
+        frame.folder_scan_busy = true;
+        frame.playlist_pos = Some((1, 1));
+        assert_eq!(
+            super::top_rating_position_label(&frame).as_deref(),
+            Some("1 / ...")
+        );
+        frame.playlist_pos = Some((1, 4));
+        assert_eq!(
+            super::top_rating_position_label(&frame).as_deref(),
+            Some("1 / 4")
+        );
     }
 
     #[test]

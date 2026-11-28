@@ -2023,6 +2023,18 @@ const MESSAGES: &[Message] = &[
         german: "{rated} von {total} bewertet",
     },
     Message {
+        english: "{index} / {total}",
+        spanish: "{index} / {total}",
+        french: "{index} / {total}",
+        german: "{index} / {total}",
+    },
+    Message {
+        english: "{index} / ...",
+        spanish: "{index} / ...",
+        french: "{index} / ...",
+        german: "{index} / ...",
+    },
+    Message {
         english: "{index} / {total} rated {rating}+ · {rated} of {folder} rated",
         spanish: "{index} / {total} valoradas {rating}+ · {rated} de {folder} valoradas",
         french: "{index} / {total} notées {rating}+ · {rated} sur {folder} notées",

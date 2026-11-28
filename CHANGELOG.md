@@ -47,6 +47,8 @@ and organized by user-visible concern.
   TOOLS and IMAGE INFORMATION.
 - Image Information formats an ISO sensitivity with one catalog frame.
   English stays ISO 400.
+- The top status formats a folder position with one catalog frame, and the
+  in-progress scan with another. English stays 1 / 2 and 1 / ....
 
 ## 0.7.9 - 2026-11-27
 

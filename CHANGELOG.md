@@ -61,6 +61,8 @@ and organized by user-visible concern.
   for one tag and for seven tags stays those existing sentences.
 - Source Privacy fills each present-category line once. The already translated
   category is inserted once. English stays Present: location-related data.
+- The View menu fills the folder-sort label once. The already translated sort
+  name is inserted once. English stays Folder Sort: Latest First.
 
 ## 0.7.9 - 2026-11-27
 

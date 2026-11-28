@@ -211,6 +211,9 @@ of by review:
   status. The rating is inserted once. A brace inside the rating stays
   literal. English stays Rating: 4 of 5. French keeps the space before the
   colon.
+  `chrome::rating_of_five_follows_the_selected_language` proves a rating
+  value. The rating is inserted once. A brace inside the rating stays
+  literal. English stays 5 of 5.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

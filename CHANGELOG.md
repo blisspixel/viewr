@@ -91,6 +91,8 @@ and organized by user-visible concern.
 - The rated status fills its sentence once. The rating is inserted once. A
   brace inside the rating stays literal. English stays Rating: 4 of 5. French
   keeps the space before the colon.
+- A rating value fills its phrase once. The rating is inserted once. A brace
+  inside the rating stays literal. English stays 5 of 5.
 
 ## 0.7.9 - 2026-11-27
 

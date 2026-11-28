@@ -1198,6 +1198,14 @@ const fn rating_value_shortcut(rating: crate::ratings::Rating) -> &'static str {
     }
 }
 
+/// Fill the rating-filter status once. A brace inside the rating stays literal.
+fn at_least_filter_status(language: Language, rating: &str) -> String {
+    const _: () = crate::locale::assert_cataloged(COPY_FILTER_AT_LEAST_STATUS);
+    language
+        .fill(COPY_FILTER_AT_LEAST_STATUS, &[("rating", rating)])
+        .into_string()
+}
+
 pub(crate) fn rating_filter_label(
     language: Language,
     filter: crate::ratings::RatingFilter,
@@ -1207,9 +1215,9 @@ pub(crate) fn rating_filter_label(
         crate::ratings::RatingFilter::Unrated => {
             language.text(COPY_FILTER_UNRATED_STATUS).to_owned()
         }
-        crate::ratings::RatingFilter::AtLeast(rating) => language
-            .text(COPY_FILTER_AT_LEAST_STATUS)
-            .replace(RATING_PLACEHOLDER, &rating.get().to_string()),
+        crate::ratings::RatingFilter::AtLeast(rating) => {
+            at_least_filter_status(language, &rating.get().to_string())
+        }
     }
 }
 
@@ -2277,6 +2285,37 @@ mod tests {
         assert!(pseudo.contains("At least 3"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{label}"));
+        assert!(!pseudo.contains("{rating}"));
+    }
+
+    #[test]
+    fn at_least_filter_status_follows_the_selected_language() {
+        let filter = crate::ratings::RatingFilter::AtLeast(
+            crate::ratings::Rating::new(3).expect("valid rating"),
+        );
+        assert_eq!(
+            super::rating_filter_label(EN, filter),
+            "Rating Filter: At least 3"
+        );
+        assert_eq!(
+            super::rating_filter_label(Language::Spanish, filter),
+            "Filtro de valoración: al menos 3"
+        );
+        assert_eq!(
+            super::rating_filter_label(Language::French, filter),
+            "Filtre de notes : au moins 3"
+        );
+        assert_eq!(
+            super::rating_filter_label(Language::German, filter),
+            "Bewertungsfilter: mindestens 3"
+        );
+        assert_eq!(
+            super::at_least_filter_status(EN, "keep {rating}"),
+            "Rating Filter: At least keep {rating}"
+        );
+        let pseudo = super::at_least_filter_status(Language::Pseudo, "3");
+        assert!(pseudo.contains('3'));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{rating}"));
     }
 

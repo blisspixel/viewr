@@ -203,6 +203,10 @@ of by review:
   choice. The threshold label is inserted once. A brace inside that label
   stays literal. English stays Rating filter: At least 3 and Rating filter:
   Unrated. French keeps the space before the colon.
+  `chrome::at_least_filter_status_follows_the_selected_language` proves the
+  rating filter menu status. The rating is inserted once. A brace inside the
+  rating stays literal. English stays Rating Filter: At least 3. French keeps
+  the space before the colon.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

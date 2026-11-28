@@ -956,9 +956,9 @@ Make viewing excellent, not merely functional.
   An exposure uses one catalog frame for a fraction of a second and one for a
   longer time. The crop overlay uses one catalog frame for its pixel size.
   The zoom control uses one catalog frame for its percent. The panel position
-  menu translates its section headings. Other composed status lines are still
-  migrated one seam at a time, each with the coverage test in
-  `docs/LOCALIZATION.md`.
+  menu translates its section headings. An ISO sensitivity uses one catalog
+  frame. Other composed status lines are still migrated one seam at a time,
+  each with the coverage test in `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

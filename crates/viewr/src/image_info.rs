@@ -47,7 +47,7 @@ pub struct ImageDetails {
     pub exposure: Option<String>,
     /// Aperture, such as `f/2.8`.
     pub aperture: Option<String>,
-    /// ISO sensitivity.
+    /// ISO sensitivity, such as `ISO 400`.
     pub iso: Option<String>,
     /// Focal length, such as `50 mm`.
     pub focal_length: Option<String>,
@@ -113,6 +113,17 @@ impl ImageDetails {
         self.focal_length
             .as_deref()
             .map(|s| language.localize_decimal_string(s))
+    }
+
+    /// ISO sensitivity formatted for the given language.
+    ///
+    /// The stored fact uses the English frame. Display fills the catalog again
+    /// so each language owns the sentence and the count is inserted once.
+    #[must_use]
+    pub(crate) fn localized_iso(&self, language: Language) -> Option<String> {
+        let stored = self.iso.as_deref()?;
+        let value = stored.strip_prefix("ISO ").unwrap_or(stored);
+        Some(format_iso_text(value, language))
     }
 
     /// Read file-system and supported EXIF facts without failing the open path.
@@ -194,7 +205,10 @@ fn inspect_metadata(details: &mut ImageDetails, metadata: &Metadata) {
                     .map(|value| format_aperture(value, Language::English));
             }
             ExifTag::ISO(values) => {
-                details.iso = values.first().map(|value| format!("ISO {value}"));
+                details.iso = values
+                    .first()
+                    .copied()
+                    .map(|value| format_iso(value, Language::English));
             }
             ExifTag::FocalLength(values) => {
                 details.focal_length = values
@@ -1337,6 +1351,24 @@ pub(crate) fn format_focal_length(value: f64, language: Language) -> String {
         .into_string()
 }
 
+const ISO_SENSITIVITY: &str = "ISO {value}";
+
+fn format_iso_text(value: &str, language: Language) -> String {
+    const _: () = crate::locale::assert_cataloged(ISO_SENSITIVITY);
+    language
+        .fill(ISO_SENSITIVITY, &[("value", value)])
+        .into_string()
+}
+
+/// Format an ISO sensitivity, such as `ISO 400`.
+///
+/// Each language owns the frame. `ISO` stays the sensitivity abbreviation.
+/// The count is inserted once and is not translated again.
+#[must_use]
+pub(crate) fn format_iso(value: u16, language: Language) -> String {
+    format_iso_text(&value.to_string(), language)
+}
+
 const EXPOSURE_FRACTION: &str = "1/{fraction} s";
 const EXPOSURE_SECONDS: &str = "{seconds} s";
 
@@ -1696,6 +1728,36 @@ mod tests {
     }
 
     #[test]
+    fn iso_follows_the_selected_language() {
+        assert_eq!(format_iso(400, Language::English), "ISO 400");
+        assert_eq!(format_iso(100, Language::English), "ISO 100");
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_eq!(format_iso(400, language), "ISO 400");
+            assert_eq!(format_iso(100, language), "ISO 100");
+        }
+        let pseudo = format_iso(400, Language::Pseudo);
+        assert!(pseudo.contains("ISO 400"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{value}"));
+        let stored = ImageDetails {
+            iso: Some("ISO 400".to_owned()),
+            ..ImageDetails::default()
+        };
+        assert_eq!(
+            stored.localized_iso(Language::English).as_deref(),
+            Some("ISO 400")
+        );
+        assert_eq!(
+            stored.localized_iso(Language::German).as_deref(),
+            Some("ISO 400")
+        );
+        let displayed = stored.localized_iso(Language::Pseudo).expect("iso");
+        assert!(displayed.contains("ISO 400"));
+        assert!(displayed.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!displayed.contains("{value}"));
+    }
+
+    #[test]
     fn value_formatting_localizes_decimal_separators_across_languages() {
         for (language, sep) in [
             (Language::English, '.'),
@@ -1718,6 +1780,7 @@ mod tests {
 
             assert_eq!(format_aperture(2.8, language), format!("f/2{sep}8"));
             assert_eq!(format_focal_length(50.0, language), format!("50{sep}0 mm"));
+            assert_eq!(format_iso(400, language), "ISO 400");
 
             let fast = uR64 {
                 nominator: 1,
@@ -1735,6 +1798,7 @@ mod tests {
                 aperture: Some("f/2.8".into()),
                 exposure: Some("1.5 s".into()),
                 focal_length: Some("50.0 mm".into()),
+                iso: Some("ISO 400".into()),
                 ..ImageDetails::default()
             };
             assert_eq!(
@@ -1749,6 +1813,7 @@ mod tests {
                 details.localized_focal_length(language),
                 Some(format!("50{sep}0 mm"))
             );
+            assert_eq!(details.localized_iso(language).as_deref(), Some("ISO 400"));
         }
     }
 

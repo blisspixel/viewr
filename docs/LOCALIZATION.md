@@ -156,6 +156,9 @@ of by review:
   `ui::format_and_size_follows_the_selected_language` proves the frame that
   joins a format name to its file size. The name and the size are inserted
   once, the format name stays untranslated, and English stays JPEG · 1.0 KiB.
+  `ui::animation_frame_label_follows_the_selected_language` proves the
+  animation position. Both counts are inserted once, English stays Frame 2 of
+  3, and the existing Spanish, French, and German sentences stay.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

@@ -51,6 +51,8 @@ and organized by user-visible concern.
   in-progress scan with another. English stays 1 / 2 and 1 / ....
 - Image Information joins a format name to its file size with one catalog
   frame. English stays JPEG · 1.0 KiB. The format name stays untranslated.
+- The animation position fills its existing catalog frame once. English stays
+  Frame 2 of 3. Spanish, French, and German keep their existing sentences.
 
 ## 0.7.9 - 2026-11-27
 

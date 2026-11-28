@@ -959,8 +959,9 @@ Make viewing excellent, not merely functional.
   menu translates its section headings. An ISO sensitivity uses one catalog
   frame. A folder position uses one catalog frame, and an in-progress scan
   whose total is still unknown uses another. Image Information joins a format
-  name to its file size with one catalog frame. Other composed status lines
-  are still migrated one seam at a time, each with the coverage test in
+  name to its file size with one catalog frame. The animation position fills
+  its existing catalog frame once. Other composed status lines are still
+  migrated one seam at a time, each with the coverage test in
   `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image

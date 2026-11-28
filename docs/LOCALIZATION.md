@@ -129,6 +129,9 @@ of by review:
   `image_info::aperture_follows_the_selected_language` proves the frame for an
   aperture. The f/ notation stays, the stop is inserted once, and the decimal
   separator follows the selected language.
+  `image_info::focal_length_follows_the_selected_language` proves the frame for
+  a focal length. The mm abbreviation stays, the length is inserted once, and
+  the decimal separator follows the selected language.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

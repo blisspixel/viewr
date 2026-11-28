@@ -3577,6 +3577,12 @@ const MESSAGES: &[Message] = &[
         german: "f/{value}",
     },
     Message {
+        english: "{length} mm",
+        spanish: "{length} mm",
+        french: "{length} mm",
+        german: "{length} mm",
+    },
+    Message {
         english: "Right for the next photo.",
         spanish: "Derecha para la siguiente foto.",
         french: "Droite pour la photo suivante.",

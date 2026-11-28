@@ -1322,10 +1322,19 @@ pub(crate) fn format_aperture(value: f64, language: Language) -> String {
         .into_string()
 }
 
+const FOCAL_LENGTH: &str = "{length} mm";
+
 /// Format focal length value, such as `50.0 mm` or `50,0 mm`.
+///
+/// Each language owns the frame. `mm` stays the unit abbreviation. The length
+/// is inserted once and is not translated again.
 #[must_use]
 pub(crate) fn format_focal_length(value: f64, language: Language) -> String {
-    format!("{} mm", language.format_decimal(value, 1))
+    const _: () = crate::locale::assert_cataloged(FOCAL_LENGTH);
+    let length = language.format_decimal(value, 1);
+    language
+        .fill(FOCAL_LENGTH, &[("length", length.as_str())])
+        .into_string()
 }
 
 /// Format shutter speed / exposure time.
@@ -1610,6 +1619,20 @@ mod tests {
         assert!(pseudo.contains("f/2.8"));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{value}"));
+    }
+
+    #[test]
+    fn focal_length_follows_the_selected_language() {
+        assert_eq!(format_focal_length(50.0, Language::English), "50.0 mm");
+        assert_eq!(format_focal_length(35.0, Language::English), "35.0 mm");
+        for language in [Language::Spanish, Language::French, Language::German] {
+            assert_eq!(format_focal_length(50.0, language), "50,0 mm");
+            assert!(language.text(super::FOCAL_LENGTH).contains("{length} mm"));
+        }
+        let pseudo = format_focal_length(50.0, Language::Pseudo);
+        assert!(pseudo.contains("50.0 mm"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{length}"));
     }
 
     #[test]

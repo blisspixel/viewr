@@ -34,6 +34,8 @@ and organized by user-visible concern.
   the language's decimal separator.
 - Image Information formats an aperture with one catalog frame. The f/
   notation stays, and the stop uses the language's decimal separator.
+- Image Information formats a focal length with one catalog frame. The mm
+  abbreviation stays, and the length uses the language's decimal separator.
 
 ## 0.7.9 - 2026-11-27
 

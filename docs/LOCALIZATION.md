@@ -126,6 +126,9 @@ of by review:
   a file size in bytes, kibibytes, mebibytes, and gibibytes. The unit
   abbreviation stays, the count is inserted once, and the decimal separator
   follows the selected language.
+  `image_info::aperture_follows_the_selected_language` proves the frame for an
+  aperture. The f/ notation stays, the stop is inserted once, and the decimal
+  separator follows the selected language.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

@@ -952,8 +952,9 @@ Make viewing excellent, not merely functional.
   the megapixel count to the aspect ratio with one catalog frame. Ordinary
   pixel dimensions use one catalog frame, and preview dimensions keep their
   existing sentence. A file size uses one catalog frame per binary unit.
-  Other composed status lines are still migrated one seam at a time, each
-  with the coverage test in `docs/LOCALIZATION.md`.
+  An aperture uses one catalog frame. Other composed status lines are still
+  migrated one seam at a time, each with the coverage test in
+  `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

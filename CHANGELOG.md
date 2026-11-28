@@ -78,6 +78,9 @@ and organized by user-visible concern.
 - A rating choice fills its accessible name once. The value label and the
   shortcut are inserted once. A brace inside either half stays literal.
   English stays Rating 5 of 5, shortcut 5.
+- A curation count fills its singular or plural phrase once, and the status
+  sentence inserts that phrase once. A brace inside the phrase stays literal.
+  English stays Moving 1 file to Trash... and Moving 2 files to Trash...
 
 ## 0.7.9 - 2026-11-27
 

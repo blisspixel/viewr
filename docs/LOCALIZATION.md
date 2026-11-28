@@ -194,6 +194,11 @@ of by review:
   `chrome::rating_choice_accessible_name_fills_each_half_once` proves a rating
   choice name. The value label and the shortcut are inserted once. A brace
   inside either half stays literal. English stays Rating 5 of 5, shortcut 5.
+  `curation_state::file_count_follows_the_selected_language` proves a curation
+  count. One file and every other count use their own catalog frames. The
+  status sentence inserts that phrase once. A brace inside the phrase stays
+  literal. English stays Moving 1 file to Trash... and Moving 2 files to
+  Trash...
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

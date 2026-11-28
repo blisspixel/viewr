@@ -152,10 +152,6 @@ mod key {
     ];
 }
 
-/// Placeholder for a count phrase such as "2 files".
-const FILES_PLACEHOLDER: &str = "{files}";
-/// Placeholder for a bare number.
-const COUNT_PLACEHOLDER: &str = "{count}";
 /// Placeholder for a privacy-safe file name.
 const NAME_PLACEHOLDER: &str = "{name}";
 /// Placeholder for platform error text that viewr did not write.
@@ -308,21 +304,27 @@ pub(crate) fn curation_status(
 
 #[must_use]
 pub(crate) fn file_count(language: Language, count: usize) -> String {
-    let source = if count == 1 {
+    const _: () = crate::locale::assert_cataloged(key::ONE_FILE);
+    const _: () = crate::locale::assert_cataloged(key::MANY_FILES);
+    let shown = count.to_string();
+    let template = if count == 1 {
         key::ONE_FILE
     } else {
         key::MANY_FILES
     };
     language
-        .text(source)
-        .replace(COUNT_PLACEHOLDER, &count.to_string())
+        .fill(template, &[("count", shown.as_str())])
+        .into_string()
+}
+
+/// Fill one curation sentence with an already translated count phrase.
+fn files_sentence(language: Language, source: &'static str, files: &str) -> String {
+    language.fill(source, &[("files", files)]).into_string()
 }
 
 /// Substitute a translated count phrase into a translated sentence.
 fn with_files(language: Language, source: &'static str, count: usize) -> String {
-    language
-        .text(source)
-        .replace(FILES_PLACEHOLDER, &file_count(language, count))
+    files_sentence(language, source, &file_count(language, count))
 }
 
 /// Source-bound destructive action that failed before or during mutation.
@@ -951,6 +953,38 @@ mod tests {
         }
         assert_eq!(file_count(EN, 0), "0 files");
         assert_eq!(file_count(EN, usize::MAX), format!("{} files", usize::MAX));
+    }
+
+    #[test]
+    fn file_count_follows_the_selected_language() {
+        assert_eq!(file_count(EN, 1), "1 file");
+        assert_eq!(file_count(EN, 2), "2 files");
+        assert_eq!(file_count(Language::Spanish, 1), "1 archivo");
+        assert_eq!(file_count(Language::Spanish, 2), "2 archivos");
+        assert_eq!(file_count(Language::French, 1), "1 fichier");
+        assert_eq!(file_count(Language::French, 2), "2 fichiers");
+        assert_eq!(file_count(Language::German, 1), "1 Datei");
+        assert_eq!(file_count(Language::German, 2), "2 Dateien");
+        assert_eq!(
+            curation_status(Language::Spanish, CurationKind::Trash, 1, false),
+            "Moviendo 1 archivo a la papelera..."
+        );
+        assert_eq!(
+            curation_status(Language::French, CurationKind::Trash, 1, false),
+            "Mise à la corbeille de 1 fichier..."
+        );
+        assert_eq!(
+            curation_status(Language::German, CurationKind::Trash, 1, false),
+            "1 Datei werden in den Papierkorb verschoben..."
+        );
+        assert_eq!(
+            super::files_sentence(EN, key::MOVING_TO_TRASH, "keep {files}"),
+            "Moving keep {files} to Trash..."
+        );
+        let pseudo = file_count(Language::Pseudo, 2);
+        assert!(pseudo.contains('2'));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{count}"));
     }
 
     #[test]

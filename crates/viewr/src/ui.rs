@@ -4631,6 +4631,12 @@ fn render_capture_info(ui: &mut egui::Ui, frame: &UiFrameOwned) {
     );
 }
 
+fn privacy_category_line(language: Language, category: &str) -> String {
+    language
+        .fill(tr!("Present: {category}"), &[("category", category)])
+        .into_string()
+}
+
 fn exif_count_line(language: Language, count: usize) -> String {
     let shown = count.to_string();
     let template = if count == 1 {
@@ -4672,13 +4678,8 @@ fn render_source_privacy(ui: &mut egui::Ui, frame: &UiFrameOwned) {
         } else {
             for category in categories {
                 ui.label(
-                    RichText::new(
-                        frame
-                            .language
-                            .text(tr!("Present: {category}"))
-                            .replace("{category}", frame.text(category)),
-                    )
-                    .color(colors.text),
+                    RichText::new(privacy_category_line(frame.language, frame.text(category)))
+                        .color(colors.text),
                 );
             }
             ui.label(
@@ -8746,6 +8747,50 @@ mod tests {
                 value.contains("does not receive the file manager's current sort")
             })
         }));
+    }
+
+    #[test]
+    fn privacy_category_line_follows_the_selected_language() {
+        for (language, category, line) in [
+            (
+                Language::English,
+                "location-related data",
+                "Present: location-related data",
+            ),
+            (
+                Language::Spanish,
+                "datos de ubicación",
+                "Presente: datos de ubicación",
+            ),
+            (
+                Language::French,
+                "données de localisation",
+                "Présent : données de localisation",
+            ),
+            (
+                Language::German,
+                "ortsbezogene Daten",
+                "Vorhanden: ortsbezogene Daten",
+            ),
+        ] {
+            let shown = language.text(tr!("location-related data"));
+            assert_eq!(shown, category);
+            assert_eq!(super::privacy_category_line(language, shown), line);
+        }
+        let owner = Language::French.text(tr!("owner or author data"));
+        assert!(owner.contains('\u{2019}'));
+        assert_eq!(
+            super::privacy_category_line(Language::French, owner),
+            format!("Présent : {owner}")
+        );
+        let braced = super::privacy_category_line(Language::English, "keep {brace}");
+        assert!(braced.contains("keep {brace}"));
+        assert!(!braced.contains("{category}"));
+        let pseudo_category = Language::Pseudo.text(tr!("location-related data"));
+        let pseudo = super::privacy_category_line(Language::Pseudo, pseudo_category);
+        assert!(pseudo.contains("location-related data"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{category}"));
     }
 
     #[test]

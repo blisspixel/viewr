@@ -41,6 +41,8 @@ and organized by user-visible concern.
   `1/125 s`. A longer time uses the language's decimal separator.
 - The crop overlay formats its pixel size with one catalog frame. The
   multiplication sign and the px abbreviation stay between the two counts.
+- The zoom control formats its percent with one catalog frame. The percent
+  sign stays attached to the rounded count, so English stays 100% and 6400%.
 
 ## 0.7.9 - 2026-11-27
 

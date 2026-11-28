@@ -153,6 +153,9 @@ of by review:
   known folder position and for a scan whose total is still unknown. Both
   counts are inserted once, the slash stays, and English stays 1 / 2 and
   1 / .... The same label is what the top strip reserves.
+  `ui::format_and_size_follows_the_selected_language` proves the frame that
+  joins a format name to its file size. The name and the size are inserted
+  once, the format name stays untranslated, and English stays JPEG · 1.0 KiB.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

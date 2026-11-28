@@ -3601,6 +3601,12 @@ const MESSAGES: &[Message] = &[
         german: "{count} GiB",
     },
     Message {
+        english: "{format} · {size}",
+        spanish: "{format} · {size}",
+        french: "{format} · {size}",
+        german: "{format} · {size}",
+    },
+    Message {
         english: "f/{value}",
         spanish: "f/{value}",
         french: "f/{value}",

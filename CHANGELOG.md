@@ -49,6 +49,8 @@ and organized by user-visible concern.
   English stays ISO 400.
 - The top status formats a folder position with one catalog frame, and the
   in-progress scan with another. English stays 1 / 2 and 1 / ....
+- Image Information joins a format name to its file size with one catalog
+  frame. English stays JPEG · 1.0 KiB. The format name stays untranslated.
 
 ## 0.7.9 - 2026-11-27
 

@@ -59,6 +59,8 @@ and organized by user-visible concern.
 - Source Privacy fills the supported-EXIF count once. One tag keeps the
   singular sentence and any other count keeps the plural sentence. English
   for one tag and for seven tags stays those existing sentences.
+- Source Privacy fills each present-category line once. The already translated
+  category is inserted once. English stays Present: location-related data.
 
 ## 0.7.9 - 2026-11-27
 

@@ -168,6 +168,10 @@ of by review:
   any other count uses the plural sentence. English for one tag and for seven
   tags stays those existing sentences. Zero stays the separate none-detected
   sentence.
+  `ui::privacy_category_line_follows_the_selected_language` proves a present
+  privacy category. The already translated category is inserted once. English
+  stays Present: location-related data. The French owner sentence keeps its
+  apostrophe.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

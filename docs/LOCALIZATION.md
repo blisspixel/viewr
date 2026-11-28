@@ -218,6 +218,10 @@ of by review:
   failure. The action is inserted once. A brace inside the action stays
   literal. English stays Undo could not be applied. The image and edit
   history are unchanged.
+  `curation_state::operation_failure_fills_the_platform_text_once` proves a
+  Trash or delete failure. The platform text is inserted once. A brace inside
+  that text stays literal. English stays Trash failed: access denied. Nothing
+  was moved. French keeps the space before the colon.
 
 A user-visible sentence has exactly one owner. The empty-state card and the top
 status line share `shortcuts::open_status`, and a test asserts they agree in

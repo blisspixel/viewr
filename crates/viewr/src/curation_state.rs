@@ -154,8 +154,6 @@ mod key {
 
 /// Placeholder for a privacy-safe file name.
 const NAME_PLACEHOLDER: &str = "{name}";
-/// Placeholder for platform error text that viewr did not write.
-const ERROR_PLACEHOLDER: &str = "{error}";
 
 const RECOVERY_PRIORITY: [CurationKind; 3] = [
     CurationKind::PermanentDelete,
@@ -334,6 +332,13 @@ pub(crate) enum GuardedSourceAction {
     PermanentDelete,
 }
 
+/// Fill one operation-failure sentence once. A brace inside the platform text stays literal.
+fn failure_with_error(language: Language, template: &'static str, platform: &str) -> String {
+    language
+        .fill(template, &[("error", platform)])
+        .into_string()
+}
+
 /// Path-free failure copy for Trash and permanent delete preflight rejections.
 #[must_use]
 pub(crate) fn guarded_source_action_failure_message(
@@ -341,6 +346,8 @@ pub(crate) fn guarded_source_action_failure_message(
     action: GuardedSourceAction,
     error: &GuardedActionError,
 ) -> String {
+    const _: () = crate::locale::assert_cataloged(key::TRASH_FAILED);
+    const _: () = crate::locale::assert_cataloged(key::DELETE_FAILED);
     let source = match (action, error) {
         (GuardedSourceAction::Trash, GuardedActionError::Changed) => key::TRASH_CHANGED,
         (GuardedSourceAction::PermanentDelete, GuardedActionError::Changed) => key::DELETE_CHANGED,
@@ -355,14 +362,10 @@ pub(crate) fn guarded_source_action_failure_message(
             key::DELETE_UNAVAILABLE
         }
         (GuardedSourceAction::Trash, GuardedActionError::OperationFailed(platform)) => {
-            return language
-                .text(key::TRASH_FAILED)
-                .replace(ERROR_PLACEHOLDER, platform);
+            return failure_with_error(language, key::TRASH_FAILED, platform);
         }
         (GuardedSourceAction::PermanentDelete, GuardedActionError::OperationFailed(platform)) => {
-            return language
-                .text(key::DELETE_FAILED)
-                .replace(ERROR_PLACEHOLDER, platform);
+            return failure_with_error(language, key::DELETE_FAILED, platform);
         }
     };
     language.text(source).to_owned()
@@ -985,6 +988,48 @@ mod tests {
         assert!(pseudo.contains('2'));
         assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
         assert!(!pseudo.contains("{count}"));
+    }
+
+    #[test]
+    fn operation_failure_fills_the_platform_text_once() {
+        let denied = GuardedActionError::OperationFailed("access denied".to_owned());
+        assert_eq!(
+            guarded_source_action_failure_message(EN, GuardedSourceAction::Trash, &denied),
+            "Trash failed: access denied. Nothing was moved."
+        );
+        assert_eq!(
+            guarded_source_action_failure_message(
+                Language::Spanish,
+                GuardedSourceAction::Trash,
+                &denied
+            ),
+            "Error al mover a la papelera: access denied. No se movió nada."
+        );
+        assert_eq!(
+            guarded_source_action_failure_message(
+                Language::French,
+                GuardedSourceAction::Trash,
+                &denied
+            ),
+            "Échec de la mise à la corbeille : access denied. Rien n\u{2019}a été déplacé."
+        );
+        assert_eq!(
+            guarded_source_action_failure_message(
+                Language::German,
+                GuardedSourceAction::PermanentDelete,
+                &denied
+            ),
+            "Löschen fehlgeschlagen: access denied. Es wurde nichts gelöscht."
+        );
+        let braced = GuardedActionError::OperationFailed("keep {error}".to_owned());
+        assert_eq!(
+            guarded_source_action_failure_message(EN, GuardedSourceAction::Trash, &braced),
+            "Trash failed: keep {error}. Nothing was moved."
+        );
+        let pseudo = failure_with_error(Language::Pseudo, key::TRASH_FAILED, "access denied");
+        assert!(pseudo.contains("access denied"));
+        assert!(pseudo.contains(crate::locale::PSEUDO_MARKS.0));
+        assert!(!pseudo.contains("{error}"));
     }
 
     #[test]

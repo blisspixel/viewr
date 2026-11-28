@@ -969,9 +969,10 @@ Make viewing excellent, not merely functional.
   fills its accessible name once. Undo Trash fills its accessible name once.
   A rating choice fills its accessible name once. A curation count fills its
   singular or plural phrase once, and the status sentence inserts that phrase
-  once. A rating filter choice fills its accessible name once. Other composed
-  status lines are still migrated one seam at a time, each with the coverage
-  test in `docs/LOCALIZATION.md`.
+  once. A rating filter choice fills its accessible name once. The rating
+  filter menu fills its current-threshold status once. Other composed status
+  lines are still migrated one seam at a time, each with the coverage test in
+  `docs/LOCALIZATION.md`.
 
 Definition of done: viewing feels polished and obvious, the default image
 background follows the operating system live, persistent chrome stays compact and

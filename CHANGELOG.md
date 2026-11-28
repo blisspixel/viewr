@@ -85,6 +85,9 @@ and organized by user-visible concern.
   is inserted once. A brace inside that label stays literal. English stays
   Rating filter: At least 3 and Rating filter: Unrated. French keeps the
   space before the colon.
+- The rating filter menu fills its current-threshold status once. The rating
+  is inserted once. A brace inside the rating stays literal. English stays
+  Rating Filter: At least 3. French keeps the space before the colon.
 
 ## 0.7.9 - 2026-11-27
 
